@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Display};
+use std::fmt::Display;
 
 #[cfg(test)]
 use crate::core::output_model::OutputItems;
@@ -11,6 +11,8 @@ use crate::dsl::{
     parse::key_spec::KeySpec,
     verbs::common::{parse_alias_after_as, parse_stage_words},
 };
+
+use super::sort::compare_auto;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AggregateFn {
@@ -248,7 +250,7 @@ fn min_value(values: &[Value]) -> Option<Value> {
     values
         .iter()
         .filter(|value| !value.is_null())
-        .min_by(|left, right| compare_values(left, right))
+        .min_by(|left, right| compare_auto(left, right))
         .cloned()
 }
 
@@ -256,26 +258,8 @@ fn max_value(values: &[Value]) -> Option<Value> {
     values
         .iter()
         .filter(|value| !value.is_null())
-        .max_by(|left, right| compare_values(left, right))
+        .max_by(|left, right| compare_auto(left, right))
         .cloned()
-}
-
-fn compare_values(left: &Value, right: &Value) -> Ordering {
-    match (left, right) {
-        (Value::Number(a), Value::Number(b)) => a
-            .as_f64()
-            .partial_cmp(&b.as_f64())
-            .unwrap_or(Ordering::Equal),
-        (Value::String(a), Value::String(b)) => a.cmp(b),
-        _ => value_to_string(left).cmp(&value_to_string(right)),
-    }
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
 }
 
 impl AggregateFn {

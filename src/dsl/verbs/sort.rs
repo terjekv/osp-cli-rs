@@ -209,7 +209,7 @@ fn compare_values(left: &Value, right: &Value, cast: SortCast) -> Ordering {
     }
 }
 
-fn compare_auto(left: &Value, right: &Value) -> Ordering {
+pub(super) fn compare_auto(left: &Value, right: &Value) -> Ordering {
     // Classification must depend on each value, never on its comparison
     // partner: pairwise numeric/text fallback produces ordering cycles.
     match (to_f64(left), to_f64(right)) {
