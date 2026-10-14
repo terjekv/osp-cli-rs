@@ -352,7 +352,9 @@ impl SuggestionEngine {
         }
 
         if flag_node.value_type == Some(ValueType::Path) {
-            return vec![SuggestionOutput::PathSentinel];
+            let mut suggestions = self.entry_suggestions(&flag_node.suggestions, stub);
+            suggestions.push(SuggestionOutput::PathSentinel);
+            return suggestions;
         }
 
         if !flag_node.catalogs.is_empty() {

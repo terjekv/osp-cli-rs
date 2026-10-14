@@ -240,12 +240,14 @@ impl CompletionTreeBuilder {
         let Some(set_node) = config_node.children.get_mut("set") else {
             return Ok(());
         };
+        let set_flags = set_node.flags.clone();
 
         for key in keys {
             let key_name = key.key.clone();
             let mut node = CompletionNode {
                 tooltip: key.tooltip,
                 value_key: true,
+                flags: set_flags.clone(),
                 ..CompletionNode::default()
             };
             for suggestion in key.value_suggestions {

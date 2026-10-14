@@ -542,6 +542,13 @@ fn config_command_spec(view: ReplViewContext<'_>) -> CommandSpec {
             .flag_only()
             .tooltip("Explain the resolved write targets"),
     );
+    set_flags.insert(
+        "--from-file".to_string(),
+        // Keep this REPL metadata aligned with ConfigSetArgs::from_file.
+        FlagNode::new()
+            .value_type(ValueType::Path)
+            .suggestions([SuggestionEntry::value("-")]),
+    );
 
     CommandSpec::new(CMD_CONFIG)
         .tooltip("Inspect and edit runtime config")
