@@ -10,7 +10,7 @@ use crate::core::output::OutputFormat;
 use crate::native::{NativeCommandCatalogEntry, NativeCommandRegistry};
 use crate::repl;
 use clap::{CommandFactory, FromArgMatches};
-use miette::{Result, WrapErr, miette};
+use miette::{Result, miette};
 use nu_ansi_term::Style;
 
 use crate::guide::{GuideSection, GuideSectionKind, GuideView, HelpLevel};
@@ -30,13 +30,11 @@ use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, sca
 use crate::cli::{Cli, Commands};
 use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
 
-pub(crate) use super::bootstrap::{
-    RuntimeConfigRequest, prepare_startup_host, resolve_runtime_config,
-};
+pub(crate) use super::bootstrap::prepare_startup_host;
 pub(crate) use super::command_output::run_cli_command_with_ui;
 pub(crate) use super::dispatch::{
     DispatchPlan, RunAction, build_dispatch_plan, ensure_builtin_visible_for,
-    normalize_cli_profile, normalize_profile_override,
+    normalize_profile_override,
 };
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
@@ -496,7 +494,7 @@ fn run(
 }
 
 // Startup is phase-based:
-// 1. bootstrap just enough config to understand profiles and dispatch
+// 1. choose the action from argv alone
 // 2. assemble the runtime/session layer for the chosen action
 // 3. apply startup-time side effects before handing off to execution
 fn prepare_host_run(
@@ -505,20 +503,10 @@ fn prepare_host_run(
     app: &super::AppDefinition,
     run_started: Instant,
 ) -> Result<PreparedHostRun> {
-    let normalized_profile = normalize_cli_profile(cli);
-    let runtime_load = cli.runtime_load_options();
-    let initial_config = resolve_runtime_config(
-        RuntimeConfigRequest::new(normalized_profile.clone(), Some("cli"))
-            .with_runtime_load(runtime_load)
-            .with_product_defaults(app.product_defaults.clone()),
-    )
-    .wrap_err("failed to resolve initial config for startup")?;
-    let known_profiles = initial_config.known_profiles().clone();
-    let dispatch = build_dispatch_plan(cli, &known_profiles)?;
+    let dispatch = build_dispatch_plan(cli)?;
     tracing::debug!(
         action = %dispatch.action.name(),
         profile_override = ?dispatch.profile_override,
-        known_profiles = known_profiles.len(),
         "built dispatch plan"
     );
 

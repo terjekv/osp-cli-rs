@@ -104,7 +104,7 @@ ui.message.verbosity = "definitely-invalid"
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
-    assert!(normalized.contains("failed to resolve initial config for startup"));
+    assert!(normalized.contains("failed to resolve config with session layer"));
     assert!(normalized.contains("config resolution failed"));
     assert!(
         normalized.contains("invalid value for key ui.message.verbosity"),

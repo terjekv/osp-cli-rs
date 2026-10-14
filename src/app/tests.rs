@@ -42,7 +42,7 @@ use crate::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCom
 use clap::Command;
 use clap::Parser;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 mod app_runtime;
@@ -53,10 +53,6 @@ mod presentation;
 mod repl_completion;
 #[cfg(unix)]
 mod repl_runtime;
-
-fn profiles(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|name| name.to_string()).collect()
-}
 
 fn repl_view<'a>(
     runtime: &'a crate::app::AppRuntime,

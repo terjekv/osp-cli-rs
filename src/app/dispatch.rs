@@ -84,10 +84,7 @@ impl DispatchPlan {
     }
 }
 
-pub(crate) fn build_dispatch_plan(
-    cli: &mut Cli,
-    _known_profiles: &BTreeSet<String>,
-) -> Result<DispatchPlan> {
+pub(crate) fn build_dispatch_plan(cli: &mut Cli) -> Result<DispatchPlan> {
     let explicit_profile = normalize_cli_profile(cli);
     let command = cli.command.take();
 
@@ -542,7 +539,6 @@ fn access_reason_action(reason: &AccessReason) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
 
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
     use crate::core::command_policy::{AccessReason, CommandPath, CommandPolicy, VisibilityMode};
@@ -596,14 +592,11 @@ mod tests {
 
     #[test]
     fn build_dispatch_plan_routes_profiles_builtins_external_and_errors_unit() {
-        let profiles = BTreeSet::from(["dev".to_string(), "prod".to_string()]);
-
         let mut repl_cli = parse_cli(&["osp", "--profile", "dev"]);
         let DispatchPlan {
             action,
             profile_override,
-        } = build_dispatch_plan(&mut repl_cli, &profiles)
-            .expect("explicit profile repl should work");
+        } = build_dispatch_plan(&mut repl_cli).expect("explicit profile repl should work");
         assert!(matches!(action, RunAction::Repl));
         assert_eq!(profile_override.as_deref(), Some("dev"));
 
@@ -611,7 +604,7 @@ mod tests {
         let DispatchPlan {
             action,
             profile_override,
-        } = build_dispatch_plan(&mut config_cli, &profiles)
+        } = build_dispatch_plan(&mut config_cli)
             .expect("explicit profile config command should work");
         assert!(matches!(action, RunAction::Builtin(Commands::Config(_))));
         assert_eq!(profile_override.as_deref(), Some("dev"));
@@ -621,7 +614,7 @@ mod tests {
         let DispatchPlan {
             action,
             profile_override,
-        } = build_dispatch_plan(&mut explicit_profile_cli, &profiles)
+        } = build_dispatch_plan(&mut explicit_profile_cli)
             .expect("explicit profile should leave command tokens untouched");
         assert!(
             matches!(action, RunAction::External(tokens) if tokens == vec!["dev", "config", "show"])
@@ -632,7 +625,7 @@ mod tests {
         let DispatchPlan {
             action,
             profile_override,
-        } = build_dispatch_plan(&mut unknown_profile_cli, &profiles)
+        } = build_dispatch_plan(&mut unknown_profile_cli)
             .expect("unknown prefix should stay external");
         assert!(
             matches!(action, RunAction::External(tokens) if tokens == vec!["stage", "config", "show"])
@@ -643,12 +636,12 @@ mod tests {
         let DispatchPlan {
             action,
             profile_override,
-        } = build_dispatch_plan(&mut repl_cli, &profiles).expect("repl subcommand should parse");
+        } = build_dispatch_plan(&mut repl_cli).expect("repl subcommand should parse");
         assert!(matches!(action, RunAction::Builtin(Commands::Repl(_))));
         assert!(profile_override.is_none());
 
         let mut bad_shorthand_cli = parse_cli(&["osp", "dev", "config", "set", "ui.format"]);
-        let plan = build_dispatch_plan(&mut bad_shorthand_cli, &profiles)
+        let plan = build_dispatch_plan(&mut bad_shorthand_cli)
             .expect("command arguments belong to the external command");
         assert!(matches!(plan.action, RunAction::External(tokens)
             if tokens == vec!["dev", "config", "set", "ui.format"]));
@@ -684,7 +677,6 @@ mod tests {
         assert!(err.to_string().contains("requires authentication"));
         assert!(err.to_string().contains("Try: authenticate, then retry"));
 
-        let profiles = BTreeSet::from(["dev".to_string()]);
         let auth = auth_state(
             Some(&["plugins", "doctor", "theme", "config", "history"]),
             Some(&["ldap"]),
@@ -697,7 +689,7 @@ mod tests {
             (&["osp"][..], TerminalKind::Repl),
         ] {
             let mut cli = parse_cli(args);
-            let plan = build_dispatch_plan(&mut cli, &profiles).expect("command should parse");
+            let plan = build_dispatch_plan(&mut cli).expect("command should parse");
             assert_eq!(plan.action.terminal_kind(), expected_terminal);
             ensure_dispatch_visibility(&auth, &plan.action).expect("command should be visible");
         }

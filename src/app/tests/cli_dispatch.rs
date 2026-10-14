@@ -1,8 +1,8 @@
 use super::*;
 
-fn dispatch_plan_for(args: &[&str], profile_names: &[&str]) -> crate::app::dispatch::DispatchPlan {
+fn dispatch_plan_for(args: &[&str]) -> crate::app::dispatch::DispatchPlan {
     let mut cli = Cli::parse_from(args);
-    build_dispatch_plan(&mut cli, &profiles(profile_names)).expect("dispatch plan should parse")
+    build_dispatch_plan(&mut cli).expect("dispatch plan should parse")
 }
 
 #[test]
@@ -112,14 +112,11 @@ fn cli_presentation_flags_map_to_session_overrides_unit() {
 
 #[test]
 fn dispatch_plan_keeps_structured_builtin_shape_and_profile_normalization_unit() {
-    let plan = dispatch_plan_for(&["osp", "--profile", "tsd"], &["uio", "tsd"]);
+    let plan = dispatch_plan_for(&["osp", "--profile", "tsd"]);
     assert_eq!(plan.profile_override.as_deref(), Some("tsd"));
     assert!(matches!(plan.action, RunAction::Repl));
 
-    let plan = dispatch_plan_for(
-        &["osp", "--profile", "tsd", "plugins", "list"],
-        &["uio", "tsd"],
-    );
+    let plan = dispatch_plan_for(&["osp", "--profile", "tsd", "plugins", "list"]);
     assert_eq!(plan.profile_override.as_deref(), Some("tsd"));
     assert!(matches!(
         plan.action,
@@ -128,11 +125,8 @@ fn dispatch_plan_keeps_structured_builtin_shape_and_profile_normalization_unit()
         }))
     ));
 
-    let positional = dispatch_plan_for(&["osp", "tsd", "plugins", "list"], &["uio", "tsd"]);
-    let explicit = dispatch_plan_for(
-        &["osp", "--profile", "tsd", "plugins", "list"],
-        &["uio", "tsd"],
-    );
+    let positional = dispatch_plan_for(&["osp", "tsd", "plugins", "list"]);
+    let explicit = dispatch_plan_for(&["osp", "--profile", "tsd", "plugins", "list"]);
     assert!(positional.profile_override.is_none());
     assert_eq!(explicit.profile_override.as_deref(), Some("tsd"));
     assert!(matches!(
@@ -144,12 +138,11 @@ fn dispatch_plan_keeps_structured_builtin_shape_and_profile_normalization_unit()
         RunAction::Builtin(Commands::Plugins(_))
     ));
 
-    let normalized = dispatch_plan_for(&["osp", "--profile", "TSD"], &["tsd"]);
+    let normalized = dispatch_plan_for(&["osp", "--profile", "TSD"]);
     assert_eq!(normalized.profile_override.as_deref(), Some("tsd"));
 
     let mut cli = Cli::parse_from(["osp", "plugins", "doctor"]);
-    let plan = build_dispatch_plan(&mut cli, &profiles(&["uio", "tsd"]))
-        .expect("dispatch plan should parse");
+    let plan = build_dispatch_plan(&mut cli).expect("dispatch plan should parse");
     assert_eq!(plan.profile_override, None);
     assert!(matches!(
         plan.action,
@@ -160,8 +153,7 @@ fn dispatch_plan_keeps_structured_builtin_shape_and_profile_normalization_unit()
     assert!(matches!(cli.command, None | Some(Commands::Plugins(_))));
 
     let mut cli = Cli::parse_from(["osp", "--profile", "tsd", "config", "show", "--sources"]);
-    let plan = build_dispatch_plan(&mut cli, &profiles(&["uio", "tsd"]))
-        .expect("dispatch plan should parse");
+    let plan = build_dispatch_plan(&mut cli).expect("dispatch plan should parse");
     assert_eq!(plan.profile_override.as_deref(), Some("tsd"));
     match plan.action {
         RunAction::Builtin(Commands::Config(args)) => {
