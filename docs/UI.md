@@ -146,10 +146,10 @@ What these do:
 - `ui.help.level` controls how much help/detail is shown
 - `ui.messages.layout` controls whether messages are grouped into sections or
   shown as plain indented groups or inline with minimal chrome
-- `ui.chrome.frame` controls the section framing style used by help, guide, and
-  grouped messages
-- `ui.chrome.rule_policy` controls whether section rules are rendered
-  independently or shared across sibling sections
+- `ui.chrome.frame` controls section framing for grouped messages. Help and
+  guide headings follow the selected help layout.
+- `ui.chrome.rule_policy` controls whether grouped message rules are rendered
+  independently or shared across sibling message sections
 
 These settings change presentation only. They do not change the underlying
 command data.
