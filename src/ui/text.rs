@@ -63,7 +63,7 @@ pub(crate) fn visible_inline_text(value: &str) -> String {
 
     while i < chars.len() {
         let ch = chars[i];
-        if ch == '\\' && i + 1 < chars.len() {
+        if ch == '\\' && i + 1 < chars.len() && is_markdown_escapable(chars[i + 1]) {
             out.push(chars[i + 1]);
             i += 2;
             continue;
@@ -133,6 +133,10 @@ pub(crate) fn visible_inline_text(value: &str) -> String {
     }
 
     out
+}
+
+fn is_markdown_escapable(ch: char) -> bool {
+    ch.is_ascii_punctuation()
 }
 
 pub(crate) fn crop_display_width(raw: &str, width: usize) -> String {
