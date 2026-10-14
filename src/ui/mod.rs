@@ -46,6 +46,8 @@
 //! - one emitter family renders terminal or markdown output
 //! - sidecar subsystems such as messages live in their own folders
 
+use std::borrow::Cow;
+
 pub mod clipboard;
 pub mod messages;
 pub mod section_chrome;
@@ -166,22 +168,29 @@ fn render_output_with_profile(
     settings: &RenderSettings,
     profile: RenderProfile,
 ) -> String {
-    let mut unlimited;
-    let output = if output.meta.display_limit.is_some()
-        && (!settings.runtime.stdout_is_tty || profile == RenderProfile::CopySafe)
-    {
-        unlimited = output.clone();
-        unlimited.meta.display_limit = None;
-        &unlimited
-    } else {
-        output
-    };
-    let plan = plan_output(output, settings, profile);
+    let output = prepare_output_for_sink(output, settings, profile);
+    let plan = plan_output(&output, settings, profile);
     emit::emit_doc(
-        &lower::lower_output(output, &plan),
+        &lower::lower_output(&output, &plan),
         plan.format,
         &plan.settings,
     )
+}
+
+fn prepare_output_for_sink<'a>(
+    output: &'a OutputResult,
+    settings: &RenderSettings,
+    profile: RenderProfile,
+) -> Cow<'a, OutputResult> {
+    if output.meta.display_limit.is_some()
+        && (!settings.runtime.stdout_is_tty || profile == RenderProfile::CopySafe)
+    {
+        let mut unlimited = output.clone();
+        unlimited.meta.display_limit = None;
+        Cow::Owned(unlimited)
+    } else {
+        Cow::Borrowed(output)
+    }
 }
 
 /// Renders an already-materialized row slice through the canonical UI
@@ -317,10 +326,11 @@ pub(crate) fn render_structured_output_with_guide_options(
     settings: &RenderSettings,
     options: StructuredGuideRenderOptions<'_>,
 ) -> String {
-    let plan = plan_output(output, settings, RenderProfile::Normal);
+    let output = prepare_output_for_sink(output, settings, RenderProfile::Normal);
+    let plan = plan_output(&output, settings, RenderProfile::Normal);
     if !matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown) {
         return emit::emit_doc(
-            &lower::lower_output(output, &plan),
+            &lower::lower_output(&output, &plan),
             plan.format,
             &plan.settings,
         );
@@ -329,9 +339,9 @@ pub(crate) fn render_structured_output_with_guide_options(
     let Some(guide) = options
         .source_guide
         .cloned()
-        .or_else(|| GuideView::try_from_output_result(output))
+        .or_else(|| GuideView::try_from_output_result(&output))
     else {
-        return render_output(output, settings);
+        return render_output(&output, settings);
     };
 
     let guide = apply_title_prefix(&guide, options.title_prefix);
