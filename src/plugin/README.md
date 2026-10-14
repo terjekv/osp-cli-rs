@@ -37,7 +37,7 @@ osp plugins list                     # what was discovered, and from where
 osp plugins commands                 # the resulting catalog
 osp plugins doctor                   # conflicts and unhealthy plugins
 osp plugins select-provider <command> <plugin-id>
-osp plugins refresh                  # ignore the describe cache once
+osp plugins refresh                  # invalidate persisted describe metadata
 ```
 
 See `docs/WRITING_PLUGINS.md` for the plugin side.

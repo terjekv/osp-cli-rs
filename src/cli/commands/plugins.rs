@@ -83,7 +83,7 @@ pub(crate) fn run_plugins_command(
             None,
         )),
         PluginsCommands::Refresh => {
-            plugin_manager.refresh();
+            plugin_manager.invalidate_describe_cache();
             let mut result = CliCommandResult::exit(0);
             result.messages.success("refreshed plugin discovery cache");
             Ok(result)

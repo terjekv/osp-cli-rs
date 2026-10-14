@@ -216,6 +216,11 @@ impl PluginManager {
         *guard = DiscoveryCache::default();
     }
 
+    pub(crate) fn invalidate_describe_cache(&self) {
+        self.refresh();
+        self.save_describe_cache_or_warn(&DescribeCacheFile::default());
+    }
+
     pub(super) fn discover(&self) -> Arc<[DiscoveredPlugin]> {
         self.discover_with_policy(DiscoveryPolicy::Passive)
     }
