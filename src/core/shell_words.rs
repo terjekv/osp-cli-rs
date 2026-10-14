@@ -34,7 +34,8 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
     }
 }
 
-/// Escapes shell-sensitive characters without adding surrounding quotes.
+/// Escapes shell-sensitive characters, using single quotes when needed to
+/// preserve empty arguments or line breaks.
 ///
 /// This is useful for tab-completion and history displays where adding full
 /// quotes would be noisier than backslash-escaping.
@@ -50,6 +51,10 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
 /// );
 /// ```
 pub fn escape_for_shell(value: &str) -> String {
+    if value.is_empty() || value.contains('\n') || value.contains('\r') {
+        return quote_single(value);
+    }
+
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
         if is_unquoted_safe(ch) {
