@@ -544,7 +544,7 @@ format = "json"
         other => panic!("unexpected error: {other:?}"),
     }
 
-    prune_empty_table_path(&mut nested, &[]).expect("empty path should short-circuit");
+    prune_empty_table_path(&mut nested, &[] as &[&str]).expect("empty path should short-circuit");
 
     let mut empty_root = toml::value::Table::new();
     empty_root.insert(

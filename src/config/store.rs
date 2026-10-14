@@ -22,6 +22,7 @@ use crate::config::{
     ConfigError, ConfigValue, Scope, TomlEditResult, TomlParseDiagnostic, normalize_scope,
     validate_key_scope, with_path_context,
 };
+use crate::normalize::normalize_identifier;
 
 /// Options that control how TOML-backed config edits are applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -228,15 +229,13 @@ fn edit_scoped_value_in_toml(
         .ok_or(ConfigError::TomlRootMustBeTable)?;
 
     let previous = match operation {
-        ValidatedTomlEditOperation::Set(value) => {
-            let scoped_table = scoped_table_mut(root_table, &normalized_scope)?;
-            set_dotted_value(
-                scoped_table,
-                key,
-                &value,
-                matches!(options.mode, TomlStoreEditMode::FillEmpty),
-            )?
-        }
+        ValidatedTomlEditOperation::Set(value) => set_scoped_value(
+            root_table,
+            &normalized_scope,
+            key,
+            &value,
+            matches!(options.mode, TomlStoreEditMode::FillEmpty),
+        )?,
         ValidatedTomlEditOperation::Unset => {
             unset_dotted_value(root_table, &normalized_scope, key)?
         }
@@ -486,47 +485,112 @@ pub fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
     Ok(metadata.permissions().mode() & 0o777)
 }
 
-fn scoped_table_mut<'a>(
-    root: &'a mut toml::value::Table,
-    scope: &Scope,
-) -> Result<&'a mut toml::value::Table, ConfigError> {
-    ensure_table_path(root, &scope_path(scope))
-}
-
-fn scoped_table<'a>(
-    root: &'a toml::value::Table,
-    scope: &Scope,
-) -> Result<Option<&'a toml::value::Table>, ConfigError> {
-    get_table_path(root, &scope_path(scope))
-}
-
-fn scope_path(scope: &Scope) -> Vec<&str> {
-    match (scope.profile.as_deref(), scope.terminal.as_deref()) {
+fn canonical_scope_path(scope: &Scope) -> Vec<String> {
+    let path = match (scope.profile.as_deref(), scope.terminal.as_deref()) {
         (None, None) => vec!["default"],
         (Some(profile), None) => vec!["profile", profile],
         (None, Some(terminal)) => vec!["terminal", terminal],
         (Some(profile), Some(terminal)) => vec!["terminal", terminal, "profile", profile],
+    };
+    path.into_iter().map(str::to_string).collect()
+}
+
+/// Returns every stored table path that holds a normalized scope, in the
+/// order the loader reads them.
+///
+/// The loader normalizes profile and terminal names, so `[profile.TSD]` and
+/// `[profile.tsd]` both hold the `tsd` scope and the later table wins.
+fn stored_scope_paths(root: &toml::value::Table, scope: &Scope) -> Vec<Vec<String>> {
+    let mut paths = vec![(Vec::new(), root)];
+    for (index, section) in canonical_scope_path(scope).into_iter().enumerate() {
+        let mut next = Vec::new();
+        for (path, table) in paths {
+            // Profile and terminal names follow their `profile`/`terminal` table.
+            let keys = table.keys().filter(|key| {
+                if index % 2 == 1 {
+                    normalize_identifier(key) == section
+                } else {
+                    **key == section
+                }
+            });
+            for key in keys {
+                if let Some(child) = table.get(key).and_then(toml::Value::as_table) {
+                    let mut child_path = path.clone();
+                    child_path.push(key.clone());
+                    next.push((child_path, child));
+                }
+            }
+        }
+        paths = next;
     }
+    paths.into_iter().map(|(path, _)| path).collect()
+}
+
+/// Sets a value so that it is the one the loader sees for the scope: written
+/// to the exact table if one exists, otherwise to an existing spelling, and
+/// removed from any other table holding the same scope.
+fn set_scoped_value(
+    root: &mut toml::value::Table,
+    scope: &Scope,
+    dotted_key: &str,
+    value: &ConfigValue,
+    only_if_empty: bool,
+) -> Result<Option<ConfigValue>, ConfigError> {
+    let parts = dotted_key_parts(dotted_key)?;
+    let stored = stored_scope_paths(root, scope);
+    // Report and test the value the loader sees, before any table changes.
+    let previous = scoped_value(root, &stored, &parts).cloned();
+    if only_if_empty
+        && let Some(existing) = &previous
+        && !matches!(existing, toml::Value::String(text) if text.trim().is_empty())
+    {
+        return ConfigValue::from_toml(dotted_key, existing).map(Some);
+    }
+    let canonical = canonical_scope_path(scope);
+    let target = if stored.contains(&canonical) {
+        canonical
+    } else {
+        stored.first().cloned().unwrap_or(canonical)
+    };
+    for path in stored.iter().filter(|path| **path != target) {
+        remove_dotted_value(ensure_table_path(root, path)?, &parts)?;
+        prune_empty_table_path(root, path)?;
+    }
+    set_dotted_value(ensure_table_path(root, &target)?, dotted_key, value, false)?;
+    Ok(previous.and_then(|existing| ConfigValue::from_toml(dotted_key, &existing).ok()))
+}
+
+/// The value the loader sees for `parts` across the scope's stored tables.
+fn scoped_value<'a>(
+    root: &'a toml::value::Table,
+    stored: &[Vec<String>],
+    parts: &[&str],
+) -> Option<&'a toml::Value> {
+    stored
+        .iter()
+        .rev()
+        .filter_map(|path| get_table_path(root, path).ok().flatten())
+        .find_map(|table| read_dotted_value(table, parts))
 }
 
 fn ensure_table_path<'a>(
     table: &'a mut toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<&'a mut toml::value::Table, ConfigError> {
     let mut cursor = table;
     for section in path {
-        cursor = ensure_table(cursor, section)?;
+        cursor = ensure_table(cursor, section.as_ref())?;
     }
     Ok(cursor)
 }
 
 fn get_table_path<'a>(
     table: &'a toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<Option<&'a toml::value::Table>, ConfigError> {
     let mut cursor = table;
     for section in path {
-        let Some(next) = get_table(cursor, section)? else {
+        let Some(next) = get_table(cursor, section.as_ref())? else {
             return Ok(None);
         };
         cursor = next;
@@ -609,37 +673,32 @@ fn unset_dotted_value(
     scope: &Scope,
     dotted_key: &str,
 ) -> Result<Option<ConfigValue>, ConfigError> {
+    let parts = dotted_key_parts(dotted_key)?;
+    let stored = stored_scope_paths(root, scope);
+    let previous = scoped_value(root, &stored, &parts)
+        .and_then(|value| ConfigValue::from_toml(dotted_key, value).ok());
+
+    for path in &stored {
+        remove_dotted_value(ensure_table_path(root, path)?, &parts)?;
+        prune_empty_table_path(root, path)?;
+    }
+
+    Ok(previous)
+}
+
+fn dotted_key_parts(dotted_key: &str) -> Result<Vec<&str>, ConfigError> {
     let parts = dotted_key
         .split('.')
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect::<Vec<&str>>();
-
     if parts.is_empty() {
         return Err(ConfigError::InvalidConfigKey {
             key: dotted_key.to_string(),
             reason: "empty key path".to_string(),
         });
     }
-
-    let previous = scoped_table(root, scope)?
-        .and_then(|table| read_dotted_value(table, &parts))
-        .and_then(|value| ConfigValue::from_toml(dotted_key, value).ok());
-
-    let _ = remove_scoped_value(root, scope, &parts)?;
-    prune_empty_scope_tables(root, scope)?;
-
-    Ok(previous)
-}
-
-fn remove_scoped_value(
-    root: &mut toml::value::Table,
-    scope: &Scope,
-    parts: &[&str],
-) -> Result<bool, ConfigError> {
-    let table = ensure_table_path(root, &scope_path(scope))?;
-
-    remove_dotted_value(table, parts)
+    Ok(parts)
 }
 
 fn remove_dotted_value(
@@ -674,27 +733,20 @@ fn remove_dotted_value(
     Ok(removed)
 }
 
-fn prune_empty_scope_tables(
-    root: &mut toml::value::Table,
-    scope: &Scope,
-) -> Result<(), ConfigError> {
-    prune_empty_table_path(root, &scope_path(scope))?;
-    Ok(())
-}
-
 fn prune_empty_table_path(
     table: &mut toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<(), ConfigError> {
     let Some((head, tail)) = path.split_first() else {
         return Ok(());
     };
+    let head = head.as_ref();
     if tail.is_empty() {
         remove_empty_table(table, head);
         return Ok(());
     }
 
-    let should_remove = if let Some(value) = table.get_mut(*head) {
+    let should_remove = if let Some(value) = table.get_mut(head) {
         let child = as_table_mut(value, head)?;
         prune_empty_table_path(child, tail)?;
         child.is_empty()
@@ -702,7 +754,7 @@ fn prune_empty_table_path(
         false
     };
     if should_remove {
-        table.remove(*head);
+        table.remove(head);
     }
     Ok(())
 }
