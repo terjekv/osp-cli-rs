@@ -948,6 +948,11 @@ impl PluginManager {
         self.with_passive_catalog(|catalog| catalog)
     }
 
+    pub(crate) fn command_catalog_for_dispatch(&self) -> Option<Vec<CommandCatalogEntry>> {
+        self.allow_path_discovery
+            .then(|| self.with_dispatch_view(build_command_catalog))
+    }
+
     /// Builds a command policy registry from active plugin describe metadata.
     ///
     /// Use this when plugin auth hints need to participate in the same runtime

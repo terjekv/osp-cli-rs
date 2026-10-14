@@ -145,7 +145,10 @@ extensions.plugins.discovery.path = true
         "plugin execution must not start before policy allows it"
     );
     let stderr = stderr_utf8(output.stderr);
-    assert!(stderr.contains("unknown command guarded"), "{stderr}");
+    assert!(
+        stderr.contains("plugin command guarded requires authentication"),
+        "{stderr}"
+    );
 }
 
 #[cfg(unix)]

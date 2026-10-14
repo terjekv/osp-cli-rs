@@ -234,7 +234,7 @@ pub(crate) fn resolve_external_command_source(
         return Ok(ExternalCommandSource::Plugin);
     }
 
-    let catalog = super::authorized_command_catalog_for(auth, clients)?;
+    let catalog = invocation_command_catalog(auth, clients, command)?;
     let matching = matching_external_command_entries(&catalog, command);
     let has_native = matching.iter().any(|entry| is_native_command_entry(entry));
     let has_plugin = matching.iter().any(|entry| !is_native_command_entry(entry));
@@ -282,11 +282,33 @@ pub(crate) fn canonical_external_command_name(
     clients: &AppClients,
     command: &str,
 ) -> Result<String> {
-    let catalog = super::authorized_command_catalog_for(auth, clients)?;
+    let catalog = invocation_command_catalog(auth, clients, command)?;
     Ok(matching_external_command_entries(&catalog, command)
         .first()
         .map(|entry| entry.name.clone())
         .unwrap_or_else(|| command.to_string()))
+}
+
+/// The authorized catalog for invoking `command`. When nothing matches
+/// passively, PATH plugins found only by execution-aware discovery are added.
+fn invocation_command_catalog(
+    auth: &AuthState,
+    clients: &AppClients,
+    command: &str,
+) -> Result<Vec<CommandCatalogEntry>> {
+    let mut catalog = super::authorized_command_catalog_for(auth, clients)?;
+    if matching_external_command_entries(&catalog, command).is_empty()
+        && auth.is_external_command_visible(command)
+        && let Some(dispatch_catalog) = clients.plugins().command_catalog_for_dispatch()
+    {
+        catalog.extend(
+            dispatch_catalog
+                .into_iter()
+                .filter(|entry| auth.is_external_command_visible(&entry.name)),
+        );
+        catalog.sort_by(|left, right| left.name.cmp(&right.name));
+    }
+    Ok(catalog)
 }
 
 pub(crate) fn external_command_source_label(entry: &CommandCatalogEntry) -> String {
