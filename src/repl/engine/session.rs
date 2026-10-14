@@ -163,15 +163,27 @@ where
     B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplRunResult>,
 {
     loop {
-        let signal = match read_signal(editor) {
-            Ok(signal) => signal,
-            Err(err) => {
-                if is_cursor_position_error(&err) {
-                    mark_cursor_position_unsupported();
-                    super::warn_basic_input_once(BasicInputReason::CursorProbeUnsupported);
-                    return run_basic_fn(prompt, submission);
+        // Keys typed during the startup probe: run lines finished with Enter
+        // as if submitted, and leave an unfinished line in the editor.
+        let pending = crate::ui::prompt::take_pending_line();
+        let signal = if let Some((typed, true)) = pending {
+            println!("{}{}{typed}", prompt.left(), prompt.indicator());
+            submission.history_store.stage_command_line(&typed)?;
+            Signal::Success(typed)
+        } else {
+            if let Some((typed, _)) = pending {
+                editor.run_edit_commands(&[EditCommand::InsertString(typed)]);
+            }
+            match read_signal(editor) {
+                Ok(signal) => signal,
+                Err(err) => {
+                    if is_cursor_position_error(&err) {
+                        mark_cursor_position_unsupported();
+                        super::warn_basic_input_once(BasicInputReason::CursorProbeUnsupported);
+                        return run_basic_fn(prompt, submission);
+                    }
+                    return Err(err.into());
                 }
-                return Err(err.into());
             }
         };
 

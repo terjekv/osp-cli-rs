@@ -335,13 +335,18 @@ fn probe_cursor_position_reports() -> bool {
         }
         buffer.extend_from_slice(&chunk[..read as usize]);
         if contains_cursor_position_report(&buffer) {
-            return true;
+            // Keys typed during the probe are kept for whichever reader runs.
+            let (found, pending) = separate_cursor_position_reports(&buffer);
+            crate::ui::prompt::preserve_pending_input(&pending);
+            return found;
         }
         if buffer.len() >= 256 {
             break;
         }
     }
 
+    let (_, pending) = separate_cursor_position_reports(&buffer);
+    crate::ui::prompt::preserve_pending_input(&pending);
     false
 }
 
@@ -349,6 +354,27 @@ pub(crate) fn contains_cursor_position_report(bytes: &[u8]) -> bool {
     bytes.windows(2).enumerate().any(|(start, window)| {
         window == b"\x1b[" && parse_cursor_position_report(&bytes[start..]).is_some()
     })
+}
+
+#[cfg(unix)]
+fn separate_cursor_position_reports(bytes: &[u8]) -> (bool, Vec<u8>) {
+    let mut found = false;
+    let mut pending = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        let remaining = &bytes[cursor..];
+        if remaining.starts_with(b"\x1b[")
+            && parse_cursor_position_report(remaining).is_some()
+            && let Some(length) = remaining.iter().position(|byte| *byte == b'R')
+        {
+            found = true;
+            cursor += length + 1;
+        } else {
+            pending.push(bytes[cursor]);
+            cursor += 1;
+        }
+    }
+    (found, pending)
 }
 
 pub(crate) use crate::ui::prompt::parse_cursor_position_report;
