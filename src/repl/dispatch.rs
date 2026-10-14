@@ -249,9 +249,9 @@ fn execute_repl_plugin_line_with_acceptance(
             runtime, session, clients, history, &resolved, sink, accepted,
         )
     })();
-    history
-        .finalize_execution(line, &resolved, *accepted && keep_history)
-        .map_err(|err| miette!("failed to update REPL history: {err}"))?;
+    if let Err(err) = history.finalize_execution(line, &resolved, *accepted && keep_history) {
+        sink.write_stderr(&format!("failed to update REPL history: {err}\n"));
+    }
     if *accepted && !is_repl_bang_request(&resolved) {
         history.remember_command(&resolved);
     }
