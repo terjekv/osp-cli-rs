@@ -11,7 +11,7 @@ use miette::{Result, WrapErr, miette};
 
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{RuntimeContext, TerminalKind, UiState};
-use crate::cli::invocation::extend_with_invocation_help;
+use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_command_tokens};
 use crate::cli::pipeline::parse_command_tokens_with_aliases;
 use crate::cli::{Commands, parse_inline_command_tokens};
 use crate::guide::GuideView;
@@ -702,6 +702,22 @@ fn add_native_pagination_hint(result: &mut CliCommandResult, context: &NativeSes
     result.messages.success(text);
 }
 
+/// Returns invocation flags that only appear after alias or quoted-line
+/// expansion, so the host can apply them like flags typed on the command line.
+pub(super) fn expanded_invocation_options(
+    runtime: &AppRuntime,
+    tokens: &[String],
+) -> Result<InvocationOptions> {
+    let expanded = parse_invocation_elevation(tokens).and_then(|(command_tokens, _)| {
+        parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())
+    });
+    // Expansion errors are reported with full context during dispatch.
+    let Ok(parsed) = expanded else {
+        return Ok(InvocationOptions::default());
+    };
+    Ok(scan_command_tokens(&parsed.tokens)?.invocation)
+}
+
 fn parse_external_invocation(
     runtime: &AppRuntime,
     session: &AppSession,
@@ -709,7 +725,9 @@ fn parse_external_invocation(
     invocation: &ResolvedInvocation,
 ) -> Result<ExternalParse> {
     let (command_tokens, elevation) = parse_invocation_elevation(tokens)?;
-    let parsed = parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())?;
+    let mut parsed = parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())?;
+    // Expansion may expose host flags; the host has already applied them.
+    parsed.tokens = scan_command_tokens(&parsed.tokens)?.tokens;
     if parsed.tokens.is_empty() {
         return Err(miette!("missing external command"));
     }

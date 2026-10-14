@@ -87,6 +87,32 @@ pub(crate) struct ScannedCommandTokenTrace {
     pub(crate) kept_indices: Vec<usize>,
 }
 
+impl InvocationOptions {
+    /// Adds flags found in a second scan, such as an expanded alias, using
+    /// the same conflict rules as a single scan.
+    pub(crate) fn merge(&mut self, other: InvocationOptions) -> Result<()> {
+        if let Some(format) = other.format {
+            set_format(self, format, &format!("--format {}", format.as_str()))?;
+        }
+        if let Some(mode) = other.mode {
+            set_mode(self, mode, &format!("--render-mode {}", mode.as_str()))?;
+        }
+        if let Some(color) = other.color {
+            set_color(self, color, &format!("--color {}", color.as_str()))?;
+        }
+        if let Some(unicode) = other.unicode {
+            set_unicode(self, unicode, &format!("--unicode {}", unicode.as_str()))?;
+        }
+        if let Some(provider) = other.plugin_provider {
+            set_plugin_provider(self, &provider, "--plugin-provider")?;
+        }
+        self.verbose = self.verbose.saturating_add(other.verbose);
+        self.quiet = self.quiet.saturating_add(other.quiet);
+        self.debug = self.debug.saturating_add(other.debug);
+        Ok(())
+    }
+}
+
 pub(crate) fn scan_cli_argv(argv: &[OsString]) -> Result<ScannedCliArgs> {
     if argv.is_empty() {
         return Ok(ScannedCliArgs {
