@@ -39,6 +39,7 @@ pub(crate) struct ReplStateRebuilder {
     render_settings: RenderSettings,
     native_commands: NativeCommandRegistry,
     plugin_preferences: PluginCommandPreferences,
+    config_plugin_preferences: PluginCommandPreferences,
     preserved_session: AppSessionRebuildState,
 }
 
@@ -59,6 +60,9 @@ impl ReplStateRebuilder {
             render_settings: runtime.ui.render_settings.clone(),
             native_commands: clients.native_commands().clone(),
             plugin_preferences: clients.plugins().command_preferences_snapshot(),
+            config_plugin_preferences: PluginCommandPreferences::from_resolved(
+                runtime.config.resolved(),
+            ),
             preserved_session: session.capture_rebuild_state(),
         }
     }
@@ -90,7 +94,10 @@ impl ReplStateRebuilder {
             &self.launch,
             super::assembly::RenderSettingsSeed::Existing(Box::new(render_settings)),
             None,
-            Some(self.plugin_preferences.clone()),
+            Some(self.plugin_preferences.rebased(
+                &self.config_plugin_preferences,
+                PluginCommandPreferences::from_resolved(&config),
+            )),
             self.preserved_session.session_layer(),
         )
         .wrap_err("failed to derive host runtime inputs for REPL rebuild")?;

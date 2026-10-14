@@ -90,6 +90,42 @@ impl PluginCommandPreferences {
     pub(crate) fn clear_provider(&mut self, command: &str) -> bool {
         self.preferred_providers.remove(command).is_some()
     }
+
+    /// Replays changes made to `self` since `baseline` over fresh preferences.
+    ///
+    /// Entries that still match the config-derived baseline defer to `fresh`,
+    /// so config changes win over stale copies of earlier config.
+    pub(crate) fn rebased(&self, baseline: &Self, mut fresh: Self) -> Self {
+        replay_changes(
+            &self.command_states,
+            &baseline.command_states,
+            &mut fresh.command_states,
+        );
+        replay_changes(
+            &self.preferred_providers,
+            &baseline.preferred_providers,
+            &mut fresh.preferred_providers,
+        );
+        fresh
+    }
+}
+
+fn replay_changes<V: Clone + PartialEq>(
+    current: &BTreeMap<String, V>,
+    baseline: &BTreeMap<String, V>,
+    fresh: &mut BTreeMap<String, V>,
+) {
+    for key in current.keys().chain(baseline.keys()) {
+        match (current.get(key), baseline.get(key)) {
+            (current, baseline) if current == baseline => {}
+            (Some(value), _) => {
+                fresh.insert(key.clone(), value.clone());
+            }
+            (None, _) => {
+                fresh.remove(key);
+            }
+        }
+    }
 }
 
 enum PluginCommandConfigField {
