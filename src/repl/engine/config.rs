@@ -337,6 +337,8 @@ pub struct ReplAppearance {
     /// Without it the REPL shows no inline suggestion, which would be
     /// indistinguishable from typed text.
     pub hint_style: Option<String>,
+    /// Whether the host resolved ANSI color for the editor session.
+    pub(crate) ansi_colors: bool,
     /// Maximum number of visible rows in the history search menu.
     pub history_menu_rows: u16,
 }
@@ -371,6 +373,7 @@ impl Default for ReplAppearance {
             command_highlight_style: None,
             error_highlight_style: None,
             hint_style: None,
+            ansi_colors: true,
             history_menu_rows: DEFAULT_HISTORY_MENU_ROWS,
         }
     }
@@ -452,6 +455,11 @@ impl ReplAppearanceBuilder {
     /// If omitted, the builder keeps the default history-menu row count.
     pub fn with_history_menu_rows(mut self, history_menu_rows: u16) -> Self {
         self.appearance.history_menu_rows = history_menu_rows;
+        self
+    }
+
+    pub(crate) fn with_ansi_colors(mut self, ansi_colors: bool) -> Self {
+        self.appearance.ansi_colors = ansi_colors;
         self
     }
 

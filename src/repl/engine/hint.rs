@@ -26,7 +26,7 @@ pub(crate) struct ReplHinter {
     painted: PaintedLine,
     // `None` turns the inline suggestion off; unstyled it would look typed.
     style: Option<Style>,
-    error_style: Style,
+    error_style: Option<Style>,
     inline: String,
 }
 
@@ -36,7 +36,7 @@ impl ReplHinter {
         highlighter: ReplHighlighter,
         painted: PaintedLine,
         style: Option<Style>,
-        error_style: Style,
+        error_style: Option<Style>,
     ) -> Self {
         Self {
             completer,
@@ -197,7 +197,7 @@ impl Hinter for ReplHinter {
         let mut out = paint(&self.inline, self.style);
         if let Some((status, is_problem, active)) = self.status(line, pos, &candidates) {
             let style = if is_problem {
-                Some(self.error_style)
+                self.error_style
             } else {
                 self.style
             };
@@ -330,7 +330,7 @@ mod tests {
             ReplHighlighter::new(tree(), Color::Green, Color::Red, None),
             PaintedLine::default(),
             Some(Style::new()),
-            Style::new(),
+            Some(Style::new()),
         )
     }
 

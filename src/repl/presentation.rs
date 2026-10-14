@@ -595,14 +595,6 @@ pub(crate) fn theme_display_name(slug: &str) -> String {
 
 pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance {
     let resolved = view.ui.render_settings.resolve_render_settings();
-    if !resolved.color {
-        return ReplAppearance::default();
-    }
-    let theme = &resolved.theme;
-    let completion_text_style = theme.repl_completion_text_spec().to_string();
-    let completion_background_style = theme.repl_completion_background_spec().to_string();
-    let completion_highlight_style = theme.repl_completion_highlight_spec().to_string();
-    let command_highlight_style = theme.palette.success.to_string();
     let history_menu_rows = match view
         .config
         .get("repl.history.menu_rows")
@@ -612,14 +604,26 @@ pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance
         _ => DEFAULT_REPL_HISTORY_MENU_ROWS as u16,
     };
 
-    ReplAppearance::builder()
+    let appearance = ReplAppearance::builder()
+        .with_ansi_colors(resolved.color)
+        .with_history_menu_rows(history_menu_rows);
+    if !resolved.color {
+        return appearance.build();
+    }
+
+    let theme = &resolved.theme;
+    let completion_text_style = theme.repl_completion_text_spec().to_string();
+    let completion_background_style = theme.repl_completion_background_spec().to_string();
+    let completion_highlight_style = theme.repl_completion_highlight_spec().to_string();
+    let command_highlight_style = theme.palette.success.to_string();
+
+    appearance
         .with_completion_text_style(Some(completion_text_style))
         .with_completion_background_style(Some(completion_background_style))
         .with_completion_highlight_style(Some(completion_highlight_style))
         .with_command_highlight_style(Some(command_highlight_style))
         .with_error_highlight_style(Some(theme.palette.error.to_string()))
         .with_hint_style(Some(theme.palette.muted.to_string()))
-        .with_history_menu_rows(history_menu_rows)
         .build()
 }
 
