@@ -424,6 +424,8 @@ pub enum NativeCommandOutcome {
 pub trait NativeCommand: Send + Sync {
     /// Applies the resolved host configuration before help, policy, completion,
     /// or execution reads this command's state. Called again on REPL rebuild.
+    /// Cloned registries share command instances, so embedders must serialize
+    /// invocations that use `configure` to select mutable session state.
     ///
     /// Keep this local: select the service/session context and invalidate stale
     /// snapshots here; remote refresh belongs in execution, invocation metadata

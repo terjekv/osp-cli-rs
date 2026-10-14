@@ -55,7 +55,11 @@ cutover. The unpublished UiO companion uses the sibling path dependency.
 Native commands can implement `configure(&ResolvedConfig)` to select their
 local session before help, completion, policy, or execution reads it. Remote
 refresh still belongs to execution or completion refresh. Derived UI and auth
-state remain owned by the host.
+state remain owned by the host. Cloned registries share their command instances,
+so invocations using `configure` to select mutable session state must be
+serialized from configuration through completion. Parallel embedded runs need
+independent command instances in separate registries, or service selection
+derived from each execution context.
 
 ## Ownership Split
 
