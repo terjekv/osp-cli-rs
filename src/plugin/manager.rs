@@ -328,7 +328,7 @@ pub struct RawPluginOutput {
     /// Process exit status code. Unix signals use the conventional
     /// `128 + signal` shell status; other non-code exits fall back to `1`.
     pub status_code: i32,
-    /// Captured standard output.
+    /// Captured standard output, decoded lossily for text-oriented passthrough.
     pub stdout: String,
     /// Captured standard error.
     pub stderr: String,

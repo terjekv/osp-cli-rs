@@ -73,7 +73,14 @@ pub(super) struct CapturedOutput {
 
 struct ExecutedPluginCommand {
     provider: DiscoveredPlugin,
-    raw: RawPluginOutput,
+    raw: CapturedPluginOutput,
+}
+
+#[derive(Debug)]
+pub(super) struct CapturedPluginOutput {
+    status_code: i32,
+    stdout: Vec<u8>,
+    stderr: String,
 }
 
 impl ExecutedPluginCommand {
@@ -89,7 +96,11 @@ impl ExecutedPluginCommand {
     }
 
     fn into_raw(self) -> RawPluginOutput {
-        self.raw
+        RawPluginOutput {
+            status_code: self.raw.status_code,
+            stdout: String::from_utf8_lossy(&self.raw.stdout).into_owned(),
+            stderr: self.raw.stderr,
+        }
     }
 
     fn into_response(self, command: &str) -> std::result::Result<ResponseV1, PluginDispatchError> {
@@ -108,7 +119,7 @@ impl ExecutedPluginCommand {
             });
         }
 
-        let response: ResponseV1 = serde_json::from_str(&self.raw.stdout).map_err(|source| {
+        let response: ResponseV1 = serde_json::from_slice(&self.raw.stdout).map_err(|source| {
             tracing::warn!(
                 plugin_id = %self.provider.plugin_id,
                 command = %command,
@@ -173,10 +184,11 @@ impl PluginManager {
         ExecutedPluginCommand::run(self, command, args, context)?.into_response(command)
     }
 
-    /// Runs a plugin command and returns raw stdout, stderr, and exit status.
+    /// Runs a plugin command and returns stdout, stderr, and exit status.
     ///
     /// Unlike [`PluginManager::dispatch`], this does not attempt to decode or
-    /// validate plugin JSON output. Non-zero exit codes are returned in
+    /// validate plugin JSON output. Captured streams become lossy UTF-8 text.
+    /// Non-zero exit codes are returned in
     /// [`RawPluginOutput::status_code`] rather than surfaced as
     /// [`PluginDispatchError::NonZeroExit`].
     ///
@@ -293,7 +305,7 @@ pub(super) fn run_provider(
     args: &[String],
     context: &PluginDispatchContext,
     timeout: Duration,
-) -> std::result::Result<RawPluginOutput, PluginDispatchError> {
+) -> std::result::Result<CapturedPluginOutput, PluginDispatchError> {
     let env_issues = context
         .env_issues_for(&provider.plugin_id)
         .map(str::to_string)
@@ -378,9 +390,9 @@ pub(super) fn run_provider(
         "plugin command completed"
     );
 
-    Ok(RawPluginOutput {
+    Ok(CapturedPluginOutput {
         status_code: exit_status_code(output.status),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stdout: output.stdout,
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
 }
