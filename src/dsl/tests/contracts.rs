@@ -386,6 +386,13 @@ fn unicode_case_insensitive_matching_is_shared_by_quick_and_filter() {
     };
     assert_eq!(value_rows.len(), 1);
 
+    let exact_value_quick = apply_pipeline(rows.clone(), &["V =ålesund".to_string()])
+        .expect("unicode exact quick value match should work");
+    let OutputItems::Rows(exact_value_rows) = exact_value_quick.items else {
+        panic!("expected row output");
+    };
+    assert_eq!(exact_value_rows.len(), 1);
+
     let key_quick = apply_pipeline(rows.clone(), &["K grønn".to_string()])
         .expect("unicode quick key match should work");
     let OutputItems::Rows(key_rows) = key_quick.items else {

@@ -13,8 +13,8 @@ use crate::dsl::{
     eval::{
         flatten::{coalesce_flat_row, flatten_row},
         matchers::{
-            contains_case_insensitive, fuzzy_contains_case_insensitive, match_row_keys_detailed,
-            match_row_keys_detailed_fuzzy, render_value,
+            contains_case_insensitive, eq_case_insensitive, fuzzy_contains_case_insensitive,
+            match_row_keys_detailed, match_row_keys_detailed_fuzzy, render_value,
         },
         resolve::{is_truthy, resolve_pairs, resolve_values_truthy},
     },
@@ -180,7 +180,7 @@ fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool
             Value::Array(values) => values
                 .iter()
                 .any(|item| value_matches_token(item, &token, exact, fuzzy)),
-            scalar => render_value(scalar).eq_ignore_ascii_case(&token),
+            scalar => eq_case_insensitive(&render_value(scalar), &token),
         },
         ExactMode::None => match value {
             Value::Array(values) => values
