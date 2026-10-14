@@ -1,6 +1,5 @@
 #[cfg(test)]
 use crate::dsl::verbs::common::map_group_rows;
-use std::borrow::Cow;
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
@@ -20,6 +19,7 @@ use crate::dsl::{
     },
     parse::{
         key_spec::ExactMode,
+        lexer::{Span, StageSegment, tokenize_stage_words},
         quick::{QuickScope, parse_quick_spec},
     },
 };
@@ -77,7 +77,9 @@ impl QuickPlan {
 }
 
 pub(crate) fn compile(raw_stage: &str) -> Result<QuickPlan> {
-    let spec = CompiledQuickSpec::from_parsed(parse_quick_spec(raw_stage));
+    let mut parsed = parse_quick_spec(raw_stage);
+    parsed.key_spec.token = decode_search_token(&parsed.key_spec.token)?;
+    let spec = CompiledQuickSpec::from_parsed(parsed);
     let token = spec.token().trim();
     if token.is_empty() {
         return Err(anyhow!("quick stage requires a search token"));
@@ -100,6 +102,27 @@ pub(crate) fn compile(raw_stage: &str) -> Result<QuickPlan> {
         }
     }
     Ok(QuickPlan { spec })
+}
+
+fn decode_search_token(raw_token: &str) -> Result<String> {
+    let segment = StageSegment {
+        raw: raw_token.to_string(),
+        span: Span {
+            start: 0,
+            end: raw_token.len(),
+        },
+    };
+    let words = tokenize_stage_words(&segment)?;
+    let mut decoded = String::with_capacity(raw_token.len());
+    let mut previous_end = 0;
+    for (index, word) in words.iter().enumerate() {
+        if index > 0 {
+            decoded.push_str(&raw_token[previous_end..word.span.start]);
+        }
+        decoded.push_str(&word.text);
+        previous_end = word.span.end;
+    }
+    Ok(decoded)
 }
 
 pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &QuickPlan) -> Result<Vec<Row>> {
@@ -168,48 +191,27 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
 }
 
 fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool) -> bool {
-    let token = unescape_search_token(token);
     match exact {
         ExactMode::CaseSensitive => match value {
             Value::Array(values) => values
                 .iter()
-                .any(|item| value_matches_token(item, &token, exact, fuzzy)),
+                .any(|item| value_matches_token(item, token, exact, fuzzy)),
             scalar => render_value(scalar) == token,
         },
         ExactMode::CaseInsensitive => match value {
             Value::Array(values) => values
                 .iter()
-                .any(|item| value_matches_token(item, &token, exact, fuzzy)),
-            scalar => eq_case_insensitive(&render_value(scalar), &token),
+                .any(|item| value_matches_token(item, token, exact, fuzzy)),
+            scalar => eq_case_insensitive(&render_value(scalar), token),
         },
         ExactMode::None => match value {
             Value::Array(values) => values
                 .iter()
-                .any(|item| value_matches_token(item, &token, exact, fuzzy)),
-            scalar if fuzzy => fuzzy_contains_case_insensitive(&render_value(scalar), &token),
-            scalar => contains_case_insensitive(&render_value(scalar), &token),
+                .any(|item| value_matches_token(item, token, exact, fuzzy)),
+            scalar if fuzzy => fuzzy_contains_case_insensitive(&render_value(scalar), token),
+            scalar => contains_case_insensitive(&render_value(scalar), token),
         },
     }
-}
-
-fn unescape_search_token(token: &str) -> Cow<'_, str> {
-    if !token.contains('\\') {
-        return Cow::Borrowed(token);
-    }
-
-    let mut out = String::with_capacity(token.len());
-    let mut chars = token.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next() {
-                Some(escaped) => out.push(escaped),
-                None => out.push('\\'),
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    Cow::Owned(out)
 }
 
 fn match_structural_value(root: &Value, spec: &CompiledQuickSpec) -> Option<bool> {

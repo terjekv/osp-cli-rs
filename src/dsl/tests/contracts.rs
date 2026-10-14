@@ -52,7 +52,7 @@ fn grouped_output() -> OutputResult {
 }
 
 #[test]
-fn quoted_term_contract_is_shared_by_project_and_value_stages() {
+fn quoted_term_contract_is_shared_by_pipeline_stages() {
     let rows = vec![row(
         json!({"display,name": "Alice", "team ops": "platform"}),
     )];
@@ -70,6 +70,24 @@ fn quoted_term_contract_is_shared_by_project_and_value_stages() {
         panic!("expected row output");
     };
     assert_eq!(value_rows, vec![row(json!({"value": "Alice"}))]);
+
+    for stage in ["V \"hello world\"", "K \"team ops\"", "\"hello world\""] {
+        let quick = apply_pipeline(
+            vec![row(
+                json!({"team ops": "hello world", "note": "hello world"}),
+            )],
+            &[stage.to_string()],
+        )
+        .expect("quoted quick phrase should work");
+        assert_eq!(quick.as_rows().map(|rows| rows.len()), Some(1), "{stage}");
+    }
+
+    let quoted_sigil = apply_pipeline(
+        vec![row(json!({"note": "prefix =hello suffix"}))],
+        &["V \"=hello\"".to_string()],
+    )
+    .expect("quoted quick sigil should stay literal");
+    assert_eq!(quoted_sigil.as_rows().map(|rows| rows.len()), Some(1));
 }
 
 #[test]

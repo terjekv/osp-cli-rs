@@ -199,6 +199,11 @@ pub fn tokenize_stage(segment: &StageSegment) -> Result<Vec<Token>, LexerError> 
     Ok(out)
 }
 
+/// Tokenize a stage into decoded shell-like words without splitting DSL operators.
+pub(crate) fn tokenize_stage_words(segment: &StageSegment) -> Result<Vec<Token>, LexerError> {
+    tokenize_words(&segment.raw, segment.span.start)
+}
+
 /// Tokenize one stage into plain words using both commas and whitespace as
 /// delimiters while still respecting shell-style quoting and escaping.
 pub fn tokenize_stage_terms(segment: &StageSegment) -> Result<Vec<Token>, LexerError> {

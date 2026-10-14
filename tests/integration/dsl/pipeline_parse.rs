@@ -1,7 +1,11 @@
 #![allow(missing_docs)]
 
-use osp_cli::cli::{parse_command_text_with_aliases, parse_command_tokens_with_aliases};
 use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, ResolvedConfig};
+use osp_cli::{
+    cli::{parse_command_text_with_aliases, parse_command_tokens_with_aliases},
+    dsl::apply_pipeline,
+    row,
+};
 
 fn make_config(entries: &[(&str, &str)]) -> ResolvedConfig {
     let mut defaults = ConfigLayer::default();
@@ -76,6 +80,10 @@ fn parse_cli_tokens_preserves_single_stage_argument_with_spaces() {
 
     assert_eq!(parsed.tokens, vec!["status"]);
     assert_eq!(parsed.stages, vec!["K 'foo bar'"]);
+
+    let output = apply_pipeline(vec![row! { "foo bar" => "match" }], &parsed.stages)
+        .expect("quoted CLI quick term should execute");
+    assert_eq!(output.as_rows().map(|rows| rows.len()), Some(1));
 }
 
 #[test]
