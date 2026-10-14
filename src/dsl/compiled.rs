@@ -64,6 +64,19 @@ impl CompiledPipeline {
 }
 
 impl CompiledStage {
+    /// Output fields this stage creates rather than carries over; `None`
+    /// when any field may be new, as with an arbitrary jq program.
+    pub(crate) fn synthesized_fields(&self) -> Option<Vec<String>> {
+        Some(match self {
+            Self::Aggregate(plan) => vec![plan.output_field().to_string()],
+            Self::Group(plan) => plan.renamed_headers(),
+            Self::CountMacro => vec!["count".to_string()],
+            Self::Values(_) => vec!["value".to_string()],
+            Self::Jq(_) => return None,
+            _ => Vec::new(),
+        })
+    }
+
     pub(crate) fn from_parsed(stage: &ParsedStage) -> Result<Self> {
         match stage.kind {
             ParsedStageKind::Quick => Ok(Self::Quick(quick::compile(&stage.raw)?)),

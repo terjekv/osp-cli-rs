@@ -3,7 +3,7 @@
 //! documents are retained only for unstaged rendering.
 
 use crate::core::{
-    output_model::{OutputItems, OutputResult, compute_key_index},
+    output_model::{DisplayRule, OutputItems, OutputMeta, OutputResult, compute_key_index},
     row::Row,
 };
 use anyhow::Result;
@@ -308,6 +308,13 @@ pub(crate) fn run_compiled(
             crate::dsl::compiled::SemanticEffect::Preserve
         );
         rows = apply_stage(rows, stage)?;
+        match stage.synthesized_fields() {
+            Some(created) => forget_formatting(&mut output.meta, &created),
+            None => {
+                output.meta.unix_timestamp_columns.clear();
+                output.meta.display_rules.clear();
+            }
+        }
     }
     output.meta.grouped = rows.grouped;
     output.items = rows.into();
@@ -355,6 +362,21 @@ fn merged_group_header(group: &crate::core::output_model::Group) -> Row {
     let mut row = group.groups.clone();
     row.extend(group.aggregates.clone());
     row
+}
+
+/// Drops field-keyed formatting for fields a stage created: a count named
+/// `created_at` is not a timestamp just because an input field was.
+fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
+    if synthesized.is_empty() {
+        return;
+    }
+    let created = |field: &String| synthesized.contains(field);
+    meta.unix_timestamp_columns.retain(|field| !created(field));
+    meta.display_rules.retain(|rule| match rule {
+        DisplayRule::SuffixWhenTrue { field, when, .. }
+        | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
+        DisplayRule::Bytes { field } | DisplayRule::RelativeTimestamp { field } => !created(field),
+    });
 }
 
 #[cfg(test)]

@@ -40,6 +40,17 @@ pub(crate) struct GroupPlan {
     keys: Vec<GroupKeyPlan>,
 }
 
+impl GroupPlan {
+    /// Header keys named by `as` instead of by their source field.
+    pub(crate) fn renamed_headers(&self) -> Vec<String> {
+        self.keys
+            .iter()
+            .filter(|key| key.header_key != canonical_header_key(&key.key_spec.token))
+            .map(|key| key.header_key.clone())
+            .collect()
+    }
+}
+
 pub(crate) fn compile(spec: &str) -> Result<GroupPlan> {
     Ok(GroupPlan {
         keys: parse_group_plan(spec)?,

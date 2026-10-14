@@ -35,6 +35,12 @@ pub(crate) struct AggregatePlan {
     spec: AggregateSpec,
 }
 
+impl AggregatePlan {
+    pub(crate) fn output_field(&self) -> &str {
+        &self.spec.alias
+    }
+}
+
 pub(crate) fn compile(spec: &str) -> Result<AggregatePlan> {
     Ok(AggregatePlan {
         spec: parse_aggregate_spec(spec)?,
