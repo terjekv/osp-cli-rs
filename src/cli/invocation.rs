@@ -95,15 +95,21 @@ pub(crate) fn scan_cli_argv(argv: &[OsString]) -> Result<ScannedCliArgs> {
         });
     }
 
-    let head = argv[0].clone();
-    let tail = argv[1..]
+    let tail = &argv[1..];
+    let lossy = tail
         .iter()
         .map(|value| value.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let scanned = scan_command_tokens(&tail)?;
-    let mut cleaned = Vec::with_capacity(scanned.tokens.len() + 1);
-    cleaned.push(head);
-    cleaned.extend(scanned.tokens.into_iter().map(OsString::from));
+    let scanned = scan_command_tokens_with_trace(&lossy)?;
+    // Kept tokens are verbatim, so forward the native values (e.g. paths).
+    let mut cleaned = Vec::with_capacity(scanned.kept_indices.len() + 1);
+    cleaned.push(argv[0].clone());
+    cleaned.extend(
+        scanned
+            .kept_indices
+            .iter()
+            .map(|&index| tail[index].clone()),
+    );
 
     Ok(ScannedCliArgs {
         argv: cleaned,
