@@ -537,9 +537,8 @@ impl CommandLineParser {
         let prefix = text_before_cursor.get(..safe_cursor).unwrap_or("");
         let mut active = ActiveToken::default();
         let state = scan_shell(prefix, |event| match event.kind {
-            LexEventKind::Separator => active.reset(),
+            LexEventKind::Separator | LexEventKind::Pipe => active.reset(),
             LexEventKind::Text(_)
-            | LexEventKind::Pipe
             | LexEventKind::QuoteStart
             | LexEventKind::QuoteEnd
             | LexEventKind::EscapeStart => active.observe(event),
@@ -591,6 +590,7 @@ impl CommandLineParser {
                 LexEventKind::Pipe => {
                     push_current(&mut out, &mut active.value);
                     out.push("|".to_string());
+                    active.reset();
                 }
                 LexEventKind::Text(_)
                 | LexEventKind::QuoteStart

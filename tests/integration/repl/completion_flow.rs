@@ -81,6 +81,25 @@ fn repl_completion_flow_tracks_committed_scope_and_consumed_flags() {
     for verb in ["F", "P", "S", "G"] {
         assert!(pipeline.contains(&verb.to_string()), "{pipeline:?}");
     }
+
+    let pipe_cursor = debug_complete_payload("config show|", &[]);
+    assert_eq!(pipe_cursor["stub"], "");
+    assert_eq!(pipe_cursor["replace_range"], serde_json::json!([12, 12]));
+    assert!(match_labels(&pipe_cursor).contains(&"F".to_string()));
+
+    for (line, accepted) in [
+        ("config show|F", "config show|F "),
+        ("config show |F", "config show |F "),
+    ] {
+        let payload = debug_complete_payload(line, &["tab", "tab", "accept"]);
+        let frames = payload
+            .as_array()
+            .expect("stepped debug-complete should render frames");
+        let accepted_line = frames
+            .last()
+            .and_then(|frame| frame["state"]["line"].as_str());
+        assert_eq!(accepted_line, Some(accepted));
+    }
 }
 
 #[test]
