@@ -1038,7 +1038,10 @@ fn describe_with_cache(
 }
 
 fn describe_cache_key(path: &Path) -> String {
-    path.to_string_lossy().to_string()
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
 }
 
 pub(super) fn find_cached_describe<'a>(

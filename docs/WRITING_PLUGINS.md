@@ -379,7 +379,8 @@ make it executable, and put it in an explicit plugin directory, in
 ### Discovery caching
 
 Plugin `--describe` results are cached in
-`<platform-cache-dir>/osp/describe-v1.json`, keyed by executable path,
+`<platform-cache-dir>/osp/describe-v1.json`, keyed by canonical absolute
+executable path,
 file size, and modification time. On Linux this is typically
 `~/.cache/osp/describe-v1.json`, and `XDG_CACHE_HOME` overrides the base
 cache dir when set. The cache is invalidated automatically when the

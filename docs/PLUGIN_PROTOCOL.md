@@ -62,7 +62,7 @@ failures.
 ## Describe Caching (Backbone Behavior)
 
 - Backbone caches successful `--describe` payloads.
-- Cache key is `(executable path, file size, file mtime)`.
+- Cache key is `(canonical absolute executable path, file size, file mtime)`.
 - Default cache file:
   `<platform-cache-dir>/osp/describe-v1.json`.
 - On Linux this is typically `~/.cache/osp/describe-v1.json`.
