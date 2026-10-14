@@ -1,4 +1,5 @@
 use crate::core::output_model::ColumnAlignment;
+use crate::ui::text::escape_markdown_table_cell;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::doc::TableBlock;
@@ -64,7 +65,7 @@ impl PreparedCell {
     fn new(raw: &str) -> Self {
         Self {
             raw: raw.to_string(),
-            markdown: raw.replace('|', "\\|"),
+            markdown: escape_markdown_table_cell(raw),
             width: UnicodeWidthStr::width(raw),
         }
     }
