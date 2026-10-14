@@ -22,7 +22,7 @@ use crate::dsl::{
     },
     parse::{
         key_spec::{ExactMode, KeySpec},
-        path::{PathExpression, expression_to_flat_key, parse_path},
+        path::{PathExpression, expression_to_flat_key, is_structural_path_token, parse_path},
     },
     verbs::common::{parse_optional_alias_after_key, parse_stage_words},
 };
@@ -274,15 +274,7 @@ fn is_descendant_key(key: &str, prefix: &str) -> bool {
 
 fn selector_expression(token: &str) -> Option<PathExpression> {
     let path = parse_path(token).ok()?;
-    if path
-        .segments
-        .iter()
-        .any(|segment| !segment.selectors.is_empty())
-    {
-        Some(path)
-    } else {
-        None
-    }
+    is_structural_path_token(token, &path).then_some(path)
 }
 
 fn select_match_keys(
