@@ -41,13 +41,7 @@ pub(crate) fn apply_set(
     plan: &SortPlan,
 ) -> Result<crate::dsl::model::RowSet> {
     if set.grouped {
-        validate_keys(
-            &set.partitions
-                .iter()
-                .map(merged_group_row)
-                .collect::<Vec<_>>(),
-            plan,
-        )?;
+        validate_group_keys(&set.partitions, plan)?;
         set.partitions
             .sort_by(|left, right| compare_groups(left, right, &plan.keys));
         Ok(set)
@@ -79,6 +73,22 @@ fn validate_keys(rows: &[Row], plan: &SortPlan) -> Result<()> {
             && !rows.iter().any(|row| {
                 resolve_first_value(row, &key.key_spec.token, key.key_spec.exact).is_some()
             })
+        {
+            return Err(anyhow!(
+                "S: field '{}' is absent from all rows",
+                key.key_spec.token
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_group_keys(groups: &[Group], plan: &SortPlan) -> Result<()> {
+    for key in &plan.keys {
+        if !groups.is_empty()
+            && !groups
+                .iter()
+                .any(|group| resolve_group_value(group, key).is_some())
         {
             return Err(anyhow!(
                 "S: field '{}' is absent from all rows",
@@ -176,9 +186,37 @@ fn compare_rows(left: &Row, right: &Row, keys: &[SortKeySpec]) -> Ordering {
 }
 
 fn compare_groups(left: &Group, right: &Group, keys: &[SortKeySpec]) -> Ordering {
-    let left_row = merged_group_row(left);
-    let right_row = merged_group_row(right);
-    compare_rows(&left_row, &right_row, keys)
+    for key in keys {
+        let left_value = resolve_group_value(left, key);
+        let right_value = resolve_group_value(right, key);
+
+        let mut ordering =
+            compare_optional_values(left_value.as_ref(), right_value.as_ref(), key.cast);
+        if key.descending && left_value.is_some() && right_value.is_some() {
+            ordering = ordering.reverse();
+        }
+
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+
+    Ordering::Equal
+}
+
+fn resolve_group_value(group: &Group, key: &SortKeySpec) -> Option<Value> {
+    group
+        .groups
+        .get(&key.key_spec.token)
+        .or_else(|| group.aggregates.get(&key.key_spec.token))
+        .cloned()
+        .or_else(|| {
+            resolve_first_value(
+                &merged_group_row(group),
+                &key.key_spec.token,
+                key.key_spec.exact,
+            )
+        })
 }
 
 fn merged_group_row(group: &Group) -> Row {

@@ -7,7 +7,7 @@ use regex::Regex;
 use crate::dsl::{
     eval::{
         matchers::{contains_case_insensitive, eq_case_insensitive, render_value},
-        resolve::{resolve_values, resolve_values_truthy},
+        resolve::{is_truthy, resolve_values},
     },
     parse::key_spec::{ExactMode, KeySpec},
     verbs::common::parse_stage_words,
@@ -23,6 +23,10 @@ pub(crate) struct FilterPlan {
 impl FilterPlan {
     pub(crate) fn matches(&self, row: &Row) -> bool {
         evaluate_row(row, &self.parsed)
+    }
+
+    fn matches_group_header_value(&self, value: &serde_json::Value) -> bool {
+        evaluate_values(std::iter::once(value), true, &self.parsed)
     }
 }
 
@@ -71,6 +75,9 @@ pub(crate) fn apply_set(
         if grouped {
             let header = crate::core::output_model::group_header_row(partition);
             let selector = &plan.parsed.column.key_spec;
+            if let Some(value) = header.get(&selector.token) {
+                return plan.matches_group_header_value(value);
+            }
             if !resolve_values(&header, &selector.token, selector.exact).is_empty() {
                 return plan.matches(&header);
             }
@@ -236,9 +243,17 @@ fn parse_operator_token(token: &str) -> Option<Operator> {
 }
 
 fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
+    let values = resolve_values(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
+    evaluate_values(values.iter(), !values.is_empty(), spec)
+}
+
+fn evaluate_values<'a>(
+    mut values: impl Iterator<Item = &'a serde_json::Value>,
+    has_values: bool,
+    spec: &ParsedFilterSpec,
+) -> bool {
     if spec.existence_check {
-        let found =
-            resolve_values_truthy(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
+        let found = values.any(is_truthy);
         return if spec.column.key_spec.negated {
             !found
         } else {
@@ -246,8 +261,7 @@ fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
         };
     }
 
-    let values = resolve_values(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
-    if values.is_empty() {
+    if !has_values {
         return spec.negated;
     }
 
@@ -255,9 +269,7 @@ fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
         return false;
     };
 
-    let positive = values
-        .iter()
-        .any(|value| matches_value(value, spec.operator, value_spec));
+    let positive = values.any(|value| matches_value(value, spec.operator, value_spec));
 
     if spec.negated { !positive } else { positive }
 }
