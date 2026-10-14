@@ -4,7 +4,9 @@ use anyhow::{Result, anyhow};
 use serde_json::{Map, Value};
 
 use crate::dsl::{
-    eval::resolve::{AddressStep, AddressedValue, enumerate_path_matches},
+    eval::resolve::{
+        AddressStep, AddressedValue, enumerate_named_descendant_arrays, enumerate_path_matches,
+    },
     parse::path::{PathExpression, parse_path},
 };
 
@@ -64,7 +66,7 @@ pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &UnrollPlan) -> Result<Vec<R
 
 pub(crate) fn apply_value_with_plan(value: Value, plan: &UnrollPlan) -> Result<Value> {
     Ok(match &plan.target {
-        UnrollTarget::DescendantField(field) => unroll_named_descendant_field(value, field),
+        UnrollTarget::DescendantField(field) => unroll_descendant_field(value, field),
         UnrollTarget::Path(path) => unroll_path_value(value, path),
     })
 }
@@ -98,6 +100,14 @@ fn unroll_path_value(value: Value, path: &PathExpression) -> Value {
     unroll_matches(value, &matches)
 }
 
+fn unroll_descendant_field(value: Value, field: &str) -> Value {
+    let matches = enumerate_named_descendant_arrays(&value, field);
+    if matches.is_empty() {
+        return value;
+    }
+    unroll_matches(value, &matches)
+}
+
 fn unroll_matches(value: Value, matches: &[AddressedValue]) -> Value {
     let addresses = matches
         .iter()
@@ -115,29 +125,62 @@ fn unroll_at_addresses(value: Value, addresses: &[Vec<AddressStep>]) -> Value {
 }
 
 fn unroll_object_at_addresses(map: Map<String, Value>, addresses: &[Vec<AddressStep>]) -> Value {
-    if let Some(field) = direct_target_field(addresses) {
-        return duplicate_object_over_field(map, &field);
+    // Each target branch, owned directly or below, multiplies the rows
+    // produced by the branches before it.
+    let mut rows = vec![map];
+    let mut expanded = false;
+    for key in target_fields(addresses) {
+        let child_addresses = child_field_addresses(addresses, &key);
+        let direct = child_addresses.iter().any(Vec::is_empty);
+        let mut next = Vec::with_capacity(rows.len());
+        for row in rows {
+            let unrolled = if direct {
+                duplicate_object_over_field(row, &key)
+            } else {
+                unroll_object_field(row, &key, &child_addresses)
+            };
+            match unrolled {
+                Value::Array(items) => {
+                    expanded = true;
+                    next.extend(items.into_iter().filter_map(|item| match item {
+                        Value::Object(map) => Some(map),
+                        _ => None,
+                    }));
+                }
+                Value::Object(map) => next.push(map),
+                _ => {}
+            }
+        }
+        rows = next;
     }
 
-    let mut map = map;
-    let Some(key) = first_target_field(addresses) else {
+    if !expanded
+        && rows.len() == 1
+        && let Some(row) = rows.pop()
+    {
+        return Value::Object(row);
+    }
+    Value::Array(rows.into_iter().map(Value::Object).collect())
+}
+
+fn unroll_object_field(
+    mut map: Map<String, Value>,
+    key: &str,
+    child_addresses: &[Vec<AddressStep>],
+) -> Value {
+    let Some(child) = map.remove(key) else {
         return Value::Object(map);
     };
 
-    let Some(child) = map.remove(&key) else {
-        return Value::Object(map);
-    };
-
-    let child_addresses = child_field_addresses(addresses, &key);
     let child_was_object = matches!(child, Value::Object(_));
-    let transformed = unroll_at_addresses(child, &child_addresses);
+    let transformed = unroll_at_addresses(child, child_addresses);
 
     if child_was_object && matches!(transformed, Value::Array(_)) {
-        return duplicate_object_over_value(map, &key, transformed);
+        return duplicate_object_over_value(map, key, transformed);
     }
 
     if !json::is_structurally_empty(&transformed) {
-        map.insert(key, transformed);
+        map.insert(key.to_string(), transformed);
     }
     Value::Object(map)
 }
@@ -207,20 +250,16 @@ fn unroll_array_at_addresses(items: Vec<Value>, addresses: &[Vec<AddressStep>]) 
     Value::Array(out)
 }
 
-fn direct_target_field(addresses: &[Vec<AddressStep>]) -> Option<String> {
-    addresses
-        .iter()
-        .find_map(|address| match address.as_slice() {
-            [AddressStep::Field(field)] => Some(field.clone()),
-            _ => None,
-        })
-}
-
-fn first_target_field(addresses: &[Vec<AddressStep>]) -> Option<String> {
-    addresses.iter().find_map(|address| match address.first() {
-        Some(AddressStep::Field(field)) => Some(field.clone()),
-        _ => None,
-    })
+fn target_fields(addresses: &[Vec<AddressStep>]) -> Vec<String> {
+    let mut fields: Vec<String> = Vec::new();
+    for address in addresses {
+        if let Some(AddressStep::Field(field)) = address.first()
+            && !fields.contains(field)
+        {
+            fields.push(field.clone());
+        }
+    }
+    fields
 }
 
 fn child_field_addresses(addresses: &[Vec<AddressStep>], field: &str) -> Vec<Vec<AddressStep>> {
@@ -241,56 +280,6 @@ fn child_index_addresses(addresses: &[Vec<AddressStep>], index: usize) -> Vec<Ve
             _ => None,
         })
         .collect()
-}
-
-fn unroll_named_descendant_field(value: Value, field: &str) -> Value {
-    match value {
-        // When the current object owns the target array, duplicate the object
-        // once per member and replace the field with the single unrolled item.
-        // This preserves object envelope metadata instead of flattening the
-        // array contents into anonymous rows.
-        Value::Object(mut map) if matches!(map.get(field), Some(Value::Array(_))) => {
-            let Some(existing) = map.remove(field) else {
-                return Value::Object(map);
-            };
-            let Value::Array(items) = existing else {
-                map.insert(field.to_string(), existing);
-                return Value::Object(map);
-            };
-            Value::Array(
-                items
-                    .into_iter()
-                    .filter(|item| !json::is_structurally_empty(item))
-                    .map(|item| {
-                        let mut clone = map.clone();
-                        clone.insert(field.to_string(), item);
-                        Value::Object(clone)
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        }
-        Value::Object(map) => {
-            let mut out = Map::new();
-            for (key, child) in map {
-                let transformed = unroll_named_descendant_field(child, field);
-                if !json::is_structurally_empty(&transformed) {
-                    out.insert(key, transformed);
-                }
-            }
-            Value::Object(out)
-        }
-        Value::Array(items) => Value::Array(
-            items
-                .into_iter()
-                .flat_map(|item| match unroll_named_descendant_field(item, field) {
-                    Value::Array(values) => values,
-                    other if !json::is_structurally_empty(&other) => vec![other],
-                    _ => Vec::new(),
-                })
-                .collect::<Vec<_>>(),
-        ),
-        scalar => scalar,
-    }
 }
 
 #[cfg(test)]

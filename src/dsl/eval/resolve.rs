@@ -201,6 +201,52 @@ pub fn enumerate_path_matches(root: &Value, path: &PathExpression) -> Vec<Addres
     out
 }
 
+/// Finds arrays owned by fields named `field` anywhere below `root`.
+pub(crate) fn enumerate_named_descendant_arrays(
+    root: &Value,
+    field: &str,
+) -> Vec<AddressedValue> {
+    fn visit(
+        value: &Value,
+        field: &str,
+        flat_key: &str,
+        address: &mut Vec<AddressStep>,
+        out: &mut Vec<AddressedValue>,
+    ) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let child_key = append_name(flat_key, key);
+                    address.push(AddressStep::Field(key.clone()));
+                    if key == field && matches!(child, Value::Array(_)) {
+                        out.push(AddressedValue {
+                            address: address.clone(),
+                            flat_key: child_key,
+                            value: child.clone(),
+                        });
+                    } else {
+                        visit(child, field, &child_key, address, out);
+                    }
+                    address.pop();
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    let child_key = append_index(flat_key, index);
+                    address.push(AddressStep::Index(index));
+                    visit(child, field, &child_key, address, out);
+                    address.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    visit(root, field, "", &mut Vec::new(), &mut out);
+    out
+}
+
 /// Rebuilds a minimal JSON subtree from addressed path matches.
 ///
 /// Array holes introduced by index-based selection are represented with an
