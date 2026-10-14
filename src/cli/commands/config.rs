@@ -86,6 +86,17 @@ impl<'a> ConfigCommandContext<'a> {
 }
 
 impl<'a> ConfigReadContext<'a> {
+    /// Rebuilds the runtime config request behind the current session.
+    fn runtime_request(&self) -> RuntimeConfigRequest {
+        RuntimeConfigRequest::new(
+            self.context.profile_override().map(str::to_owned),
+            Some(self.context.terminal_kind().as_config_terminal()),
+        )
+        .with_runtime_load(self.runtime_load)
+        .with_product_defaults(self.product_defaults.clone())
+        .with_session_layer(Some(self.config_overrides.clone()))
+    }
+
     pub(crate) fn from_parts(
         runtime: &'a AppRuntime,
         session: &'a AppSession,
@@ -302,16 +313,8 @@ fn config_get_rows(
     }
 
     if is_bootstrap_only_key(&args.key) {
-        let explain = explain_runtime_config(
-            RuntimeConfigRequest::new(
-                context.context.profile_override().map(str::to_owned),
-                Some(context.context.terminal_kind().as_config_terminal()),
-            )
-            .with_runtime_load(context.runtime_load)
-            .with_session_layer(Some(context.config_overrides.clone())),
-            &args.key,
-        )
-        .wrap_err_with(|| format!("failed to resolve bootstrap key `{}`", args.key))?;
+        let explain = explain_runtime_config(context.runtime_request(), &args.key)
+            .wrap_err_with(|| format!("failed to resolve bootstrap key `{}`", args.key))?;
 
         if let Some(entry) = explain.final_entry {
             let row = config_entry_row(&args.key, &entry, args.output.sources, args.output.raw);
@@ -703,13 +706,7 @@ fn run_config_set(
     }
 
     let output = if args.explain {
-        let request = RuntimeConfigRequest::new(
-            context.context.profile_override().map(str::to_owned),
-            Some(context.context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(context.runtime_load)
-        .with_product_defaults(context.product_defaults.clone())
-        .with_session_layer(Some(context.config_overrides.clone()));
+        let request = context.read().runtime_request();
         let explain = explain_runtime_config(request.clone(), &key)
             .wrap_err_with(|| format!("failed to explain config for key `{key}` after set"))?;
         let config = resolve_runtime_config(request)
