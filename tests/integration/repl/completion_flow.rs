@@ -77,6 +77,38 @@ fn repl_completion_flow_tracks_committed_scope_and_consumed_flags() {
     assert!(!committed_flag.contains(&"--raw".to_string()));
     assert!(committed_flag.contains(&"--sources".to_string()));
 
+    for (line, accepted) in [
+        (
+            "config set --yes ui.format j",
+            "config set --yes ui.format json ",
+        ),
+        (
+            "config set --profile default ui.format j",
+            "config set --profile default ui.format json ",
+        ),
+    ] {
+        let payload = debug_complete_payload(line, &["tab", "tab", "accept"]);
+        let frames = payload
+            .as_array()
+            .expect("stepped debug-complete should render frames");
+        let first_matches = frames[0]["state"]["matches"]
+            .as_array()
+            .expect("frame matches should render as an array");
+        assert!(
+            first_matches.iter().any(|item| item["label"] == "json"),
+            "{line}: {first_matches:?}"
+        );
+        assert_eq!(
+            frames
+                .last()
+                .and_then(|frame| frame["state"]["line"].as_str()),
+            Some(accepted)
+        );
+    }
+    let values = match_labels(&debug_complete_payload("config set --yes ui.format ", &[]));
+    assert!(values.contains(&"json".to_string()));
+    assert!(!values.contains(&"ui.format".to_string()));
+
     let pipeline = match_labels(&debug_complete_payload("config show | ", &[]));
     for verb in ["F", "P", "S", "G"] {
         assert!(pipeline.contains(&verb.to_string()), "{pipeline:?}");

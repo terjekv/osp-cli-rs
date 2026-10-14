@@ -45,6 +45,13 @@ enum LexEventKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlagArity {
+    FlagOnly,
+    SingleValue,
+    MultipleValues,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LexEvent {
     index: usize,
     end: usize,
@@ -158,10 +165,11 @@ impl ParseState {
         &mut self,
         first_token: String,
         iter: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
     ) {
-        // Once the parser has seen the first flag-like token, the rest of the
-        // line stays in "tail mode". From that point on we only distinguish
-        // between more flags, their values, `--`, and a pipe into DSL mode.
+        // Once the parser has seen the first flag-like token, it keeps the
+        // remaining command words in the tail. Known flag arity distinguishes
+        // option values from positional words; unknown flags stay permissive.
         let mut current = first_token;
         loop {
             if current == "|" {
@@ -172,6 +180,16 @@ impl ParseState {
             if current == "--" {
                 self.collect_positional_tail(iter);
                 return;
+            }
+
+            if !looks_like_flag_start(&current) {
+                self.tail
+                    .push(crate::completion::model::TailItem::Positional(current));
+                let Some(next) = iter.next().cloned() else {
+                    break;
+                };
+                current = next;
+                continue;
             }
 
             if let Some((flag, value)) = split_inline_flag_value(&current) {
@@ -198,7 +216,12 @@ impl ParseState {
             }
 
             let flag = current;
-            let values = self.consume_flag_values(iter);
+            let value_limit = match flag_arity(&self.head, &flag) {
+                Some(FlagArity::FlagOnly) => Some(0),
+                Some(FlagArity::SingleValue) => Some(1),
+                Some(FlagArity::MultipleValues) | None => None,
+            };
+            let values = self.consume_flag_values(iter, value_limit);
             self.tail
                 .push(crate::completion::model::TailItem::Flag(FlagOccurrence {
                     name: flag.clone(),
@@ -219,10 +242,14 @@ impl ParseState {
     fn consume_flag_values<'a>(
         &mut self,
         iter: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+        limit: Option<usize>,
     ) -> Vec<String> {
         let mut values = Vec::new();
 
         while let Some(next) = iter.peek() {
+            if limit.is_some_and(|limit| values.len() >= limit) {
+                break;
+            }
             if *next == "|" || *next == "--" {
                 break;
             }
@@ -395,10 +422,19 @@ impl CommandLineParser {
     /// assert_eq!(parsed.cursor.token_stub, "ali");
     /// ```
     pub fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
+        self.analyze_with_flag_arity(line, cursor, |_, _| None)
+    }
+
+    pub(crate) fn analyze_with_flag_arity(
+        &self,
+        line: &str,
+        cursor: usize,
+        flag_arity: impl Fn(&[String], &str) -> Option<FlagArity>,
+    ) -> ParsedCursorLine {
         let safe_cursor = clamp_to_char_boundary(line, cursor.min(line.len()));
         let before_cursor = &line[..safe_cursor];
         let lexical = self.lex_cursor_line(line, before_cursor, safe_cursor);
-        self.assemble_parsed_cursor_line(before_cursor, safe_cursor, lexical)
+        self.assemble_parsed_cursor_line(before_cursor, safe_cursor, lexical, &flag_arity)
     }
 
     fn tokenize_inner(&self, line: &str) -> Option<Vec<String>> {
@@ -495,6 +531,14 @@ impl CommandLineParser {
     /// assert!(parsed.has_pipe());
     /// ```
     pub fn parse(&self, tokens: &[String]) -> CommandLine {
+        self.parse_with_flag_arity(tokens, &|_, _| None)
+    }
+
+    fn parse_with_flag_arity(
+        &self,
+        tokens: &[String],
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
+    ) -> CommandLine {
         let mut state = ParseState::default();
         let mut iter = tokens.iter().peekable();
 
@@ -507,8 +551,8 @@ impl CommandLineParser {
                 state.collect_positional_tail(&mut iter);
                 return state.finish();
             }
-            if token.starts_with('-') {
-                state.parse_flag_tail(token.clone(), &mut iter);
+            if looks_like_flag_start(token) {
+                state.parse_flag_tail(token.clone(), &mut iter, flag_arity);
                 return state.finish();
             }
             state.head.push(token.clone());
@@ -653,11 +697,12 @@ impl CommandLineParser {
         before_cursor: &str,
         safe_cursor: usize,
         lexical: CursorLexicalState,
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
     ) -> ParsedCursorLine {
         match lexical {
             CursorLexicalState::Structured(tokenized) => {
-                let full_cmd = self.parse(&tokenized.full_tokens);
-                let cursor_cmd = self.parse(&tokenized.cursor_tokens);
+                let full_cmd = self.parse_with_flag_arity(&tokenized.full_tokens, flag_arity);
+                let cursor_cmd = self.parse_with_flag_arity(&tokenized.cursor_tokens, flag_arity);
                 let cursor =
                     self.build_cursor_state(before_cursor, safe_cursor, tokenized.cursor_state);
 
@@ -676,8 +721,8 @@ impl CommandLineParser {
                 full_tokens,
                 cursor_tokens,
             } => {
-                let full_cmd = self.parse(&full_tokens);
-                let cursor_cmd = self.parse(&cursor_tokens);
+                let full_cmd = self.parse_with_flag_arity(&full_tokens, flag_arity);
+                let cursor_cmd = self.parse_with_flag_arity(&cursor_tokens, flag_arity);
                 let cursor = self.cursor_state(before_cursor, safe_cursor);
 
                 ParsedCursorLine {

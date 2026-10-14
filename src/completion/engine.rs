@@ -12,7 +12,7 @@ use crate::completion::{
         CompletionTree, ContextScope, CursorState, MatchKind, ParsedLine, SuggestionOutput,
         TailItem,
     },
-    parse::CommandLineParser,
+    parse::{CommandLineParser, FlagArity},
     suggest::SuggestionEngine,
 };
 use crate::core::fuzzy::fold_case;
@@ -89,7 +89,9 @@ impl CompletionEngine {
     /// `cursor` is clamped to the line length and to a valid UTF-8 character
     /// boundary before parsing.
     pub fn analyze(&self, line: &str, cursor: usize) -> CompletionAnalysis {
-        let parsed = self.parser.analyze(line, cursor);
+        let parsed = self
+            .parser
+            .analyze_with_flag_arity(line, cursor, |path, flag| self.flag_arity(path, flag));
 
         self.analyze_command_parts(parsed.parsed, parsed.cursor)
     }
@@ -183,12 +185,9 @@ impl CompletionEngine {
         if path.is_empty() || node.args.is_empty() {
             return None;
         }
-        let index = positional_arg_index(
-            &analysis.parsed.cursor_cmd,
-            &analysis.cursor.token_stub,
-            path.len(),
-            node,
-        );
+        let path_tokens = command_path_tokens(&analysis.parsed.cursor_cmd);
+        let index =
+            positional_arg_index(&path_tokens, &analysis.cursor.token_stub, path.len(), node);
         let active_index = match &analysis.request {
             CompletionRequest::Positionals { arg_index, .. } => Some(*arg_index),
             _ => None,
@@ -342,10 +341,32 @@ impl CompletionEngine {
         cursor_cmd.prepend_positional_values(prefilled_positionals);
     }
 
+    fn flag_arity(&self, command_path: &[String], flag_name: &str) -> Option<FlagArity> {
+        let resolver = TreeResolver::new(&self.tree);
+        let (_, matched_path) = resolver.resolve_context(command_path);
+        for prefix_len in (0..=matched_path.len()).rev() {
+            let Some(node) = resolver.resolve_exact(&matched_path[..prefix_len]) else {
+                continue;
+            };
+            let Some(flag) = node.flags.get(flag_name) else {
+                continue;
+            };
+            return Some(if flag.flag_only {
+                FlagArity::FlagOnly
+            } else if flag.multi {
+                FlagArity::MultipleValues
+            } else {
+                FlagArity::SingleValue
+            });
+        }
+        None
+    }
+
     fn resolve_completion_context(&self, cmd: &CommandLine, stub: &str) -> CompletionContext {
         let resolver = TreeResolver::new(&self.tree);
+        let path_tokens = command_path_tokens(cmd);
         let exact_token_commits = if !stub.is_empty() && !stub.starts_with('-') {
-            let parent_path = &cmd.head()[..cmd.head().len().saturating_sub(1)];
+            let parent_path = &path_tokens[..path_tokens.len().saturating_sub(1)];
             resolver
                 .resolve_exact(parent_path)
                 .and_then(|node| node.children.get(stub))
@@ -357,31 +378,25 @@ impl CompletionEngine {
         // Keep exact and partial head tokens in the parent scope so Tab keeps
         // cycling sibling commands until a trailing space commits the token,
         // unless the exact token explicitly commits scope on its own.
-        let head_without_partial_subcommand = if !stub.is_empty()
+        let path_without_partial_token = if !stub.is_empty()
             && !stub.starts_with('-')
-            && cmd.head().last().is_some_and(|token| token == stub)
+            && path_tokens.last().is_some_and(|token| token == stub)
             && !exact_token_commits
         {
-            &cmd.head()[..cmd.head().len().saturating_sub(1)]
+            &path_tokens[..path_tokens.len().saturating_sub(1)]
         } else {
-            cmd.head()
+            &path_tokens
         };
-        let (_, matched) = resolver.resolve_context(head_without_partial_subcommand);
+        let (_, matched) = resolver.resolve_context(path_without_partial_token);
         let flag_scope_path = resolver.resolve_flag_scope_path(&matched);
 
         // Keep the in-progress stub out of arg accounting so a partial
         // subcommand or value does not shift completion into the next slot.
-        let arg_tokens: Vec<String> = cmd
-            .head()
+        let arg_tokens: Vec<String> = path_tokens
             .iter()
             .skip(matched.len())
             .filter(|token| token.as_str() != stub)
             .cloned()
-            .chain(
-                cmd.positional_args()
-                    .filter(|token| token.as_str() != stub)
-                    .cloned(),
-            )
             .collect();
 
         let context_node = resolver.resolve_exact_or_root(&matched);
@@ -425,18 +440,22 @@ impl CompletionEngine {
             };
         }
 
-        let consumed = cmd
-            .head()
+        let path_tokens = command_path_tokens(cmd);
+        let consumed = path_tokens
             .iter()
             .skip(context.matched_path.len())
-            .chain(cmd.positional_args())
             .filter(|token| token.as_str() != stub)
             .count();
         let required_args = context_node.args.iter().filter(|arg| arg.required).count();
         CompletionRequest::Positionals {
             context_path: context.matched_path.clone(),
             flag_scope_path: context.flag_scope_path.clone(),
-            arg_index: positional_arg_index(cmd, stub, context.matched_path.len(), context_node),
+            arg_index: positional_arg_index(
+                &path_tokens,
+                stub,
+                context.matched_path.len(),
+                context_node,
+            ),
             show_subcommands: context.subcommand_context
                 && (context_node.value_key || consumed <= required_args),
             show_flag_names: stub.is_empty() && !context.subcommand_context,
@@ -449,7 +468,8 @@ fn last_flag_needs_value(
     cmd: &CommandLine,
     stub: &str,
 ) -> (bool, Option<String>) {
-    let Some(last_occurrence) = cmd.last_flag_occurrence() else {
+    // A positional word after the flag means the flag is complete.
+    let Some(TailItem::Flag(last_occurrence)) = cmd.tail().last() else {
         return (false, None);
     };
     let last_flag = &last_occurrence.name;
@@ -478,17 +498,23 @@ fn last_flag_needs_value(
     (flag_node.multi, Some(last_flag.clone()))
 }
 
+fn command_path_tokens(cmd: &CommandLine) -> Vec<String> {
+    cmd.head()
+        .iter()
+        .cloned()
+        .chain(cmd.positional_args().cloned())
+        .collect()
+}
+
 fn positional_arg_index(
-    cmd: &CommandLine,
+    path_tokens: &[String],
     stub: &str,
-    matched_head_len: usize,
+    matched_path_len: usize,
     context_node: &CompletionNode,
 ) -> usize {
-    let consumed = cmd
-        .head()
+    let consumed = path_tokens
         .iter()
-        .skip(matched_head_len)
-        .chain(cmd.positional_args())
+        .skip(matched_path_len)
         .filter(|token| token.as_str() != stub)
         .count();
 
