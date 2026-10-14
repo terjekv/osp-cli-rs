@@ -255,7 +255,79 @@ pub struct ParsedCursorLine {
 struct CursorTokenization {
     full_tokens: Vec<String>,
     cursor_tokens: Vec<String>,
-    cursor_quote_style: Option<QuoteStyle>,
+    cursor_state: CursorEditState,
+}
+
+#[derive(Debug, Clone)]
+struct CursorEditState {
+    token_stub: String,
+    replace_start: usize,
+    quote_style: Option<QuoteStyle>,
+}
+
+#[derive(Debug, Default)]
+struct ActiveToken {
+    value: String,
+    start: Option<usize>,
+    inline_value_start: Option<usize>,
+    inline_value_offset: Option<usize>,
+    quote_start: Option<usize>,
+}
+
+impl ActiveToken {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn observe(&mut self, event: LexEvent) {
+        match event.kind {
+            LexEventKind::Text(ch) => {
+                self.start.get_or_insert(event.index);
+                if ch == '='
+                    && event.state_before == LexState::Normal
+                    && self.value.starts_with("--")
+                    && self.inline_value_start.is_none()
+                {
+                    self.inline_value_start = Some(event.end);
+                    self.inline_value_offset = Some(self.value.len() + 1);
+                }
+                self.value.push(ch);
+            }
+            LexEventKind::QuoteStart => {
+                self.start.get_or_insert(event.index);
+                self.quote_start = Some(event.end);
+            }
+            LexEventKind::EscapeStart => {
+                self.start.get_or_insert(event.index);
+            }
+            LexEventKind::Separator | LexEventKind::Pipe | LexEventKind::QuoteEnd => {}
+        }
+    }
+
+    fn cursor_state(&self, safe_cursor: usize, state: LexState) -> CursorEditState {
+        let quote_style = quote_style_for_state(state);
+        let token_stub = if self.start.is_some() {
+            self.inline_value_offset
+                .and_then(|offset| self.value.get(offset..))
+                .unwrap_or(&self.value)
+                .to_string()
+        } else {
+            String::new()
+        };
+        let replace_start = self.start.map_or(safe_cursor, |start| {
+            if quote_style.is_some() {
+                self.quote_start.unwrap_or(start)
+            } else {
+                self.inline_value_start.unwrap_or(start)
+            }
+        });
+
+        CursorEditState {
+            token_stub,
+            replace_start,
+            quote_style,
+        }
+    }
 }
 
 impl CommandLineParser {
@@ -458,34 +530,40 @@ impl CommandLineParser {
     /// assert_eq!(cursor.replace_range, 10..13);
     /// ```
     pub fn cursor_state(&self, text_before_cursor: &str, safe_cursor: usize) -> CursorState {
-        let tokens = self.tokenize(text_before_cursor);
-        self.build_cursor_state(
+        let safe_cursor = clamp_to_char_boundary(
             text_before_cursor,
-            safe_cursor,
-            &tokens,
-            self.compute_stub_quote(text_before_cursor),
-        )
+            safe_cursor.min(text_before_cursor.len()),
+        );
+        let prefix = text_before_cursor.get(..safe_cursor).unwrap_or("");
+        let mut active = ActiveToken::default();
+        let state = scan_shell(prefix, |event| match event.kind {
+            LexEventKind::Separator => active.reset(),
+            LexEventKind::Text(_)
+            | LexEventKind::Pipe
+            | LexEventKind::QuoteStart
+            | LexEventKind::QuoteEnd
+            | LexEventKind::EscapeStart => active.observe(event),
+        });
+        self.build_cursor_state(prefix, safe_cursor, active.cursor_state(safe_cursor, state))
     }
 
     fn build_cursor_state(
         &self,
         text_before_cursor: &str,
         safe_cursor: usize,
-        tokens: &[String],
-        quote_style: Option<QuoteStyle>,
+        cursor_state: CursorEditState,
     ) -> CursorState {
-        let token_stub = self.compute_stub(text_before_cursor, tokens);
-        let replace_start = token_replace_start(text_before_cursor, safe_cursor, quote_style);
+        let replace_start = cursor_state.replace_start;
         let raw_stub = text_before_cursor
             .get(replace_start..safe_cursor)
             .unwrap_or("")
             .to_string();
 
         CursorState::new(
-            token_stub,
+            cursor_state.token_stub,
             raw_stub,
             replace_start..safe_cursor,
-            quote_style,
+            cursor_state.quote_style,
         )
     }
 
@@ -495,58 +573,48 @@ impl CommandLineParser {
         safe_cursor: usize,
     ) -> Option<CursorTokenization> {
         let mut out = Vec::new();
-        let mut current = String::new();
+        let mut active = ActiveToken::default();
         let mut cursor_tokens = None;
-        let mut cursor_quote_style = None;
+        let mut cursor_state = None;
 
         let state = scan_shell(line, |event| {
             if event.index == safe_cursor && cursor_tokens.is_none() {
-                cursor_tokens = Some(snapshot_tokens(&out, &current));
-                cursor_quote_style = Some(quote_style_for_state(event.state_before));
+                cursor_tokens = Some(snapshot_tokens(&out, &active.value));
+                cursor_state = Some(active.cursor_state(safe_cursor, event.state_before));
             }
 
             match event.kind {
-                LexEventKind::Separator => push_current(&mut out, &mut current),
+                LexEventKind::Separator => {
+                    push_current(&mut out, &mut active.value);
+                    active.reset();
+                }
                 LexEventKind::Pipe => {
-                    push_current(&mut out, &mut current);
+                    push_current(&mut out, &mut active.value);
                     out.push("|".to_string());
                 }
-                LexEventKind::Text(ch) => current.push(ch),
-                LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
+                LexEventKind::Text(_)
+                | LexEventKind::QuoteStart
+                | LexEventKind::QuoteEnd
+                | LexEventKind::EscapeStart => active.observe(event),
             }
         });
 
         if safe_cursor == line.len() && cursor_tokens.is_none() {
-            cursor_tokens = Some(snapshot_tokens(&out, &current));
-            cursor_quote_style = Some(quote_style_for_state(state));
+            cursor_tokens = Some(snapshot_tokens(&out, &active.value));
+            cursor_state = Some(active.cursor_state(safe_cursor, state));
         }
 
         match state {
             LexState::Normal => {
-                push_current(&mut out, &mut current);
+                push_current(&mut out, &mut active.value);
                 Some(CursorTokenization {
                     full_tokens: out,
-                    cursor_tokens: cursor_tokens.unwrap_or_default(),
-                    cursor_quote_style: cursor_quote_style.unwrap_or(None),
+                    cursor_tokens: cursor_tokens?,
+                    cursor_state: cursor_state?,
                 })
             }
             _ => None,
         }
-    }
-
-    fn compute_stub(&self, text_before_cursor: &str, tokens: &[String]) -> String {
-        if text_before_cursor.is_empty() || text_before_cursor.ends_with(' ') {
-            return String::new();
-        }
-        let Some(last) = tokens.last() else {
-            return String::new();
-        };
-
-        if last.starts_with("--") && last.ends_with('=') && last.contains('=') {
-            return String::new();
-        }
-
-        last.clone()
     }
 
     /// Returns the active quote style for the token being edited, if any.
@@ -590,12 +658,8 @@ impl CommandLineParser {
             CursorLexicalState::Structured(tokenized) => {
                 let full_cmd = self.parse(&tokenized.full_tokens);
                 let cursor_cmd = self.parse(&tokenized.cursor_tokens);
-                let cursor = self.build_cursor_state(
-                    before_cursor,
-                    safe_cursor,
-                    &tokenized.cursor_tokens,
-                    tokenized.cursor_quote_style,
-                );
+                let cursor =
+                    self.build_cursor_state(before_cursor, safe_cursor, tokenized.cursor_state);
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
@@ -710,43 +774,6 @@ fn is_number(text: &str) -> bool {
 
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
     quote_style_for_state(scan_shell(text, |_| {}))
-}
-
-fn token_replace_start(
-    text_before_cursor: &str,
-    safe_cursor: usize,
-    quote_style: Option<QuoteStyle>,
-) -> usize {
-    if text_before_cursor.is_empty() || text_before_cursor.ends_with(' ') {
-        return safe_cursor;
-    }
-
-    let mut token_start = 0usize;
-    let mut token_active = false;
-    let mut quote_start = None;
-
-    scan_shell(text_before_cursor, |event| {
-        if event.kind == LexEventKind::Separator {
-            token_active = false;
-            token_start = event.end;
-            quote_start = None;
-            return;
-        }
-
-        if !token_active {
-            token_active = true;
-            token_start = event.index;
-        }
-
-        if event.kind == LexEventKind::QuoteStart {
-            quote_start = Some(event.end);
-        }
-    });
-
-    match quote_style {
-        Some(_) => quote_start.unwrap_or(token_start),
-        None => token_start,
-    }
 }
 
 #[cfg(test)]

@@ -98,4 +98,20 @@ fn repl_completion_flow_first_tab_returns_matches_for_current_slot() {
             .iter()
             .any(|item| item["label"] == "show")
     );
+
+    let inline_value = debug_complete_payload("config show --format=j", &["tab", "tab", "accept"]);
+    let frames = inline_value
+        .as_array()
+        .expect("stepped debug-complete should render frames");
+    assert_eq!(frames[0]["state"]["stub"], "j");
+    assert_eq!(
+        frames[0]["state"]["replace_range"],
+        serde_json::json!([21, 22])
+    );
+    assert_eq!(
+        frames
+            .last()
+            .and_then(|frame| frame["state"]["line"].as_str()),
+        Some("config show --format=json ")
+    );
 }
