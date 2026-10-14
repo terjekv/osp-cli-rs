@@ -222,11 +222,12 @@ fn split_display_width(raw: &str, width: usize) -> Vec<String> {
     let mut remaining = raw;
     while !remaining.is_empty() {
         let part = crop_display_width(remaining, width);
-        if part.is_empty() {
-            break;
-        }
-        let bytes = part.len();
-        parts.push(part);
+        let bytes = if part.is_empty() {
+            remaining.chars().next().map(char::len_utf8).unwrap_or(0)
+        } else {
+            part.len()
+        };
+        parts.push(remaining[..bytes].to_string());
         remaining = &remaining[bytes..];
     }
     parts
