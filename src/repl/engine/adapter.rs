@@ -299,13 +299,13 @@ fn extract_color_token(spec: &str) -> Option<&str> {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CompletionTraceMenuState {
     pub selected_index: i64,
-    pub selected_row: u16,
+    pub selected_row: usize,
     pub selected_col: u16,
     pub active: bool,
     pub just_activated: bool,
     pub columns: u16,
     pub visible_rows: u16,
-    pub rows: u16,
+    pub rows: usize,
     pub menu_indent: u16,
 }
 
@@ -331,7 +331,7 @@ struct CompletionTracePayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_index: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    selected_row: Option<u16>,
+    selected_row: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_col: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -343,7 +343,7 @@ struct CompletionTracePayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     visible_rows: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rows: Option<u16>,
+    rows: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     menu_indent: Option<u16>,
 }

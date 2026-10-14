@@ -46,13 +46,13 @@ pub struct CompletionDebug {
     /// Selected match index, or `-1` when no match is selected.
     pub selected: i64,
     /// Selected menu row.
-    pub selected_row: u16,
+    pub selected_row: usize,
     /// Selected menu column.
     pub selected_col: u16,
     /// Number of menu columns.
     pub columns: u16,
     /// Number of menu rows.
-    pub rows: u16,
+    pub rows: usize,
     /// Number of visible menu rows after clipping.
     pub visible_rows: u16,
     /// Menu indentation used for rendering.

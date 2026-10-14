@@ -56,7 +56,7 @@ pub(crate) struct MenuCore {
     working_details: WorkingGridDetails,
     values: Vec<Suggestion>,
     col_pos: u16,
-    row_pos: u16,
+    row_pos: usize,
     input_indent: u16,
     just_activated: bool,
     activated_while_active: bool,
@@ -88,11 +88,11 @@ pub struct MenuStyleDebug {
 
 pub(crate) struct MenuDebug {
     pub(crate) columns: u16,
-    pub(crate) rows: u16,
+    pub(crate) rows: usize,
     pub(crate) visible_rows: u16,
     pub(crate) indent: u16,
     pub(crate) selected_index: i64,
-    pub(crate) selected_row: u16,
+    pub(crate) selected_row: usize,
     pub(crate) selected_col: u16,
     pub(crate) description: Option<String>,
     pub(crate) description_rendered: Option<String>,
@@ -121,7 +121,7 @@ impl MenuCore {
         (!self.values.is_empty() && !self.just_activated).then_some(self.index())
     }
 
-    pub(crate) fn selected_row(&self) -> u16 {
+    pub(crate) fn selected_row(&self) -> usize {
         self.row_pos
     }
 
@@ -129,7 +129,7 @@ impl MenuCore {
         self.col_pos
     }
 
-    pub(crate) fn rows(&self) -> u16 {
+    pub(crate) fn rows(&self) -> usize {
         self.get_rows()
     }
 
@@ -143,11 +143,12 @@ impl MenuCore {
 
     pub(crate) fn visible_rows_for(&self, available_lines: u16) -> u16 {
         let (_, desc_rows) = self.description_plan(available_lines);
-        let available_rows = available_lines.saturating_sub(desc_rows).max(1);
+        let available_rows = usize::from(available_lines.saturating_sub(desc_rows).max(1));
         let total_rows = self.get_rows();
-        available_rows
+        let visible_rows = available_rows
             .min(total_rows)
-            .min(self.default_details.max_rows)
+            .min(usize::from(self.default_details.max_rows));
+        u16::try_from(visible_rows).unwrap_or(u16::MAX)
     }
 
     pub(crate) fn pre_event(&mut self, event: &MenuEvent) {
@@ -313,9 +314,12 @@ impl MenuCore {
     }
 
     pub(crate) fn menu_required_lines(&self) -> u16 {
-        let rows = self.get_rows().min(self.default_details.max_rows).max(1);
+        let rows = self
+            .get_rows()
+            .min(usize::from(self.default_details.max_rows))
+            .max(1);
         let desc_line = self.description_line().map(|_| 1).unwrap_or(0);
-        rows + desc_line
+        u16::try_from(rows.saturating_add(desc_line)).unwrap_or(u16::MAX)
     }
 
     pub(crate) fn menu_string(
@@ -329,19 +333,19 @@ impl MenuCore {
         }
 
         let (desc_line, desc_rows) = self.description_plan(available_lines);
-        let available_rows = available_lines.saturating_sub(desc_rows).max(1);
+        let available_rows = usize::from(available_lines.saturating_sub(desc_rows).max(1));
         let total_rows = self.get_rows();
         let visible_rows = available_rows
             .min(total_rows)
-            .min(self.default_details.max_rows);
+            .min(usize::from(self.default_details.max_rows));
 
         let skip_values = if self.row_pos >= visible_rows {
-            let skip_lines = self.row_pos.saturating_sub(visible_rows) + 1;
-            (skip_lines * self.get_cols()) as usize
+            let skip_lines = self.row_pos.saturating_sub(visible_rows).saturating_add(1);
+            skip_lines.saturating_mul(usize::from(self.get_cols()))
         } else {
             0
         };
-        let available_values = (visible_rows * self.get_cols()) as usize;
+        let available_values = visible_rows.saturating_mul(usize::from(self.get_cols()));
         let last_index = self.values.len().saturating_sub(1).min(
             skip_values
                 .saturating_add(available_values)
@@ -356,7 +360,7 @@ impl MenuCore {
             .enumerate()
             .map(|(index, suggestion)| {
                 let index = index + skip_values;
-                let column = index as u16 % self.get_cols();
+                let column = (index % usize::from(self.get_cols())) as u16;
                 self.create_entry_string(
                     suggestion,
                     index,
@@ -396,11 +400,11 @@ impl MenuCore {
         self.update_layout(screen_width, input_indent);
 
         let (desc_line, desc_rows) = self.description_plan(screen_height);
-        let available_rows = screen_height.saturating_sub(desc_rows).max(1);
+        let available_rows = usize::from(screen_height.saturating_sub(desc_rows).max(1));
         let total_rows = self.get_rows();
         let visible_rows = available_rows
             .min(total_rows)
-            .min(self.default_details.max_rows);
+            .min(usize::from(self.default_details.max_rows));
 
         let description_rendered = if let Some(description) = desc_line.as_deref() {
             let menu_width = self.working_details.col_widths.iter().sum::<usize>();
@@ -424,7 +428,7 @@ impl MenuCore {
         MenuDebug {
             columns: self.working_details.columns.max(1),
             rows,
-            visible_rows,
+            visible_rows: u16::try_from(visible_rows).unwrap_or(u16::MAX),
             indent: self.input_indent,
             selected_index,
             selected_row: self.row_pos,
@@ -447,7 +451,9 @@ impl MenuCore {
     }
 
     fn index(&self) -> usize {
-        (self.row_pos * self.get_cols() + self.col_pos) as usize
+        self.row_pos
+            .saturating_mul(usize::from(self.get_cols()))
+            .saturating_add(usize::from(self.col_pos))
     }
 
     fn get_cols(&self) -> u16 {
@@ -462,12 +468,12 @@ impl MenuCore {
             .unwrap_or(1)
     }
 
-    fn get_rows(&self) -> u16 {
-        let values = self.values.len() as u16;
+    fn get_rows(&self) -> usize {
+        let values = self.values.len();
         if values == 0 {
             return 1;
         }
-        let cols = self.get_cols();
+        let cols = usize::from(self.get_cols());
         let rows = values / cols;
         if !values.is_multiple_of(cols) {
             rows + 1
@@ -530,83 +536,65 @@ impl MenuCore {
     }
 
     fn move_previous(&mut self) {
-        let new_col = self.col_pos.checked_sub(1);
-
-        let (new_col, new_row) = match new_col {
-            Some(col) => (col, self.row_pos),
-            None => match self.row_pos.checked_sub(1) {
-                Some(row) => (self.get_cols().saturating_sub(1), row),
-                None => (
-                    self.get_cols().saturating_sub(1),
-                    self.get_rows().saturating_sub(1),
-                ),
-            },
-        };
-
-        let position = new_row * self.get_cols() + new_col;
-        if position >= self.values.len() as u16 {
-            self.col_pos = (self.values.len() as u16 % self.get_cols()).saturating_sub(1);
-            self.row_pos = self.get_rows().saturating_sub(1);
-        } else {
-            self.col_pos = new_col;
-            self.row_pos = new_row;
-        }
-    }
-
-    fn move_next(&mut self) {
-        let cols = self.get_cols().max(1);
-        let rows = self.get_rows().max(1);
-        let total = self.values.len() as u16;
+        let total = self.values.len();
         if total == 0 {
             return;
         }
 
-        let mut new_col = self.col_pos + 1;
-        let mut new_row = self.row_pos;
-        if new_col >= cols {
-            new_col = 0;
-            new_row = new_row.saturating_add(1);
-            if new_row >= rows {
-                new_row = 0;
-            }
+        let current = self.index().min(total - 1);
+        self.set_index(if current == 0 { total - 1 } else { current - 1 });
+    }
+
+    fn move_next(&mut self) {
+        let total = self.values.len();
+        if total == 0 {
+            return;
         }
 
-        let position = new_row * cols + new_col;
-        if position >= total {
-            self.col_pos = 0;
-            self.row_pos = 0;
-        } else {
-            self.col_pos = new_col;
-            self.row_pos = new_row;
-        }
+        let current = self.index().min(total - 1);
+        self.set_index(if current + 1 == total { 0 } else { current + 1 });
     }
 
     fn move_up(&mut self) {
-        self.row_pos = if let Some(new_row) = self.row_pos.checked_sub(1) {
-            new_row
-        } else {
-            let new_row = self.get_rows().saturating_sub(1);
-            let index = new_row * self.get_cols() + self.col_pos;
-            if index >= self.values.len() as u16 {
-                new_row.saturating_sub(1)
-            } else {
-                new_row
-            }
+        let rows = self.get_rows();
+        if self.values.is_empty() || rows == 0 {
+            return;
         }
+
+        let new_row = if self.row_pos == 0 {
+            rows - 1
+        } else {
+            self.row_pos - 1
+        };
+        let index = new_row
+            .saturating_mul(usize::from(self.get_cols()))
+            .saturating_add(usize::from(self.col_pos));
+        self.row_pos = if index >= self.values.len() {
+            new_row.saturating_sub(1)
+        } else {
+            new_row
+        };
     }
 
     fn move_down(&mut self) {
-        let new_row = self.row_pos + 1;
-        self.row_pos = if new_row >= self.get_rows() {
+        let rows = self.get_rows();
+        if self.values.is_empty() || rows == 0 {
+            return;
+        }
+
+        let new_row = if self.row_pos + 1 >= rows {
             0
         } else {
-            let index = new_row * self.get_cols() + self.col_pos;
-            if index >= self.values.len() as u16 {
-                0
-            } else {
-                new_row
-            }
-        }
+            self.row_pos + 1
+        };
+        let index = new_row
+            .saturating_mul(usize::from(self.get_cols()))
+            .saturating_add(usize::from(self.col_pos));
+        self.row_pos = if index >= self.values.len() {
+            0
+        } else {
+            new_row
+        };
     }
 
     fn move_left(&mut self) {
@@ -619,31 +607,34 @@ impl MenuCore {
 
     fn move_right(&mut self) {
         let new_col = self.col_pos + 1;
-        self.col_pos = if new_col >= self.get_cols() || self.index() + 2 > self.values.len() {
-            0
-        } else {
-            new_col
-        };
+        self.col_pos =
+            if new_col >= self.get_cols() || self.index().saturating_add(2) > self.values.len() {
+                0
+            } else {
+                new_col
+            };
     }
 
     fn move_page_down(&mut self) {
-        self.move_rows(self.default_details.max_rows.max(1) as i32);
+        self.move_rows(usize::from(self.default_details.max_rows.max(1)), true);
     }
 
     fn move_page_up(&mut self) {
-        self.move_rows(-(self.default_details.max_rows.max(1) as i32));
+        self.move_rows(usize::from(self.default_details.max_rows.max(1)), false);
     }
 
-    fn move_rows(&mut self, delta: i32) {
+    fn move_rows(&mut self, delta: usize, down: bool) {
         let rows = self.get_rows();
         if rows == 0 || self.values.is_empty() {
             return;
         }
 
-        let rows_i32 = rows as i32;
-        let mut new_row = self.row_pos as i32 + delta;
-        new_row = ((new_row % rows_i32) + rows_i32) % rows_i32;
-        self.row_pos = new_row as u16;
+        let movement = delta % rows;
+        self.row_pos = if down {
+            (self.row_pos + movement) % rows
+        } else {
+            (self.row_pos + rows - movement) % rows
+        };
 
         let max_col = self.rightmost_valid_col_for_row(self.row_pos);
         if self.col_pos > max_col {
@@ -748,17 +739,21 @@ impl MenuCore {
         }
     }
 
-    fn rightmost_valid_col_for_row(&self, row: u16) -> u16 {
-        let cols = self.get_cols().max(1);
-        let row_start = row.saturating_mul(cols) as usize;
-        let row_end = row_start
-            .saturating_add(cols as usize)
-            .min(self.values.len());
+    fn set_index(&mut self, index: usize) {
+        let cols = usize::from(self.get_cols());
+        self.row_pos = index / cols;
+        self.col_pos = (index % cols) as u16;
+    }
+
+    fn rightmost_valid_col_for_row(&self, row: usize) -> u16 {
+        let cols = usize::from(self.get_cols().max(1));
+        let row_start = row.saturating_mul(cols);
+        let row_end = row_start.saturating_add(cols).min(self.values.len());
         let row_len = row_end.saturating_sub(row_start);
         if row_len == 0 {
             0
         } else {
-            row_len.saturating_sub(1) as u16
+            (row_len - 1) as u16
         }
     }
 
