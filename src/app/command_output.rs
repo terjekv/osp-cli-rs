@@ -25,7 +25,7 @@ use terminal_size::{Height, terminal_size};
 
 use crate::app::resolve_render_settings_with_hint;
 use crate::app::sink::UiSink;
-use crate::app::{AppSession, UiState};
+use crate::app::{AppSession, ErrorDetail, UiState};
 use crate::cli::rows::output::{
     output_to_rows, plugin_data_to_output_result, rows_to_output_result,
 };
@@ -368,6 +368,24 @@ pub(crate) fn run_cli_command(
             runtime.ui().message_verbosity,
             sink,
         );
+    }
+    // -v and above follow the same detail ladder as `doctor last`.
+    if let Some(report) = &result.failure_report
+        && runtime.ui().error_detail >= ErrorDetail::Normal
+    {
+        let detail = super::host::render_report_message(
+            report,
+            runtime.ui().error_detail,
+            &runtime.ui().render_settings,
+        );
+        let summary = super::host::render_report_message(
+            report,
+            ErrorDetail::Terse,
+            &runtime.ui().render_settings,
+        );
+        if detail.trim() != summary.trim() {
+            sink.write_stderr(&format!("{}\n", detail.trim_end()));
+        }
     }
     // Keep structured backend details behind the normal verbose diagnostic gate.
     if let Some(output) = result.output
