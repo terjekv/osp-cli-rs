@@ -12,6 +12,7 @@
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -105,9 +106,18 @@ pub trait UiSink {
 
 /// Sink that forwards output directly to the process stdio streams.
 ///
-/// Empty writes are ignored.
+/// Empty writes are ignored. A stdout write failure other than a closed pipe
+/// is reported on stderr and makes [`crate::App::run_process`] fail.
 #[derive(Default)]
 pub struct StdIoUiSink;
+
+// Process stdout is global, so its failure state is too.
+static STDOUT_WRITE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Returns and clears whether process stdout lost command output.
+pub(crate) fn take_stdout_write_failure() -> bool {
+    STDOUT_WRITE_FAILED.swap(false, Ordering::Relaxed)
+}
 
 impl UiSink for StdIoUiSink {
     fn write_stdout(&mut self, text: &str) {
@@ -118,6 +128,7 @@ impl UiSink for StdIoUiSink {
                 .and_then(|()| stdout.flush())
                 && err.kind() != io::ErrorKind::BrokenPipe
             {
+                STDOUT_WRITE_FAILED.store(true, Ordering::Relaxed);
                 let _ = writeln!(io::stderr(), "failed to write command output: {err}");
             }
         }

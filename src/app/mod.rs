@@ -436,7 +436,13 @@ impl App {
         T: Into<OsString> + Clone,
     {
         let mut sink = StdIoUiSink;
-        self.run_process_with_sink(args, &mut sink)
+        sink::take_stdout_write_failure();
+        let code = self.run_process_with_sink(args, &mut sink);
+        if sink::take_stdout_write_failure() && code == 0 {
+            1
+        } else {
+            code
+        }
     }
 
     /// Runs the application with the provided sink and returns a process exit
