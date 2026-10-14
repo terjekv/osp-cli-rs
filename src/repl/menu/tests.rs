@@ -139,7 +139,7 @@ fn tab_cycles_selection_replaces_buffer() {
     menu.update_for_test(&mut editor, &mut completer, 80);
 
     let debug = super::debug_snapshot(&mut menu, &editor, 80, 5, false);
-    assert_eq!(debug.selected_index, 0);
+    assert_eq!(debug.selected_index, -1);
     assert_eq!(editor.line_buffer().get_buffer(), "co");
 
     menu.navigate(MenuEvent::NextElement, &mut editor);
@@ -453,7 +453,7 @@ fn menu_state_and_builder_variants_cover_debug_partial_completion_and_reactivati
             debug.styles.selected_match.foreground.as_deref(),
             Some("magenta")
         );
-        assert_eq!(debug.selected_index, 0);
+        assert_eq!(debug.selected_index, -1);
         assert_eq!(debug.selected_row, 0);
         assert_eq!(debug.selected_col, 0);
     }

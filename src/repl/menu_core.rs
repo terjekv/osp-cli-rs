@@ -118,7 +118,7 @@ impl MenuCore {
     }
 
     pub(crate) fn selected_index(&self) -> Option<usize> {
-        (!self.values.is_empty()).then_some(self.index())
+        (!self.values.is_empty() && !self.just_activated).then_some(self.index())
     }
 
     pub(crate) fn selected_row(&self) -> u16 {

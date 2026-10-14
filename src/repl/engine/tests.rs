@@ -325,13 +325,11 @@ fn debug_completion_and_steps_surface_menu_state_unit() {
         "config sh",
         "config sh".len(),
         CompletionDebugOptions::new(80, 6),
-        &[DebugStep::Tab, DebugStep::Accept],
+        &[DebugStep::Tab],
     );
-    assert_eq!(frames.len(), 2);
+    assert_eq!(frames.len(), 1);
     assert_eq!(frames[0].step, "tab");
-    assert!(frames[0].state.matches.iter().any(|item| item.id == "show"));
-    assert_eq!(frames[1].step, "accept");
-    assert_eq!(frames[1].state.line, "config show ");
+    assert_eq!(frames[0].state.line, "config show ");
 }
 
 #[cfg_attr(miri, ignore = "filesystem-backed path completion integration test")]

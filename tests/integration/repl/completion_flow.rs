@@ -87,23 +87,7 @@ fn repl_completion_flow_tracks_committed_scope_and_consumed_flags() {
             "config set --profile default ui.format json ",
         ),
     ] {
-        let payload = debug_complete_payload(line, &["tab", "tab", "accept"]);
-        let frames = payload
-            .as_array()
-            .expect("stepped debug-complete should render frames");
-        let first_matches = frames[0]["state"]["matches"]
-            .as_array()
-            .expect("frame matches should render as an array");
-        assert!(
-            first_matches.iter().any(|item| item["label"] == "json"),
-            "{line}: {first_matches:?}"
-        );
-        assert_eq!(
-            frames
-                .last()
-                .and_then(|frame| frame["state"]["line"].as_str()),
-            Some(accepted)
-        );
+        assert_eq!(tab_completed_line(line).as_deref(), Some(accepted));
     }
     let values = match_labels(&debug_complete_payload("config set --yes ui.format ", &[]));
     assert!(values.contains(&"json".to_string()));
@@ -123,14 +107,7 @@ fn repl_completion_flow_tracks_committed_scope_and_consumed_flags() {
         ("config show|F", "config show|F "),
         ("config show |F", "config show |F "),
     ] {
-        let payload = debug_complete_payload(line, &["tab", "tab", "accept"]);
-        let frames = payload
-            .as_array()
-            .expect("stepped debug-complete should render frames");
-        let accepted_line = frames
-            .last()
-            .and_then(|frame| frame["state"]["line"].as_str());
-        assert_eq!(accepted_line, Some(accepted));
+        assert_eq!(tab_completed_line(line).as_deref(), Some(accepted));
     }
 }
 
@@ -150,19 +127,19 @@ fn repl_completion_flow_first_tab_returns_matches_for_current_slot() {
             .any(|item| item["label"] == "show")
     );
 
-    let inline_value = debug_complete_payload("config show --format=j", &["tab", "tab", "accept"]);
-    let frames = inline_value
-        .as_array()
-        .expect("stepped debug-complete should render frames");
-    assert_eq!(frames[0]["state"]["stub"], "j");
+    let inline_value = debug_complete_payload("config show --format=j", &[]);
+    assert_eq!(inline_value["stub"], "j");
+    assert_eq!(inline_value["replace_range"], serde_json::json!([21, 22]));
     assert_eq!(
-        frames[0]["state"]["replace_range"],
-        serde_json::json!([21, 22])
-    );
-    assert_eq!(
-        frames
-            .last()
-            .and_then(|frame| frame["state"]["line"].as_str()),
+        tab_completed_line("config show --format=j").as_deref(),
         Some("config show --format=json ")
     );
+}
+
+/// The line after one Tab, which completes a unique match like the editor.
+fn tab_completed_line(line: &str) -> Option<String> {
+    let payload = debug_complete_payload(line, &["tab"]);
+    payload.as_array()?.last()?["state"]["line"]
+        .as_str()
+        .map(str::to_string)
 }

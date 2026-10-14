@@ -75,10 +75,10 @@ pub struct CompletionDebug {
     pub rendered: Vec<String>,
 }
 
-/// Synthetic editor action used by completion-debug stepping.
+/// Synthetic editor action used by menu-debug stepping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugStep {
-    /// Advance to the next item or open the menu.
+    /// Apply Tab behavior: complete a closed completion menu or advance an open one.
     Tab,
     /// Move to the previous item.
     BackTab,
@@ -238,7 +238,10 @@ pub fn debug_completion(
     )
 }
 
-/// Builds a single history-menu debug snapshot for `line` at `cursor`.
+/// Builds a bounded history-menu diagnostic snapshot for `line` at `cursor`.
+///
+/// This exposes up to five distinct entries and does not model the live Ctrl-R
+/// skim picker, which searches the full history.
 pub fn debug_history_menu(
     history: &SharedHistory,
     line: &str,
@@ -305,7 +308,8 @@ pub fn debug_completion_steps(
     frames
 }
 
-/// Replays synthetic editor actions for the history menu and captures each frame.
+/// Replays menu actions for the bounded history diagnostic and captures each
+/// frame. This does not model the live Ctrl-R skim picker.
 pub fn debug_history_menu_steps(
     history: &SharedHistory,
     line: &str,
@@ -405,11 +409,7 @@ fn apply_debug_step(
 ) {
     match step {
         DebugStep::Tab => {
-            if menu.is_active() {
-                menu.navigate(MenuEvent::NextElement, editor);
-            } else {
-                dispatch_menu_event(menu, editor, completer, MenuEvent::Activate(false));
-            }
+            menu.tab(editor, completer);
         }
         DebugStep::BackTab => {
             if menu.is_active() {

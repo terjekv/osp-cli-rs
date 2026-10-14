@@ -45,7 +45,7 @@ fn event_state_machine_covers_reactivate_edit_and_deactivate() {
     assert!(core.just_activated());
 
     core.set_values(values.clone());
-    assert_eq!(core.selected_index(), Some(0));
+    assert_eq!(core.selected_index(), None);
 
     core.pre_event(&MenuEvent::Activate(false));
     assert_eq!(core.values().len(), 3);
@@ -80,7 +80,7 @@ fn event_state_machine_covers_reactivate_edit_and_deactivate() {
         MenuAction::UpdateValues
     );
     assert!(core.just_activated());
-    assert_eq!(core.selected_index(), Some(0));
+    assert_eq!(core.selected_index(), None);
 
     core.pre_event(&MenuEvent::Deactivate);
     assert!(!core.is_active());

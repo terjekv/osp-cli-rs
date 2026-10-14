@@ -183,6 +183,19 @@ impl OspCompletionMenu {
         }
     }
 
+    /// Applies Tab using the same closed-menu policy as the live editor.
+    pub(crate) fn tab(&mut self, editor: &mut Editor, completer: &mut dyn Completer) {
+        if self.core.is_active() {
+            self.navigate(MenuEvent::NextElement, editor);
+            return;
+        }
+
+        self.tab_open = true;
+        self.menu_event(MenuEvent::Activate(false));
+        let _ = self.can_partially_complete(false, editor, completer);
+        self.apply_event(editor, completer);
+    }
+
     fn navigate_painted_line(&mut self, event: MenuEvent) -> Option<Vec<EditCommand>> {
         if !self.core.is_active() {
             return None;
