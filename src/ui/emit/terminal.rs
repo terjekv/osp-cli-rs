@@ -173,6 +173,7 @@ fn emit_grid_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> Strin
         .iter()
         .map(|item| format_list_item(item, block.inline_markup))
         .collect::<Vec<_>>();
+    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
         .unwrap_or(100)
@@ -691,6 +692,7 @@ fn render_terminal_scalar_grid(
         .iter()
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
+    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
         .unwrap_or(100)
