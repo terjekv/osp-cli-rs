@@ -64,6 +64,16 @@ fn quoted_term_contract_is_shared_by_pipeline_stages() {
     };
     assert_eq!(projected_rows, vec![row(json!({"display,name": "Alice"}))]);
 
+    let mut labeled = OutputResult::from_rows(vec![row(json!({"status": "running", "uid": "42"}))]);
+    labeled.meta.display_columns = Some(vec!["status".to_string(), "uid".to_string()]);
+    labeled.meta.display_column_labels = Some(vec!["STATE".to_string(), "ID".to_string()]);
+    let labeled_projection = apply_output_pipeline(labeled, &["P STATE,ID".to_string()])
+        .expect("comma-separated display labels should project separately");
+    assert_eq!(
+        labeled_projection.as_rows().expect("row output"),
+        &[row(json!({"status": "running", "uid": "42"}))]
+    );
+
     let values = apply_pipeline(rows, &["VALUE \"display,name\"".to_string()])
         .expect("quoted value term should work");
     let OutputItems::Rows(value_rows) = values.items else {

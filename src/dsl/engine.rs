@@ -133,7 +133,9 @@ fn resolve_stage_keys(output: &OutputResult, stages: &[String]) -> Result<Vec<St
     stages
         .iter()
         .map(|stage| {
-            use crate::dsl::parse::lexer::{Span, StageSegment, TokenKind, tokenize_stage};
+            use crate::dsl::parse::lexer::{
+                Span, StageSegment, TokenKind, tokenize_stage, tokenize_stage_terms,
+            };
             let tokens = tokenize_stage(&StageSegment {
                 raw: stage.clone(),
                 span: Span {
@@ -167,20 +169,47 @@ fn resolve_stage_keys(output: &OutputResult, stages: &[String]) -> Result<Vec<St
                 {
                     continue;
                 }
-                let resolved = token
-                    .text
-                    .split(',')
-                    .map(|key| {
-                        if key.is_empty() {
-                            Ok(String::new())
-                        } else {
-                            resolve(key)
+                if verb == "P" {
+                    let raw = &stage[token.span.start..token.span.end];
+                    let term_segment = StageSegment {
+                        raw: raw.to_string(),
+                        span: Span {
+                            start: 0,
+                            end: raw.len(),
+                        },
+                    };
+                    let terms = tokenize_stage_terms(&term_segment)?;
+                    let mut resolved = raw.to_string();
+                    let mut changed = false;
+                    for term in terms.iter().rev() {
+                        let field = resolve(&term.text)?;
+                        if field != term.text {
+                            resolved.replace_range(
+                                term.span.start..term.span.end,
+                                &serde_json::to_string(&field)?,
+                            );
+                            changed = true;
                         }
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .join(",");
-                if resolved != token.text {
-                    replacements.push((token.span, serde_json::to_string(&resolved)?));
+                    }
+                    if changed {
+                        replacements.push((token.span, resolved));
+                    }
+                } else {
+                    let resolved = token
+                        .text
+                        .split(',')
+                        .map(|key| {
+                            if key.is_empty() {
+                                Ok(String::new())
+                            } else {
+                                resolve(key)
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?
+                        .join(",");
+                    if resolved != token.text {
+                        replacements.push((token.span, serde_json::to_string(&resolved)?));
+                    }
                 }
                 if verb == "F" {
                     break;
