@@ -81,6 +81,26 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
         vec![other]
     );
 
+    let value_matches_key = row(json!({"status": "running", "note": "status"}));
+    assert_eq!(
+        apply_with_plan(
+            vec![value_matches_key.clone()],
+            &compile("V status").unwrap()
+        )
+        .unwrap(),
+        vec![value_matches_key]
+    );
+    for (row, query) in [
+        (row(json!({"metadata": {"owner": "Alice"}})), "V metadata"),
+        (row(json!({"members": [{"uid": "alice"}]})), "V members"),
+    ] {
+        assert!(
+            apply_with_plan(vec![row], &compile(query).unwrap())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     let groups = vec![Group {
         groups: row(json!({"team": "ops"})),
         aggregates: row(json!({"count": 1})),

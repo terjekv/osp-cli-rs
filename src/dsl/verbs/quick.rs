@@ -127,7 +127,6 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
     }
 
     let flat = flatten_row(row);
-    let (pairs, _) = resolve_pairs(&flat, spec.token());
     let matches = if spec.fuzzy {
         match_row_keys_detailed_fuzzy(&flat, spec.token(), spec.exact())
     } else {
@@ -138,10 +137,22 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
     } else {
         matches.exact
     };
-    let value_hit = pairs
-        .iter()
-        .any(|(_, value)| value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy));
-    let synthetic_hit = pairs.iter().any(|(key, _)| !flat.contains_key(key));
+    let (value_hit, synthetic_hit) = match spec.scope {
+        QuickScope::ValueOnly => (
+            flat.values()
+                .any(|value| value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy)),
+            false,
+        ),
+        QuickScope::KeyOnly => (false, false),
+        QuickScope::KeyOrValue => {
+            let (pairs, _) = resolve_pairs(&flat, spec.token());
+            let value_hit = pairs.iter().any(|(_, value)| {
+                value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy)
+            });
+            let synthetic_hit = pairs.iter().any(|(key, _)| !flat.contains_key(key));
+            (value_hit, synthetic_hit)
+        }
+    };
 
     let matched = match spec.scope {
         QuickScope::KeyOnly if spec.key_not_equals => {
@@ -149,7 +160,7 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
             flat.keys().any(|key| !key_set.contains(key))
         }
         QuickScope::KeyOnly => !key_hits.is_empty(),
-        QuickScope::ValueOnly => value_hit || synthetic_hit,
+        QuickScope::ValueOnly => value_hit,
         QuickScope::KeyOrValue => !key_hits.is_empty() || value_hit || synthetic_hit,
     };
 
