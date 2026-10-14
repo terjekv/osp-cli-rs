@@ -202,10 +202,7 @@ pub fn enumerate_path_matches(root: &Value, path: &PathExpression) -> Vec<Addres
 }
 
 /// Finds arrays owned by fields named `field` anywhere below `root`.
-pub(crate) fn enumerate_named_descendant_arrays(
-    root: &Value,
-    field: &str,
-) -> Vec<AddressedValue> {
+pub(crate) fn enumerate_named_descendant_arrays(root: &Value, field: &str) -> Vec<AddressedValue> {
     fn visit(
         value: &Value,
         field: &str,
@@ -551,7 +548,10 @@ fn slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: Option<i
             if index >= 0 {
                 out.push(index);
             }
-            index += step;
+            let Some(next_index) = index.checked_add(step) else {
+                break;
+            };
+            index = next_index;
         }
     } else {
         let mut index = start.unwrap_or(len - 1);
@@ -575,7 +575,10 @@ fn slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: Option<i
             if index >= 0 {
                 out.push(index);
             }
-            index += step;
+            let Some(next_index) = index.checked_add(step) else {
+                break;
+            };
+            index = next_index;
         }
     }
 
