@@ -12,7 +12,8 @@ Plugins are separate binaries discovered at runtime (Option B).
 ## Process Model
 
 - Backbone binary: `osp`
-- Plugin binaries: `osp-<id>` (for example `osp-acme-inventory`)
+- Plugin binaries: `osp-<id>` (for example `osp-acme-inventory`; `<id>` may
+  contain lowercase letters, digits, `-`, or `_`)
 - Transport: subprocess invocation + JSON over stdout
 
 ## Required Plugin Commands

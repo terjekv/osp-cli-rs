@@ -1214,7 +1214,7 @@ pub(super) fn has_valid_plugin_suffix(file_name: &str) -> bool {
     !suffix.is_empty()
         && suffix
             .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
 }
 
 #[cfg(not(windows))]
@@ -1225,7 +1225,7 @@ pub(super) fn has_valid_plugin_suffix(file_name: &str) -> bool {
     !suffix.is_empty()
         && suffix
             .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
 }
 
 #[cfg(unix)]
