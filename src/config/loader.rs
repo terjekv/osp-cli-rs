@@ -459,7 +459,7 @@ impl ConfigLoader for ChainedLoader {
         );
         for loader in &self.loaders {
             let layer = loader.load()?;
-            merged.entries.extend(layer.entries);
+            merged.extend_from_layer(&layer);
         }
         tracing::debug!(
             entries = merged.entries().len(),
