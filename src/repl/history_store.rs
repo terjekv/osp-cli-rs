@@ -486,6 +486,15 @@ impl SharedHistory {
         guard.finalize_pending(command_line, true)?;
         Ok(())
     }
+
+    pub(crate) fn stage_command_line(&self, command_line: &str) -> Result<()> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        History::save(&mut *guard, HistoryItem::from_command_line(command_line)).map(|_| ())?;
+        Ok(())
+    }
 }
 
 /// `reedline::History` implementation backed by newline-delimited JSON records.

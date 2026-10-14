@@ -201,6 +201,7 @@ where
             return Ok(ReplRunResult::Exit(0));
         }
 
+        submission.history_store.stage_command_line(&line)?;
         match apply_basic_submission(evaluate_repl_submission(&line, submission)?) {
             BasicSubmissionAction::Continue => continue,
             BasicSubmissionAction::Return(result) => return Ok(result),
