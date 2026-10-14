@@ -740,22 +740,27 @@ fn run_config_set(
     );
     if matches!(store, ConfigStore::Session) && !args.dry_run && !is_sensitive_key(&key) {
         for scope in &scopes {
-            let mut command = format!(
-                "config set {} {} --permanent",
-                escape_for_shell(&key),
-                args.from_file.as_ref().map_or_else(
-                    || escape_for_shell(&input),
-                    |path| format!("--from-file {}", escape_for_shell(&path.to_string_lossy())),
-                )
-            );
+            let mut options = " --permanent".to_string();
             if let Some(profile) = &scope.profile {
-                command.push_str(&format!(" --profile {}", escape_for_shell(profile)));
+                options.push_str(&format!(" --profile {}", escape_for_shell(profile)));
             } else {
-                command.push_str(" --global");
+                options.push_str(" --global");
             }
             if let Some(terminal) = &scope.terminal {
-                command.push_str(&format!(" --terminal {}", escape_for_shell(terminal)));
+                options.push_str(&format!(" --terminal {}", escape_for_shell(terminal)));
             }
+            let key = escape_for_shell(&key);
+            let command = match &args.from_file {
+                Some(path) => format!(
+                    "config set {key} --from-file {}{options}",
+                    escape_for_shell(&path.to_string_lossy())
+                ),
+                // An option-shaped value must follow `--` to replay literally.
+                None if input.starts_with('-') => {
+                    format!("config set {key}{options} -- {}", escape_for_shell(&input))
+                }
+                None => format!("config set {key} {}{options}", escape_for_shell(&input)),
+            };
             success.push_str(&format!("\nTo save this setting: {command}"));
         }
     }
