@@ -19,7 +19,6 @@ use crate::core::row::Row;
 use crate::dsl::verbs::common::map_group_rows;
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 
 use crate::dsl::{
     eval::{
@@ -166,7 +165,7 @@ fn project_single_row(
         })
     });
 
-    reject_ambiguous_dynamic_columns(&dynamic_columns)?;
+    reject_ambiguous_dynamic_columns(&static_flat, &dynamic_columns)?;
     let mut rows = build_rows_from_dynamic(static_flat, dynamic_columns);
     if rows.is_empty() && keepers.is_empty() {
         rows.push(rebuild_row(&Map::new()));
@@ -181,26 +180,58 @@ struct DynamicColumn {
     values: Vec<Value>,
 }
 
-fn reject_ambiguous_dynamic_columns(columns: &[DynamicColumn]) -> Result<()> {
-    let mut grouped: HashMap<&str, Vec<&str>> = HashMap::new();
-    for column in columns {
-        grouped
-            .entry(column.label.as_str())
-            .or_default()
-            .push(column.source.as_str());
+fn reject_ambiguous_dynamic_columns(static_flat: &Row, columns: &[DynamicColumn]) -> Result<()> {
+    let row_count = columns
+        .iter()
+        .map(|column| column.values.len())
+        .max()
+        .unwrap_or(0);
+    let static_keys = static_flat
+        .keys()
+        .map(|key| (key.as_str(), key.as_str()))
+        .collect::<Vec<_>>();
+
+    for index in 0..row_count {
+        let mut dynamic_keys = Vec::<(String, &str)>::new();
+        for column in columns {
+            let emitted_keys = match column.values.get(index) {
+                Some(Value::Object(map)) => map.keys().cloned().collect(),
+                Some(_) | None => vec![column.label.clone()],
+            };
+
+            for key in emitted_keys {
+                if let Some((_, source)) = static_keys
+                    .iter()
+                    .find(|(existing, _)| output_keys_overlap(existing, &key))
+                {
+                    return Err(ambiguous_projection_key(&key, source, &column.source));
+                }
+                if let Some((_, source)) = dynamic_keys
+                    .iter()
+                    .find(|(existing, _)| output_keys_overlap(existing, &key))
+                {
+                    return Err(ambiguous_projection_key(&key, source, &column.source));
+                }
+                dynamic_keys.push((key, column.source.as_str()));
+            }
+        }
     }
 
-    let Some((label, selectors)) = grouped
-        .into_iter()
-        .find(|(_, selectors)| selectors.len() > 1)
-    else {
-        return Ok(());
-    };
+    Ok(())
+}
 
-    Err(anyhow!(
-        "ambiguous dynamic projection label `{label}` from selectors: {}",
-        selectors.join(", ")
-    ))
+fn output_keys_overlap(left: &str, right: &str) -> bool {
+    fn is_parent(parent: &str, child: &str) -> bool {
+        child
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('['))
+    }
+
+    left == right || is_parent(left, right) || is_parent(right, left)
+}
+
+fn ambiguous_projection_key(key: &str, first: &str, second: &str) -> anyhow::Error {
+    anyhow!("ambiguous dynamic projection label `{key}` from selectors: {first}, {second}")
 }
 
 fn rebuild_row(flat: &Row) -> Row {
