@@ -357,7 +357,10 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                             "native help metadata refresh failed; using cached help"
                         ),
                     }
-                    return Ok(CliCommandResult::guide(guide_help(&help)));
+                    return crate::app::command_output::apply_stages_to_cli_result(
+                        CliCommandResult::guide(guide_help(&help)),
+                        &parsed.stages,
+                    );
                 }
                 if path_ambiguous
                     || described_path_has_subcommands(&description, &path)
@@ -558,7 +561,10 @@ fn run_native_command(
     }
 
     match execution? {
-        NativeCommandOutcome::Help(text) => Ok(CliCommandResult::guide(guide_help(&text))),
+        NativeCommandOutcome::Help(text) => crate::app::command_output::apply_stages_to_cli_result(
+            CliCommandResult::guide(guide_help(&text)),
+            input.stages,
+        ),
         NativeCommandOutcome::Exit(code) => Ok(CliCommandResult::exit(code)),
         NativeCommandOutcome::Response(response) => render_native_response_with_context(
             *response,
@@ -835,7 +841,7 @@ fn run_external_plugin_command(
             result.stderr_text = Some(raw.stderr);
         }
         result.exit_code = raw.status_code;
-        return Ok(result);
+        return crate::app::command_output::apply_stages_to_cli_result(result, &parsed.stages);
     }
 
     let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
