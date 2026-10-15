@@ -3,6 +3,8 @@
 //! Documents describe content without prescribing its terminal or Markdown
 //! layout. The UI lowers these blocks into its private rendering model.
 
+mod template;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -43,6 +45,11 @@ pub struct Document {
 }
 
 impl Document {
+    /// Parses passive intro templates, expanding help includes in authored order.
+    pub fn from_markdown_template(text: &str, help: &Document) -> Self {
+        template::parse(text, help)
+    }
+
     /// Projects blocks into canonical rows in document order.
     pub fn rows(&self) -> Vec<crate::core::row::Row> {
         fn append(blocks: &[DocBlock], section: &str, rows: &mut Vec<crate::core::row::Row>) {
@@ -678,6 +685,28 @@ mod tests {
             blocks.get(1),
             Some(DocBlock::Paragraph { text }) if text == "explanatory text"
         ));
+
+        let template = Document::from_markdown_template(
+            "- parent\n  - child\n- next\n\n- loose\n\n- item\n",
+            &Document::default(),
+        );
+        let items = template
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                DocBlock::List { items } => Some(items.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            items
+                .iter()
+                .any(|item| item.contains("parent") && item.contains("child"))
+        );
+        assert!(items.iter().any(|item| *item == "next"));
+        assert!(items.iter().any(|item| *item == "loose"));
+        assert!(items.iter().any(|item| *item == "item"));
 
         let command = clap::Command::new("demo")
             .about("Short summary")

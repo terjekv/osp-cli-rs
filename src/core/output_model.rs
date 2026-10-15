@@ -102,6 +102,8 @@ pub struct OutputMeta {
     pub grouped: bool,
     /// Rows explicitly produced by a semantic document, with section context.
     pub document_rows: bool,
+    /// Optional minimum gap after aligned document entry names.
+    pub document_entry_gap: Option<usize>,
     /// Preferred renderer for this result, when known.
     pub render_recommendation: Option<RenderRecommendation>,
     /// Human-only complete lines supplied by a producer for presentation.
@@ -215,6 +217,7 @@ impl OutputResult {
                 wants_copy: false,
                 grouped: false,
                 document_rows: false,
+                document_entry_gap: None,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

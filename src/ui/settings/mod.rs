@@ -1193,6 +1193,7 @@ mod tests {
                 wants_copy: false,
                 grouped: true,
                 document_rows: false,
+                document_entry_gap: None,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

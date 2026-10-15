@@ -351,6 +351,31 @@ pub(crate) fn render_structured_output_with_guide_options(
         );
     }
 
+    if output.meta.document_rows
+        && let Some(document) = output
+            .document
+            .as_ref()
+            .filter(|document| {
+                document.kind == crate::core::output_model::OutputDocumentKind::Document
+            })
+            .and_then(|document| serde_json::from_value::<Document>(document.value.clone()).ok())
+    {
+        let mut doc = if plan.format == OutputFormat::Markdown {
+            lower::lower_document(&document, plan.format, plan.settings.indent_size)
+        } else {
+            lower::lower_document_help_layout(
+                &document,
+                &plan,
+                options.layout,
+                options
+                    .show_footer_rule
+                    .unwrap_or_else(|| default_show_footer_rule(options.layout)),
+            )
+        };
+        lower::sanitize_doc(&mut doc);
+        return emit::emit_doc(&doc, plan.format, &plan.settings);
+    }
+
     let Some(guide) = options
         .source_guide
         .cloned()

@@ -17,8 +17,8 @@ use crate::app::{
 };
 use crate::app::{CMD_CONFIG, CMD_HELP, CMD_PLUGINS, CMD_THEME};
 use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+use crate::core::document::{DocBlock, Document, DocumentEntry};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 use crate::plugin::PluginManager;
 use crate::repl::ReplViewContext;
 use crate::repl::surface::{ReplOverviewEntry, ReplSurface};
@@ -252,8 +252,9 @@ fn intro_payload_override_style_is_not_reinterpreted_by_verbosity_unit() {
         Some(ReplIntroStyle::Minimal),
     );
 
-    assert!(payload.preamble.iter().any(|line| line.contains("Welcome")));
-    assert!(payload.sections.is_empty());
+    assert!(
+        matches!(payload.blocks.as_slice(), [DocBlock::Paragraph { text }] if text.contains("Welcome"))
+    );
 }
 
 #[test]
@@ -274,14 +275,17 @@ fn repl_intro_round_trip_preserves_template_section_order_unit() {
         &intro_surface_with_overview(&["help", "config", "theme", "plugins"]),
         None,
     );
-    let rebuilt = crate::guide::GuideView::try_from_output_result(&payload.to_output_result())
-        .expect("guide");
-
+    let value = serde_json::to_value(&payload).unwrap();
+    let rebuilt: Document = serde_json::from_value(value).unwrap();
+    assert_eq!(rebuilt, payload);
     assert_eq!(
         rebuilt
-            .sections
+            .blocks
             .iter()
-            .map(|section| section.title.as_str())
+            .filter_map(|block| match block {
+                DocBlock::Section { title, .. } => Some(title.as_str()),
+                _ => None,
+            })
             .collect::<Vec<_>>(),
         vec!["OSP", "Keybindings", "Pipes", "Usage", "Commands"]
     );
@@ -305,36 +309,38 @@ fn full_intro_template_uses_semantic_osp_blocks_for_section_data_unit() {
         None,
     );
 
-    let osp = payload
-        .sections
+    let value = serde_json::to_value(&payload).unwrap();
+    let blocks = value["blocks"].as_array().unwrap();
+    let osp = blocks
         .iter()
-        .find(|section| section.title == "OSP")
-        .expect("expected OSP section");
-    assert!(osp.data.is_some(), "expected semantic data for OSP section");
-    assert!(osp.paragraphs.iter().any(|line| line.contains("Welcome")));
-
-    let keybindings = payload
-        .sections
-        .iter()
-        .find(|section| section.title == "Keybindings")
-        .expect("expected keybindings section");
-    let Some(serde_json::Value::Array(items)) = keybindings.data.as_ref() else {
-        panic!("expected keybindings semantic array data");
-    };
-    assert_eq!(items[0]["name"], "Ctrl-D");
-    assert_eq!(items[0]["short_help"], "exit");
-
-    let pipes = payload
-        .sections
-        .iter()
-        .find(|section| section.title == "Pipes")
-        .expect("expected pipes section");
-    let Some(serde_json::Value::Array(items)) = pipes.data.as_ref() else {
-        panic!("expected pipes semantic array data");
-    };
-    assert!(items.iter().all(serde_json::Value::is_string));
+        .find(|block| block["section"] == "OSP")
+        .unwrap();
     assert!(
-        items
+        osp["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|block| block.get("value").is_some())
+    );
+    assert!(osp["blocks"].as_array().unwrap().iter().any(|block| {
+        block["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Welcome"))
+    }));
+    let keys = blocks
+        .iter()
+        .find(|block| block["section"] == "Keybindings")
+        .unwrap();
+    assert_eq!(keys["blocks"][0]["value"][0]["name"], "Ctrl-D");
+    assert_eq!(keys["blocks"][0]["value"][0]["short_help"], "exit");
+    let pipes = blocks
+        .iter()
+        .find(|block| block["section"] == "Pipes")
+        .unwrap();
+    assert!(
+        pipes["blocks"][0]["value"]
+            .as_array()
+            .unwrap()
             .iter()
             .any(|item| item == "`| H <verb>` verb help, e.g. `| H F`")
     );
@@ -580,12 +586,13 @@ fn repl_intro_payload_uses_custom_full_section_templates() {
     let payload =
         build_repl_intro_payload(repl_view(&state), &intro_surface(&["help", "config"]), None);
 
-    assert_eq!(payload.sections.len(), 3);
-    assert_eq!(payload.sections[0].paragraphs, vec!["User anonymous"]);
-    assert_eq!(payload.sections[1].paragraphs, vec!["Keys default"]);
+    let value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(value["blocks"].as_array().unwrap().len(), 3);
+    assert_eq!(value["blocks"][0]["blocks"][0]["text"], "User anonymous");
+    assert_eq!(value["blocks"][1]["blocks"][0]["text"], "Keys default");
     assert_eq!(
-        payload.sections[2].paragraphs,
-        vec!["Pipe Authored Theme Name".to_string()]
+        value["blocks"][2]["blocks"][0]["text"],
+        "Pipe Authored Theme Name"
     );
 }
 
@@ -608,23 +615,19 @@ fn repl_intro_payload_overview_placeholders_preserve_sections_and_authored_order
 
     let payload = build_repl_intro_payload(repl_view(&state), &surface, None);
 
-    assert_eq!(payload.sections.len(), 2);
-    assert_eq!(payload.sections[0].title, "Usage");
+    let value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(value["blocks"][0]["section"], "Usage");
     assert_eq!(
-        payload.sections[0].paragraphs,
-        vec!["  [INVOCATION_OPTIONS] COMMAND [ARGS]..."]
+        value["blocks"][0]["blocks"][0]["text"],
+        "[INVOCATION_OPTIONS] COMMAND [ARGS]..."
     );
-    assert_eq!(payload.sections[1].title, "Commands");
-    assert_eq!(payload.sections[1].entries.len(), 2);
-    assert_eq!(payload.sections[1].entries[0].name, "config");
+    assert_eq!(value["blocks"][1]["section"], "Commands");
     assert_eq!(
-        payload.sections[1].entries[0].short_help,
-        "Show and change config"
-    );
-    assert_eq!(payload.sections[1].entries[1].name, "theme");
-    assert_eq!(
-        payload.sections[1].entries[1].short_help,
-        "List and use themes"
+        value["blocks"][1]["blocks"][0]["entries"],
+        json!([
+            {"name": "config", "description": "Show and change config"},
+            {"name": "theme", "description": "List and use themes"},
+        ])
     );
 
     let authored = make_state(&[
@@ -636,23 +639,20 @@ fn repl_intro_payload_overview_placeholders_preserve_sections_and_authored_order
     ]);
     let authored_payload = build_repl_intro_payload(repl_view(&authored), &surface, None);
 
-    assert_eq!(authored_payload.preamble, vec!["Before overview"]);
-    assert_eq!(authored_payload.sections.len(), 3);
-    assert_eq!(authored_payload.sections[0].title, "Usage");
-    assert_eq!(authored_payload.sections[1].title, "Commands");
+    let value = serde_json::to_value(&authored_payload).unwrap();
+    assert_eq!(value["blocks"][0]["text"], "Before overview");
+    assert_eq!(value["blocks"][1]["section"], "Usage");
+    assert_eq!(value["blocks"][2]["section"], "Commands");
     assert_eq!(
-        authored_payload.sections[1]
-            .entries
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["config", "theme"]
+        value["blocks"][2]["blocks"][0]["entries"][0]["name"],
+        "config"
     );
-    assert_eq!(authored_payload.sections[2].title, "Footer");
     assert_eq!(
-        authored_payload.sections[2].paragraphs,
-        vec!["After overview"]
+        value["blocks"][2]["blocks"][0]["entries"][1]["name"],
+        "theme"
     );
+    assert_eq!(value["blocks"][4]["section"], "Footer");
+    assert_eq!(value["blocks"][4]["blocks"][0]["text"], "After overview");
 }
 
 #[test]
@@ -730,42 +730,66 @@ fn session_history_opt_out_enables_incognito_prompt_indicator_unit() {
 
 #[test]
 fn intro_template_parser_expands_all_help_sections_and_merges_repeated_data_blocks() {
-    let help = GuideView {
-        usage: vec!["osp [OPTIONS] COMMAND".to_string()],
-        commands: vec![crate::guide::GuideEntry {
-            name: "help".to_string(),
-            short_help: "Show help".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        arguments: vec![crate::guide::GuideEntry {
-            name: "<TARGET>".to_string(),
-            short_help: "Target name".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        options: vec![crate::guide::GuideEntry {
-            name: "--json".to_string(),
-            short_help: "Render json".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        common_invocation_options: vec![crate::guide::GuideEntry {
-            name: "--profile".to_string(),
-            short_help: "Select profile".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        notes: vec!["Be careful.".to_string()],
-        sections: vec![GuideSection {
-            title: "Custom".to_string(),
-            kind: GuideSectionKind::Custom,
-            paragraphs: vec!["  Extra section".to_string()],
-            entries: Vec::new(),
-            data: None,
-        }],
-        epilogue: vec!["tail".to_string()],
-        ..GuideView::default()
+    let help = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Usage",
+                vec![DocBlock::Paragraph {
+                    text: "osp [OPTIONS] COMMAND".into(),
+                }],
+            ),
+            DocBlock::section(
+                "Commands",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "help".into(),
+                        description: "Show help".into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Arguments",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "<TARGET>".into(),
+                        description: "Target name".into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Options",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "--json".into(),
+                        description: "Render json".into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Common Invocation Options",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "--profile".into(),
+                        description: "Select profile".into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Notes",
+                vec![DocBlock::Paragraph {
+                    text: "Be careful.".into(),
+                }],
+            ),
+            DocBlock::section(
+                "Custom",
+                vec![DocBlock::Paragraph {
+                    text: "Extra section".into(),
+                }],
+            ),
+            DocBlock::Paragraph {
+                text: "tail".into(),
+            },
+        ],
     };
 
     let payload = super::parse_intro_template_payload(
@@ -784,41 +808,18 @@ ready
         &help,
     );
 
-    assert_eq!(payload.preamble, vec!["Before help"]);
+    let value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(value["blocks"][0]["text"], "Before help");
+    assert_eq!(value["blocks"][1]["section"], "Status");
     assert_eq!(
-        payload
-            .sections
-            .iter()
-            .map(|section| section.title.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "Status",
-            "Usage",
-            "Commands",
-            "Arguments",
-            "Options",
-            "Common Invocation Options",
-            "Notes",
-            "Custom",
-        ]
+        value["blocks"][1]["blocks"][1]["value"],
+        json!({"phase": "boot"})
     );
     assert_eq!(
-        payload.sections[0].data,
-        Some(json!([{ "phase": "boot" }, { "phase": "steady" }]))
+        value["blocks"][1]["blocks"][2]["value"],
+        json!({"phase": "steady"})
     );
-    assert_eq!(
-        payload.sections[1].paragraphs,
-        vec!["  osp [OPTIONS] COMMAND".to_string()]
-    );
-    assert_eq!(payload.sections[2].entries[0].name, "help");
-    assert_eq!(payload.sections[3].entries[0].name, "<TARGET>");
-    assert_eq!(payload.sections[4].entries[0].name, "--json");
-    assert_eq!(payload.sections[5].entries[0].name, "--profile");
-    assert_eq!(
-        payload.sections[6].paragraphs,
-        vec!["  Be careful.".to_string()]
-    );
-    assert_eq!(payload.epilogue, vec!["tail"]);
+    assert_eq!(&payload.blocks[2..], help.blocks.as_slice());
 }
 
 #[test]
@@ -833,13 +834,15 @@ fn intro_template_parser_flattens_repeated_array_data_blocks_unit() {
 ["ready"]
 ```
 "#,
-        &GuideView::default(),
+        &Document::default(),
     );
 
+    let value = serde_json::to_value(&payload).unwrap();
     assert_eq!(
-        payload.sections[0].data,
-        Some(json!(["boot", "steady", "ready"]))
+        value["blocks"][0]["blocks"][0]["value"],
+        json!(["boot", "steady"])
     );
+    assert_eq!(value["blocks"][0]["blocks"][1]["value"], json!(["ready"]));
 }
 
 #[test]
@@ -896,7 +899,7 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
         "Hello Codex true 42 1, 2, 3 See help for more. {{ help }} {{extensions.demo.token}} {{}} {{broken"
     );
     assert_eq!(
-        super::parse_intro_template_payload("", &GuideView::default()),
-        GuideView::default()
+        super::parse_intro_template_payload("", &Document::default()),
+        Document::default()
     );
 }

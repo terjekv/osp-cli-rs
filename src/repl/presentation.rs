@@ -13,17 +13,14 @@ use crate::app::{CMD_HELP, DEFAULT_REPL_PROMPT};
 use crate::config::ConfigValue;
 use crate::config::DEFAULT_REPL_HISTORY_MENU_ROWS;
 use crate::config::ResolvedConfig;
-use crate::guide::template::{GuideTemplateBlock, GuideTemplateInclude, parse_markdown_template};
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+use crate::core::document::{DocBlock, Document, DocumentEntry};
 use crate::native::NativeSessionContext;
 use crate::repl::{ReplAppearance, ReplPrompt};
 use crate::ui::messages::MessageLevel;
 use crate::ui::render_structured_output_with_source_guide;
 use crate::ui::style::{StyleToken, apply_style_with_theme, apply_style_with_theme_overrides};
-use serde_json::Value;
 use std::borrow::Cow;
 use std::sync::Arc;
-use unicode_width::UnicodeWidthStr;
 
 use super::ReplViewContext;
 use super::history;
@@ -155,8 +152,8 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
         intro_style_with_verbosity(intro_style(view.config), view.ui.message_verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
     let mut rendered = render_structured_output_with_source_guide(
-        &guide.to_output_result(),
-        Some(&guide),
+        &repl_document_output(&guide),
+        None,
         &view.ui.render_settings,
         crate::ui::help_layout_from_config(view.config),
     );
@@ -167,18 +164,24 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
     rendered
 }
 
+pub(crate) fn repl_document_output(document: &Document) -> crate::core::output_model::OutputResult {
+    let mut output = document.to_output_result();
+    output.meta.document_entry_gap = Some(5);
+    output
+}
+
 pub(crate) fn build_repl_intro_payload(
     view: ReplViewContext<'_>,
     surface: &ReplSurface,
     override_style: Option<ReplIntroStyle>,
-) -> GuideView {
+) -> Document {
     let config = view.config;
     let intro_style = override_style.unwrap_or_else(|| {
         intro_style_with_verbosity(intro_style(config), view.ui.message_verbosity)
     });
 
     if matches!(intro_style, ReplIntroStyle::None) {
-        return GuideView::default();
+        return Document::default();
     }
     let template = intro_template(view.config, intro_style);
     let expanded = expand_intro_template(view, &surface.intro_commands, template);
@@ -207,167 +210,8 @@ fn intro_template(config: &crate::config::ResolvedConfig, style: ReplIntroStyle)
     }
 }
 
-// Intro templates are authored like lightweight markdown, but the payload they
-// produce must stay semantic. Headings create explicit sections, `osp` fences
-// attach semantic data to the current section, and `{{ help }}` expands into
-// canonical help sections in template order instead of being re-derived later.
-fn parse_intro_template_payload(template: &str, help: &GuideView) -> GuideView {
-    let trimmed = template.trim();
-    if trimmed.is_empty() {
-        return GuideView::default();
-    }
-
-    let mut payload = GuideView::default();
-    let mut current_section: Option<GuideSection> = None;
-
-    for block in parse_markdown_template(trimmed) {
-        match block {
-            GuideTemplateBlock::Heading(title) => {
-                flush_intro_section(&mut payload, &mut current_section);
-                current_section = Some(GuideSection::new(title, GuideSectionKind::Custom));
-            }
-            GuideTemplateBlock::Include(GuideTemplateInclude::Help)
-            | GuideTemplateBlock::Include(GuideTemplateInclude::Overview) => {
-                flush_intro_section(&mut payload, &mut current_section);
-                append_template_include_payload(&mut payload, help);
-            }
-            GuideTemplateBlock::Paragraph(line) => {
-                let lines = line
-                    .lines()
-                    .map(str::trim_end)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                if let Some(section) = current_section.as_mut() {
-                    section.paragraphs.extend(lines);
-                } else {
-                    payload.preamble.extend(lines);
-                }
-            }
-            GuideTemplateBlock::Data(data) => {
-                // Fenced `osp` blocks attach semantic data to the current
-                // section so intro authoring can opt into list/key-value/grid
-                // rendering without hardcoding presentation cases here.
-                let section = current_section
-                    .get_or_insert_with(|| GuideSection::new("", GuideSectionKind::Custom));
-                attach_intro_data_block(section, data);
-            }
-        }
-    }
-
-    flush_intro_section(&mut payload, &mut current_section);
-    payload
-}
-
-fn flush_intro_section(payload: &mut GuideView, current: &mut Option<GuideSection>) {
-    let Some(section) = current.take() else {
-        return;
-    };
-    if intro_section_has_content(&section) {
-        payload.sections.push(section);
-    }
-}
-
-fn intro_section_has_content(section: &GuideSection) -> bool {
-    !section.paragraphs.is_empty()
-        || !section.entries.is_empty()
-        || !matches!(section.data, None | Some(Value::Null))
-}
-
-fn attach_intro_data_block(section: &mut GuideSection, data: Value) {
-    section.data = Some(match section.data.take() {
-        None => data,
-        // Keep repeated data fences inside the authored section instead of
-        // inventing sibling sections during parsing.
-        Some(Value::Array(mut existing)) => {
-            match data {
-                Value::Array(next) => existing.extend(next),
-                other => existing.push(other),
-            }
-            Value::Array(existing)
-        }
-        Some(existing) => match data {
-            Value::Array(mut next) => {
-                let mut merged = vec![existing];
-                merged.append(&mut next);
-                Value::Array(merged)
-            }
-            other => Value::Array(vec![existing, other]),
-        },
-    });
-}
-
-// Help/overview includes are expanded at parse time, in authored order. This
-// is the boundary where `{{ help }}` / `{{ overview }}` stop being placeholders
-// and become concrete builtin sections followed by any surrounding custom
-// sections, so later quick/filter/render code does not reorder them.
-fn append_template_include_payload(payload: &mut GuideView, included: &GuideView) {
-    payload.preamble.extend(included.preamble.iter().cloned());
-
-    if !included.usage.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Usage".to_string(),
-            kind: GuideSectionKind::Usage,
-            paragraphs: repl_intro_body_paragraphs(&included.usage),
-            entries: Vec::new(),
-            data: None,
-        });
-    }
-    if !included.commands.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Commands".to_string(),
-            kind: GuideSectionKind::Commands,
-            paragraphs: Vec::new(),
-            entries: included.commands.clone(),
-            data: None,
-        });
-    }
-    if !included.arguments.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Arguments".to_string(),
-            kind: GuideSectionKind::Arguments,
-            paragraphs: Vec::new(),
-            entries: included.arguments.clone(),
-            data: None,
-        });
-    }
-    if !included.options.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Options".to_string(),
-            kind: GuideSectionKind::Options,
-            paragraphs: Vec::new(),
-            entries: included.options.clone(),
-            data: None,
-        });
-    }
-    if !included.common_invocation_options.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Common Invocation Options".to_string(),
-            kind: GuideSectionKind::CommonInvocationOptions,
-            paragraphs: Vec::new(),
-            entries: included.common_invocation_options.clone(),
-            data: None,
-        });
-    }
-    if !included.notes.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Notes".to_string(),
-            kind: GuideSectionKind::Notes,
-            paragraphs: repl_intro_body_paragraphs(&included.notes),
-            entries: Vec::new(),
-            data: None,
-        });
-    }
-
-    payload.sections.extend(included.sections.iter().cloned());
-    payload.epilogue.extend(included.epilogue.iter().cloned());
-}
-
-fn repl_intro_body_paragraphs(paragraphs: &[String]) -> Vec<String> {
-    paragraphs
-        .iter()
-        .map(|line| format!("  {}", line.trim_start()))
-        .collect()
+fn parse_intro_template_payload(template: &str, help: &Document) -> Document {
+    Document::from_markdown_template(template, help)
 }
 
 /// Picks one entry from `repl.intro_tips`, the same one all day (UTC).
@@ -536,39 +380,39 @@ pub(crate) fn render_repl_command_overview(
         0,
     ));
     render_structured_output_with_source_guide(
-        &guide.to_output_result(),
-        Some(&guide),
+        &repl_document_output(&guide),
+        None,
         &view.ui.render_settings,
         crate::ui::help_layout_from_config(view.config),
     )
 }
 
-pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> GuideView {
-    let name_width = surface
-        .overview_entries
-        .iter()
-        .map(|entry| UnicodeWidthStr::width(entry.name.as_str()))
-        .max()
-        .unwrap_or(0);
-    GuideView {
-        usage: vec!["[INVOCATION_OPTIONS] COMMAND [ARGS]...".to_string()],
-        commands: surface
-            .overview_entries
-            .iter()
-            .map(|entry| crate::guide::GuideEntry {
-                name: entry.name.clone(),
-                short_help: entry.summary.clone(),
-                display_indent: Some("  ".to_string()),
-                display_gap: Some(format!(
-                    "{}     ",
-                    " ".repeat(
-                        name_width.saturating_sub(UnicodeWidthStr::width(entry.name.as_str()))
-                    )
-                )),
-            })
-            .collect(),
-        epilogue: vec!["Pipe command output with `|`; use `| H` for in-band DSL help.".to_string()],
-        ..GuideView::default()
+pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> Document {
+    Document {
+        blocks: vec![
+            DocBlock::section(
+                "Usage",
+                vec![DocBlock::Paragraph {
+                    text: "[INVOCATION_OPTIONS] COMMAND [ARGS]...".into(),
+                }],
+            ),
+            DocBlock::section(
+                "Commands",
+                vec![DocBlock::Entries {
+                    entries: surface
+                        .overview_entries
+                        .iter()
+                        .map(|entry| DocumentEntry {
+                            name: entry.name.clone(),
+                            description: entry.summary.clone(),
+                        })
+                        .collect(),
+                }],
+            ),
+            DocBlock::Paragraph {
+                text: "Pipe command output with `|`; use `| H` for in-band DSL help.".into(),
+            },
+        ],
     }
 }
 

@@ -323,9 +323,12 @@ fn repl_help_command_result_for_scope(
 ) -> Result<CliCommandResult> {
     if session.scope.is_root() {
         let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
-        return Ok(CliCommandResult::guide(
-            presentation::build_repl_command_overview_view(&prepared.surface)
-                .filtered_for_help_level(invocation.help_level),
+        return Ok(CliCommandResult::output(
+            presentation::repl_document_output(
+                &presentation::build_repl_command_overview_view(&prepared.surface)
+                    .filtered_for_help_level(invocation.help_level),
+            ),
+            None,
         ));
     }
 
@@ -873,7 +876,7 @@ JSON
             "filtered root help should not retain unrelated usage envelope",
         );
         assert_eq!(rows[0]["name"], "doctor");
-        assert_eq!(rows[0]["short_help"], "Run diagnostics checks");
+        assert_eq!(rows[0]["description"], "Run diagnostics checks");
     }
 
     #[test]
@@ -886,7 +889,7 @@ JSON
             .as_array()
             .expect("staged help json should be row array");
         assert_eq!(json_rows.len(), 1);
-        assert!(json_rows[0].get("value").is_some());
+        assert!(json_rows[0].get("text").is_some());
 
         let mut guide_state = app_state();
         let guide = render_root_help_line(&mut guide_state, "--guide help | L 1");
@@ -902,7 +905,7 @@ JSON
 
         let mut table_state = app_state();
         let table = render_root_help_line(&mut table_state, "--table help | L 1");
-        assert!(table.contains("value"));
+        assert!(table.contains("text"));
         assert!(table.contains("COMMAND"));
 
         let mut mreg_state = app_state();

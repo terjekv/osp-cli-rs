@@ -14,6 +14,7 @@ pub struct RenderPlan {
     pub format: OutputFormat,
     pub profile: RenderProfile,
     pub settings: ResolvedRenderSettings,
+    pub document_entry_gap: Option<usize>,
     pub semantic_kind: Option<SemanticKind>,
 }
 
@@ -33,6 +34,7 @@ pub fn plan_output(
         profile: effective_profile,
         settings: resolve_settings(settings, effective_profile),
         semantic_kind: semantic_kind(output),
+        document_entry_gap: output.meta.document_entry_gap,
     }
 }
 

@@ -26,6 +26,7 @@
 //!   remains reusable
 
 pub(crate) mod pipeline;
+#[cfg(test)]
 pub(crate) mod template;
 
 use crate::core::command_def::{ArgDef, CommandDef, FlagDef};

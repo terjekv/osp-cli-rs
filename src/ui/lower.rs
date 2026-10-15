@@ -118,6 +118,43 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         return doc;
     }
 
+    if output.meta.document_rows && plan.format == OutputFormat::Value {
+        let items = output
+            .as_rows()
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|row| {
+                if row.len() == 3
+                    && let Some(description) = row.get("description").and_then(Value::as_str)
+                {
+                    return vec![if description.is_empty() {
+                        row.get("name").map(display_value).unwrap_or_default()
+                    } else {
+                        description.into()
+                    }];
+                }
+                if row.len() == 3
+                    && row.contains_key("name")
+                    && let Some(description) = row.get("short_help")
+                {
+                    return vec![display_value(description)];
+                }
+                row.iter()
+                    .filter(|(key, value)| key.as_str() != "section" && !value.is_null())
+                    .map(|(_, value)| display_value(value))
+                    .collect()
+            })
+            .collect();
+        return Doc {
+            blocks: vec![Block::List(ListBlock {
+                items,
+                indent: 0,
+                inline_markup: false,
+                auto_grid: false,
+            })],
+        };
+    }
+
     let guide = GuideView::try_from_output_result(output);
 
     // Human projection is deliberately downstream of filtering and JSON output.
@@ -685,6 +722,109 @@ fn lower_value_doc(output: &OutputResult) -> Doc {
         })],
     };
 
+    Doc { blocks }
+}
+
+pub(crate) fn lower_document_help_layout(
+    document: &Document,
+    plan: &RenderPlan,
+    layout: HelpLayout,
+    footer: bool,
+) -> Doc {
+    fn lower(
+        blocks: &[DocBlock],
+        plan: &RenderPlan,
+        layout: HelpLayout,
+        inside: bool,
+    ) -> Vec<Block> {
+        let mut out = Vec::new();
+        for block in blocks {
+            let next = match block {
+                DocBlock::Section { title, blocks, .. } => {
+                    let suffix = match blocks.as_slice() {
+                        [DocBlock::Paragraph { text }]
+                            if title == "Usage" && text.lines().count() == 1 =>
+                        {
+                            Some(visible_inline_text(text))
+                        }
+                        _ => None,
+                    };
+                    let body = if suffix.is_some() {
+                        Vec::new()
+                    } else {
+                        lower(blocks, plan, layout, true)
+                    };
+                    vec![Block::Section(SectionBlock {
+                        title: (!title.is_empty()).then(|| title.clone()),
+                        title_chrome: if suffix.is_some() {
+                            SectionTitleChrome::Plain
+                        } else {
+                            help_layout_title_chrome(layout)
+                        },
+                        body_indent: 0,
+                        inline_title_suffix: suffix,
+                        trailing_newline: false,
+                        blocks: body,
+                    })]
+                }
+                DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
+                    text: text.clone(),
+                    indent: if inside { 2 } else { 0 },
+                    inline_markup: true,
+                })],
+                DocBlock::Entries { entries } => vec![Block::Entries(EntriesBlock {
+                    default_indent: " ".repeat(plan.settings.help_chrome.entry_indent),
+                    default_gap: plan
+                        .settings
+                        .help_chrome
+                        .entry_gap
+                        .map(|gap| " ".repeat(gap)),
+                    rows: entries
+                        .iter()
+                        .map(|entry| EntryRow {
+                            key: entry.name.clone(),
+                            value: entry.description.clone(),
+                            indent_hint: None,
+                            gap_hint: plan.document_entry_gap.map(|gap| {
+                                let width = entries
+                                    .iter()
+                                    .map(|entry| display_width(&entry.name))
+                                    .max()
+                                    .unwrap_or(0);
+                                " ".repeat(width.saturating_sub(display_width(&entry.name)) + gap)
+                            }),
+                        })
+                        .collect(),
+                })],
+                DocBlock::List { items } => vec![Block::List(ListBlock {
+                    items: items.iter().map(|item| format!("- {item}")).collect(),
+                    indent: if inside { 2 } else { 0 },
+                    inline_markup: true,
+                    auto_grid: false,
+                })],
+                DocBlock::Data { value } => {
+                    help_layout_blocks_from_value(value, &plan.settings.help_chrome)
+                }
+            };
+            let section_break = matches!(block, DocBlock::Section { .. })
+                || matches!(out.last(), Some(Block::Section(_)));
+            if section_break {
+                push_blank_lines(&mut out, plan.settings.help_chrome.section_spacing);
+            } else if !out.is_empty() && !matches!(block, DocBlock::Paragraph { .. }) {
+                out.push(Block::Blank);
+            }
+            out.extend(next);
+        }
+        out
+    }
+    let mut blocks = lower(&document.blocks, plan, layout, false);
+    if footer
+        && blocks
+            .iter()
+            .any(|block| matches!(block, Block::Section(_)))
+    {
+        blocks.push(Block::Rule);
+    }
     Doc { blocks }
 }
 

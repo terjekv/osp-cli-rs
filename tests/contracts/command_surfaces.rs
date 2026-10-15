@@ -59,24 +59,20 @@ fn alias_catalog_preserves_configured_pipeline_templates_contract() {
 fn intro_command_emits_semantic_json_with_explicit_format_contract() {
     let stdout = run_cli_stdout(&["--no-env", "--no-config-file", "--json", "intro"]);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("intro JSON should parse");
-    let rows = json.as_array().expect("guide output should be row array");
-    assert_eq!(rows.len(), 1);
-    let sections = rows[0]["sections"]
-        .as_array()
-        .expect("intro should carry semantic sections");
-    let commands = sections
+    let blocks = json["blocks"].as_array().expect("document blocks");
+    let commands = blocks
         .iter()
-        .find(|section| section["kind"] == "commands")
-        .expect("intro should carry command entries");
+        .find(|block| block["section"] == "Commands")
+        .unwrap();
     assert!(
-        commands["entries"]
+        commands["blocks"][0]["entries"]
             .as_array()
-            .expect("commands should be an entry array")
+            .unwrap()
             .iter()
             .any(|entry| entry["name"] == "help"
-                && entry["short_help"]
+                && entry["description"]
                     .as_str()
-                    .is_some_and(|help| !help.is_empty()))
+                    .is_some_and(|text| !text.is_empty()))
     );
 }
 
@@ -142,11 +138,7 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
     let json = run_cli_stdout(&["--no-env", "--no-config-file", "--json", "intro"]);
     let json_value: serde_json::Value =
         serde_json::from_str(&json).expect("intro json should parse");
-    let json_rows = json_value
-        .as_array()
-        .expect("intro json should be row array");
-    assert_eq!(json_rows.len(), 1);
-    assert!(json_rows[0].get("sections").is_some());
+    assert!(json_value["blocks"].is_array());
 
     let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--guide", "intro"]);
     assert!(guide.contains("OSP"));
@@ -171,11 +163,11 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
     assert!(markdown.contains("- `help` Show this command overview."));
 
     let table = run_cli_stdout(&["--no-env", "--no-config-file", "--table", "intro"]);
-    assert!(table.contains("sections"));
+    assert!(table.contains("section"));
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "intro"]);
-    assert!(mreg.contains("sections ("));
-    assert!(mreg.contains("title:"));
+    assert!(mreg.contains("section"));
+    assert!(mreg.contains("Commands"));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "intro"]);
     assert!(value.contains("Welcome"));

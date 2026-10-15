@@ -9,7 +9,7 @@ use crate::app::CliCommandResult;
 use crate::app::{AppClients, AppRuntime, AppSession, authorized_command_catalog_for};
 use crate::cli::IntroArgs;
 use crate::repl::ReplViewContext;
-use crate::repl::presentation::build_repl_intro_payload;
+use crate::repl::presentation::{build_repl_intro_payload, repl_document_output};
 use crate::repl::surface::ReplSurface;
 
 pub(crate) struct IntroCommandContext<'a> {
@@ -53,11 +53,14 @@ pub(crate) fn run_intro_command(
     context: IntroCommandContext<'_>,
     _args: IntroArgs,
 ) -> Result<CliCommandResult> {
-    Ok(CliCommandResult::guide(build_repl_intro_payload(
-        context.view,
-        &context.surface,
+    Ok(CliCommandResult::output(
+        repl_document_output(&build_repl_intro_payload(
+            context.view,
+            &context.surface,
+            None,
+        )),
         None,
-    )))
+    ))
 }
 
 #[cfg(test)]
@@ -159,6 +162,6 @@ mod tests {
         else {
             panic!("intro command should return guide output");
         };
-        assert!(structured.source_guide.is_some());
+        assert!(structured.output.meta.document_rows);
     }
 }
