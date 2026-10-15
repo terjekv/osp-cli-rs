@@ -57,25 +57,7 @@ pub(crate) fn compile(spec: &str) -> Result<GroupPlan> {
     })
 }
 
-pub(crate) fn group_rows_with_plan(rows: Vec<Row>, plan: &GroupPlan) -> Result<Vec<Group>> {
-    let mut buckets = GroupBuckets::default();
-
-    for row in rows {
-        let flat = flatten_row(&row);
-        let headers = resolve_group_headers(&flat, &plan.keys)?;
-        for header in headers {
-            buckets.push(Group {
-                groups: header,
-                aggregates: Row::new(),
-                rows: vec![row.clone()],
-            })?;
-        }
-    }
-
-    Ok(buckets.finish())
-}
-
-pub(crate) fn regroup_groups_with_plan(groups: Vec<Group>, plan: &GroupPlan) -> Result<Vec<Group>> {
+fn group_partitions_with_plan(groups: Vec<Group>, plan: &GroupPlan) -> Result<Vec<Group>> {
     let mut buckets = GroupBuckets::default();
 
     for group in groups {
@@ -331,17 +313,7 @@ pub(crate) fn apply_set(
     mut set: crate::dsl::model::RowSet,
     plan: &GroupPlan,
 ) -> Result<crate::dsl::model::RowSet> {
-    set.partitions = if set.grouped {
-        regroup_groups_with_plan(set.partitions, plan)?
-    } else {
-        group_rows_with_plan(
-            set.partitions
-                .into_iter()
-                .flat_map(|part| part.rows)
-                .collect(),
-            plan,
-        )?
-    };
+    set.partitions = group_partitions_with_plan(set.partitions, plan)?;
     set.grouped = true;
     Ok(set)
 }
