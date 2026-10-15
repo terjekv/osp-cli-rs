@@ -1479,29 +1479,28 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
     if trimmed.starts_with('!') || is_sudo_bang_command(trimmed) {
         return true;
     }
-    if trimmed.contains("--help") {
-        return true;
-    }
-    // Keep ordinary config writes, while using the existing command grammar and
-    // sensitivity policy to avoid retaining inline credentials.
-    if is_sensitive_config_set_command(trimmed) {
-        return true;
-    }
-    exclude_patterns
-        .iter()
-        .any(|pattern| matches_pattern(pattern, trimmed))
-}
-
-fn is_sensitive_config_set_command(command: &str) -> bool {
-    // Use the execution lexer so quoted pipes remain values and actual stages
-    // cannot make a sensitive command fail open at the built-in parser.
-    let Ok(pipeline) = crate::dsl::parse_pipeline(command) else {
+    // Use the command lexer so help-like text inside a quoted value is not
+    // treated as an invocation flag.
+    let Ok(pipeline) = crate::dsl::parse_pipeline(trimmed) else {
         return true;
     };
     let Ok(words) = shell_words::split(&pipeline.command) else {
         return true;
     };
-    is_sensitive_config_set_tokens(&words)
+    if words
+        .iter()
+        .any(|word| matches!(word.as_str(), "--help" | "-h"))
+    {
+        return true;
+    }
+    // Keep ordinary config writes, while using the existing command grammar and
+    // sensitivity policy to avoid retaining inline credentials.
+    if is_sensitive_config_set_tokens(&words) {
+        return true;
+    }
+    exclude_patterns
+        .iter()
+        .any(|pattern| matches_pattern(pattern, trimmed))
 }
 
 pub(super) fn is_sensitive_config_set_tokens(tokens: &[String]) -> bool {
