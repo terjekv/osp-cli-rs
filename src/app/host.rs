@@ -84,6 +84,23 @@ struct PreparedHostRun {
     invocation_ui: ResolvedInvocation,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ErrorDisplaySettings {
+    pub(crate) error_detail: ErrorDetail,
+    pub(crate) message_verbosity: crate::ui::messages::MessageLevel,
+    pub(crate) render_settings: RenderSettings,
+}
+
+impl From<&UiState> for ErrorDisplaySettings {
+    fn from(ui: &UiState) -> Self {
+        Self {
+            error_detail: ui.error_detail,
+            message_verbosity: ui.message_verbosity,
+            render_settings: ui.render_settings.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct BoxedContextError {
     context: &'static str,
@@ -93,8 +110,9 @@ struct BoxedContextError {
 
 #[derive(Debug)]
 struct ReportContextError {
-    context: &'static str,
+    context: Option<&'static str>,
     source: miette::Report,
+    error_display: Option<ErrorDisplaySettings>,
 }
 
 #[derive(Clone, Copy)]
@@ -177,11 +195,9 @@ impl miette::Diagnostic for BoxedContextError {}
 
 impl std::fmt::Display for ReportContextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string();
-        if source.is_empty() {
-            write!(f, "{}", self.context)
-        } else {
-            write!(f, "{}: {}", self.context, source)
+        match self.context {
+            Some(context) => write!(f, "{context}: {}", self.source),
+            None => std::fmt::Display::fmt(&self.source, f),
         }
     }
 }
@@ -439,7 +455,7 @@ fn run(
     let PreparedHostRun {
         mut state,
         dispatch,
-        invocation_ui,
+        mut invocation_ui,
     } = {
         let _phase = crate::startup_trace::phase("host startup");
         prepare_host_run(&mut cli, &invocation, app, run_started)?
@@ -472,7 +488,7 @@ fn run(
                 &state.clients,
                 &tokens,
                 &invocation,
-                &invocation_ui,
+                &mut invocation_ui,
                 sink,
             ),
             RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
@@ -514,7 +530,7 @@ fn run(
         }
     }
 
-    result
+    result.map_err(|err| report_with_invocation(err, ErrorDisplaySettings::from(&invocation_ui.ui)))
 }
 
 // Startup is phase-based:
@@ -1073,9 +1089,26 @@ pub(crate) fn report_report_with_context(
     context: &'static str,
 ) -> miette::Report {
     miette::Report::new(ReportContextError {
-        context,
+        context: Some(context),
         source: err,
+        error_display: None,
     })
+}
+
+pub(crate) fn report_with_invocation(
+    err: miette::Report,
+    settings: ErrorDisplaySettings,
+) -> miette::Report {
+    miette::Report::new(ReportContextError {
+        context: None,
+        source: err,
+        error_display: Some(settings),
+    })
+}
+
+pub(crate) fn error_display_settings(err: &miette::Report) -> Option<&ErrorDisplaySettings> {
+    find_error_in_chain::<ReportContextError>(err)
+        .and_then(|context| context.error_display.as_ref())
 }
 
 pub(super) fn find_error_in_chain<E>(err: &miette::Report) -> Option<&E>

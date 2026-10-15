@@ -230,6 +230,20 @@ impl<'a> CommandRenderRuntime<'a> {
     }
 }
 
+pub(crate) fn json_failure_error(
+    report: Option<&miette::Report>,
+    code: &str,
+    message: String,
+) -> Value {
+    if let Some(backend) =
+        report.and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
+    {
+        serde_json::json!(backend.error)
+    } else {
+        serde_json::json!({"code": code, "message": message, "details": null})
+    }
+}
+
 pub(crate) fn render_json_failure(
     error: Value,
     exit_code: i32,
@@ -279,19 +293,11 @@ pub(crate) fn run_cli_command(
             .iter()
             .find(|entry| entry.level == MessageLevel::Error)
             .map(|entry| entry.text.as_str());
-        let error = if let Some(backend) = result
-            .failure_report
-            .as_ref()
-            .and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
-        {
-            serde_json::json!(backend.error)
-        } else {
-            let message = primary_error
-                .map(str::to_string)
-                .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
-                .unwrap_or_else(|| "command failed".to_string());
-            serde_json::json!({"code": "command_failed", "message": message, "details": null})
-        };
+        let message = primary_error
+            .map(str::to_string)
+            .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
+            .unwrap_or_else(|| "command failed".to_string());
+        let error = json_failure_error(result.failure_report.as_ref(), "command_failed", message);
         sink.write_stdout(&render_json_failure(
             error,
             result.exit_code,

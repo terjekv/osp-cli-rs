@@ -70,6 +70,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
 #[test]
 fn repl_failure_is_cached_for_doctor_last_unit() {
     let mut state = make_test_state(Vec::new());
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
     let err = repl_dispatch::execute_repl_plugin_line(
@@ -91,6 +92,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
     assert!(last.detail.contains("unknown command `missing`"));
     assert!(state.session.last_failure_diagnostics.is_some());
 
+    state.runtime.ui.render_settings.format = OutputFormat::Json;
     let rendered = doctor_cmd::run_doctor_command(
         doctor_cmd::DoctorCommandContext {
             config: crate::cli::commands::config::ConfigReadContext {

@@ -548,6 +548,7 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
         &[],
         NativeCommandRegistry::new().with_command(CapabilityGatedNativeCommand),
     );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     state.runtime.set_policy_context(
         crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
     );
@@ -569,7 +570,6 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
     assert!(immediate.contains("command `ldap user`"));
     assert!(immediate.contains("capability `ldap.user.read`"));
     assert!(immediate.contains("Try: authenticate"));
-    state.runtime.ui.render_settings.format = OutputFormat::Table;
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -614,6 +614,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
     let error = repl_dispatch::execute_repl_plugin_line(
@@ -633,7 +634,6 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     assert!(!immediate.contains("Usage:"));
     assert!(!immediate.contains("native command execution failed"));
 
-    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
@@ -671,6 +671,7 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
     let error = repl_dispatch::execute_repl_plugin_line(

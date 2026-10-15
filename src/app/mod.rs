@@ -489,13 +489,24 @@ impl App {
             Err(err) => {
                 let (error_detail, message_verbosity, error_render_settings) = {
                     let _phase = crate::startup_trace::phase("process error display preparation");
-                    let (verbose, quiet, _) = bootstrap_verbosity_counts(&args);
-                    let error_detail = adjust_error_detail(ErrorDetail::Terse, verbose, quiet);
-                    let message_verbosity = adjust_verbosity(MessageLevel::Success, verbose, quiet);
-                    let error_render_settings =
-                        help::render_settings_for_help(&args, &self.definition.product_defaults)
-                            .settings;
-                    (error_detail, message_verbosity, error_render_settings)
+                    if let Some(ui) = host::error_display_settings(&err) {
+                        (
+                            ui.error_detail,
+                            ui.message_verbosity,
+                            ui.render_settings.clone(),
+                        )
+                    } else {
+                        let (verbose, quiet, _) = bootstrap_verbosity_counts(&args);
+                        let error_detail = adjust_error_detail(ErrorDetail::Terse, verbose, quiet);
+                        let message_verbosity =
+                            adjust_verbosity(MessageLevel::Success, verbose, quiet);
+                        let error_render_settings = help::render_settings_for_help(
+                            &args,
+                            &self.definition.product_defaults,
+                        )
+                        .settings;
+                        (error_detail, message_verbosity, error_render_settings)
+                    }
                 };
                 let rendered = render_process_error(
                     &err,
@@ -791,7 +802,7 @@ where
     App::new().run_process_with_sink(args, sink)
 }
 
-fn render_process_error(
+pub(crate) fn render_process_error(
     err: &miette::Report,
     detail: ErrorDetail,
     settings: &crate::ui::RenderSettings,
@@ -805,7 +816,7 @@ fn render_process_error(
             _ => "command_error",
         };
         return command_output::render_json_failure(
-            serde_json::json!({"code": code, "message": message, "details": null}),
+            command_output::json_failure_error(Some(err), code, message),
             exit_code,
             Vec::new(),
             serde_json::Value::Null,

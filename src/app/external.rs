@@ -75,7 +75,7 @@ pub(super) fn run_external_command(
     clients: &AppClients,
     tokens: &[String],
     options: &InvocationOptions,
-    invocation: &ResolvedInvocation,
+    invocation: &mut ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
     let expanded = expand_external_tokens(runtime, tokens);
@@ -85,17 +85,14 @@ pub(super) fn run_external_command(
         Ok((parsed, _)) => Some(scan_command_tokens(&parsed.tokens)?),
         Err(_) => None,
     };
-    let merged;
-    let invocation = if let Some(scanned) = &scanned
+    if let Some(scanned) = &scanned
         && scanned.invocation != InvocationOptions::default()
     {
         let mut options = options.clone();
         options.merge(scanned.invocation.clone())?;
-        merged = super::resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
-        &merged
-    } else {
-        invocation
-    };
+        *invocation =
+            super::resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
+    }
     let parsed = expanded
         .and_then(|(mut parsed, elevation)| {
             if let Some(scanned) = scanned {

@@ -593,6 +593,7 @@ fn staged_repl_line_validation_rejects_invalid_invocations_before_pipeline_execu
 
     for (line, needle) in cases {
         let mut state = make_state_with_plugins(empty_plugins());
+        state.runtime.ui.render_settings.format = OutputFormat::Table;
         let err = execute_repl_plugin_line(
             &mut state.runtime,
             &mut state.session,
@@ -675,6 +676,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
 
     for (line, expected) in dispatch_cases {
         let mut observed_state = make_state_with_plugins(empty_plugins());
+        observed_state.runtime.ui.render_settings.format = OutputFormat::Table;
         let observed = observe_dispatch_kind(&mut observed_state, &test_history(), line);
         assert_eq!(observed, expected, "line: {line}");
     }
@@ -709,6 +711,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
 #[test]
 fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     state.runtime.ui.debug_verbosity = 1;
     let history = test_history();
 
@@ -882,6 +885,7 @@ fn render_repl_command_output_handles_text_none_and_stderr_unit() {
 #[test]
 fn repl_unrelated_lines_clear_native_pagination_context_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = test_history();
     state
         .session

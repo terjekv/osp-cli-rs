@@ -263,6 +263,8 @@ fn execute_repl_plugin_line_with_acceptance(
             Ok(executed)
         }
         Err(err) => {
+            let fallback = crate::app::host::ErrorDisplaySettings::from(&runtime.ui);
+            let ui = crate::app::host::error_display_settings(&err).unwrap_or(&fallback);
             if runtime.ui.debug_verbosity > 0 {
                 session.record_prompt_timing(
                     runtime.ui.debug_verbosity,
@@ -272,7 +274,7 @@ fn execute_repl_plugin_line_with_acceptance(
                     None,
                 );
             }
-            let plain_settings = runtime.ui.render_settings.plain_copy_settings();
+            let plain_settings = ui.render_settings.plain_copy_settings();
             let summary = render_report_message(&err, ErrorDetail::Terse, &plain_settings);
             let mut doctor_command = None;
             if !is_repl_bang_request(&resolved)
@@ -290,16 +292,32 @@ fn execute_repl_plugin_line_with_acceptance(
                 };
                 session.record_failure_diagnostics(&resolved, summary.clone(), diagnostics);
             }
+            if ui.render_settings.format == crate::core::output::OutputFormat::Json {
+                sink.write_stdout(&crate::app::render_process_error(
+                    &err,
+                    ui.error_detail,
+                    &ui.render_settings,
+                    ui.message_verbosity,
+                ));
+                let mut executed = ExecutedReplLine::flat(
+                    ReplLineResult::Continue(String::new()),
+                    runtime.ui.debug_verbosity,
+                );
+                executed.exit_code = crate::app::classify_exit_code(&err);
+                return Ok(executed);
+            }
             let mut messages = MessageBuffer::default();
+            let detail = render_report_message(&err, ui.error_detail, &ui.render_settings);
             let visible_error = doctor_command
-                .map(|command| format!("{summary}\nMore: run `{command}` for more detail."))
-                .unwrap_or(summary);
+                .filter(|_| ui.error_detail == ErrorDetail::Terse)
+                .map(|command| format!("{detail}\nMore: run `{command}` for more detail."))
+                .unwrap_or(detail);
             messages.push_titled(MessageLevel::Error, "Command failed", visible_error);
             let rendered = crate::ui::render_messages(
                 runtime.config.resolved(),
-                &runtime.ui.render_settings,
+                &ui.render_settings,
                 &messages,
-                runtime.ui.message_verbosity,
+                ui.message_verbosity,
             );
             Err(miette!(rendered.trim_end().to_string()))
         }
@@ -476,7 +494,12 @@ fn execute_repl_line_plan(
             Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity))
         }
         ReplLinePlan::Command(dispatch) => {
-            let executed = execute_repl_command_dispatch_with_acceptance(
+            let ui = match dispatch.as_ref() {
+                ParsedReplDispatch::Help { effective, .. } => &effective.ui,
+                ParsedReplDispatch::Invocation(invocation) => &invocation.effective.ui,
+            };
+            let error_display = crate::app::host::ErrorDisplaySettings::from(ui);
+            execute_repl_command_dispatch_with_acceptance(
                 runtime,
                 session,
                 clients,
@@ -485,8 +508,9 @@ fn execute_repl_line_plan(
                 *dispatch,
                 sink,
                 accepted,
-            )?;
-            Ok(ExecutedReplLine::command(parse_finished, executed))
+            )
+            .map(|executed| ExecutedReplLine::command(parse_finished, executed))
+            .map_err(|err| crate::app::host::report_with_invocation(err, error_display))
         }
     }
 }

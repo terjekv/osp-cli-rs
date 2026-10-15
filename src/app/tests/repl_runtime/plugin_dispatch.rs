@@ -28,6 +28,7 @@ JSON
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
 
     let mut state = make_test_state(vec![dir.to_path_buf()]);
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
 
     let history = make_test_history(&mut state);
     let err = repl_dispatch::execute_repl_plugin_line(
@@ -164,6 +165,7 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
     let _alpha = write_provider_test_plugin(&dir, "alpha-provider", "hello", "alpha");
     let _beta = write_provider_test_plugin(&dir, "beta-provider", "hello", "beta");
     let mut state = make_test_state(vec![dir.to_path_buf()]);
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
     let err = repl_dispatch::execute_repl_plugin_line(
