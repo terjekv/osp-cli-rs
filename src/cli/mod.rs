@@ -266,7 +266,16 @@ pub struct CompletionsArgs {
 }
 
 pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
-    let mut command = Cli::command();
+    // Hidden commands are REPL-only or internal, so the scripts leave them out.
+    let full = Cli::command();
+    let mut command = clap::Command::new("osp")
+        .version(env!("CARGO_PKG_VERSION"))
+        .args(full.get_arguments().cloned())
+        .subcommands(
+            full.get_subcommands()
+                .filter(|subcommand| !subcommand.is_hide_set())
+                .cloned(),
+        );
     let mut output = Vec::new();
     clap_complete::generate(args.shell, &mut command, "osp", &mut output);
     String::from_utf8(output).unwrap_or_default()
