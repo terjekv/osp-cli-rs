@@ -633,7 +633,11 @@ impl OspHistoryStore {
             records.push(pending.record.clone());
             index
         });
-        let eligible = self.visible_record_indices_in(&records, shell_prefix);
+        let eligible = self
+            .visible_record_indices_in(&records, shell_prefix)
+            .into_iter()
+            .filter(|index| Some(*index) != pending_index)
+            .collect::<Vec<_>>();
         let to_remove = if keep == 0 {
             eligible
         } else if eligible.len() <= keep {
