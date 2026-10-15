@@ -303,6 +303,10 @@ pub(crate) fn run_compiled(
             output.meta.display_column_labels = None;
             output.meta.column_align.clear();
         }
+        output.meta.document_rows &= matches!(
+            stage.behavior().semantic_effect,
+            crate::dsl::compiled::SemanticEffect::Preserve
+        );
         preserve_guide &= matches!(
             stage.behavior().semantic_effect,
             crate::dsl::compiled::SemanticEffect::Preserve

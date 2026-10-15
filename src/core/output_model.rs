@@ -100,6 +100,8 @@ pub struct OutputMeta {
     /// a semantic document. Pipeline continuations preserve this identity;
     /// service field names alone must never set it.
     pub grouped: bool,
+    /// Rows explicitly produced by a semantic document, with section context.
+    pub document_rows: bool,
     /// Preferred renderer for this result, when known.
     pub render_recommendation: Option<RenderRecommendation>,
     /// Human-only complete lines supplied by a producer for presentation.
@@ -126,6 +128,8 @@ pub enum RenderRecommendation {
 /// Stable identity for a semantic payload carried through the output pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputDocumentKind {
+    /// Ordered semantic blocks for help, intro, and command reference.
+    Document,
     /// Structured guide/help/intro payload.
     Guide,
     /// Canonical JSON document supplied by a command implementation.
@@ -210,6 +214,7 @@ impl OutputResult {
                 column_align: Vec::new(),
                 wants_copy: false,
                 grouped: false,
+                document_rows: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

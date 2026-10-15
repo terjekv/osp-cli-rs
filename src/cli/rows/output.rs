@@ -61,6 +61,7 @@ pub(crate) fn plugin_data_to_output_result(
                 .unwrap_or_default(),
             wants_copy: false,
             grouped: false,
+            document_rows: false,
             render_recommendation: None,
             presentation_lines: meta
                 .map(|meta| meta.presentation_lines.clone())
@@ -429,6 +430,7 @@ mod tests {
                 column_align: Vec::new(),
                 wants_copy: false,
                 grouped: true,
+                document_rows: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

@@ -874,7 +874,8 @@ impl RenderSettings {
             return self.format;
         }
 
-        if crate::guide::GuideView::try_from_output_result(output).is_some()
+        if (output.meta.document_rows
+            || crate::guide::GuideView::try_from_output_result(output).is_some())
             && self.prefers_guide_rendering()
         {
             return OutputFormat::Guide;
@@ -1191,6 +1192,7 @@ mod tests {
                 column_align: Vec::new(),
                 wants_copy: false,
                 grouped: true,
+                document_rows: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

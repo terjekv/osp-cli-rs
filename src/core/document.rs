@@ -43,6 +43,52 @@ pub struct Document {
 }
 
 impl Document {
+    /// Projects blocks into canonical rows in document order.
+    pub fn rows(&self) -> Vec<crate::core::row::Row> {
+        fn append(blocks: &[DocBlock], section: &str, rows: &mut Vec<crate::core::row::Row>) {
+            for block in blocks {
+                match block {
+                    DocBlock::Section { title, blocks, .. } => append(blocks, title, rows),
+                    DocBlock::Entries { entries } => rows.extend(entries.iter().map(|entry| {
+                        crate::row! { "section" => section, "name" => entry.name.as_str(),
+                        "description" => entry.description.as_str() }
+                    })),
+                    DocBlock::Paragraph { text } => rows.extend(text.lines().map(|text| {
+                        crate::row! { "section" => section, "text" => text }
+                    })),
+                    DocBlock::List { items } => rows.extend(items.iter().map(|text| {
+                        crate::row! { "section" => section, "text" => format!("- {text}") }
+                    })),
+                    DocBlock::Data { value } => {
+                        rows.extend(
+                            crate::core::output_model::rows_from_value(value.clone())
+                                .into_iter()
+                                .map(|mut row| {
+                                    row.insert("section".into(), Value::String(section.into()));
+                                    row
+                                }),
+                        );
+                    }
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        append(&self.blocks, "", &mut rows);
+        rows
+    }
+
+    /// Keeps the unstaged document alongside its canonical row projection.
+    pub fn to_output_result(&self) -> crate::core::output_model::OutputResult {
+        use crate::core::output_model::{OutputDocument, OutputDocumentKind, OutputResult};
+        let mut output = OutputResult::from_rows(self.rows());
+        output.document = Some(OutputDocument::new(
+            OutputDocumentKind::Document,
+            serde_json::to_value(self).unwrap_or(Value::Null),
+        ));
+        output.meta.document_rows = true;
+        output
+    }
+
     /// Keeps sections available at `level`, preserving all other block order.
     pub fn filtered_for_help_level(&self, level: HelpLevel) -> Self {
         fn filter_blocks(blocks: &[DocBlock], level: HelpLevel) -> Vec<DocBlock> {

@@ -77,6 +77,52 @@ fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
     assert!(rendered.contains("## Options"));
     assert!(rendered.contains("- `--json` Emit JSON"));
     assert!(rendered.contains("- first\n- second"));
+    let document = Document {
+        blocks: vec![
+            DocBlock::Section {
+                title: "First".into(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "zebra".into(),
+                        description: "same".into(),
+                    }],
+                }],
+            },
+            DocBlock::Section {
+                title: "Second".into(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "apple".into(),
+                        description: "same".into(),
+                    }],
+                }],
+            },
+        ],
+    };
+    let output = crate::dsl::apply_output_pipeline(
+        document.to_output_result(),
+        &["S name".into(), "L 1".into(), "F name=apple".into()],
+    )
+    .unwrap();
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap()[0]["section"], "Second");
+    let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
+    settings.format_explicit = true;
+    let rendered = render_output(&output, &settings);
+    assert!(rendered.contains("## Second"));
+    assert!(!rendered.contains("First"));
+    let projected = crate::dsl::apply_output_pipeline(output, &["P name".into()]).unwrap();
+    assert!(!projected.meta.document_rows);
+    assert!(
+        render_output(
+            &projected,
+            &RenderSettings::test_plain(OutputFormat::Markdown)
+        )
+        .contains("| name")
+    );
 }
 
 #[test]
@@ -424,6 +470,7 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
             ],
             wants_copy: false,
             grouped: false,
+            document_rows: false,
             render_recommendation: None,
             presentation_lines: Vec::new(),
             progress_append: Vec::new(),
@@ -462,6 +509,7 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
             ],
             wants_copy: false,
             grouped: false,
+            document_rows: false,
             render_recommendation: None,
             presentation_lines: Vec::new(),
             progress_append: Vec::new(),
@@ -783,6 +831,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
             column_align: Vec::new(),
             wants_copy: false,
             grouped: true,
+            document_rows: false,
             render_recommendation: None,
             presentation_lines: Vec::new(),
             progress_append: Vec::new(),

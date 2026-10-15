@@ -97,6 +97,27 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         _ => (output, None),
     };
 
+    if output.meta.document_rows
+        && matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown)
+    {
+        let mut doc = match output
+            .document
+            .as_ref()
+            .filter(|doc| doc.kind == OutputDocumentKind::Document)
+        {
+            Some(document) => serde_json::from_value::<Document>(document.value.clone())
+                .map(|document| lower_document(&document, plan.format, plan.settings.indent_size))
+                .unwrap_or_default(),
+            None => lower_document_rows(
+                output.as_rows().unwrap_or_default(),
+                plan.format,
+                plan.settings.indent_size,
+            ),
+        };
+        sanitize_doc(&mut doc);
+        return doc;
+    }
+
     let guide = GuideView::try_from_output_result(output);
 
     // Human projection is deliberately downstream of filtering and JSON output.
@@ -205,6 +226,82 @@ pub(crate) fn lower_document(document: &Document, format: OutputFormat, indent_s
     Doc {
         blocks: lower_document_blocks(&document.blocks, format, indent_size),
     }
+}
+
+fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -> Doc {
+    let mut blocks = Vec::new();
+    let mut start = 0;
+    while start < rows.len() {
+        let section = rows[start]
+            .get("section")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let end = start
+            + rows[start..]
+                .iter()
+                .take_while(|row| {
+                    row.get("section").and_then(Value::as_str).unwrap_or("") == section
+                })
+                .count();
+        let mut body = Vec::new();
+        for row in &rows[start..end] {
+            if row.len() == 3
+                && row.contains_key("description")
+                && let Some(name) = row.get("name").and_then(Value::as_str)
+            {
+                let entry = EntryRow {
+                    key: name.into(),
+                    value: row
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .into(),
+                    indent_hint: None,
+                    gap_hint: None,
+                };
+                if let Some(Block::Entries(entries)) = body.last_mut() {
+                    entries.rows.push(entry);
+                } else {
+                    body.push(Block::Entries(EntriesBlock {
+                        default_indent: " ".repeat(indent_size),
+                        default_gap: None,
+                        rows: vec![entry],
+                    }));
+                }
+            } else if row.len() == 2
+                && let Some(text) = row.get("text").and_then(Value::as_str)
+            {
+                body.push(Block::Paragraph(ParagraphBlock {
+                    text: text.into(),
+                    indent: 0,
+                    inline_markup: true,
+                }));
+            } else {
+                let mut data = row.clone();
+                data.remove("section");
+                body.extend(lower_value_blocks(&Value::Object(data)));
+            }
+        }
+        let next = if section.is_empty() {
+            body
+        } else {
+            vec![Block::Section(SectionBlock {
+                title: Some(section.into()),
+                title_chrome: if format == OutputFormat::Markdown {
+                    SectionTitleChrome::Ruled
+                } else {
+                    SectionTitleChrome::Plain
+                },
+                body_indent: 0,
+                inline_title_suffix: None,
+                trailing_newline: false,
+                blocks: body,
+            })]
+        };
+        extend_with_blank_between(&mut blocks, next);
+        start = end;
+    }
+    Doc { blocks }
 }
 
 fn lower_document_blocks(
@@ -635,11 +732,12 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
-    if let Some(document) = output
-        .document
-        .as_ref()
-        .filter(|document| document.kind == OutputDocumentKind::Json)
-    {
+    if let Some(document) = output.document.as_ref().filter(|document| {
+        matches!(
+            document.kind,
+            OutputDocumentKind::Json | OutputDocumentKind::Document
+        )
+    }) {
         return document.value.clone();
     }
     match &output.items {
