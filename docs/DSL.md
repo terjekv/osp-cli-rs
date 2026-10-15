@@ -200,10 +200,11 @@ replace its member rows.
 ## Groups and empty selections
 
 `G` keeps group keys, aggregate values and member rows distinct. A field
-holding a list of plain values groups like `field[]`: each element is its own
-group, so a host with two siteadmins counts under both. A row joins each group
-once even if a list repeats an element. Group header names must be distinct
-after aliases resolve. Lists of objects still need a leaf field.
+holding a list of plain values groups like `field[]`: each element is its
+own group, so a host with two siteadmins counts under both. A row joins each
+group once even if a list repeats an element. An empty list joins the
+null/missing-value group, as does explicit `field[]`. Group header names must
+be distinct after aliases resolve. Lists of objects still need a leaf field.
 Row operations such as `P`, `U`, `VALUE`, quick search and clean run within
 each partition.
 `F` tests matching header/aggregate fields first; otherwise it filters members

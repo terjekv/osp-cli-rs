@@ -189,6 +189,16 @@ fn resolve_group_pairs(row: &Row, key_plan: &GroupKeyPlan) -> Result<Vec<(String
         return Ok(enumerate_path_values(&nested, &expr));
     }
 
+    if !key_plan.key_spec.existence
+        && !key_plan.allow_multiple
+        && let Some(flat_hint) = &key_plan.flat_hint
+        && row
+            .get(flat_hint)
+            .is_some_and(|value| matches!(value, Value::Array(items) if items.is_empty()))
+    {
+        return Ok(Vec::new());
+    }
+
     let matches = match_row_keys_detailed(row, &key_plan.key_spec.token, key_plan.key_spec.exact);
     let mut keys = select_match_keys(&matches, key_plan.key_spec.exact);
 
