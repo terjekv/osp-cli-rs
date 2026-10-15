@@ -1220,7 +1220,7 @@ impl PluginManager {
                 }
                 Ok(ProviderResolution::Ambiguous(providers)) => {
                     let provider_labels = provider_labels(&providers);
-                    tracing::warn!(
+                    tracing::debug!(
                         command = %command,
                         providers = provider_labels.join(", "),
                         "plugin command requires explicit provider selection"
@@ -1235,7 +1235,7 @@ impl PluginManager {
                     providers,
                 }) => {
                     let provider_labels = provider_labels(&providers);
-                    tracing::warn!(
+                    tracing::debug!(
                         command = %command,
                         requested_provider = %requested_provider,
                         providers = provider_labels.join(", "),
@@ -1251,7 +1251,7 @@ impl PluginManager {
                     requested_provider,
                     issue,
                 }) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         command = %command,
                         requested_provider = %requested_provider,
                         issue = %issue,
@@ -1263,9 +1263,8 @@ impl PluginManager {
                     })
                 }
                 Err(ProviderResolutionError::CommandNotFound) => {
-                    // The dispatch error below is already rendered for the
-                    // user; a WARN here duplicates it as a raw log line on
-                    // stderr for every mistyped command.
+                    // The dispatch error below is rendered for the user, so
+                    // keep this developer context at debug level.
                     tracing::debug!(
                         command = %command,
                         active_plugins = view.healthy_plugins().len(),

@@ -129,7 +129,7 @@ impl ExecutedPluginCommand {
 
     fn into_response(self, command: &str) -> std::result::Result<ResponseV1, PluginDispatchError> {
         if self.raw.status_code != 0 {
-            tracing::warn!(
+            tracing::debug!(
                 plugin_id = %self.provider.plugin_id,
                 command = %command,
                 status_code = self.raw.status_code,
@@ -145,7 +145,7 @@ impl ExecutedPluginCommand {
 
         let mut response: ResponseV1 =
             serde_json::from_slice(&self.raw.stdout).map_err(|source| {
-                tracing::warn!(
+                tracing::debug!(
                     plugin_id = %self.provider.plugin_id,
                     command = %command,
                     error = %source,
@@ -158,7 +158,7 @@ impl ExecutedPluginCommand {
             })?;
 
         response.validate_v1().map_err(|reason| {
-            tracing::warn!(
+            tracing::debug!(
                 plugin_id = %self.provider.plugin_id,
                 command = %command,
                 reason = %reason,
@@ -296,7 +296,7 @@ pub(super) fn finish_describe(
 ) -> Result<DescribeV1> {
     let output = capture.output.map_err(|err| match err {
         CommandRunError::Execute(source) => {
-            tracing::warn!(
+            tracing::debug!(
                 executable = %path.display(),
                 error = %source,
                 "plugin describe execution failed"
@@ -308,7 +308,7 @@ pub(super) fn finish_describe(
         }
         CommandRunError::TimedOut { timeout, stderr } => {
             let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
-            tracing::warn!(
+            tracing::debug!(
                 executable = %path.display(),
                 timeout_ms = timeout.as_millis(),
                 stderr = %stderr,
@@ -395,7 +395,7 @@ pub(super) fn run_provider(
 
     let output = run_command_with_timeout(command, timeout).map_err(|err| match err {
         CommandRunError::Execute(source) => {
-            tracing::warn!(
+            tracing::debug!(
                 plugin_id = %provider.plugin_id,
                 executable = %provider.executable.display(),
                 command = %selected_command,
@@ -409,7 +409,7 @@ pub(super) fn run_provider(
         }
         CommandRunError::TimedOut { timeout, stderr } => {
             let stderr_text = String::from_utf8_lossy(&stderr).to_string();
-            tracing::warn!(
+            tracing::debug!(
                 plugin_id = %provider.plugin_id,
                 executable = %provider.executable.display(),
                 command = %selected_command,
