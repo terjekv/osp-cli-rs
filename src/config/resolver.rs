@@ -297,7 +297,9 @@ impl ConfigResolver {
         // Aliases are selected with the same precedence rules so explain can
         // still show their winning raw source, but they stay out of ordinary
         // runtime interpolation and schema validation.
-        let alias_values = Self::drain_alias_values(&mut pre_interpolated);
+        let alias_values = pre_interpolated
+            .extract_if(.., |key, _| is_alias_key(key))
+            .collect::<BTreeMap<_, _>>();
         // Keep both snapshots: normal resolution only needs `final_values`, but
         // `config explain` needs the selected raw winners alongside the final
         // interpolated/adapted view.
@@ -369,23 +371,6 @@ impl ConfigResolver {
         }
 
         keys
-    }
-
-    fn drain_alias_values(
-        values: &mut BTreeMap<String, ResolvedValue>,
-    ) -> BTreeMap<String, ResolvedValue> {
-        let alias_keys = values
-            .keys()
-            .filter(|key| is_alias_key(key))
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut aliases = BTreeMap::new();
-        for key in alias_keys {
-            if let Some(value) = values.remove(&key) {
-                aliases.insert(key, value);
-            }
-        }
-        aliases
     }
 
     fn select_across_layers<'a>(
