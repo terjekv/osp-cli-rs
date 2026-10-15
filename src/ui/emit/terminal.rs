@@ -476,19 +476,26 @@ fn table_cell_lines(raw: &str, width: usize, overflow: TableOverflow) -> Vec<Str
         return vec![String::new()];
     }
     match overflow {
-        TableOverflow::None => vec![raw.to_string()],
-        TableOverflow::Clip => vec![crop_display_width(raw, width)],
+        TableOverflow::None => vec![escape_table_line_breaks(raw)],
+        TableOverflow::Clip => vec![crop_display_width(&escape_table_line_breaks(raw), width)],
         TableOverflow::Ellipsis => {
-            if UnicodeWidthStr::width(raw) <= width {
-                vec![raw.to_string()]
+            let raw = escape_table_line_breaks(raw);
+            if UnicodeWidthStr::width(raw.as_str()) <= width {
+                vec![raw]
             } else if width == 1 {
                 vec!["…".to_string()]
             } else {
-                vec![format!("{}…", crop_display_width(raw, width - 1))]
+                vec![format!("{}…", crop_display_width(&raw, width - 1))]
             }
         }
         TableOverflow::Wrap => wrap_display_width(raw, width),
     }
+}
+
+fn escape_table_line_breaks(raw: &str) -> String {
+    raw.replace("\r\n", "\\n")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn format_summary(
