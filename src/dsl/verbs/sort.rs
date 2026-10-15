@@ -41,15 +41,13 @@ pub(crate) fn apply_set(
     plan: &SortPlan,
 ) -> Result<crate::dsl::model::RowSet> {
     if set.grouped {
-        validate_group_keys(&set.partitions, plan)?;
-        set.partitions
-            .sort_by(|left, right| compare_groups(left, right, &plan.keys));
+        set.partitions = sort_items(set.partitions, plan, resolve_group_value)?;
         Ok(set)
     } else {
-        set.map_rows(|mut rows| {
-            validate_keys(&rows, plan)?;
-            rows.sort_by(|left, right| compare_rows(left, right, &plan.keys));
-            Ok(rows)
+        set.map_rows(|rows| {
+            sort_items(rows, plan, |row, key| {
+                resolve_first_value(row, &key.key_spec.token, key.key_spec.exact)
+            })
         })
     }
 }
@@ -67,36 +65,32 @@ fn apply_value_with_plan(value: Value, plan: &SortPlan) -> Result<Value> {
     )
 }
 
-fn validate_keys(rows: &[Row], plan: &SortPlan) -> Result<()> {
-    for key in &plan.keys {
-        if !rows.is_empty()
-            && !rows.iter().any(|row| {
-                resolve_first_value(row, &key.key_spec.token, key.key_spec.exact).is_some()
-            })
-        {
-            return Err(anyhow!(
-                "S: field '{}' is absent from all rows",
-                key.key_spec.token
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn validate_group_keys(groups: &[Group], plan: &SortPlan) -> Result<()> {
-    for key in &plan.keys {
-        if !groups.is_empty()
-            && !groups
+fn sort_items<T>(
+    items: Vec<T>,
+    plan: &SortPlan,
+    resolve: impl Fn(&T, &SortKeySpec) -> Option<Value>,
+) -> Result<Vec<T>> {
+    let mut keyed = items
+        .into_iter()
+        .map(|item| {
+            let values = plan
+                .keys
                 .iter()
-                .any(|group| resolve_group_value(group, key).is_some())
-        {
+                .map(|key| resolve(&item, key))
+                .collect::<Vec<_>>();
+            (item, values)
+        })
+        .collect::<Vec<_>>();
+    for (index, key) in plan.keys.iter().enumerate() {
+        if !keyed.is_empty() && !keyed.iter().any(|(_, values)| values[index].is_some()) {
             return Err(anyhow!(
                 "S: field '{}' is absent from all rows",
                 key.key_spec.token
             ));
         }
     }
-    Ok(())
+    keyed.sort_by(|(_, left), (_, right)| compare_keys(left, right, &plan.keys));
+    Ok(keyed.into_iter().map(|(item, _)| item).collect())
 }
 
 fn parse_sort_spec(spec: &str) -> Result<Vec<SortKeySpec>> {
@@ -166,41 +160,17 @@ fn parse_sort_cast(raw: &str) -> Result<SortCast> {
     }
 }
 
-fn compare_rows(left: &Row, right: &Row, keys: &[SortKeySpec]) -> Ordering {
-    for key in keys {
-        let left_value = resolve_first_value(left, &key.key_spec.token, key.key_spec.exact);
-        let right_value = resolve_first_value(right, &key.key_spec.token, key.key_spec.exact);
-
+fn compare_keys(left: &[Option<Value>], right: &[Option<Value>], keys: &[SortKeySpec]) -> Ordering {
+    for ((left_value, right_value), key) in left.iter().zip(right).zip(keys) {
         let mut ordering =
             compare_optional_values(left_value.as_ref(), right_value.as_ref(), key.cast);
         if key.descending && left_value.is_some() && right_value.is_some() {
             ordering = ordering.reverse();
         }
-
         if ordering != Ordering::Equal {
             return ordering;
         }
     }
-
-    Ordering::Equal
-}
-
-fn compare_groups(left: &Group, right: &Group, keys: &[SortKeySpec]) -> Ordering {
-    for key in keys {
-        let left_value = resolve_group_value(left, key);
-        let right_value = resolve_group_value(right, key);
-
-        let mut ordering =
-            compare_optional_values(left_value.as_ref(), right_value.as_ref(), key.cast);
-        if key.descending && left_value.is_some() && right_value.is_some() {
-            ordering = ordering.reverse();
-        }
-
-        if ordering != Ordering::Equal {
-            return ordering;
-        }
-    }
-
     Ordering::Equal
 }
 
