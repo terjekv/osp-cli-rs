@@ -125,20 +125,13 @@ fn parse_aggregate_spec(spec: &str) -> Result<AggregateSpec> {
     let (function, mut column_raw, from_parenthesized) = parse_function_and_column(&words[0])?;
     let mut index = 1usize;
 
-    if column_raw.is_none() && index < words.len() {
-        if function == AggregateFn::Count && words.len() == 2 {
-        } else if !words[index].eq_ignore_ascii_case("AS") {
-            column_raw = Some(words[index].clone());
-            index += 1;
-        }
+    if column_raw.is_none() && index < words.len() && !words[index].eq_ignore_ascii_case("AS") {
+        column_raw = Some(words[index].clone());
+        index += 1;
     }
 
     let alias = if let Some(alias) = parse_alias_after_as(&words, index, "A")? {
         index += 2;
-        alias
-    } else if index < words.len() {
-        let alias = words[index].clone();
-        index += 1;
         alias
     } else if let Some(column) = &column_raw {
         if from_parenthesized {

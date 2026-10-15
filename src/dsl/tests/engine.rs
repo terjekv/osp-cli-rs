@@ -416,8 +416,11 @@ fn apply_output_pipeline_covers_explicit_materializing_row_stages_unit() {
     assert!(grouped.meta.grouped);
 
     let aggregated =
-        apply_pipeline(rows.clone(), &["A count total".to_string()]).expect("aggregate works");
-    assert!(!output_rows(&aggregated).is_empty());
+        apply_pipeline(rows.clone(), &["A count AS total".to_string()]).expect("aggregate works");
+    assert_eq!(
+        output_rows(&aggregated),
+        &[json!({"total": 3}).as_object().cloned().expect("object")]
+    );
 
     let counted = apply_pipeline(rows.clone(), &["C".to_string()]).expect("count works");
     assert_eq!(output_rows(&counted).len(), 1);

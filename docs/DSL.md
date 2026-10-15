@@ -207,6 +207,9 @@ group keys. `A count` follows the same empty-selection rule. Empty numeric
 sum/average are zero; minimum/maximum are null. `G` alone over empty input
 produces no groups.
 
+`A count field` and `A count(field)` count non-null field values. Use `AS`
+to name an aggregate, for example `A count AS total` to count all rows.
+
 ## Human tables
 
 Null and empty arrays render blank; lists render as readable comma-separated
