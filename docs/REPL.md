@@ -112,10 +112,10 @@ The REPL is useful because it keeps a few things alive across commands:
 - session context published by native commands and plugins
 
 Use `context` to inspect the latest value for each subject kind. Rows include
-the kind, value, command path, and UTC update time. `context clear` removes all
-entries; `context clear host` removes only the `host` entry. The command accepts
-normal output flags and DSL pipes, for example `context --json` or
-`context | F kind == 'host'`.
+the kind, value, command path, and update time (stored in UTC, shown in local
+time). `context clear` removes all entries; `context clear host` removes only
+the `host` entry. The command accepts normal output flags and DSL pipes, for
+example `context --json` or `context | F kind == 'host'`.
 
 Context exists only in the REPL process, so `osp context` is not useful as a
 one-shot command and is restricted to the REPL. Entries survive config-driven

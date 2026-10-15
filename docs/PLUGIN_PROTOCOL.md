@@ -138,6 +138,8 @@ Rules:
 - For a successful response, `context` updates the active REPL session. The
   host records the selected command path and UTC update time, keeping only the
   latest value for each kind. Failed responses do not update session context.
+- Kinds are case-insensitive and stored lowercase. An empty value clears that
+  kind.
 - `context` is independent of `meta`, which controls output presentation.
 - `meta.columns` controls column order when the payload is rendered as a table.
 - With `meta.row_path`, column entries may be dotted paths into each row, such

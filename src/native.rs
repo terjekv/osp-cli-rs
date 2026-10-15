@@ -341,7 +341,12 @@ impl NativeSessionContext {
         value: impl Into<String>,
         prompt_label: Option<String>,
     ) {
-        let kind = kind.into();
+        let kind = context_kind(&kind.into());
+        let value = value.into();
+        if value.trim().is_empty() {
+            self.clear_context(Some(&kind));
+            return;
+        }
         let command = self.command_path.as_deref().unwrap_or("native").to_string();
         let when = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         if let Ok(mut entries) = self.context_entries.write() {
@@ -354,7 +359,7 @@ impl NativeSessionContext {
                     when: when.clone(),
                     prompt_label: None,
                 });
-            entry.value = value.into();
+            entry.value = value;
             entry.command = command;
             entry.when = when;
             if prompt_label.is_some() {
@@ -374,9 +379,9 @@ impl NativeSessionContext {
     /// Clears all context values, or only the named kind.
     pub fn clear_context(&self, kind: Option<&str>) {
         if let Ok(mut entries) = self.context_entries.write() {
-            match kind {
+            match kind.map(context_kind) {
                 Some(kind) if !kind.is_empty() => {
-                    entries.remove(kind);
+                    entries.remove(&kind);
                 }
                 Some(_) => {}
                 None => entries.clear(),
@@ -502,6 +507,11 @@ impl NativeSessionContext {
         self.completion_refresh_requested
             .swap(false, Ordering::AcqRel)
     }
+}
+
+/// Context kinds compare like command names: trimmed and lowercase.
+fn context_kind(kind: &str) -> String {
+    kind.trim().to_lowercase()
 }
 
 /// Result of executing a native command.
