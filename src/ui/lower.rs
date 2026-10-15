@@ -847,7 +847,7 @@ fn lower_markdown_doc(output: &OutputResult) -> Doc {
         OutputItems::Rows(rows) if rows.len() == 1 && row_has_nested_values(&rows[0]) => Doc {
             blocks: vec![Block::KeyValue(key_value_from_map(
                 &rows[0],
-                Some(&output.meta.key_index),
+                &output.meta.key_index,
             ))],
         },
         _ => lower_table_doc(output),
@@ -884,7 +884,7 @@ fn lower_mreg_doc(output: &OutputResult) -> Doc {
         OutputItems::Rows(rows) if rows.len() == 1 => Doc {
             blocks: vec![Block::KeyValue(key_value_from_map(
                 &rows[0],
-                Some(&output.meta.key_index),
+                &output.meta.key_index,
             ))],
         },
         _ => lower_table_doc(output),
@@ -912,37 +912,27 @@ fn lower_value_blocks(value: &Value) -> Vec<Block> {
                 auto_grid: false,
             })]
         }
-        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, None))],
+        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
     }
 }
 
-fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
+fn ordered_keys<'a>(
+    preferred_keys: &'a [String],
+    keys: impl IntoIterator<Item = &'a String>,
+) -> impl Iterator<Item = &'a String> {
     let mut seen = BTreeSet::new();
+    preferred_keys
+        .iter()
+        .chain(keys)
+        .filter(move |key| seen.insert(*key))
+}
 
-    for key in key_order {
-        if !seen.insert(key.clone()) {
-            continue;
-        }
-        if let Some(value) = row.get(key)
-            && !value.is_null()
-        {
-            out.push(display_value(value));
-        }
-    }
-
-    for key in row.keys() {
-        if seen.contains(key) {
-            continue;
-        }
-        if let Some(value) = row.get(key)
-            && !value.is_null()
-        {
-            out.push(display_value(value));
-        }
-    }
-
-    out
+fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
+    ordered_keys(key_order, row.keys())
+        .filter_map(|key| row.get(key))
+        .filter(|value| !value.is_null())
+        .map(display_value)
+        .collect()
 }
 
 fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
@@ -981,9 +971,7 @@ fn help_layout_blocks_from_value(
         Value::Object(map) if should_render_as_key_value_group(map) => {
             vec![Block::KeyValue(key_value_from_document_data_map(map))]
         }
-        Value::Object(map) => vec![Block::KeyValue(KeyValueBlock {
-            rows: key_value_from_map(map, None).rows,
-        })],
+        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
         Value::Array(items) if items.is_empty() => Vec::new(),
         Value::Array(items) => {
             if let Some(entries) = items
@@ -1032,38 +1020,19 @@ fn push_blank_lines(blocks: &mut Vec<Block>, count: usize) {
     blocks.extend((0..count).map(|_| Block::Blank));
 }
 
-fn key_value_from_map(
-    map: &Map<String, Value>,
-    preferred_keys: Option<&[String]>,
-) -> KeyValueBlock {
-    let mut rows = Vec::new();
-    let mut seen = BTreeSet::new();
-    if let Some(order) = preferred_keys {
-        for key in order {
-            if seen.insert(key.clone())
-                && let Some(value) = map.get(key)
-            {
-                rows.push(KeyValueRow {
+fn key_value_from_map(map: &Map<String, Value>, preferred_keys: &[String]) -> KeyValueBlock {
+    KeyValueBlock {
+        rows: ordered_keys(preferred_keys, map.keys())
+            .filter_map(|key| {
+                map.get(key).map(|value| KeyValueRow {
                     key: key.clone(),
                     value: lower_key_value_value(value, false),
                     indent: None,
                     gap: None,
-                });
-            }
-        }
+                })
+            })
+            .collect(),
     }
-    for (key, value) in map {
-        if seen.insert(key.clone()) {
-            rows.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-
-    KeyValueBlock { rows }
 }
 
 #[derive(Debug, Default)]
@@ -1112,16 +1081,8 @@ impl MregRecordBuilder {
 
 fn mreg_record_blocks(map: &Map<String, Value>, preferred_keys: &[String]) -> Vec<Block> {
     let mut builder = MregRecordBuilder::default();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone())
-            && let Some(value) = map.get(key)
-        {
-            visit_mreg_record_field(&mut builder, key, value, 0);
-        }
-    }
-    for (key, value) in map {
-        if seen.insert(key.clone()) {
+    for key in ordered_keys(preferred_keys, map.keys()) {
+        if let Some(value) = map.get(key) {
             visit_mreg_record_field(&mut builder, key, value, 0);
         }
     }
@@ -1182,7 +1143,7 @@ fn lower_key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
                 .map(|item| lower_key_value_value(item, false))
                 .collect(),
         ),
-        Value::Object(map) => KeyValueValue::Object(key_value_from_map(map, None).rows),
+        Value::Object(map) => KeyValueValue::Object(key_value_from_map(map, &[]).rows),
     }
 }
 
@@ -1249,31 +1210,11 @@ fn table_from_group(
 ) -> TableBlock {
     let merged_rows = group_rows(group);
     let mut summary = Vec::new();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone())
-            && let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key))
-        {
-            summary.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-    for (key, value) in &group.groups {
-        if seen.insert(key.clone()) {
-            summary.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-    for (key, value) in &group.aggregates {
-        if seen.insert(key.clone()) {
+    for key in ordered_keys(
+        preferred_keys,
+        group.groups.keys().chain(group.aggregates.keys()),
+    ) {
+        if let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key)) {
             summary.push(KeyValueRow {
                 key: key.clone(),
                 value: lower_key_value_value(value, false),
@@ -1288,21 +1229,9 @@ fn table_from_group(
 }
 
 fn headers_for_rows(rows: &[Row], preferred_keys: &[String]) -> Vec<String> {
-    let mut headers = Vec::new();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone()) {
-            headers.push(key.clone());
-        }
-    }
-    for row in rows {
-        for key in row.keys() {
-            if seen.insert(key.clone()) {
-                headers.push(key.clone());
-            }
-        }
-    }
-    headers
+    ordered_keys(preferred_keys, rows.iter().flat_map(Row::keys))
+        .cloned()
+        .collect()
 }
 
 fn table_from_value_array(items: &[Value]) -> Option<TableBlock> {
