@@ -9,7 +9,6 @@ use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs, ThemeUseArgs};
 use crate::config::{ConfigLayer, Scope};
 use crate::core::command_def::{ArgDef, CommandDef, ValueChoice};
-use crate::core::output_model::{OutputDocument, OutputDocumentKind};
 use crate::core::row::Row;
 use crate::ui::theme::{DEFAULT_THEME_NAME, normalize_theme_name};
 use crate::ui::theme_catalog::{ThemeCatalog, ThemeSource};
@@ -39,21 +38,9 @@ pub(crate) fn run_theme_command(
     match args.command {
         ThemeCommands::List => {
             let rows = theme_list_rows(context.themes, &context.ui.render_settings.theme_name);
-            let display_rows = rows
-                .iter()
-                .map(|row| {
-                    crate::row! {
-                        "name" => row.get("name").cloned().unwrap_or_default(),
-                        "source" => row.get("source").cloned().unwrap_or_default(),
-                        "status" => row.get("status").cloned().unwrap_or_default(),
-                    }
-                })
-                .collect();
-            let document =
-                serde_json::Value::Array(rows.into_iter().map(serde_json::Value::Object).collect());
-            let mut output = rows_to_output_result(display_rows);
-            output.document = Some(OutputDocument::new(OutputDocumentKind::Json, document));
-            output.meta.key_index = ["name", "source", "status"].map(str::to_string).to_vec();
+            let mut output = rows_to_output_result(rows);
+            output.meta.display_columns =
+                Some(["name", "source", "status"].map(str::to_string).to_vec());
             Ok(CliCommandResult::output(output, None))
         }
         ThemeCommands::Show(ThemeShowArgs { name }) => {

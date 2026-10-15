@@ -8,7 +8,6 @@ use crate::config::{
     ConfigValue, DEFAULT_REPL_HISTORY_MAX_ENTRIES, ResolvedConfig, RuntimeDefaults,
 };
 use crate::core::command_def::{CommandDef, FlagDef};
-use crate::core::output_model::{OutputDocument, OutputDocumentKind};
 use crate::core::row::Row;
 use crate::repl::{HistoryConfig, HistoryEntry, SharedHistory};
 use crate::ui::theme::DEFAULT_THEME_NAME;
@@ -181,20 +180,8 @@ pub(crate) fn run_history_repl_command(
                 .collect::<Vec<_>>();
             entries.reverse();
             let rows = history_entries_rows(entries);
-            let display_rows = rows
-                .iter()
-                .map(|row| {
-                    crate::row! {
-                        "id" => row.get("id").cloned().unwrap_or_default(),
-                        "command" => row.get("command").cloned().unwrap_or_default(),
-                    }
-                })
-                .collect();
-            let document =
-                serde_json::Value::Array(rows.into_iter().map(serde_json::Value::Object).collect());
-            let mut output = rows_to_output_result(display_rows);
-            output.document = Some(OutputDocument::new(OutputDocumentKind::Json, document));
-            output.meta.key_index = ["id", "command"].map(str::to_string).to_vec();
+            let mut output = rows_to_output_result(rows);
+            output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
             Ok(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
                     source_document: None,
@@ -517,7 +504,7 @@ mod tests {
                 let rows = output.output.into_rows().expect("list should produce rows");
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0]["command"], Value::String("config show".to_string()));
-                assert!(!rows[0].contains_key("timestamp_ms"));
+                assert!(rows[0].contains_key("timestamp_ms"));
             }
             other => panic!("unexpected history list output: {other:?}"),
         }
