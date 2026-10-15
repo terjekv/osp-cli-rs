@@ -23,6 +23,9 @@ REPL stay outside.
 
 ## Boundaries
 
+- Uncached describes run in batches of at most four per search root. Results,
+  warnings, and cache updates retain scan order; passive PATH discovery still
+  uses cached metadata only.
 - The wire format lives in `core/plugin.rs` and `docs/PLUGIN_PROTOCOL.md`.
   Change both together and bump the protocol version for breaking changes.
 - In-process commands that should look like plugins use `native`, not a

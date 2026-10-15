@@ -218,7 +218,17 @@ impl PluginManager {
     }
 }
 
+pub(super) struct DescribeOutput {
+    elapsed: Duration,
+    output: Result<CommandOutput, CommandRunError>,
+}
+
+#[cfg(test)]
 pub(super) fn describe_plugin(path: &std::path::Path, timeout: Duration) -> Result<DescribeV1> {
+    finish_describe(capture_describe(path, timeout), path)
+}
+
+pub(super) fn capture_describe(path: &std::path::Path, timeout: Duration) -> DescribeOutput {
     let _phase =
         crate::startup_trace::phase_with_name(|| format!("plugin --describe {}", path.display()));
     let mut command = Command::new(path);
@@ -230,7 +240,18 @@ pub(super) fn describe_plugin(path: &std::path::Path, timeout: Duration) -> Resu
         timeout_ms = timeout.as_millis(),
         "running plugin describe"
     );
-    let output = run_command_with_timeout(command, timeout).map_err(|err| match err {
+    let output = run_command_with_timeout(command, timeout);
+    DescribeOutput {
+        elapsed: started_at.elapsed(),
+        output,
+    }
+}
+
+pub(super) fn finish_describe(
+    capture: DescribeOutput,
+    path: &std::path::Path,
+) -> Result<DescribeV1> {
+    let output = capture.output.map_err(|err| match err {
         CommandRunError::Execute(source) => {
             tracing::warn!(
                 executable = %path.display(),
@@ -273,7 +294,7 @@ pub(super) fn describe_plugin(path: &std::path::Path, timeout: Duration) -> Resu
 
     tracing::debug!(
         executable = %path.display(),
-        elapsed_ms = started_at.elapsed().as_millis(),
+        elapsed_ms = capture.elapsed.as_millis(),
         status = ?output.status.code(),
         "plugin describe completed"
     );

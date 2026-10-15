@@ -20,10 +20,12 @@ use std::fmt::Write as FmtWrite;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, UNIX_EPOCH};
 
 const PLUGIN_EXECUTABLE_PREFIX: &str = "osp-";
 const BUNDLED_MANIFEST_FILE: &str = "manifest.toml";
+const MAX_CONCURRENT_DESCRIBES: usize = 4;
 
 #[derive(Debug, Clone)]
 pub(super) struct SearchRoot {
@@ -66,11 +68,6 @@ pub(super) enum ManifestState {
     Missing,
     Invalid(String),
     Valid(ValidatedBundledManifest),
-}
-
-enum DescribeEligibility {
-    Allowed,
-    Skip,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,18 +463,32 @@ fn discover_plugins_in_root(
     policy: DiscoveryPolicy,
 ) -> Vec<DiscoveredPlugin> {
     let manifest_state = load_manifest_state(root);
-    let plugins = seed_root_candidates(root, &manifest_state, seen_paths)
+    let mut candidates = seed_root_candidates(root, &manifest_state, seen_paths)
         .into_iter()
-        .map(|candidate| {
-            finalize_seeded_candidate(
-                candidate,
+        .peekable();
+    let mut plugins = Vec::new();
+    while candidates.peek().is_some() {
+        let mut pending = Vec::new();
+        let mut keys = HashSet::new();
+        // Publish each batch in scan order. Aliases of the same cache key wait
+        // for the earlier candidate, just as they do during a serial scan.
+        while let Some(mut candidate) = candidates.next_if(|candidate| {
+            pending.len() < MAX_CONCURRENT_DESCRIBES
+                && keys.insert(describe_cache_key(&candidate.plugin.executable))
+        }) {
+            let describe = prepare_describe(
+                &mut candidate,
                 &manifest_state,
                 describe_cache,
                 process_timeout,
                 policy,
-            )
-        })
-        .collect::<Vec<_>>();
+            );
+            pending.push((candidate, describe));
+        }
+        plugins.extend(pending.into_iter().map(|(candidate, describe)| {
+            finalize_seeded_candidate(candidate, describe, describe_cache, process_timeout)
+        }));
+    }
 
     tracing::debug!(
         root = %root.path.display(),
@@ -554,12 +565,19 @@ pub(super) fn assemble_discovered_plugin(
         seen_paths: std::mem::take(seen_describe_paths),
         dirty: *cache_dirty,
     };
-    let plugin = finalize_seeded_candidate(
-        seed_plugin_candidate(source, executable, manifest_state),
+    let mut candidate = seed_plugin_candidate(source, executable, manifest_state);
+    let describe = prepare_describe(
+        &mut candidate,
         manifest_state,
         &mut describe_cache_session,
         process_timeout,
         DiscoveryPolicy::Passive,
+    );
+    let plugin = finalize_seeded_candidate(
+        candidate,
+        describe,
+        &mut describe_cache_session,
+        process_timeout,
     );
     *describe_cache = describe_cache_session.file;
     *seen_describe_paths = describe_cache_session.seen_paths;
@@ -598,33 +616,47 @@ fn seed_plugin_candidate(
     }
 }
 
-fn finalize_seeded_candidate(
-    mut candidate: SeededPluginCandidate,
+fn prepare_describe(
+    candidate: &mut SeededPluginCandidate,
     manifest_state: &ManifestState,
     describe_cache: &mut DescribeCacheSession,
     process_timeout: Duration,
     policy: DiscoveryPolicy,
-) -> DiscoveredPlugin {
+) -> Result<PendingDescribe> {
     if let Some(issue) = manifest_discovery_issue(manifest_state, candidate.manifest_entry.as_ref())
     {
         super::state::merge_issue(&mut candidate.plugin.issue, issue);
     }
-    let describe = (|| match describe_eligibility(
+    if !describe_allowed(
         candidate.plugin.source,
         manifest_state,
         candidate.manifest_entry.as_ref(),
         &candidate.plugin.executable,
     )? {
-        DescribeEligibility::Allowed => describe_with_cache(
+        return Ok(PendingDescribe::Ready(None));
+    }
+    start_describe_with_cache(
+        &candidate.plugin.executable,
+        candidate.plugin.source,
+        policy,
+        describe_cache,
+        process_timeout,
+    )
+}
+
+fn finalize_seeded_candidate(
+    mut candidate: SeededPluginCandidate,
+    describe: Result<PendingDescribe>,
+    describe_cache: &mut DescribeCacheSession,
+    process_timeout: Duration,
+) -> DiscoveredPlugin {
+    let describe = describe.and_then(|pending| {
+        pending.finish(
             &candidate.plugin.executable,
-            candidate.plugin.source,
-            policy,
-            describe_cache,
             process_timeout,
+            describe_cache,
         )
-        .map(Some),
-        DescribeEligibility::Skip => Ok(None),
-    })();
+    });
     match describe {
         Ok(Some(describe)) => apply_describe_metadata(
             &mut candidate.plugin,
@@ -695,20 +727,20 @@ fn seeded_discovered_plugin(
     }
 }
 
-fn describe_eligibility(
+fn describe_allowed(
     source: PluginSource,
     manifest_state: &ManifestState,
     manifest_entry: Option<&ManifestPlugin>,
     executable: &Path,
-) -> Result<DescribeEligibility> {
+) -> Result<bool> {
     if source != PluginSource::Bundled {
-        return Ok(DescribeEligibility::Allowed);
+        return Ok(true);
     }
 
     match manifest_state {
-        ManifestState::Missing | ManifestState::Invalid(_) => return Ok(DescribeEligibility::Skip),
+        ManifestState::Missing | ManifestState::Invalid(_) => return Ok(false),
         ManifestState::Valid(_) if manifest_entry.is_none() => {
-            return Ok(DescribeEligibility::Skip);
+            return Ok(false);
         }
         ManifestState::NotBundled | ManifestState::Valid(_) => {}
     }
@@ -717,7 +749,7 @@ fn describe_eligibility(
         validate_manifest_checksum(entry, executable)?;
     }
 
-    Ok(DescribeEligibility::Allowed)
+    Ok(true)
 }
 
 fn manifest_discovery_issue(
@@ -930,20 +962,67 @@ fn validate_manifest_checksum(entry: &ManifestPlugin, path: &Path) -> Result<()>
     Ok(())
 }
 
-fn describe_with_cache(
+enum PendingDescribe {
+    Ready(Option<DescribeV1>),
+    Running {
+        key: String,
+        fingerprint: (u64, u64, u32),
+        worker: Option<JoinHandle<super::dispatch::DescribeOutput>>,
+    },
+}
+
+impl PendingDescribe {
+    fn finish(
+        self,
+        path: &Path,
+        process_timeout: Duration,
+        cache: &mut DescribeCacheSession,
+    ) -> Result<Option<DescribeV1>> {
+        let (key, fingerprint, worker) = match self {
+            Self::Ready(describe) => return Ok(describe),
+            Self::Running {
+                key,
+                fingerprint,
+                worker,
+            } => (key, fingerprint, worker),
+        };
+        // Resource exhaustion must not turn a previously runnable describe
+        // into a discovery failure: run it here if its worker could not start.
+        let output = match worker {
+            Some(worker) => worker
+                .join()
+                .map_err(|_| anyhow!("--describe worker panicked for {}", path.display()))?,
+            None => super::dispatch::capture_describe(path, process_timeout),
+        };
+        let describe = super::dispatch::finish_describe(output, path)?;
+        let (size, mtime_secs, mtime_nanos) = fingerprint;
+        upsert_cached_describe(
+            &mut cache.file,
+            key,
+            size,
+            mtime_secs,
+            mtime_nanos,
+            describe.clone(),
+        );
+        cache.dirty = true;
+        Ok(Some(describe))
+    }
+}
+
+fn start_describe_with_cache(
     path: &Path,
     source: PluginSource,
     policy: DiscoveryPolicy,
     cache: &mut DescribeCacheSession,
     process_timeout: Duration,
-) -> Result<DescribeV1> {
+) -> Result<PendingDescribe> {
     let key = describe_cache_key(path);
     cache.seen_paths.insert(key.clone());
     let (size, mtime_secs, mtime_nanos) = file_fingerprint(path)?;
 
     if let Some(entry) = find_cached_describe(&cache.file, &key, size, mtime_secs, mtime_nanos) {
         tracing::trace!(path = %path.display(), "describe cache hit");
-        return Ok(entry.describe.clone());
+        return Ok(PendingDescribe::Ready(Some(entry.describe.clone())));
     }
 
     if !policy.allows_uncached_describe(source) {
@@ -952,18 +1031,15 @@ fn describe_with_cache(
 
     tracing::trace!(path = %path.display(), "describe cache miss");
 
-    let describe = super::dispatch::describe_plugin(path, process_timeout)?;
-    upsert_cached_describe(
-        &mut cache.file,
+    let executable = path.to_path_buf();
+    let worker = thread::Builder::new()
+        .spawn(move || super::dispatch::capture_describe(&executable, process_timeout))
+        .ok();
+    Ok(PendingDescribe::Running {
         key,
-        size,
-        mtime_secs,
-        mtime_nanos,
-        describe.clone(),
-    );
-    cache.dirty = true;
-
-    Ok(describe)
+        fingerprint: (size, mtime_secs, mtime_nanos),
+        worker,
+    })
 }
 
 fn describe_cache_key(path: &Path) -> String {
