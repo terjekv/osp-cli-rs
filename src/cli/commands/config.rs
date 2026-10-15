@@ -17,7 +17,8 @@ use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::rows::row::RowBuilder;
 use crate::cli::{
     AliasAddArgs, AliasArgs, AliasCommands, AliasListArgs, AliasRemoveArgs, ConfigArgs,
-    ConfigCommands, ConfigGetArgs, ConfigSetArgs, ConfigShowArgs, ConfigUnsetArgs,
+    ConfigCommands, ConfigGetArgs, ConfigScopeArgs, ConfigSetArgs, ConfigShowArgs, ConfigStoreArgs,
+    ConfigUnsetArgs,
 };
 #[cfg(unix)]
 use crate::config::secret_file_mode;
@@ -577,7 +578,7 @@ fn run_config_set(
         })
         .wrap_err("invalid bootstrap value")?;
     let read = context.read();
-    let target = ConfigWriteTarget::from_set_args(&args).with_default(read);
+    let target = ConfigWriteTarget::from_args(&args.scope, &args.store).with_default(read);
     let store = resolve_config_store(read, &target);
     validate_store_key(store, &key)?;
     let scopes = resolve_config_scopes(read, &target)
@@ -775,7 +776,7 @@ fn run_config_unset(
         .validate_writable_key(&key)
         .into_diagnostic()?;
     let read = context.read();
-    let target = ConfigWriteTarget::from_unset_args(&args).with_default(read);
+    let target = ConfigWriteTarget::from_args(&args.scope, &args.store).with_default(read);
     let store = resolve_config_store(read, &target);
     validate_store_key(store, &key)?;
     let scopes = resolve_config_scopes(read, &target)
@@ -1040,36 +1041,15 @@ impl ConfigWriteTarget {
         self
     }
 
-    fn from_set_args(args: &ConfigSetArgs) -> Self {
+    fn from_args(scope: &ConfigScopeArgs, store: &ConfigStoreArgs) -> Self {
         Self {
-            scope: resolve_scope_target(
-                args.scope.global,
-                args.scope.profile.clone(),
-                args.scope.profile_all,
-            ),
-            terminal: args.scope.terminal.clone(),
+            scope: resolve_scope_target(scope.global, scope.profile.clone(), scope.profile_all),
+            terminal: scope.terminal.clone(),
             store: resolve_store_target(
-                args.store.session,
-                args.store.config_store,
-                args.store.secrets,
-                args.store.save,
-            ),
-        }
-    }
-
-    fn from_unset_args(args: &ConfigUnsetArgs) -> Self {
-        Self {
-            scope: resolve_scope_target(
-                args.scope.global,
-                args.scope.profile.clone(),
-                args.scope.profile_all,
-            ),
-            terminal: args.scope.terminal.clone(),
-            store: resolve_store_target(
-                args.store.session,
-                args.store.config_store,
-                args.store.secrets,
-                args.store.save,
+                store.session,
+                store.config_store,
+                store.secrets,
+                store.save,
             ),
         }
     }
