@@ -708,8 +708,10 @@ fn bootstrap_message_verbosity_handles_non_utf8_short_flags_and_double_dash_unit
         OsString::from("--quiet"),
     ]);
 
+    let (verbose, quiet, debug) = super::bootstrap_verbosity_counts(&args);
+    assert_eq!((verbose, quiet, debug), (2, 1, 0));
     assert_eq!(
-        super::bootstrap_message_verbosity(&args),
+        crate::ui::messages::adjust_verbosity(MessageLevel::Success, verbose, quiet),
         MessageLevel::Info
     );
 }
@@ -732,7 +734,12 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
         OsString::from("--quiet"),
     ]);
 
-    assert_eq!(super::bootstrap_error_detail(&args), ErrorDetail::Normal);
+    let (verbose, quiet, debug) = super::bootstrap_verbosity_counts(&args);
+    assert_eq!((verbose, quiet, debug), (2, 1, 0));
+    assert_eq!(
+        crate::app::adjust_error_detail(ErrorDetail::Terse, verbose, quiet),
+        ErrorDetail::Normal
+    );
 }
 
 #[cfg_attr(

@@ -16,6 +16,7 @@
 //! - steady-state command execution belongs in `app::dispatch` and `repl`
 //! - config precedence still belongs to `crate::config`, not to this module
 
+use std::ffi::OsString;
 use std::time::Instant;
 
 use crate::config::{
@@ -33,6 +34,30 @@ use crate::ui::build_presentation_defaults_layer;
 
 use super::{DEFAULT_REPL_PROMPT, report_std_error_with_context};
 use crate::ui::theme::DEFAULT_THEME_NAME;
+
+pub(crate) fn bootstrap_verbosity_counts(args: &[OsString]) -> (u8, u8, u8) {
+    let (mut verbose, mut quiet, mut debug) = (0u8, 0u8, 0u8);
+    for value in args.iter().skip(1).filter_map(|token| token.to_str()) {
+        match value {
+            "--" => break,
+            "--verbose" => verbose = verbose.saturating_add(1),
+            "--quiet" => quiet = quiet.saturating_add(1),
+            "--debug" => debug = debug.saturating_add(1),
+            value if value.starts_with('-') && !value.starts_with("--") => {
+                for ch in value.chars().skip(1) {
+                    match ch {
+                        'v' => verbose = verbose.saturating_add(1),
+                        'q' => quiet = quiet.saturating_add(1),
+                        'd' => debug = debug.saturating_add(1),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (verbose, quiet, debug)
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfigRequest {

@@ -3,9 +3,9 @@ use super::command_output::{
 };
 use super::help::parse_help_render_overrides;
 use super::{
-    CliCommandResult, ErrorDetail, authorized_command_catalog_for, bootstrap_error_detail,
-    bootstrap_message_verbosity, command_output, plugin_dispatch_context_for_runtime,
-    resolve_runtime_config, run_cli_command_with_ui, run_from, run_from_with_sink,
+    CliCommandResult, ErrorDetail, authorized_command_catalog_for, bootstrap_verbosity_counts,
+    command_output, plugin_dispatch_context_for_runtime, resolve_runtime_config,
+    run_cli_command_with_ui, run_from, run_from_with_sink,
 };
 use super::{
     EXIT_CODE_ERROR, EXIT_CODE_USAGE, PluginConfigEntry, PluginConfigScope, ReplCommandOutput,

@@ -488,8 +488,9 @@ impl App {
             Err(err) => {
                 let (error_detail, message_verbosity, error_render_settings) = {
                     let _phase = crate::startup_trace::phase("process error display preparation");
-                    let error_detail = bootstrap_error_detail(&args);
-                    let message_verbosity = bootstrap_message_verbosity(&args);
+                    let (verbose, quiet, _) = bootstrap_verbosity_counts(&args);
+                    let error_detail = adjust_error_detail(ErrorDetail::Terse, verbose, quiet);
+                    let message_verbosity = adjust_verbosity(MessageLevel::Success, verbose, quiet);
                     let error_render_settings =
                         help::render_settings_for_help(&args, &self.definition.product_defaults)
                             .settings;
@@ -823,53 +824,4 @@ fn render_process_error(
         message,
     );
     render_messages_without_config(settings, &messages, message_verbosity)
-}
-
-fn bootstrap_message_verbosity(args: &[OsString]) -> MessageLevel {
-    let (verbose, quiet) = bootstrap_verbosity_counts(args);
-    adjust_verbosity(MessageLevel::Success, verbose, quiet)
-}
-
-fn bootstrap_error_detail(args: &[OsString]) -> ErrorDetail {
-    let (verbose, quiet) = bootstrap_verbosity_counts(args);
-    adjust_error_detail(ErrorDetail::Terse, verbose, quiet)
-}
-
-fn bootstrap_verbosity_counts(args: &[OsString]) -> (u8, u8) {
-    let mut verbose = 0u8;
-    let mut quiet = 0u8;
-
-    for token in args.iter().skip(1) {
-        let Some(value) = token.to_str() else {
-            continue;
-        };
-
-        if value == "--" {
-            break;
-        }
-
-        match value {
-            "--verbose" => {
-                verbose = verbose.saturating_add(1);
-                continue;
-            }
-            "--quiet" => {
-                quiet = quiet.saturating_add(1);
-                continue;
-            }
-            _ => {}
-        }
-
-        if value.starts_with('-') && !value.starts_with("--") {
-            for ch in value.chars().skip(1) {
-                match ch {
-                    'v' => verbose = verbose.saturating_add(1),
-                    'q' => quiet = quiet.saturating_add(1),
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    (verbose, quiet)
 }

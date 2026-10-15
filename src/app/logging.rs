@@ -73,7 +73,7 @@ impl DeveloperLoggingConfig {
 
 /// Derives the initial developer logging configuration from raw CLI arguments.
 pub fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
-    DeveloperLoggingConfig::new(scan_debug_count(args))
+    DeveloperLoggingConfig::new(super::bootstrap_verbosity_counts(args).2)
 }
 
 /// Initializes or reloads the process-global developer logging subscriber.
@@ -277,35 +277,6 @@ fn map_debug_count(debug_count: u8) -> LevelFilter {
         2 => LevelFilter::DEBUG,
         _ => LevelFilter::TRACE,
     }
-}
-
-fn scan_debug_count(args: &[OsString]) -> u8 {
-    let mut debug = 0u8;
-
-    for token in args.iter().skip(1) {
-        let Some(value) = token.to_str() else {
-            continue;
-        };
-
-        match value {
-            "--" => break,
-            "--debug" => {
-                debug = debug.saturating_add(1);
-                continue;
-            }
-            _ => {}
-        }
-
-        if value.starts_with('-') && !value.starts_with("--") {
-            for ch in value.chars().skip(1) {
-                if ch == 'd' {
-                    debug = debug.saturating_add(1);
-                }
-            }
-        }
-    }
-
-    debug
 }
 
 #[cfg(test)]
