@@ -185,7 +185,15 @@ fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
 
 pub(crate) fn lower_document(document: &Document, format: OutputFormat, indent_size: usize) -> Doc {
     Doc {
-        blocks: lower_document_blocks(&document.blocks, format, indent_size),
+        blocks: lower_document_blocks(
+            &document.blocks,
+            DocumentLayout::Direct {
+                format,
+                indent_size,
+            },
+            false,
+            false,
+        ),
     }
 }
 
@@ -266,62 +274,146 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -
     Doc { blocks }
 }
 
+#[derive(Clone, Copy)]
+enum DocumentLayout<'a> {
+    Direct {
+        format: OutputFormat,
+        indent_size: usize,
+    },
+    Help {
+        plan: &'a RenderPlan,
+        layout: HelpLayout,
+    },
+}
+
 fn lower_document_blocks(
     blocks: &[DocBlock],
-    format: OutputFormat,
-    indent_size: usize,
+    layout: DocumentLayout<'_>,
+    inside: bool,
+    long_help: bool,
 ) -> Vec<Block> {
+    let (format, indent_size, help) = match layout {
+        DocumentLayout::Direct {
+            format,
+            indent_size,
+        } => (format, indent_size, None),
+        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, 0, Some((plan, layout))),
+    };
     let mut lowered = Vec::new();
     for block in blocks {
         let next = match block {
-            DocBlock::Section { title, blocks, .. } => vec![Block::Section(SectionBlock {
-                title: Some(title.clone()),
-                title_chrome: if matches!(format, OutputFormat::Auto | OutputFormat::Markdown) {
-                    SectionTitleChrome::Ruled
+            DocBlock::Section { title, blocks, .. } => {
+                let suffix = match blocks.as_slice() {
+                    [DocBlock::Paragraph { text }]
+                        if help.is_some() && title == "Usage" && text.lines().count() == 1 =>
+                    {
+                        Some(visible_inline_text(text))
+                    }
+                    _ => None,
+                };
+                let body = if suffix.is_some() {
+                    Vec::new()
                 } else {
-                    SectionTitleChrome::Plain
-                },
-                body_indent: if matches!(format, OutputFormat::Markdown) {
-                    0
-                } else {
-                    indent_size
-                },
-                inline_title_suffix: None,
-                trailing_newline: !matches!(format, OutputFormat::Markdown),
-                blocks: lower_document_blocks(blocks, format, indent_size),
-            })],
+                    lower_document_blocks(
+                        blocks,
+                        layout,
+                        true,
+                        long_help
+                            && !matches!(
+                                title.as_str(),
+                                "Common Invocation Options" | "Product options"
+                            ),
+                    )
+                };
+                vec![Block::Section(SectionBlock {
+                    title: (help.is_none() || !title.is_empty()).then(|| title.clone()),
+                    title_chrome: if suffix.is_some() {
+                        SectionTitleChrome::Plain
+                    } else if let Some((_, layout)) = help {
+                        help_layout_title_chrome(layout)
+                    } else if matches!(format, OutputFormat::Auto | OutputFormat::Markdown) {
+                        SectionTitleChrome::Ruled
+                    } else {
+                        SectionTitleChrome::Plain
+                    },
+                    body_indent: if format == OutputFormat::Markdown {
+                        0
+                    } else {
+                        indent_size
+                    },
+                    inline_title_suffix: suffix,
+                    trailing_newline: help.is_none() && format != OutputFormat::Markdown,
+                    blocks: body,
+                })]
+            }
             DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
                 text: text.clone(),
-                indent: 0,
+                indent: if help.is_some() && inside { 2 } else { 0 },
                 inline_markup: true,
             })],
-            DocBlock::Entries { entries } => vec![Block::Entries(EntriesBlock {
-                inline_markup: true,
-                default_indent: " ".repeat(indent_size),
-                default_gap: None,
-                rows: entries
-                    .iter()
-                    .map(|entry| EntryRow {
-                        key: entry.name.clone(),
-                        value: entry.description.clone(),
-                        indent_hint: None,
-                        gap_hint: None,
-                    })
-                    .collect(),
-            })],
+            DocBlock::Entries { entries } => {
+                let (entry_indent, entry_gap) = help.map_or((indent_size, None), |(plan, _)| {
+                    (
+                        plan.settings.help_chrome.entry_indent,
+                        plan.settings.help_chrome.entry_gap,
+                    )
+                });
+                let mut block = entries_block_with_defaults(entries, entry_indent, entry_gap);
+                if let Some((plan, _)) = help {
+                    block.inline_markup =
+                        !long_help || !entries.iter().all(|entry| entry.name.starts_with('-'));
+                    let width = entries
+                        .iter()
+                        .map(|entry| display_width(&entry.name))
+                        .max()
+                        .unwrap_or(0);
+                    for row in &mut block.rows {
+                        if long_help && row.key.starts_with('-') {
+                            row.value = row
+                                .value
+                                .lines()
+                                .filter(|line| !line.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            row.indent_hint =
+                                Some(" ".repeat(if row.key.starts_with("--") { 6 } else { 2 }));
+                            row.gap_hint = Some("\n          ".into());
+                        } else {
+                            row.gap_hint = plan.document_entry_gap.map(|gap| {
+                                " ".repeat(width.saturating_sub(display_width(&row.key)) + gap)
+                            });
+                        }
+                    }
+                }
+                vec![Block::Entries(block)]
+            }
             DocBlock::List { items } => vec![Block::List(ListBlock {
                 items: if format == OutputFormat::Markdown {
                     items.clone()
                 } else {
                     items.iter().map(|item| format!("- {item}")).collect()
                 },
-                indent: 0,
+                indent: if help.is_some() && inside { 2 } else { 0 },
                 inline_markup: true,
                 auto_grid: false,
             })],
-            DocBlock::Data { value } => lower_value_blocks(value),
+            DocBlock::Data { value } => match help {
+                Some((plan, _)) => help_layout_blocks_from_value(value, &plan.settings.help_chrome),
+                None => lower_value_blocks(value),
+            },
         };
-        extend_with_blank_between(&mut lowered, next);
+        if let Some((plan, _)) = help {
+            let section_break = matches!(block, DocBlock::Section { .. })
+                || matches!(lowered.last(), Some(Block::Section(_)));
+            if section_break {
+                push_blank_lines(&mut lowered, plan.settings.help_chrome.section_spacing);
+            } else if !lowered.is_empty() && !matches!(block, DocBlock::Paragraph { .. }) {
+                lowered.push(Block::Blank);
+            }
+            lowered.extend(next);
+        } else {
+            extend_with_blank_between(&mut lowered, next);
+        }
     }
     lowered
 }
@@ -661,128 +753,9 @@ pub(crate) fn lower_document_help_layout(
     layout: HelpLayout,
     footer: bool,
 ) -> Doc {
-    fn lower(
-        blocks: &[DocBlock],
-        plan: &RenderPlan,
-        layout: HelpLayout,
-        inside: bool,
-        long_help: bool,
-    ) -> Vec<Block> {
-        let mut out = Vec::new();
-        for block in blocks {
-            let next = match block {
-                DocBlock::Section { title, blocks, .. } => {
-                    let suffix = match blocks.as_slice() {
-                        [DocBlock::Paragraph { text }]
-                            if title == "Usage" && text.lines().count() == 1 =>
-                        {
-                            Some(visible_inline_text(text))
-                        }
-                        _ => None,
-                    };
-                    let body = if suffix.is_some() {
-                        Vec::new()
-                    } else {
-                        lower(
-                            blocks,
-                            plan,
-                            layout,
-                            true,
-                            long_help
-                                && !matches!(
-                                    title.as_str(),
-                                    "Common Invocation Options" | "Product options"
-                                ),
-                        )
-                    };
-                    vec![Block::Section(SectionBlock {
-                        title: (!title.is_empty()).then(|| title.clone()),
-                        title_chrome: if suffix.is_some() {
-                            SectionTitleChrome::Plain
-                        } else {
-                            help_layout_title_chrome(layout)
-                        },
-                        body_indent: 0,
-                        inline_title_suffix: suffix,
-                        trailing_newline: false,
-                        blocks: body,
-                    })]
-                }
-                DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
-                    text: text.clone(),
-                    indent: if inside { 2 } else { 0 },
-                    inline_markup: true,
-                })],
-                DocBlock::Entries { entries } => {
-                    let width = entries
-                        .iter()
-                        .map(|entry| display_width(&entry.name))
-                        .max()
-                        .unwrap_or(0);
-                    vec![Block::Entries(EntriesBlock {
-                        inline_markup: !long_help
-                            || !entries.iter().all(|entry| entry.name.starts_with('-')),
-                        default_indent: " ".repeat(plan.settings.help_chrome.entry_indent),
-                        default_gap: plan
-                            .settings
-                            .help_chrome
-                            .entry_gap
-                            .map(|gap| " ".repeat(gap)),
-                        rows: entries
-                            .iter()
-                            .map(|entry| EntryRow {
-                                key: entry.name.clone(),
-                                value: if long_help && entry.name.starts_with('-') {
-                                    entry
-                                        .description
-                                        .lines()
-                                        .filter(|line| !line.is_empty())
-                                        .collect::<Vec<_>>()
-                                        .join("\n")
-                                } else {
-                                    entry.description.clone()
-                                },
-                                indent_hint: (long_help && entry.name.starts_with('-')).then(
-                                    || " ".repeat(if entry.name.starts_with("--") { 6 } else { 2 }),
-                                ),
-                                gap_hint: if long_help && entry.name.starts_with('-') {
-                                    Some("\n          ".into())
-                                } else {
-                                    plan.document_entry_gap.map(|gap| {
-                                        " ".repeat(
-                                            width.saturating_sub(display_width(&entry.name)) + gap,
-                                        )
-                                    })
-                                },
-                            })
-                            .collect(),
-                    })]
-                }
-                DocBlock::List { items } => vec![Block::List(ListBlock {
-                    items: items.iter().map(|item| format!("- {item}")).collect(),
-                    indent: if inside { 2 } else { 0 },
-                    inline_markup: true,
-                    auto_grid: false,
-                })],
-                DocBlock::Data { value } => {
-                    help_layout_blocks_from_value(value, &plan.settings.help_chrome)
-                }
-            };
-            let section_break = matches!(block, DocBlock::Section { .. })
-                || matches!(out.last(), Some(Block::Section(_)));
-            if section_break {
-                push_blank_lines(&mut out, plan.settings.help_chrome.section_spacing);
-            } else if !out.is_empty() && !matches!(block, DocBlock::Paragraph { .. }) {
-                out.push(Block::Blank);
-            }
-            out.extend(next);
-        }
-        out
-    }
-    let mut blocks = lower(
+    let mut blocks = lower_document_blocks(
         &document.blocks,
-        plan,
-        layout,
+        DocumentLayout::Help { plan, layout },
         false,
         plan.document_long_help,
     );

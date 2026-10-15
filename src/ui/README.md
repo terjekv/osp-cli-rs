@@ -50,5 +50,7 @@ osp plugins commands --json                     # the data before ui
 ```
 
 Documents lower to the same UI blocks as ordinary data, including `EntriesBlock`.
+Direct and help layouts share the block traversal, with help spacing and entry
+hints applied before emission.
 Marked document rows render consecutive section runs in their current order.
 The renderer never infers document intent from ordinary row fields.
