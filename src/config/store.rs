@@ -167,7 +167,7 @@ pub fn set_scoped_value_in_toml(
     scope: &Scope,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
-    edit_scoped_value_in_toml(path, key, scope, TomlEditOperation::Set(value), options)
+    edit_scoped_value_in_toml(path, key, scope, Some(value), options)
 }
 
 /// Removes one scoped key from a TOML-backed config store.
@@ -183,24 +183,14 @@ pub fn unset_scoped_value_in_toml(
     scope: &Scope,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
-    edit_scoped_value_in_toml(path, key, scope, TomlEditOperation::Unset, options)
-}
-
-enum TomlEditOperation<'a> {
-    Set(&'a ConfigValue),
-    Unset,
-}
-
-enum ValidatedTomlEditOperation {
-    Set(ConfigValue),
-    Unset,
+    edit_scoped_value_in_toml(path, key, scope, None, options)
 }
 
 fn edit_scoped_value_in_toml(
     path: &Path,
     key: &str,
     scope: &Scope,
-    operation: TomlEditOperation<'_>,
+    value: Option<&ConfigValue>,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
     let normalized_scope = normalize_scope(scope.clone());
@@ -208,12 +198,9 @@ fn edit_scoped_value_in_toml(
     let schema = crate::config::ConfigSchema::default();
     schema.validate_writable_key(key)?;
     validate_key_scope(key, &normalized_scope)?;
-    let operation = match operation {
-        TomlEditOperation::Set(value) => {
-            ValidatedTomlEditOperation::Set(schema.validate_write_value(key, value)?)
-        }
-        TomlEditOperation::Unset => ValidatedTomlEditOperation::Unset,
-    };
+    let value = value
+        .map(|value| schema.validate_write_value(key, value))
+        .transpose()?;
     let _transaction_lock = options
         .should_write()
         .then(|| lock_file_transaction(path))
@@ -228,17 +215,15 @@ fn edit_scoped_value_in_toml(
         .as_table_mut()
         .ok_or(ConfigError::TomlRootMustBeTable)?;
 
-    let previous = match operation {
-        ValidatedTomlEditOperation::Set(value) => set_scoped_value(
+    let previous = match value {
+        Some(value) => set_scoped_value(
             root_table,
             &normalized_scope,
             key,
             &value,
             matches!(options.mode, TomlStoreEditMode::FillEmpty),
         )?,
-        ValidatedTomlEditOperation::Unset => {
-            unset_dotted_value(root_table, &normalized_scope, key)?
-        }
+        None => unset_dotted_value(root_table, &normalized_scope, key)?,
     };
 
     if options.should_write() {
@@ -605,13 +590,7 @@ fn ensure_table<'a>(
     let entry = table
         .entry(key.to_string())
         .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-    match entry {
-        toml::Value::Table(inner) => Ok(inner),
-        _ => Err(ConfigError::InvalidSection {
-            section: key.to_string(),
-            expected: "table".to_string(),
-        }),
-    }
+    as_table_mut(entry, key)
 }
 
 fn get_table<'a>(
@@ -636,23 +615,8 @@ fn set_dotted_value(
     value: &ConfigValue,
     only_if_empty: bool,
 ) -> Result<Option<ConfigValue>, ConfigError> {
-    let parts = dotted_key
-        .split('.')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<&str>>();
-
-    if parts.is_empty() {
-        return Err(ConfigError::InvalidConfigKey {
-            key: dotted_key.to_string(),
-            reason: "empty key path".to_string(),
-        });
-    }
-
-    let mut cursor = table;
-    for key in &parts[..parts.len() - 1] {
-        cursor = ensure_table(cursor, key)?;
-    }
+    let parts = dotted_key_parts(dotted_key)?;
+    let cursor = ensure_table_path(table, &parts[..parts.len() - 1])?;
 
     let leaf = parts[parts.len() - 1];
     if only_if_empty
@@ -716,15 +680,7 @@ fn remove_dotted_value(
     let Some(entry) = table.get_mut(parts[0]) else {
         return Ok(false);
     };
-    let child = match entry {
-        toml::Value::Table(inner) => inner,
-        _ => {
-            return Err(ConfigError::InvalidSection {
-                section: parts[0].to_string(),
-                expected: "table".to_string(),
-            });
-        }
-    };
+    let child = as_table_mut(entry, parts[0])?;
 
     let removed = remove_dotted_value(child, &parts[1..])?;
     if removed && child.is_empty() {
