@@ -75,7 +75,9 @@ impl Document {
                             crate::core::output_model::rows_from_value(value.clone())
                                 .into_iter()
                                 .map(|mut row| {
-                                    row.insert("section".into(), Value::String(section.into()));
+                                    // The payload's own `section` field wins.
+                                    row.entry("section")
+                                        .or_insert_with(|| Value::String(section.into()));
                                     row
                                 }),
                         );
