@@ -63,6 +63,10 @@ impl SuggestionEngine {
         Self { tree }
     }
 
+    pub(super) fn tree(&self) -> &CompletionTree {
+        &self.tree
+    }
+
     /// Produces sorted completion outputs for the current cursor analysis.
     ///
     /// # Examples

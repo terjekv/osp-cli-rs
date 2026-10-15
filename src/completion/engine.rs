@@ -29,21 +29,19 @@ use std::ops::Range;
 pub struct CompletionEngine {
     parser: CommandLineParser,
     suggester: SuggestionEngine,
-    tree: CompletionTree,
     global_context_flags: BTreeSet<String>,
 }
 
 impl CompletionEngine {
     /// Creates an engine for a prebuilt completion tree.
     ///
-    /// The engine keeps a clone of the tree for suggestion ranking and caches
-    /// global context-only flags up front.
+    /// Analysis and suggestion ranking share the tree; global context-only
+    /// flags are cached up front.
     pub fn new(tree: CompletionTree) -> Self {
         let global_context_flags = collect_global_context_flags(&tree.root);
         Self {
             parser: CommandLineParser,
-            suggester: SuggestionEngine::new(tree.clone()),
-            tree,
+            suggester: SuggestionEngine::new(tree),
             global_context_flags,
         }
     }
@@ -140,7 +138,7 @@ impl CompletionEngine {
 
     /// Returns how many leading tokens resolve to a command path in the tree.
     pub fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
-        TreeResolver::new(&self.tree).matched_command_len_tokens(tokens)
+        TreeResolver::new(self.suggester.tree()).matched_command_len_tokens(tokens)
     }
 
     /// Classifies a candidate value relative to the current completion analysis.
@@ -148,7 +146,7 @@ impl CompletionEngine {
         if analysis.parsed.cursor_cmd.has_pipe() {
             return MatchKind::Pipe;
         }
-        let nodes = TreeResolver::new(&self.tree).resolved_nodes(&analysis.context);
+        let nodes = TreeResolver::new(self.suggester.tree()).resolved_nodes(&analysis.context);
 
         if value.starts_with("--") || nodes.flag_scope_node.flags.contains_key(value) {
             return MatchKind::Flag;
@@ -165,7 +163,7 @@ impl CompletionEngine {
 
     /// Returns the tree node at an exact command path.
     pub(crate) fn node_at(&self, path: &[String]) -> Option<&CompletionNode> {
-        TreeResolver::new(&self.tree).resolve_exact(path)
+        TreeResolver::new(self.suggester.tree()).resolve_exact(path)
     }
 
     /// Positional usage and the byte range of the slot at the cursor.
@@ -243,7 +241,7 @@ impl CompletionEngine {
     /// provider-specific ones once a provider is selected. A flag counts as
     /// given under any of its spellings.
     pub(crate) fn missing_required_flags(&self, analysis: &CompletionAnalysis) -> Vec<String> {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let node = resolver.resolved_nodes(&analysis.context).flag_scope_node;
         let cmd = &analysis.parsed.full_cmd;
         let provider = ProviderSelection::from_command(cmd, node);
@@ -292,7 +290,7 @@ impl CompletionEngine {
         stub: &str,
     ) {
         let context = self.resolve_completion_context(cursor_cmd, stub);
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let mut scoped_flags = BTreeSet::new();
         for i in (0..=context.matched_path.len()).rev() {
             let path = &context.matched_path[..i];
@@ -322,7 +320,7 @@ impl CompletionEngine {
     }
 
     fn merge_prefilled_values(&self, cursor_cmd: &mut CommandLine, matched_path: &[String]) {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let mut prefilled_positionals = Vec::new();
         for i in 0..=matched_path.len() {
             let Some(node) = resolver.resolve_exact(&matched_path[..i]) else {
@@ -342,7 +340,7 @@ impl CompletionEngine {
     }
 
     fn flag_arity(&self, command_path: &[String], flag_name: &str) -> Option<FlagArity> {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let (_, matched_path) = resolver.resolve_context(command_path);
         for prefix_len in (0..=matched_path.len()).rev() {
             let Some(node) = resolver.resolve_exact(&matched_path[..prefix_len]) else {
@@ -363,7 +361,7 @@ impl CompletionEngine {
     }
 
     fn resolve_completion_context(&self, cmd: &CommandLine, stub: &str) -> CompletionContext {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let path_tokens = command_path_tokens(cmd);
         let exact_token_commits = if !stub.is_empty() && !stub.starts_with('-') {
             let parent_path = &path_tokens[..path_tokens.len().saturating_sub(1)];
@@ -429,7 +427,7 @@ impl CompletionEngine {
             };
         }
 
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let context_node = resolver.resolve_exact_or_root(&context.matched_path);
         let flag_scope_node = resolver.resolve_exact_or_root(&context.flag_scope_path);
         let (needs_flag_value, last_flag) = last_flag_needs_value(flag_scope_node, cmd, stub);
