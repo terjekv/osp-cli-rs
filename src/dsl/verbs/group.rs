@@ -147,7 +147,10 @@ fn resolve_group_headers(row: &Row, plan: &[GroupKeyPlan]) -> Result<Vec<Row>> {
             for value in &values {
                 let mut candidate = combination.clone();
                 candidate.insert(key_plan.header_key.clone(), value.clone());
-                next.push(candidate);
+                // A list that repeats an element still joins its group once.
+                if !next.contains(&candidate) {
+                    next.push(candidate);
+                }
             }
         }
 
