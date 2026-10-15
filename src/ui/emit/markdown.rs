@@ -5,7 +5,6 @@ use crate::ui::doc::{
 };
 
 use super::key_value::{display_key, scalar_text};
-use super::shared::format_list_item;
 use super::shared::indent_lines;
 use super::table::{PreparedCell, PreparedTable};
 
@@ -75,7 +74,7 @@ fn emit_entries(block: &EntriesBlock) -> String {
             if row.value.is_empty() {
                 format!("- `{}`", row.key)
             } else {
-                format!("- `{}` {}", row.key, row.value)
+                list_item(&format!("`{}` {}", row.key, row.value))
             }
         })
         .collect::<Vec<_>>()
@@ -83,12 +82,27 @@ fn emit_entries(block: &EntriesBlock) -> String {
 }
 
 fn emit_list(block: &ListBlock) -> String {
+    // Items are already Markdown, so their inline markup is kept as written.
     block
         .items
         .iter()
-        .map(|item| format!("- {}", format_list_item(item, block.inline_markup)))
+        .map(|item| list_item(item))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Formats one list item, indenting continuation lines so they stay inside it.
+fn list_item(text: &str) -> String {
+    let mut lines = text.lines();
+    let mut out = format!("- {}", lines.next().unwrap_or_default());
+    for line in lines {
+        out.push('\n');
+        if !line.is_empty() {
+            out.push_str("  ");
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 fn emit_table(block: &TableBlock) -> String {
