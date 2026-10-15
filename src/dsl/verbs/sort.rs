@@ -2,7 +2,7 @@
 use crate::core::output_model::OutputItems;
 use std::{cmp::Ordering, net::IpAddr};
 
-use crate::core::{output_model::Group, row::Row};
+use crate::core::output_model::{Group, group_header_row};
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
@@ -182,17 +182,11 @@ fn resolve_group_value(group: &Group, key: &SortKeySpec) -> Option<Value> {
         .cloned()
         .or_else(|| {
             resolve_first_value(
-                &merged_group_row(group),
+                &group_header_row(group),
                 &key.key_spec.token,
                 key.key_spec.exact,
             )
         })
-}
-
-fn merged_group_row(group: &Group) -> Row {
-    let mut merged = group.groups.clone();
-    merged.extend(group.aggregates.clone());
-    merged
 }
 
 fn compare_optional_values(

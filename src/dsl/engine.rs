@@ -3,7 +3,9 @@
 //! documents are retained only for unstaged rendering.
 
 use crate::core::{
-    output_model::{DisplayRule, OutputItems, OutputMeta, OutputResult, compute_key_index},
+    output_model::{
+        DisplayRule, OutputItems, OutputMeta, OutputResult, compute_key_index, group_header_row,
+    },
     row::Row,
 };
 use anyhow::Result;
@@ -313,7 +315,7 @@ pub(crate) fn run_compiled(
     output.meta.key_index = match &output.items {
         OutputItems::Rows(rows) => compute_key_index(rows),
         OutputItems::Groups(groups) => {
-            compute_key_index(&groups.iter().map(merged_group_header).collect::<Vec<_>>())
+            compute_key_index(&groups.iter().map(group_header_row).collect::<Vec<_>>())
         }
     };
     Ok(output)
@@ -342,12 +344,6 @@ pub(crate) fn apply_stage(items: RowSet, stage: &CompiledStage) -> Result<RowSet
         | CompiledStage::ValueQuick(_)
         | CompiledStage::KeyQuick(_) => unreachable!("quick family dispatched above"),
     }
-}
-
-fn merged_group_header(group: &crate::core::output_model::Group) -> Row {
-    let mut row = group.groups.clone();
-    row.extend(group.aggregates.clone());
-    row
 }
 
 /// Drops field-keyed formatting for fields a stage created: a count named

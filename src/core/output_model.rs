@@ -209,21 +209,7 @@ impl OutputResult {
             document: None,
             meta: OutputMeta {
                 key_index,
-                unix_timestamp_columns: Vec::new(),
-                display_rules: Vec::new(),
-                display_columns: None,
-                display_column_labels: None,
-                column_align: Vec::new(),
-                wants_copy: false,
-                grouped: false,
-                document_rows: false,
-                document_entry_gap: None,
-                document_long_help: false,
-                render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
-                display_limit: None,
+                ..OutputMeta::default()
             },
         }
     }
@@ -331,20 +317,13 @@ pub(crate) fn group_rows(group: &Group) -> Vec<Row> {
 
 pub(crate) fn group_header_row(group: &Group) -> Row {
     let mut row = group.groups.clone();
-    for (key, value) in &group.aggregates {
-        row.insert(key.clone(), value.clone());
-    }
+    row.extend(group.aggregates.clone());
     row
 }
 
 pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
-    let mut merged = group.groups.clone();
-    for (key, value) in &group.aggregates {
-        merged.insert(key.clone(), value.clone());
-    }
-    for (key, value) in row {
-        merged.insert(key.clone(), value.clone());
-    }
+    let mut merged = group_header_row(group);
+    merged.extend(row.clone());
     merged
 }
 
@@ -392,14 +371,10 @@ pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
 /// ```
 pub fn output_items_to_value(items: &OutputItems) -> Value {
     match items {
-        OutputItems::Rows(rows) if rows.len() == 1 => rows
-            .first()
-            .cloned()
-            .map(Value::Object)
-            .unwrap_or_else(|| Value::Array(Vec::new())),
-        OutputItems::Rows(rows) => {
-            Value::Array(rows.iter().cloned().map(Value::Object).collect::<Vec<_>>())
-        }
+        OutputItems::Rows(rows) => match rows.as_slice() {
+            [row] => Value::Object(row.clone()),
+            _ => Value::Array(rows.iter().cloned().map(Value::Object).collect()),
+        },
         OutputItems::Groups(groups) => Value::Array(
             groups
                 .iter()
@@ -449,24 +424,13 @@ pub fn output_items_to_value(items: &OutputItems) -> Value {
 /// );
 /// ```
 pub fn output_items_from_value(value: Value) -> OutputItems {
-    match value {
-        Value::Array(items) => {
-            if items.is_empty() {
-                OutputItems::Rows(Vec::new())
-            } else if let Some(groups) = groups_from_values(&items) {
-                OutputItems::Groups(groups)
-            } else {
-                OutputItems::Rows(
-                    items
-                        .into_iter()
-                        .flat_map(row_items_from_value)
-                        .collect::<Vec<_>>(),
-                )
-            }
-        }
-        Value::Object(map) => OutputItems::Rows(vec![map]),
-        scalar => OutputItems::Rows(vec![row_with_value(scalar)]),
+    if let Value::Array(items) = &value
+        && !items.is_empty()
+        && let Some(groups) = groups_from_values(items)
+    {
+        return OutputItems::Groups(groups);
     }
+    OutputItems::Rows(rows_from_value(value))
 }
 
 /// Projects any JSON value into a row stream for pipeline-oriented processing.
@@ -475,15 +439,15 @@ pub fn output_items_from_value(value: Value) -> OutputItems {
 /// Scalars become a single row under the canonical `value` column.
 pub fn rows_from_value(value: Value) -> Vec<Row> {
     match value {
-        Value::Array(values) => values.into_iter().flat_map(row_items_from_value).collect(),
-        other => row_items_from_value(other),
+        Value::Array(values) => values.into_iter().map(row_from_value).collect(),
+        other => vec![row_from_value(other)],
     }
 }
 
-fn row_items_from_value(value: Value) -> Vec<Row> {
+fn row_from_value(value: Value) -> Row {
     match value {
-        Value::Object(map) => vec![map],
-        other => vec![row_with_value(other)],
+        Value::Object(map) => map,
+        other => row_with_value(other),
     }
 }
 
