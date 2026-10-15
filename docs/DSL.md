@@ -201,9 +201,10 @@ replace its member rows.
 
 `G` keeps group keys, aggregate values and member rows distinct. A field
 holding a list of plain values groups like `field[]`: each element is its own
-group, so a host with two siteadmins counts under both. Lists of objects still
-need a leaf field. Row operations
-such as `P`, `U`, `VALUE`, quick search and clean run within each partition.
+group, so a host with two siteadmins counts under both. Group header names must
+be distinct after aliases resolve. Lists of objects still need a leaf field.
+Row operations such as `P`, `U`, `VALUE`, quick search and clean run within
+each partition.
 `F` tests matching header/aggregate fields first; otherwise it filters members
 and removes empty groups. `S` and `L` order/limit groups. `A` adds one aggregate
 per group; `Z` emits keys and aggregates as ordinary rows. Previously computed

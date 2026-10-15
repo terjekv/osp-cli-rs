@@ -8,7 +8,7 @@
 //! - grouping by plain objects or arrays of objects should fail and push the
 //!   user toward a leaf field or `?field`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::{output_model::Group, row::Row};
 use anyhow::{Result, anyhow};
@@ -89,11 +89,15 @@ fn parse_group_plan(spec: &str) -> Result<Vec<GroupKeyPlan>> {
     }
 
     let mut plan = Vec::new();
+    let mut header_keys = HashSet::new();
     let mut index = 0usize;
     while index < words.len() {
         let token = words[index].clone();
         let (alias, consumed) = parse_optional_alias_after_key(&words, index, "G")?;
         let header_key = alias.unwrap_or_else(|| canonical_header_key(&token));
+        if !header_keys.insert(header_key.clone()) {
+            return Err(anyhow!("G: duplicate group header name '{}'", header_key));
+        }
         index += consumed;
         let key_spec = KeySpec::parse(&token);
         let (flat_hint, allow_multiple) = classify_group_key(&key_spec.token);
