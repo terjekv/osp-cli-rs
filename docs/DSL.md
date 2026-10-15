@@ -143,7 +143,9 @@ an unrelated nested object.
 Projection keepers and droppers resolve against original addresses before
 compaction. A selected null remains null. Fanout columns use their leaf name;
 selecting two fanouts with the same name is an ambiguity error. Static parent
-fields repeat alongside projected member rows.
+fields repeat alongside projected member rows. Fanout columns join by member
+address, so a missing field stays absent rather than borrowing another member's
+value. Member rows follow their first appearance across the selectors.
 
 ## Sorting, dates and quoting
 
