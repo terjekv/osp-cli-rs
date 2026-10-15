@@ -156,12 +156,6 @@ pub(crate) fn render_repl_help(catalog: &[CommandCatalogEntry]) -> String {
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string()),
             ));
-            if !conflict.is_empty() {
-                let trim_len = out.trim_end_matches('\n').len();
-                out.truncate(trim_len);
-                out.push_str(&conflict);
-                out.push('\n');
-            }
         }
     }
 
