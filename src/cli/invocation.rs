@@ -30,31 +30,16 @@ pub(crate) const INVOCATION_HELP_SECTION: &str = r#"Common Invocation Options:
 These flags may appear anywhere before `--` and affect only the current command.
 "#;
 
-const INVOCATION_COMPLETION_FLAGS: &[&str] = &[
-    "--format",
-    "--guide",
-    "--json",
-    "--table",
-    "--mreg",
-    "--value",
-    "--md",
-    "--render-mode",
-    "--plain",
-    "--rich",
-    "--color",
-    "--unicode",
-    "--ascii",
-    "--verbose",
-    "--quiet",
-    "--debug",
-    "--plugin-provider",
+const FORMAT_ALIASES: &[(&str, OutputFormat)] = &[
+    ("--guide", OutputFormat::Guide),
+    ("--json", OutputFormat::Json),
+    ("--table", OutputFormat::Table),
+    ("--mreg", OutputFormat::Mreg),
+    ("--value", OutputFormat::Value),
+    ("--md", OutputFormat::Markdown),
 ];
-
-const FORMAT_COMPLETION_FLAGS: &[&str] = &[
-    "--format", "--guide", "--json", "--table", "--mreg", "--value", "--md",
-];
-const MODE_COMPLETION_FLAGS: &[&str] = &["--render-mode", "--plain", "--rich"];
-const UNICODE_COMPLETION_FLAGS: &[&str] = &["--unicode", "--ascii"];
+const MODE_ALIASES: &[(&str, RenderMode)] =
+    &[("--plain", RenderMode::Plain), ("--rich", RenderMode::Rich)];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct InvocationOptions {
@@ -177,14 +162,14 @@ pub(crate) fn scan_command_tokens_with_trace(
             continue;
         }
 
-        if let Some(kind) = FormatAlias::parse(token) {
-            set_format(&mut invocation, kind.format(), token)?;
+        if let Some((_, format)) = FORMAT_ALIASES.iter().find(|(flag, _)| token == flag) {
+            set_format(&mut invocation, *format, token)?;
             index += 1;
             continue;
         }
 
-        if let Some(kind) = RenderAlias::parse(token) {
-            set_mode(&mut invocation, kind.mode(), token)?;
+        if let Some((_, mode)) = MODE_ALIASES.iter().find(|(flag, _)| token == flag) {
+            set_mode(&mut invocation, *mode, token)?;
             index += 1;
             continue;
         }
@@ -226,94 +211,40 @@ pub(crate) fn scan_command_tokens_with_trace(
             continue;
         }
 
-        if let Some(value) = token.strip_prefix("--format=") {
-            let format = OutputFormat::parse(value)
-                .ok_or_else(|| miette!("unknown output format: {value}"))?;
-            set_format(&mut invocation, format, "--format")?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--format" {
-            let value = tokens
-                .get(index + 1)
-                .ok_or_else(|| miette!("`--format` expects a value"))?;
-            let format = OutputFormat::parse(value)
-                .ok_or_else(|| miette!("unknown output format: {value}"))?;
-            set_format(&mut invocation, format, "--format")?;
-            index += 2;
-            continue;
-        }
-
-        if let Some(value) = token.strip_prefix("--render-mode=") {
-            let mode =
-                RenderMode::parse(value).ok_or_else(|| miette!("unknown render mode: {value}"))?;
-            set_mode(&mut invocation, mode, "--render-mode")?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--render-mode" {
-            let value = tokens
-                .get(index + 1)
-                .ok_or_else(|| miette!("`--render-mode` expects a value"))?;
-            let mode =
-                RenderMode::parse(value).ok_or_else(|| miette!("unknown render mode: {value}"))?;
-            set_mode(&mut invocation, mode, "--render-mode")?;
-            index += 2;
-            continue;
-        }
-
-        if let Some(value) = token.strip_prefix("--color=") {
-            let color =
-                ColorMode::parse(value).ok_or_else(|| miette!("unknown color mode: {value}"))?;
-            set_color(&mut invocation, color, "--color")?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--color" {
-            let value = tokens
-                .get(index + 1)
-                .ok_or_else(|| miette!("`--color` expects a value"))?;
-            let color =
-                ColorMode::parse(value).ok_or_else(|| miette!("unknown color mode: {value}"))?;
-            set_color(&mut invocation, color, "--color")?;
-            index += 2;
-            continue;
-        }
-
-        if let Some(value) = token.strip_prefix("--unicode=") {
-            let unicode = UnicodeMode::parse(value)
-                .ok_or_else(|| miette!("unknown unicode mode: {value}"))?;
-            set_unicode(&mut invocation, unicode, "--unicode")?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--unicode" {
-            let value = tokens
-                .get(index + 1)
-                .ok_or_else(|| miette!("`--unicode` expects a value"))?;
-            let unicode = UnicodeMode::parse(value)
-                .ok_or_else(|| miette!("unknown unicode mode: {value}"))?;
-            set_unicode(&mut invocation, unicode, "--unicode")?;
-            index += 2;
-            continue;
-        }
-
-        if let Some(value) = token.strip_prefix("--plugin-provider=") {
-            set_plugin_provider(&mut invocation, value, "--plugin-provider")?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--plugin-provider" {
-            let value = tokens
-                .get(index + 1)
-                .ok_or_else(|| miette!("`--plugin-provider` expects a value"))?;
-            set_plugin_provider(&mut invocation, value, "--plugin-provider")?;
-            index += 2;
+        let (flag, inline_value) = token
+            .split_once('=')
+            .map_or((token.as_str(), None), |(flag, value)| (flag, Some(value)));
+        if matches!(
+            flag,
+            "--format" | "--render-mode" | "--color" | "--unicode" | "--plugin-provider"
+        ) {
+            let value = inline_value
+                .or_else(|| tokens.get(index + 1).map(String::as_str))
+                .ok_or_else(|| miette!("`{flag}` expects a value"))?;
+            match flag {
+                "--format" => {
+                    let format = OutputFormat::parse(value)
+                        .ok_or_else(|| miette!("unknown output format: {value}"))?;
+                    set_format(&mut invocation, format, flag)?;
+                }
+                "--render-mode" => {
+                    let mode = RenderMode::parse(value)
+                        .ok_or_else(|| miette!("unknown render mode: {value}"))?;
+                    set_mode(&mut invocation, mode, flag)?;
+                }
+                "--color" => {
+                    let color = ColorMode::parse(value)
+                        .ok_or_else(|| miette!("unknown color mode: {value}"))?;
+                    set_color(&mut invocation, color, flag)?;
+                }
+                "--unicode" => {
+                    let unicode = UnicodeMode::parse(value)
+                        .ok_or_else(|| miette!("unknown unicode mode: {value}"))?;
+                    set_unicode(&mut invocation, unicode, flag)?;
+                }
+                _ => set_plugin_provider(&mut invocation, value, flag)?,
+            }
+            index += if inline_value.is_some() { 1 } else { 2 };
             continue;
         }
 
@@ -346,39 +277,28 @@ pub(crate) fn should_show_invocation_help(invocation: &InvocationOptions) -> boo
 pub(crate) fn hidden_invocation_completion_flags(
     invocation: &InvocationOptions,
 ) -> BTreeSet<String> {
-    if !should_show_invocation_help(invocation) {
-        return INVOCATION_COMPLETION_FLAGS
-            .iter()
-            .map(|flag| (*flag).to_string())
-            .collect();
-    }
-
+    let hide_all = !should_show_invocation_help(invocation);
     let mut hidden = BTreeSet::new();
-
-    if invocation.format.is_some() {
-        hidden.extend(
-            FORMAT_COMPLETION_FLAGS
-                .iter()
-                .map(|flag| (*flag).to_string()),
-        );
+    if hide_all || invocation.format.is_some() {
+        hidden.insert("--format".to_string());
+        hidden.extend(FORMAT_ALIASES.iter().map(|(flag, _)| (*flag).to_string()));
     }
-    if invocation.mode.is_some() {
-        hidden.extend(MODE_COMPLETION_FLAGS.iter().map(|flag| (*flag).to_string()));
+    if hide_all || invocation.mode.is_some() {
+        hidden.insert("--render-mode".to_string());
+        hidden.extend(MODE_ALIASES.iter().map(|(flag, _)| (*flag).to_string()));
     }
-    if invocation.color.is_some() {
+    if hide_all || invocation.color.is_some() {
         hidden.insert("--color".to_string());
     }
-    if invocation.unicode.is_some() {
-        hidden.extend(
-            UNICODE_COMPLETION_FLAGS
-                .iter()
-                .map(|flag| (*flag).to_string()),
-        );
+    if hide_all || invocation.unicode.is_some() {
+        hidden.extend(["--unicode", "--ascii"].map(str::to_string));
     }
-    if invocation.plugin_provider.is_some() {
+    if hide_all || invocation.plugin_provider.is_some() {
         hidden.insert("--plugin-provider".to_string());
     }
-
+    if hide_all {
+        hidden.extend(["--verbose", "--quiet", "--debug"].map(str::to_string));
+    }
     hidden
 }
 
@@ -446,64 +366,6 @@ fn set_plugin_provider(options: &mut InvocationOptions, value: &str, source: &st
     }
     options.plugin_provider = Some(normalized.to_string());
     Ok(())
-}
-
-#[derive(Clone, Copy)]
-enum FormatAlias {
-    Guide,
-    Json,
-    Table,
-    Value,
-    Markdown,
-    Mreg,
-}
-
-impl FormatAlias {
-    fn parse(token: &str) -> Option<Self> {
-        match token {
-            "--guide" => Some(Self::Guide),
-            "--json" => Some(Self::Json),
-            "--table" => Some(Self::Table),
-            "--value" => Some(Self::Value),
-            "--md" => Some(Self::Markdown),
-            "--mreg" => Some(Self::Mreg),
-            _ => None,
-        }
-    }
-
-    fn format(self) -> OutputFormat {
-        match self {
-            Self::Guide => OutputFormat::Guide,
-            Self::Json => OutputFormat::Json,
-            Self::Table => OutputFormat::Table,
-            Self::Value => OutputFormat::Value,
-            Self::Markdown => OutputFormat::Markdown,
-            Self::Mreg => OutputFormat::Mreg,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum RenderAlias {
-    Rich,
-    Plain,
-}
-
-impl RenderAlias {
-    fn parse(token: &str) -> Option<Self> {
-        match token {
-            "--rich" => Some(Self::Rich),
-            "--plain" => Some(Self::Plain),
-            _ => None,
-        }
-    }
-
-    fn mode(self) -> RenderMode {
-        match self {
-            Self::Rich => RenderMode::Rich,
-            Self::Plain => RenderMode::Plain,
-        }
-    }
 }
 
 #[cfg(test)]
