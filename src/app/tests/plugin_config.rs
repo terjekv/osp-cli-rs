@@ -270,7 +270,7 @@ fn external_plugin_dispatch_fails_when_config_env_collides_unit() {
         &state.clients,
         &["cfg".to_string()],
         &invocation,
-        crate::guide::GuideView::from_text,
+        crate::core::document::Document::from_help_text,
     )
     .expect_err("colliding injected env config should block dispatch");
 

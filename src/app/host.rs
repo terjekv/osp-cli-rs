@@ -13,7 +13,7 @@ use clap::{CommandFactory, FromArgMatches};
 use miette::{Result, miette};
 use nu_ansi_term::Style;
 
-use crate::guide::{GuideSection, GuideSectionKind, GuideView, HelpLevel};
+use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::ui::{RenderBackend, RenderSettings};
 use std::backtrace::Backtrace;
 use std::borrow::Cow;
@@ -281,7 +281,7 @@ where
         crate::cli::validate_cli_dsl_stages(&stages)?;
         (pipe, scanned, suffix, stages)
     };
-    let parsed = {
+    let (parsed, help_command) = {
         let _phase = crate::startup_trace::phase("clap parse");
         let mut command = Cli::command();
         for &(name, help, key, _) in &app.config_flags {
@@ -298,8 +298,8 @@ where
                     .conflicts_with_all(conflicts),
             );
         }
-        command
-            .try_get_matches_from(scanned.argv.iter().cloned())
+        let parsed = command
+            .try_get_matches_from_mut(scanned.argv.iter().cloned())
             .and_then(|matches| {
                 let mut cli = Cli::from_arg_matches(&matches)?;
                 for &(name, _, key, value) in &app.config_flags {
@@ -308,7 +308,8 @@ where
                     }
                 }
                 Ok(cli)
-            })
+            });
+        (parsed, command)
     };
     match parsed {
         Ok(Cli {
@@ -332,12 +333,13 @@ where
                 run(cli, scanned.invocation, &stages, sink, app)
             }
         }
-        Err(err) => handle_clap_parse_error(&argv[..pipe], err, &stages, sink, app),
+        Err(err) => handle_clap_parse_error(&argv[..pipe], &help_command, err, &stages, sink, app),
     }
 }
 
 fn handle_clap_parse_error(
     args: &[OsString],
+    command: &clap::Command,
     err: clap::Error,
     stages: &[String],
     sink: &mut dyn UiSink,
@@ -352,14 +354,12 @@ fn handle_clap_parse_error(
                 let _phase = crate::startup_trace::phase("native command configure");
                 app.native_commands.configure(config);
             }
-            let raw_help = err.to_string();
-            // Only the root command's usage is `<bin> [OPTIONS] [COMMAND]`; the
-            // binary name depends on how osp was installed, so it is not matched.
-            let root_help = raw_help.lines().any(|line| {
-                let words = line.split_whitespace().collect::<Vec<_>>();
-                matches!(words.as_slice(), ["Usage:", _, "[OPTIONS]", "[COMMAND]"])
-            });
-            let mut body = GuideView::from_text(&raw_help);
+            let tokens = scan_cli_argv(args)?
+                .argv
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let (mut body, root_help) = crate::cli::command_help_document(command.clone(), &tokens);
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);
@@ -382,23 +382,28 @@ fn handle_clap_parse_error(
                             .ok_or_else(|| miette!("Unknown DSL verb: {target}"))?,
                     ]
                 };
-                filtered = GuideView {
-                    commands: verbs
-                        .into_iter()
-                        .map(|info| crate::guide::GuideEntry {
-                            name: info.verb.to_string(),
-                            short_help: info.help.to_string(),
-                            display_indent: None,
-                            display_gap: None,
-                        })
-                        .collect(),
-                    ..GuideView::default()
+                filtered = Document {
+                    blocks: vec![DocBlock::section(
+                        "Commands",
+                        vec![DocBlock::Entries {
+                            entries: verbs
+                                .into_iter()
+                                .map(|info| DocumentEntry {
+                                    name: info.verb.to_string(),
+                                    description: info.help.to_string(),
+                                })
+                                .collect(),
+                        }],
+                    )],
                 };
             }
             let stages = if dsl_help.is_some() { &[][..] } else { stages };
-            let output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
+            let mut output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
                 .map_err(|error| miette!("failed to transform help output: {error}"))?;
-            let rendered = crate::ui::render_structured_output_with_source_guide(
+            output.meta.document_long_help = tokens
+                .iter()
+                .any(|token| token == "--help" || token == "help");
+            let rendered = crate::ui::render_structured_output_with_source_document(
                 &output,
                 stages.is_empty().then_some(&filtered),
                 &help_context.settings,
@@ -1102,43 +1107,49 @@ fn native_catalog_entry_to_command_catalog_entry(
     }
 }
 
-fn add_native_command_help(view: &mut GuideView, native_commands: &NativeCommandRegistry) {
-    let catalog = native_commands.catalog();
-    if catalog.is_empty() {
+fn add_native_command_help(view: &mut Document, native_commands: &NativeCommandRegistry) {
+    let entries = native_commands
+        .catalog()
+        .into_iter()
+        .map(|entry| DocumentEntry {
+            name: entry.name,
+            description: entry.about.trim().to_string(),
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
         return;
     }
-
-    let mut section = GuideSection::new("Commands", GuideSectionKind::Commands);
-    for entry in catalog {
-        section = section.entry(entry.name, entry.about.trim());
-    }
-    let native_entries = section.entries;
-    view.commands.splice(0..0, native_entries.iter().cloned());
-    if let Some(commands) = view.sections.iter_mut().find(|section| {
-        section.kind == GuideSectionKind::Commands && section.is_canonical_builtin_section()
-    }) {
-        if commands.entries.is_empty() {
-            commands.entries = view.commands.clone();
-        } else {
-            commands.entries.splice(0..0, native_entries);
+    if let Some(DocBlock::Section { blocks, .. }) = view
+        .blocks
+        .iter_mut()
+        .find(|block| matches!(block, DocBlock::Section { title, .. } if title == "Commands"))
+    {
+        if let Some(DocBlock::Entries { entries: commands }) = blocks.first_mut() {
+            commands.splice(0..0, entries);
         }
     } else {
-        let mut commands = GuideSection::new("Commands", GuideSectionKind::Commands);
-        commands.entries = view.commands.clone();
-        view.sections.push(commands);
+        view.blocks.push(DocBlock::section(
+            "Commands",
+            vec![DocBlock::Entries { entries }],
+        ));
     }
 }
 
-fn add_product_option_help(view: &mut GuideView, options: &[(String, String)]) {
-    if options.is_empty() {
-        return;
+fn add_product_option_help(view: &mut Document, options: &[(String, String)]) {
+    if !options.is_empty() {
+        view.blocks.push(DocBlock::section(
+            "Product options",
+            vec![DocBlock::Entries {
+                entries: options
+                    .iter()
+                    .map(|(name, description)| DocumentEntry {
+                        name: name.clone(),
+                        description: description.clone(),
+                    })
+                    .collect(),
+            }],
+        ));
     }
-
-    let mut section = GuideSection::new("Product options", GuideSectionKind::Options);
-    for (syntax, help) in options {
-        section = section.entry(syntax, help);
-    }
-    view.sections.push(section);
 }
 
 pub(crate) fn resolve_render_settings_with_hint(

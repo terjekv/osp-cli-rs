@@ -9,7 +9,7 @@ use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
 use crate::cli::{Commands, ConfigCommands, PluginsCommands, ThemeCommands};
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+use crate::core::document::{DocBlock, Document};
 
 use crate::repl::input;
 
@@ -115,7 +115,7 @@ pub(super) fn parse_repl_invocation(
         return Ok(repl_help_dispatch(
             parsed,
             &effective,
-            crate::app::CliCommandResult::guide(
+            crate::app::CliCommandResult::document(
                 render_invalid_help_alias(input::help_alias_target_at(
                     &scanned.tokens,
                     command_index,
@@ -138,13 +138,16 @@ pub(super) fn parse_repl_invocation(
             return Err(miette!("missing command"));
         }
         app::command_plan::InlineCommandPlan::Help(err) => {
+            let mut output =
+                render_repl_parse_help(effective.help_level, &scoped_tokens, &err.to_string())
+                    .to_output_result();
+            output.meta.document_long_help = scoped_tokens
+                .iter()
+                .any(|token| token == "--help" || token == "help");
             return Ok(repl_help_dispatch(
                 parsed,
                 &effective,
-                crate::app::CliCommandResult::guide(render_repl_parse_help(
-                    effective.help_level,
-                    &err.to_string(),
-                )),
+                crate::app::CliCommandResult::output(output, None),
             ));
         }
     };
@@ -172,36 +175,35 @@ fn repl_help_dispatch(
     }
 }
 
-fn render_invalid_help_alias(target: Option<&str>) -> GuideView {
+fn render_invalid_help_alias(target: Option<&str>) -> Document {
     let detail = match target {
         Some(target) => format!("invalid help target: {target}"),
         None => "help expects a command target".to_string(),
     };
-    GuideView {
-        preamble: vec![detail],
-        usage: Vec::new(),
-        commands: Vec::new(),
-        arguments: Vec::new(),
-        options: Vec::new(),
-        common_invocation_options: Vec::new(),
-        notes: Vec::new(),
-        sections: vec![
-            GuideSection::new("Usage", GuideSectionKind::Usage).paragraph("help <command>"),
-            GuideSection::new("Notes", GuideSectionKind::Notes)
-                .paragraph("  Use bare help for the REPL overview.")
-                .paragraph("  help help and help --help are not valid.")
-                .paragraph("  Add -v to include common invocation options."),
-        ],
-        epilogue: Vec::new(),
-    }
+    Document { blocks: vec![DocBlock::Paragraph { text: detail },
+        DocBlock::section("Usage", vec![DocBlock::Paragraph { text: "help <command>".into() }]),
+        DocBlock::section("Notes", vec![DocBlock::Paragraph { text:
+            "Use bare help for the REPL overview.\nhelp help and help --help are not valid.\nAdd -v to include common invocation options.".into() }]),
+    ] }
 }
 
-fn render_repl_parse_help(help_level: crate::guide::HelpLevel, error_text: &str) -> GuideView {
+fn render_repl_parse_help(
+    help_level: crate::core::document::HelpLevel,
+    tokens: &[String],
+    error_text: &str,
+) -> Document {
     let parsed = parse_clap_help(error_text);
-    let mut view = GuideView::from_text(parsed.body);
+    let mut view = crate::cli::inline_help_document(tokens);
     extend_with_invocation_help(&mut view, help_level);
-    if let Some(summary) = parsed.summary {
-        view.preamble.insert(0, summary.to_string());
+    if error_text.starts_with("error:")
+        && let Some(summary) = parsed.summary
+    {
+        view.blocks.insert(
+            0,
+            DocBlock::Paragraph {
+                text: summary.into(),
+            },
+        );
     }
     view.filtered_for_help_level(help_level)
 }
@@ -528,7 +530,7 @@ pub(super) fn run_repl_external_command(
         clients,
         &tokens,
         invocation,
-        GuideView::from_text,
+        Document::from_help_text,
     )
 }
 
@@ -547,7 +549,7 @@ fn run_repl_external_command_with_progress(
         clients,
         &tokens,
         invocation,
-        GuideView::from_text,
+        Document::from_help_text,
         progress_sink,
         accepted,
     )

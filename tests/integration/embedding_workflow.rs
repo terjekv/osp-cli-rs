@@ -386,30 +386,29 @@ fn embedded_product_bootstrap_options_feed_config_and_remain_visible_in_help() {
         0
     );
     let guide: Value = serde_json::from_str(&help.stdout).unwrap();
-    let sections = guide[0]["sections"].as_array().unwrap();
+    let sections = guide["blocks"].as_array().unwrap();
     let options = sections
         .iter()
-        .find(|section| section["title"] == "Product options")
+        .find(|section| section["section"] == "Product options")
         .unwrap();
-    assert_eq!(options["kind"], "options");
-    let option = options["entries"]
+    let option = options["blocks"][0]["entries"]
         .as_array()
         .unwrap()
         .iter()
         .find(|entry| entry["name"] == "--site <NAME>")
         .unwrap();
-    assert_eq!(option["short_help"], "Select the product site");
+    assert_eq!(option["description"], "Select the product site");
     let commands = sections
         .iter()
-        .find(|section| section["kind"] == "commands")
+        .find(|section| section["section"] == "Commands")
         .unwrap();
     assert!(
-        commands["entries"]
+        commands["blocks"][0]["entries"]
             .as_array()
             .unwrap()
             .iter()
             .any(|entry| entry["name"] == "provision"
-                && entry["short_help"] == "Follow a product-owned approval workflow")
+                && entry["description"] == "Follow a product-owned approval workflow")
     );
 
     let mut config = BufferedUiSink::default();

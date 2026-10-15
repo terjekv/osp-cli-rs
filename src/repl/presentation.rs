@@ -17,7 +17,7 @@ use crate::core::document::{DocBlock, Document, DocumentEntry};
 use crate::native::NativeSessionContext;
 use crate::repl::{ReplAppearance, ReplPrompt};
 use crate::ui::messages::MessageLevel;
-use crate::ui::render_structured_output_with_source_guide;
+use crate::ui::render_structured_output_with_source_document;
 use crate::ui::style::{StyleToken, apply_style_with_theme, apply_style_with_theme_overrides};
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -151,7 +151,7 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
     let intro_style =
         intro_style_with_verbosity(intro_style(view.config), view.ui.message_verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
-    let mut rendered = render_structured_output_with_source_guide(
+    let mut rendered = render_structured_output_with_source_document(
         &repl_document_output(&guide),
         None,
         &view.ui.render_settings,
@@ -379,7 +379,7 @@ pub(crate) fn render_repl_command_overview(
         0,
         0,
     ));
-    render_structured_output_with_source_guide(
+    render_structured_output_with_source_document(
         &repl_document_output(&guide),
         None,
         &view.ui.render_settings,

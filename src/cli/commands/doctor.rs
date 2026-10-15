@@ -18,10 +18,10 @@ use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{DoctorArgs, DoctorCommands, InlineCommandCli, PluginsArgs, PluginsCommands};
 use crate::core::command_def::CommandDef;
 use crate::core::command_policy::CredentialState;
+use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
 use crate::core::row::Row;
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 use crate::ui::theme_catalog::ThemeCatalog;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -165,7 +165,7 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
         ),
     );
 
-    Ok(CliCommandResult::guide_with_output(
+    Ok(CliCommandResult::document_with_output(
         doctor_report_guide(&sections),
         doctor_report_output(&sections),
         None,
@@ -204,16 +204,19 @@ fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_
     vec![row]
 }
 
-fn doctor_report_guide(sections: &[(&str, Vec<Row>)]) -> GuideView {
-    GuideView {
-        sections: sections
+fn doctor_report_guide(sections: &[(&str, Vec<Row>)]) -> Document {
+    Document {
+        blocks: sections
             .iter()
             .map(|(name, rows)| {
-                GuideSection::new(*name, GuideSectionKind::Custom)
-                    .data(doctor_section_view_value(rows))
+                DocBlock::section(
+                    *name,
+                    vec![DocBlock::Data {
+                        value: doctor_section_view_value(rows),
+                    }],
+                )
             })
             .collect(),
-        ..GuideView::default()
     }
 }
 
@@ -376,6 +379,7 @@ mod tests {
     use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
+    use crate::core::document::DocBlock;
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
@@ -611,11 +615,12 @@ mod tests {
         };
         assert!(
             guide
-                .source_guide
+                .source_document
                 .expect("expected semantic guide payload")
-                .sections
+                .blocks
                 .iter()
-                .all(|section| section.data.is_some())
+                .all(|block| matches!(block, DocBlock::Section { blocks, .. }
+                    if matches!(blocks.as_slice(), [DocBlock::Data { .. }])))
         );
         let rows = guide
             .output

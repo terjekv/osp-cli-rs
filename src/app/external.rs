@@ -14,7 +14,7 @@ use crate::app::{RuntimeContext, TerminalKind, UiState};
 use crate::cli::Commands;
 use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_command_tokens};
 use crate::cli::pipeline::{ParsedCommandLine, parse_command_tokens_with_aliases};
-use crate::guide::GuideView;
+use crate::core::document::Document;
 use crate::native::{
     InvocationElevation, NativeCommandContext, NativeCommandOutcome, NativeProgressEvent,
     NativeProgressSink, NativeSessionContext,
@@ -111,7 +111,7 @@ pub(super) fn run_external_command(
         parsed,
         invocation,
         |stdout| {
-            let mut guide = GuideView::from_text(stdout);
+            let mut guide = Document::from_help_text(stdout);
             extend_with_invocation_help(&mut guide, invocation.help_level);
             guide.filtered_for_help_level(invocation.help_level)
         },
@@ -127,7 +127,7 @@ pub(crate) fn run_external_command_with_help_renderer(
     clients: &AppClients,
     tokens: &[String],
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
 ) -> Result<CliCommandResult> {
     run_external_command_with_help_renderer_and_progress(
         runtime, session, clients, tokens, invocation, guide_help, None,
@@ -140,7 +140,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress(
     clients: &AppClients,
     tokens: &[String],
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
 ) -> Result<CliCommandResult> {
     let parsed = parse_external_invocation(runtime, session, tokens, invocation)?;
@@ -162,7 +162,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
     clients: &AppClients,
     tokens: &[String],
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
 ) -> Result<CliCommandResult> {
@@ -185,7 +185,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
     clients: &AppClients,
     parsed: ExternalParse,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
     mut accepted: Option<&mut bool>,
 ) -> Result<CliCommandResult> {
@@ -383,7 +383,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                         ),
                     }
                     return crate::app::command_output::apply_stages_to_cli_result(
-                        CliCommandResult::guide(guide_help(&help)),
+                        CliCommandResult::document(guide_help(&help)),
                         &parsed.stages,
                     );
                 }
@@ -537,7 +537,7 @@ fn run_native_command(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     input: NativeRunInput<'_, '_, '_, '_>,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CliCommandResult> {
     session.native_context.clear_pagination();
@@ -589,7 +589,7 @@ fn run_native_command(
 
     match execution? {
         NativeCommandOutcome::Help(text) => crate::app::command_output::apply_stages_to_cli_result(
-            CliCommandResult::guide(guide_help(&text)),
+            CliCommandResult::document(guide_help(&text)),
             input.stages,
         ),
         NativeCommandOutcome::Exit(code) => Ok(CliCommandResult::exit(code)),
@@ -768,9 +768,9 @@ fn plan_external_invocation(
         ReplViewContext::from_parts(runtime, session),
         &parsed.stages,
     ) {
-        return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
-            GuideView::from_text(&help),
-        ))));
+        return Ok(ExternalParse::Handled(Box::new(
+            CliCommandResult::document(Document::from_help_text(&help)),
+        )));
     }
 
     let inline_command = match super::command_plan::parse_inline_command(
@@ -779,11 +779,18 @@ fn plan_external_invocation(
         super::command_plan::CommandSurface::External,
     )? {
         super::command_plan::InlineCommandPlan::Command(command) => command,
-        super::command_plan::InlineCommandPlan::Help(err) => {
-            let mut view = GuideView::from_text(&err.to_string());
+        super::command_plan::InlineCommandPlan::Help(_) => {
+            let mut view = crate::cli::inline_help_document(&parsed.tokens);
             extend_with_invocation_help(&mut view, invocation.help_level);
-            return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
-                view.filtered_for_help_level(invocation.help_level),
+            let mut output = view
+                .filtered_for_help_level(invocation.help_level)
+                .to_output_result();
+            output.meta.document_long_help = parsed
+                .tokens
+                .iter()
+                .any(|token| token == "--help" || token == "help");
+            return Ok(ExternalParse::Handled(Box::new(CliCommandResult::output(
+                output, None,
             ))));
         }
     };
@@ -838,7 +845,7 @@ fn run_external_plugin_command(
     command: &str,
     parsed: &ParsedExternalInvocation,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CliCommandResult> {
     let (_, args) = parsed
@@ -877,7 +884,7 @@ fn run_external_plugin_command(
             .dispatch_passthrough(command, args, &dispatch_context)
             .map_err(enrich_dispatch_error)?;
         let mut result = if !raw.stdout.is_empty() {
-            CliCommandResult::guide(guide_help(&raw.stdout))
+            CliCommandResult::document(guide_help(&raw.stdout))
         } else {
             CliCommandResult::exit(raw.status_code)
         };
@@ -923,12 +930,12 @@ mod tests {
     use crate::cli::invocation::InvocationOptions;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::command_policy::CommandPolicyContext;
+    use crate::core::document::Document;
     use crate::core::output::OutputFormat;
     use crate::core::plugin::{
         DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
         ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
     };
-    use crate::guide::GuideView;
     use crate::native::{
         NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
         NativePagination, NativeProgressEvent, NativeSessionContext,
@@ -1413,7 +1420,7 @@ JSON
                 &clients,
                 &["ldap".to_string(), "user".to_string()],
                 &invocation,
-                |text| GuideView::from_text(&format!("HELP::{text}")),
+                |text| Document::from_help_text(&format!("HELP::{text}")),
             )
             .expect("native command should dispatch");
 
@@ -1423,12 +1430,7 @@ JSON
                         result.output,
                         Some(ReplCommandOutput::Output(guide))
                             if guide
-                                .source_guide
-                                .as_ref()
-                                .expect("expected semantic guide payload")
-                                .preamble
-                                .iter()
-                                .any(|line| line.contains("HELP::Usage: osp ldap"))
+                                .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::Usage: osp ldap")
                     ));
                 }
                 NativeOutcomeKind::Exit => {
@@ -1466,7 +1468,7 @@ JSON
             &clients,
             &["progress".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
             Some(&mut sink),
         )
         .expect("native command should emit progress and return");
@@ -1494,7 +1496,7 @@ JSON
             &clients,
             &["verbosity".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect("native command should dispatch");
 
@@ -1523,7 +1525,7 @@ JSON
             &clients,
             &["ldap".to_string()],
             &invocation,
-            |text| GuideView::from_text(&format!("HELP::{text}")),
+            |text| Document::from_help_text(&format!("HELP::{text}")),
         )
         .expect("bare shellable root should rewrite to help");
 
@@ -1531,12 +1533,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .source_guide
-                    .as_ref()
-                    .expect("expected semantic guide payload")
-                    .preamble
-                    .iter()
-                    .any(|line| line.contains("HELP::") || line.contains("Directory lookup"))
+                    .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::")
         ));
     }
 
@@ -1555,7 +1552,7 @@ JSON
             &clients,
             &["LDAP".to_string()],
             &invocation,
-            |text| GuideView::from_text(&format!("HELP::{text}")),
+            |text| Document::from_help_text(&format!("HELP::{text}")),
         )
         .expect("mixed-case native command should dispatch");
 
@@ -1563,12 +1560,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .source_guide
-                    .as_ref()
-                    .expect("expected semantic guide payload")
-                    .preamble
-                    .iter()
-                    .any(|line| line.contains("HELP::Usage: osp ldap"))
+                    .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::Usage: osp ldap")
         ));
     }
 
@@ -1587,7 +1579,7 @@ JSON
             &clients,
             &["lpad".to_string(), "user".to_string(), "oistes".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("misspelled command should fail with a suggestion");
 
@@ -1621,7 +1613,7 @@ JSON
                 "alice".to_string(),
             ],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("nested auth should block native external dispatch");
 
@@ -1650,7 +1642,7 @@ JSON
             &clients,
             &["lookup".to_string(), "u".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("the canonical aliased child policy should deny execution");
 
@@ -1675,7 +1667,7 @@ JSON
             &clients,
             &["ldap".to_string(), "help".to_string(), "user".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect("visible nested help should not require its run capability");
 
@@ -1687,7 +1679,7 @@ JSON
             &clients,
             &["ldap".to_string(), "user".to_string(), "alice".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("real execution should still require runnability");
         assert!(denied.to_string().contains("requires authentication"));
@@ -1721,7 +1713,7 @@ JSON
                 &clients,
                 &["ldap".to_string(), "user".to_string(), "--help".to_string()],
                 &invocation,
-                GuideView::from_text,
+                Document::from_help_text,
             )
             .expect_err("hidden command help must remain inaccessible");
         }
@@ -1754,7 +1746,7 @@ JSON
             &clients,
             &["ldap".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("native/plugin collision should fail");
 
@@ -1788,7 +1780,7 @@ JSON
             &clients,
             &["shared".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect_err("ambiguous plugin command should fail before dispatch");
 
@@ -1826,7 +1818,7 @@ JSON
             &clients,
             &["ldap".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect("provider override should route to plugin");
 
@@ -1867,7 +1859,7 @@ JSON
             &clients,
             &["SHARED".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
         )
         .expect("mixed-case plugin command should dispatch");
 

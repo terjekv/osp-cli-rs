@@ -81,19 +81,12 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     let json = run_cli_stdout(&["--no-env", "--no-config-file", "--json", "--help"]);
     let json_value: serde_json::Value =
         serde_json::from_str(&json).expect("help json should parse");
-    let json_rows = json_value
-        .as_array()
-        .expect("help json should be row array");
-    assert_eq!(json_rows.len(), 1);
-    let usage = json_rows[0]["usage"]
-        .as_array()
-        .expect("usage should be an array");
-    assert!(!usage.is_empty());
-    assert!(
-        usage
-            .iter()
-            .all(|line| line.as_str().is_some_and(|text| !text.is_empty()))
-    );
+    let blocks = json_value["blocks"].as_array().unwrap();
+    let usage = blocks
+        .iter()
+        .find(|block| block["section"] == "Usage")
+        .unwrap();
+    assert!(!usage["blocks"][0]["text"].as_str().unwrap().is_empty());
 
     let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--guide", "--help"]);
     assert!(guide.contains("Usage"));

@@ -8,8 +8,8 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 
+use crate::core::document::{Document, HelpLevel};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use crate::guide::{GuideView, HelpLevel};
 use miette::{Result, miette};
 
 pub(crate) const INVOCATION_HELP_SECTION: &str = r#"Common Invocation Options:
@@ -260,13 +260,13 @@ pub(crate) fn scan_command_tokens_with_trace(
     })
 }
 
-pub(crate) fn invocation_help_view() -> GuideView {
-    GuideView::from_text(INVOCATION_HELP_SECTION)
+pub(crate) fn invocation_help_view() -> Document {
+    Document::from_help_text(INVOCATION_HELP_SECTION)
 }
 
-pub(crate) fn extend_with_invocation_help(view: &mut GuideView, level: HelpLevel) {
+pub(crate) fn extend_with_invocation_help(view: &mut Document, level: HelpLevel) {
     if level >= HelpLevel::Verbose {
-        view.merge(invocation_help_view());
+        view.blocks.extend(invocation_help_view().blocks);
     }
 }
 
@@ -375,9 +375,9 @@ mod tests {
         hidden_invocation_completion_flags, invocation_help_view, scan_cli_argv,
         scan_command_tokens, scan_command_tokens_with_trace, should_show_invocation_help,
     };
+    use crate::core::document::Document;
+    use crate::core::document::HelpLevel;
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-    use crate::guide::GuideView;
-    use crate::guide::HelpLevel;
     use std::ffi::OsString;
 
     fn scan(tokens: &[&str]) -> super::ScannedCommandTokens {
@@ -521,20 +521,17 @@ mod tests {
     #[test]
     fn invocation_help_hidden_completion_and_cli_argv_follow_visibility_and_flag_only_inputs_unit()
     {
-        let rendered = invocation_help_view();
-        assert!(!rendered.common_invocation_options.is_empty());
-        assert!(
-            rendered
-                .common_invocation_options
-                .iter()
-                .any(|entry| entry.name.contains("--guide"))
-        );
-        assert!(
-            rendered
-                .common_invocation_options
-                .iter()
-                .any(|entry| entry.name.contains("--json"))
-        );
+        let rendered = invocation_help_view().rows();
+        assert!(rendered.iter().any(|row| {
+            row.get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| name.contains("--guide"))
+        }));
+        assert!(rendered.iter().any(|row| {
+            row.get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| name.contains("--json"))
+        }));
         assert!(INVOCATION_HELP_SECTION.contains("--guide"));
         assert!(INVOCATION_HELP_SECTION.contains("guide|json|table"));
 
@@ -544,13 +541,23 @@ mod tests {
             ..InvocationOptions::default()
         }));
 
-        let mut hidden = GuideView::from_text("Usage: osp [COMMAND]\n");
+        let mut hidden = Document::from_help_text("Usage: osp [COMMAND]\n");
         extend_with_invocation_help(&mut hidden, HelpLevel::Normal);
-        assert!(hidden.common_invocation_options.is_empty());
+        assert!(
+            !hidden
+                .rows()
+                .iter()
+                .any(|row| row["section"] == "Common Invocation Options")
+        );
 
-        let mut visible = GuideView::from_text("Usage: osp [COMMAND]\n");
+        let mut visible = Document::from_help_text("Usage: osp [COMMAND]\n");
         extend_with_invocation_help(&mut visible, HelpLevel::Verbose);
-        assert!(!visible.common_invocation_options.is_empty());
+        assert!(
+            visible
+                .rows()
+                .iter()
+                .any(|row| row["section"] == "Common Invocation Options")
+        );
 
         let hidden = hidden_invocation_completion_flags(&InvocationOptions::default());
         assert!(hidden.contains("--guide"));

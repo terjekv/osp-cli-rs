@@ -287,7 +287,7 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
     state.session.record_success_output(
         "ldap user alice | P name",
         &ReplCommandOutput::Output(Box::new(StructuredCommandOutput {
-            source_guide: None,
+            source_document: None,
             output: rows_to_output_result(vec![crate::row! {
                 "name" => "alice",
                 "role" => "admin"

@@ -1194,6 +1194,7 @@ mod tests {
                 grouped: true,
                 document_rows: false,
                 document_entry_gap: None,
+                document_long_help: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

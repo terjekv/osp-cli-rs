@@ -736,6 +736,7 @@ pub(crate) fn lower_document_help_layout(
         plan: &RenderPlan,
         layout: HelpLayout,
         inside: bool,
+        long_help: bool,
     ) -> Vec<Block> {
         let mut out = Vec::new();
         for block in blocks {
@@ -752,7 +753,17 @@ pub(crate) fn lower_document_help_layout(
                     let body = if suffix.is_some() {
                         Vec::new()
                     } else {
-                        lower(blocks, plan, layout, true)
+                        lower(
+                            blocks,
+                            plan,
+                            layout,
+                            true,
+                            long_help
+                                && !matches!(
+                                    title.as_str(),
+                                    "Common Invocation Options" | "Product options"
+                                ),
+                        )
                     };
                     vec![Block::Section(SectionBlock {
                         title: (!title.is_empty()).then(|| title.clone()),
@@ -783,16 +794,33 @@ pub(crate) fn lower_document_help_layout(
                         .iter()
                         .map(|entry| EntryRow {
                             key: entry.name.clone(),
-                            value: entry.description.clone(),
-                            indent_hint: None,
-                            gap_hint: plan.document_entry_gap.map(|gap| {
-                                let width = entries
-                                    .iter()
-                                    .map(|entry| display_width(&entry.name))
-                                    .max()
-                                    .unwrap_or(0);
-                                " ".repeat(width.saturating_sub(display_width(&entry.name)) + gap)
+                            value: if long_help && entry.name.starts_with('-') {
+                                entry
+                                    .description
+                                    .lines()
+                                    .filter(|line| !line.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("\n          ")
+                            } else {
+                                entry.description.clone()
+                            },
+                            indent_hint: (long_help && entry.name.starts_with('-')).then(|| {
+                                " ".repeat(if entry.name.starts_with("--") { 6 } else { 2 })
                             }),
+                            gap_hint: if long_help && entry.name.starts_with('-') {
+                                Some("\n          ".into())
+                            } else {
+                                plan.document_entry_gap.map(|gap| {
+                                    let width = entries
+                                        .iter()
+                                        .map(|entry| display_width(&entry.name))
+                                        .max()
+                                        .unwrap_or(0);
+                                    " ".repeat(
+                                        width.saturating_sub(display_width(&entry.name)) + gap,
+                                    )
+                                })
+                            },
                         })
                         .collect(),
                 })],
@@ -817,7 +845,13 @@ pub(crate) fn lower_document_help_layout(
         }
         out
     }
-    let mut blocks = lower(&document.blocks, plan, layout, false);
+    let mut blocks = lower(
+        &document.blocks,
+        plan,
+        layout,
+        false,
+        plan.document_long_help,
+    );
     if footer
         && blocks
             .iter()

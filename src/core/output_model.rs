@@ -104,6 +104,8 @@ pub struct OutputMeta {
     pub document_rows: bool,
     /// Optional minimum gap after aligned document entry names.
     pub document_entry_gap: Option<usize>,
+    /// Use clap long-help entry layout for builtin option descriptions.
+    pub document_long_help: bool,
     /// Preferred renderer for this result, when known.
     pub render_recommendation: Option<RenderRecommendation>,
     /// Human-only complete lines supplied by a producer for presentation.
@@ -218,6 +220,7 @@ impl OutputResult {
                 grouped: false,
                 document_rows: false,
                 document_entry_gap: None,
+                document_long_help: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

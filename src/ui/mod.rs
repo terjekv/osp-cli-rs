@@ -64,7 +64,7 @@ pub(crate) mod settings;
 mod text;
 
 use crate::config::ResolvedConfig;
-use crate::core::document::Document;
+use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
 use crate::guide::{GuideSection, GuideSectionKind, GuideView};
@@ -154,6 +154,79 @@ pub(crate) fn format_relative_unix_timestamp(seconds: i64) -> String {
     } else {
         format!("in {amount}{unit}")
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StructuredDocumentRenderOptions<'a> {
+    pub(crate) source_document: Option<&'a Document>,
+    pub(crate) layout: HelpLayout,
+    pub(crate) title_prefix: Option<&'a str>,
+    pub(crate) show_footer_rule: Option<bool>,
+}
+
+pub(crate) fn render_structured_output_with_source_document(
+    output: &OutputResult,
+    source_document: Option<&Document>,
+    settings: &RenderSettings,
+    layout: HelpLayout,
+) -> String {
+    render_structured_output_with_document_options(
+        output,
+        settings,
+        StructuredDocumentRenderOptions {
+            source_document,
+            layout,
+            title_prefix: None,
+            show_footer_rule: None,
+        },
+    )
+}
+
+pub(crate) fn render_structured_output_with_document_options(
+    output: &OutputResult,
+    settings: &RenderSettings,
+    options: StructuredDocumentRenderOptions<'_>,
+) -> String {
+    let output = prepare_output_for_sink(output, settings, RenderProfile::Normal);
+    let plan = plan_output(&output, settings, RenderProfile::Normal);
+    if !matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown) {
+        return emit::emit_doc(
+            &lower::lower_output(&output, &plan),
+            plan.format,
+            &plan.settings,
+        );
+    }
+    let carried = output
+        .document
+        .as_ref()
+        .filter(|document| document.kind == crate::core::output_model::OutputDocumentKind::Document)
+        .and_then(|document| serde_json::from_value::<Document>(document.value.clone()).ok());
+    let Some(document) = options.source_document.or(carried.as_ref()) else {
+        return render_output(&output, settings);
+    };
+    let mut document = document.clone();
+    if let Some(prefix) = options.title_prefix
+        && let Some(DocBlock::Section { title, .. }) = document
+            .blocks
+            .iter_mut()
+            .find(|block| matches!(block, DocBlock::Section { .. }))
+    {
+        *title = format!("{prefix} · {title}");
+    }
+    let mut doc = if plan.format == OutputFormat::Markdown {
+        lower::lower_document(&document, plan.format, plan.settings.indent_size)
+    } else {
+        lower::lower_document_help_layout(
+            &document,
+            &plan,
+            options.layout,
+            options
+                .show_footer_rule
+                .unwrap_or_else(|| default_show_footer_rule(options.layout)),
+        )
+    };
+    lower::sanitize_doc(&mut doc);
+    emit::emit_doc(&doc, plan.format, &plan.settings)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -320,15 +393,15 @@ pub(crate) fn render_structured_output_with_source_guide(
 
 pub(crate) fn render_structured_output_with_config(
     output: &OutputResult,
-    source_guide: Option<&GuideView>,
+    source_document: Option<&Document>,
     settings: &RenderSettings,
     config: &ResolvedConfig,
 ) -> String {
-    render_structured_output_with_guide_options(
+    render_structured_output_with_document_options(
         output,
         settings,
-        StructuredGuideRenderOptions {
-            source_guide,
+        StructuredDocumentRenderOptions {
+            source_document,
             layout: help_layout_from_config(config),
             title_prefix: None,
             show_footer_rule: None,

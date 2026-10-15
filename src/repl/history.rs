@@ -197,7 +197,7 @@ pub(crate) fn run_history_repl_command(
             output.meta.key_index = ["id", "command"].map(str::to_string).to_vec();
             Ok(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
-                    source_guide: None,
+                    source_document: None,
                     output,
                     format_hint: None,
                 },

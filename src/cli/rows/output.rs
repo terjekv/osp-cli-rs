@@ -63,6 +63,7 @@ pub(crate) fn plugin_data_to_output_result(
             grouped: false,
             document_rows: false,
             document_entry_gap: None,
+            document_long_help: false,
             render_recommendation: None,
             presentation_lines: meta
                 .map(|meta| meta.presentation_lines.clone())
@@ -433,6 +434,7 @@ mod tests {
                 grouped: true,
                 document_rows: false,
                 document_entry_gap: None,
+                document_long_help: false,
                 render_recommendation: None,
                 presentation_lines: Vec::new(),
                 progress_append: Vec::new(),

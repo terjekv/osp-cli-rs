@@ -10,7 +10,7 @@ use crate::completion::tree::command_spec_from_command_def;
 use crate::completion::{ArgNode, CommandSpec, FlagNode, SuggestionEntry, ValueType};
 use crate::config::{ConfigSchema, SchemaValueType};
 use crate::core::command_def::CommandDef;
-use crate::guide::HelpLevel;
+use crate::core::document::HelpLevel;
 use clap::Args;
 use std::collections::BTreeSet;
 

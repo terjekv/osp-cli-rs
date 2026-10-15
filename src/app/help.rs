@@ -8,8 +8,8 @@
 use std::ffi::OsString;
 
 use crate::config::{ConfigLayer, RuntimeLoadOptions};
+use crate::core::document::HelpLevel;
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use crate::guide::HelpLevel;
 use crate::ui::RenderSettings;
 use crate::ui::{HelpLayout, help_layout_from_config};
 
@@ -351,8 +351,8 @@ fn apply_invocation_overrides(
 mod tests {
     use super::{parse_help_render_overrides, render_settings_for_help};
     use crate::config::ConfigLayer;
+    use crate::core::document::HelpLevel;
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-    use crate::guide::HelpLevel;
     use crate::ui::HelpLayout;
     use std::ffi::OsString;
     use std::sync::{Mutex, OnceLock};

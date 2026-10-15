@@ -894,6 +894,60 @@ pub fn parse_inline_command_tokens(tokens: &[String]) -> Result<Option<Commands>
     InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str)).map(|parsed| parsed.command)
 }
 
+/// Select the help target with clap's parser, then read that command's metadata.
+pub(crate) fn command_help_document(
+    mut command: clap::Command,
+    tokens: &[String],
+) -> (crate::core::document::Document, bool) {
+    fn passive(command: clap::Command) -> clap::Command {
+        command
+            .disable_help_subcommand(true)
+            .ignore_errors(true)
+            .mut_args(|arg| match arg.get_action() {
+                clap::ArgAction::Help | clap::ArgAction::HelpShort | clap::ArgAction::HelpLong => {
+                    arg.action(clap::ArgAction::SetTrue)
+                }
+                _ => arg,
+            })
+            .mut_subcommands(passive)
+    }
+    command.build();
+    let parser = passive(command.clone());
+    let matches = parser.try_get_matches_from(tokens);
+    let mut selected = &command;
+    let mut root = true;
+    let mut help_subcommand = false;
+    if let Ok(matches) = &matches {
+        let mut current = matches;
+        while let Some((name, child_matches)) = current.subcommand() {
+            current = child_matches;
+            if name == "help" {
+                help_subcommand = true;
+                if let Ok(Some(targets)) = current.try_get_many::<String>("subcommand") {
+                    for name in targets {
+                        if let Some(child) = selected.find_subcommand(name) {
+                            selected = child;
+                            root = false;
+                        }
+                    }
+                }
+            } else if let Some(child) = selected.find_subcommand(name) {
+                selected = child;
+                root = false;
+            }
+        }
+    }
+    let long = help_subcommand || tokens.iter().any(|token| token == "--help");
+    (
+        crate::core::document::Document::from_clap_command(selected, long),
+        root,
+    )
+}
+
+pub(crate) fn inline_help_document(tokens: &[String]) -> crate::core::document::Document {
+    command_help_document(InlineCommandCli::command(), tokens).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

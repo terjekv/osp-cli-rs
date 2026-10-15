@@ -30,6 +30,7 @@ pub(crate) mod pipeline;
 pub(crate) mod template;
 
 use crate::core::command_def::{ArgDef, CommandDef, FlagDef};
+#[cfg(test)]
 pub(crate) use crate::core::document::HelpLevel;
 use crate::core::output_model::{
     OutputDocument, OutputDocumentKind, OutputItems, OutputResult, RenderRecommendation,
@@ -364,6 +365,7 @@ impl GuideView {
         self.epilogue.append(&mut other.epilogue);
     }
 
+    #[cfg(test)]
     pub(crate) fn filtered_for_help_level(&self, level: HelpLevel) -> Self {
         let mut filtered = self.clone();
         filtered.usage = if level >= HelpLevel::Tiny {
@@ -930,6 +932,7 @@ impl GuideSectionKind {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn min_help_level(self) -> HelpLevel {
         match self {
             GuideSectionKind::Usage => HelpLevel::Tiny,

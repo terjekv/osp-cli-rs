@@ -6,18 +6,18 @@
 //! and REPL host paths know how to render.
 
 use crate::config::ResolvedConfig;
+use crate::core::document::Document;
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{OutputItems, OutputResult, RenderRecommendation, rows_from_value};
 use crate::core::plugin::{
     ResponseErrorV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
 use crate::dsl::apply_output_pipeline;
-use crate::guide::GuideView;
 use crate::ui::clipboard::ClipboardService;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
 use crate::ui::{
     copy_output_to_clipboard, render_json_value, render_output, render_structured_output,
-    render_structured_output_with_source_guide,
+    render_structured_output_with_source_document,
 };
 use miette::{Result, WrapErr, miette};
 use serde_json::Value;
@@ -40,14 +40,14 @@ pub(crate) enum ReplCommandOutput {
 impl ReplCommandOutput {
     /// Owns pipeline input conversion and producer hints across host surfaces.
     fn into_staged(self, stages: &[String]) -> Result<StructuredCommandOutput> {
-        let (output, format_hint, source_guide) = match self {
+        let (output, format_hint, source_document) = match self {
             Self::Output(structured) => {
                 let StructuredCommandOutput {
                     output,
                     format_hint,
-                    source_guide,
+                    source_document,
                 } = *structured;
-                (output, format_hint, source_guide)
+                (output, format_hint, source_document)
             }
             Self::Text(text) => (text_output_to_rows(&text), Some(OutputFormat::Value), None),
             Self::Json(payload) => (
@@ -58,8 +58,8 @@ impl ReplCommandOutput {
         };
         let (output, format_hint) = apply_output_stages(output, stages, format_hint)?;
         Ok(StructuredCommandOutput {
-            source_guide: if stages.is_empty() {
-                source_guide
+            source_document: if stages.is_empty() {
+                source_document
             } else {
                 None
             },
@@ -71,7 +71,7 @@ impl ReplCommandOutput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StructuredCommandOutput {
-    pub(crate) source_guide: Option<GuideView>,
+    pub(crate) source_document: Option<Document>,
     pub(crate) output: OutputResult,
     pub(crate) format_hint: Option<OutputFormat>,
 }
@@ -166,7 +166,7 @@ impl CliCommandResult {
         Self {
             output: Some(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
-                    source_guide: None,
+                    source_document: None,
                     output,
                     format_hint,
                 },
@@ -189,32 +189,24 @@ impl CliCommandResult {
         }
     }
 
-    pub(crate) fn guide(guide: impl Into<GuideView>) -> Self {
-        let guide = guide.into();
-        let output = guide.to_output_result();
-        Self::guide_with_output(guide, output, None)
+    pub(crate) fn document(document: Document) -> Self {
+        Self::output(document.to_output_result(), None)
     }
 
-    pub(crate) fn guide_with_output(
-        guide: impl Into<GuideView>,
+    pub(crate) fn document_with_output(
+        document: Document,
         mut output: OutputResult,
         format_hint: Option<OutputFormat>,
     ) -> Self {
-        let guide = guide.into();
         output
             .meta
             .render_recommendation
             .get_or_insert(RenderRecommendation::Guide);
-        Self {
-            output: Some(ReplCommandOutput::Output(Box::new(
-                StructuredCommandOutput {
-                    source_guide: Some(guide),
-                    output,
-                    format_hint,
-                },
-            ))),
-            ..Self::exit(0)
+        let mut result = Self::output(output, format_hint);
+        if let Some(ReplCommandOutput::Output(structured)) = result.output.as_mut() {
+            structured.source_document = Some(document);
         }
+        result
     }
 }
 
@@ -733,7 +725,7 @@ pub(crate) fn render_repl_output_with_runtime(
             &runtime.ui().render_settings,
             &structured.output,
             structured.format_hint,
-            structured.source_guide.as_ref(),
+            structured.source_document.as_ref(),
         ),
         ReplCommandOutput::Json(payload) => {
             let effective = resolve_render_settings_with_hint(
@@ -754,7 +746,7 @@ pub(crate) fn render_saved_repl_output_with_runtime(
     match output {
         ReplCommandOutput::Output(_) => {
             let StructuredCommandOutput {
-                source_guide,
+                source_document,
                 output,
                 format_hint,
             } = output
@@ -769,7 +761,7 @@ pub(crate) fn render_saved_repl_output_with_runtime(
                     &render_settings,
                     &output,
                     format_hint,
-                    source_guide.as_ref(),
+                    source_document.as_ref(),
                 )
             } else {
                 render_structured_output(runtime.config(), &render_settings, &output)
@@ -868,12 +860,12 @@ pub(crate) fn render_structured_repl_output(
     render_settings: &crate::ui::RenderSettings,
     output: &OutputResult,
     format_hint: Option<OutputFormat>,
-    source_guide: Option<&GuideView>,
+    source_document: Option<&Document>,
 ) -> String {
     let effective = resolve_render_settings_with_hint(render_settings, format_hint);
-    render_structured_output_with_source_guide(
+    render_structured_output_with_source_document(
         output,
-        source_guide,
+        source_document,
         &effective,
         crate::ui::help_layout_from_config(config),
     )
@@ -888,7 +880,7 @@ fn render_repl_structured_command(
     sink: &mut dyn UiSink,
 ) -> Result<String> {
     let StructuredCommandOutput {
-        source_guide,
+        source_document,
         output,
         format_hint,
     } = ReplCommandOutput::Output(structured)
@@ -902,7 +894,7 @@ fn render_repl_structured_command(
             &render_settings,
             &output,
             format_hint,
-            source_guide.as_ref(),
+            source_document.as_ref(),
         )
     } else {
         render_structured_output(runtime.config(), &render_settings, &output)
