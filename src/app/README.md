@@ -31,6 +31,8 @@ modules should not import `app`; the one current exception is
 
 - Visibility and access are decided once, from command policy, before
   dispatch. Handlers do not re-check them their own way.
+- Runtime config loads source layers once per request, then derives presentation
+  defaults on that snapshot. Process error display settings are derived on failure.
 - Output leaves `app` through a `UiSink`. Tests use `BufferedUiSink` to capture
   one-shot output; REPL prompts still use the real terminal.
 - Site-specific auth and integrations belong in the wrapper crate, not here.

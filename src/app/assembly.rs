@@ -64,14 +64,6 @@ pub(crate) struct ResolvedHostInputs {
     pub(crate) default_session: AppSession,
 }
 
-/// Config-derived host defaults reused when callers need only part of the
-/// startup snapshot.
-pub(crate) struct ResolvedHostDefaults {
-    pub(crate) themes: ThemeCatalog,
-    pub(crate) plugins: PluginManager,
-    pub(crate) default_session: AppSession,
-}
-
 impl ResolvedHostInputs {
     /// Derives the host-facing UI/theme/plugin/session inputs from one
     /// authoritative config snapshot.
@@ -84,46 +76,20 @@ impl ResolvedHostInputs {
         plugin_preferences_override: Option<PluginCommandPreferences>,
         session_overrides: Option<crate::config::ConfigLayer>,
     ) -> Result<Self> {
-        let defaults = derive_host_defaults(
-            config,
-            launch,
-            plugin_preferences_override,
-            session_overrides,
-        );
-        let ui = derive_ui_state(
-            context,
-            config,
-            &defaults.themes,
-            render_seed,
-            theme_name_override,
-        )?;
+        let themes = crate::ui::theme_catalog::load_theme_catalog(config);
+        let plugins = build_plugin_manager(config, launch, plugin_preferences_override.as_ref());
+        let default_session = match session_overrides {
+            Some(overrides) => AppSession::from_resolved_config_with_overrides(config, overrides),
+            None => AppSession::from_resolved_config(config),
+        };
+        let ui = derive_ui_state(context, config, &themes, render_seed, theme_name_override)?;
 
         Ok(Self {
-            themes: defaults.themes,
+            themes,
             ui,
-            plugins: defaults.plugins,
-            default_session: defaults.default_session,
+            plugins,
+            default_session,
         })
-    }
-}
-
-pub(crate) fn derive_host_defaults(
-    config: &ResolvedConfig,
-    launch: &LaunchContext,
-    plugin_preferences_override: Option<PluginCommandPreferences>,
-    session_overrides: Option<crate::config::ConfigLayer>,
-) -> ResolvedHostDefaults {
-    let themes = crate::ui::theme_catalog::load_theme_catalog(config);
-    let plugins = build_plugin_manager(config, launch, plugin_preferences_override.as_ref());
-    let default_session = match session_overrides {
-        Some(overrides) => AppSession::from_resolved_config_with_overrides(config, overrides),
-        None => AppSession::from_resolved_config(config),
-    };
-
-    ResolvedHostDefaults {
-        themes,
-        plugins,
-        default_session,
     }
 }
 

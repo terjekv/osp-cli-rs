@@ -920,30 +920,25 @@ impl AppStateBuilder {
         context: RuntimeContext,
         config: crate::config::ResolvedConfig,
     ) -> miette::Result<Self> {
-        // This path is the canonical embedder factory: derive host inputs once
-        // and hand callers a coherent runtime/session snapshot. Plugins are
-        // intentionally derived later at build time from the final launch
-        // context, because callers may still override launch roots before the
-        // state is assembled.
-        let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
+        let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
+        let ui = crate::app::assembly::derive_ui_state(
             &context,
             &config,
-            &LaunchContext::default(),
+            &themes,
             crate::app::assembly::RenderSettingsSeed::DefaultAuto,
             None,
-            None,
-            None,
         )?;
-        crate::ui::theme_catalog::log_theme_issues(&host_inputs.themes.issues);
+        let session = AppSession::from_resolved_config(&config);
+        crate::ui::theme_catalog::log_theme_issues(&themes.issues);
         Ok(Self {
             context,
             config,
-            ui: host_inputs.ui,
+            ui,
             launch: LaunchContext::default(),
             plugins: None,
             native_commands: NativeCommandRegistry::default(),
-            session: Some(host_inputs.default_session),
-            themes: Some(host_inputs.themes),
+            session: Some(session),
+            themes: Some(themes),
         })
     }
 
@@ -999,18 +994,10 @@ impl AppStateBuilder {
             themes,
         } = self;
         let should_log_theme_issues = themes.is_none();
-        let (themes, plugins, session) = match (themes, plugins, session) {
-            (Some(themes), Some(plugins), Some(session)) => (themes, plugins, Some(session)),
-            (themes, plugins, session) => {
-                let defaults =
-                    crate::app::assembly::derive_host_defaults(&config, &launch, None, None);
-                (
-                    themes.unwrap_or(defaults.themes),
-                    plugins.unwrap_or(defaults.plugins),
-                    Some(session.unwrap_or(defaults.default_session)),
-                )
-            }
-        };
+        let themes =
+            themes.unwrap_or_else(|| crate::ui::theme_catalog::load_theme_catalog(&config));
+        let plugins = plugins
+            .unwrap_or_else(|| crate::app::assembly::build_plugin_manager(&config, &launch, None));
         if should_log_theme_issues {
             crate::ui::theme_catalog::log_theme_issues(&themes.issues);
         }

@@ -19,7 +19,7 @@
 use std::time::Instant;
 
 use crate::config::{
-    ConfigError, ConfigExplain, ConfigLayer, ConfigValue, LoaderPipeline, ResolveOptions,
+    ConfigError, ConfigExplain, ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions,
     ResolvedConfig, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
     build_runtime_pipeline,
 };
@@ -71,7 +71,7 @@ impl RuntimeConfigRequest {
 }
 
 pub(crate) struct PreparedRuntimeConfig {
-    pipeline: LoaderPipeline,
+    resolver: ConfigResolver,
     options: ResolveOptions,
 }
 
@@ -84,11 +84,12 @@ pub(crate) struct PreparedStartupHost {
 
 impl PreparedRuntimeConfig {
     pub(crate) fn resolve(self) -> std::result::Result<ResolvedConfig, ConfigError> {
-        self.pipeline.resolve(self.options)
+        let _phase = crate::startup_trace::phase("config resolution");
+        self.resolver.resolve(self.options)
     }
 
     pub(crate) fn explain_key(self, key: &str) -> std::result::Result<ConfigExplain, ConfigError> {
-        self.pipeline.resolver()?.explain_key(key, self.options)
+        self.resolver.explain_key(key, self.options)
     }
 }
 
@@ -109,21 +110,6 @@ fn runtime_resolve_options(request: &RuntimeConfigRequest) -> ResolveOptions {
         .with_terminal_override(request.terminal.clone())
 }
 
-fn runtime_pipeline_for_request(
-    request: &RuntimeConfigRequest,
-    paths: &RuntimeConfigPaths,
-    presentation_layer: Option<ConfigLayer>,
-) -> LoaderPipeline {
-    build_runtime_pipeline(
-        runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
-        presentation_layer,
-        paths,
-        request.runtime_load,
-        None,
-        request.session_layer.clone(),
-    )
-}
-
 pub(crate) fn prepare_runtime_config(
     request: RuntimeConfigRequest,
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
@@ -132,12 +118,23 @@ pub(crate) fn prepare_runtime_config(
         RuntimeConfigPaths::discover_with(request.runtime_load)
     };
     let options = runtime_resolve_options(&request);
-    let base_resolved =
-        runtime_pipeline_for_request(&request, &paths, None).resolve(options.clone())?;
-    let presentation_layer = build_presentation_defaults_layer(&base_resolved);
-    let pipeline = runtime_pipeline_for_request(&request, &paths, Some(presentation_layer));
+    let (mut resolver, base_resolved) = {
+        let _phase = crate::startup_trace::phase("config resolution");
+        let resolver = build_runtime_pipeline(
+            runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
+            None,
+            &paths,
+            request.runtime_load,
+            None,
+            request.session_layer,
+        )
+        .resolver()?;
+        let base_resolved = resolver.resolve(options.clone())?;
+        (resolver, base_resolved)
+    };
+    resolver.set_presentation(build_presentation_defaults_layer(&base_resolved));
 
-    Ok(PreparedRuntimeConfig { pipeline, options })
+    Ok(PreparedRuntimeConfig { resolver, options })
 }
 
 pub(crate) fn build_cli_session_layer(cli: &Cli) -> Option<ConfigLayer> {

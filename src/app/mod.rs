@@ -483,18 +483,18 @@ impl App {
             let _phase = crate::startup_trace::phase("process argv collection");
             args.into_iter().map(Into::into).collect::<Vec<OsString>>()
         };
-        let (error_detail, message_verbosity, error_render_settings) = {
-            let _phase = crate::startup_trace::phase("process error display preparation");
-            let error_detail = bootstrap_error_detail(&args);
-            let message_verbosity = bootstrap_message_verbosity(&args);
-            let error_render_settings =
-                help::render_settings_for_help(&args, &self.definition.product_defaults).settings;
-            (error_detail, message_verbosity, error_render_settings)
-        };
-
-        let code = match host::run_from_with_sink_and_app(args, sink, &self.definition) {
+        let code = match host::run_from_with_sink_and_app(&args, sink, &self.definition) {
             Ok(code) => code,
             Err(err) => {
+                let (error_detail, message_verbosity, error_render_settings) = {
+                    let _phase = crate::startup_trace::phase("process error display preparation");
+                    let error_detail = bootstrap_error_detail(&args);
+                    let message_verbosity = bootstrap_message_verbosity(&args);
+                    let error_render_settings =
+                        help::render_settings_for_help(&args, &self.definition.product_defaults)
+                            .settings;
+                    (error_detail, message_verbosity, error_render_settings)
+                };
                 let rendered = render_process_error(
                     &err,
                     error_detail,
