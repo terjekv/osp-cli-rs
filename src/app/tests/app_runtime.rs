@@ -1061,18 +1061,19 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         meta: ResponseMetaV1::default(),
     };
 
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let prepared = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should still parse");
-    let super::command_output::PreparedPluginResponse::Failure(failure) = prepared else {
-        panic!("expected failure response");
+    assert_eq!(prepared.exit_code, 1);
+    let report = prepared.failure_report.expect("expected failure response");
+    let Some(ReplCommandOutput::Output(output)) = prepared.output else {
+        panic!("expected structured failure data");
     };
-
-    let rendered = failure.messages.render_grouped(MessageLevel::Trace);
+    let rendered = prepared.messages.render_grouped(MessageLevel::Trace);
     assert!(rendered.contains("queried fallback backend"));
     assert!(rendered.contains("NOT_FOUND: missing user"));
-    assert_eq!(failure.report.to_string(), "NOT_FOUND: missing user");
+    assert_eq!(report.to_string(), "NOT_FOUND: missing user");
     assert_eq!(
-        failure
+        output
             .output
             .document
             .as_ref()
@@ -1080,7 +1081,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         None
     );
     assert_eq!(
-        crate::core::output_model::output_items_to_value(&failure.output.items),
+        crate::core::output_model::output_items_to_value(&output.output.items),
         serde_json::json!({
             "code": "vm_ambiguous",
             "candidates": [{"name": "db01.uio.no", "provider": "vmware"}]
@@ -1110,9 +1111,12 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             partial_rows: None,
         },
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &["P uid".to_string()])
-        .expect("pipeline should apply");
-    let super::command_output::PreparedPluginResponse::Output(output) = prepared else {
+    let prepared =
+        super::command_output::cli_result_from_plugin_response(response, &["P uid".to_string()])
+            .expect("pipeline should apply");
+    assert_eq!(prepared.exit_code, 0);
+    assert!(prepared.failure_report.is_none());
+    let Some(ReplCommandOutput::Output(output)) = prepared.output else {
         panic!("expected successful output response");
     };
     assert!(output.format_hint.is_none());
@@ -1136,9 +1140,8 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
         context: None,
         meta: ResponseMetaV1::default(),
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let result = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should parse");
-    let result = CliCommandResult::from_prepared_plugin_response(prepared);
     let report = result
         .failure_report
         .expect("failure should carry diagnostics");
@@ -1178,9 +1181,8 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
         context: None,
         meta: ResponseMetaV1::default(),
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let result = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should still parse");
-    let result = CliCommandResult::from_prepared_plugin_response(prepared);
 
     assert_eq!(result.exit_code, 1);
     let Some(ReplCommandOutput::Output(output)) = result.output.as_ref() else {

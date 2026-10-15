@@ -119,18 +119,6 @@ impl PreparedPluginOutput {
     }
 }
 
-pub(crate) struct FailedPluginOutput {
-    pub(crate) messages: MessageBuffer,
-    pub(crate) output: OutputResult,
-    pub(crate) format_hint: Option<OutputFormat>,
-    pub(crate) report: miette::Report,
-}
-
-pub(crate) enum PreparedPluginResponse {
-    Output(PreparedPluginOutput),
-    Failure(FailedPluginOutput),
-}
-
 #[derive(Debug)]
 pub(crate) struct CommandBackendDetails {
     error: ResponseErrorV1,
@@ -176,8 +164,6 @@ impl CliCommandResult {
 
     pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
         Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
             output: Some(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
                     source_guide: None,
@@ -185,28 +171,21 @@ impl CliCommandResult {
                     format_hint,
                 },
             ))),
-            stderr_text: None,
-            failure_report: None,
+            ..Self::exit(0)
         }
     }
 
     pub(crate) fn text(text: impl Into<String>) -> Self {
         Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
             output: Some(ReplCommandOutput::Text(text.into())),
-            stderr_text: None,
-            failure_report: None,
+            ..Self::exit(0)
         }
     }
 
     pub(crate) fn json(payload: serde_json::Value) -> Self {
         Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
             output: Some(ReplCommandOutput::Json(payload)),
-            stderr_text: None,
-            failure_report: None,
+            ..Self::exit(0)
         }
     }
 
@@ -227,8 +206,6 @@ impl CliCommandResult {
             .render_recommendation
             .get_or_insert(RenderRecommendation::Guide);
         Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
             output: Some(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
                     source_guide: Some(guide),
@@ -236,39 +213,7 @@ impl CliCommandResult {
                     format_hint,
                 },
             ))),
-            stderr_text: None,
-            failure_report: None,
-        }
-    }
-
-    pub(crate) fn from_prepared_plugin_response(prepared: PreparedPluginResponse) -> Self {
-        match prepared {
-            PreparedPluginResponse::Failure(failure) => Self {
-                exit_code: 1,
-                messages: failure.messages,
-                output: Some(ReplCommandOutput::Output(Box::new(
-                    StructuredCommandOutput {
-                        source_guide: None,
-                        output: failure.output,
-                        format_hint: failure.format_hint,
-                    },
-                ))),
-                stderr_text: None,
-                failure_report: Some(failure.report),
-            },
-            PreparedPluginResponse::Output(prepared) => Self {
-                exit_code: 0,
-                messages: prepared.messages,
-                output: Some(ReplCommandOutput::Output(Box::new(
-                    StructuredCommandOutput {
-                        source_guide: None,
-                        output: prepared.output,
-                        format_hint: prepared.format_hint,
-                    },
-                ))),
-                stderr_text: None,
-                failure_report: None,
-            },
+            ..Self::exit(0)
         }
     }
 }
@@ -540,14 +485,6 @@ fn render_progress_output_with_runtime(
     render_structured_repl_output(runtime.config(), &settings, output, None, None)
 }
 
-pub(crate) fn cli_result_from_plugin_response(
-    response: ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    let prepared = prepare_plugin_response(response, stages)?;
-    Ok(CliCommandResult::from_prepared_plugin_response(prepared))
-}
-
 /// Applies trailing DSL stages to an already-produced builtin command result.
 ///
 /// Builtin commands executed inline on the CLI surface (`osp "theme list | C"`)
@@ -636,40 +573,32 @@ pub(crate) fn maybe_copy_output_with_runtime(
     }
 }
 
-pub(crate) fn prepare_plugin_response(
+pub(crate) fn cli_result_from_plugin_response(
     response: ResponseV1,
     stages: &[String],
-) -> Result<PreparedPluginResponse> {
-    let PreparedPluginOutput {
-        mut messages,
-        output,
-        format_hint,
-    } = PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages)?;
+) -> Result<CliCommandResult> {
+    let prepared =
+        PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages)?;
+    let mut result = CliCommandResult::output(prepared.output, prepared.format_hint);
+    result.messages = prepared.messages;
     if !response.ok {
         let report = if let Some(error) = response.error {
-            messages.error(format!("{}: {}", error.code, error.message));
+            result
+                .messages
+                .error(format!("{}: {}", error.code, error.message));
             let report = miette!("{}: {}", error.code, error.message);
             miette::Report::new(CommandBackendDetails {
                 error,
                 source: report,
             })
         } else {
-            messages.error("command failed");
+            result.messages.error("command failed");
             miette!("command failed")
         };
-        return Ok(PreparedPluginResponse::Failure(FailedPluginOutput {
-            messages,
-            output,
-            format_hint,
-            report,
-        }));
+        result.exit_code = 1;
+        result.failure_report = Some(report);
     }
-
-    Ok(PreparedPluginResponse::Output(PreparedPluginOutput {
-        messages,
-        output,
-        format_hint,
-    }))
+    Ok(result)
 }
 
 pub(crate) fn apply_output_stages(

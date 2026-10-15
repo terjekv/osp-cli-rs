@@ -661,20 +661,13 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
     }
 }
 
-fn render_native_response(
-    response: crate::core::plugin::ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    cli_result_from_plugin_response(response, stages)
-}
-
 fn render_native_response_with_context(
     response: crate::core::plugin::ResponseV1,
     stages: &[String],
     session: &mut AppSession,
     show_pagination_hint: bool,
 ) -> Result<CliCommandResult> {
-    let mut result = match render_native_response(response, stages) {
+    let mut result = match cli_result_from_plugin_response(response, stages) {
         Ok(result) => result,
         Err(error) => {
             session.native_context.clear_pagination();
@@ -881,21 +874,14 @@ fn run_external_plugin_command(
         }
     }
 
-    render_external_plugin_response(response, &parsed.stages)
-}
-
-fn render_external_plugin_response(
-    response: crate::core::plugin::ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    cli_result_from_plugin_response(response, stages)
+    cli_result_from_plugin_response(response, &parsed.stages)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalParse, add_native_pagination_hint, parse_external_invocation,
-        render_external_plugin_response, run_external_command_with_help_renderer,
+        ExternalParse, add_native_pagination_hint, cli_result_from_plugin_response,
+        parse_external_invocation, run_external_command_with_help_renderer,
         run_external_command_with_help_renderer_and_progress,
     };
     use crate::app::{
@@ -1344,7 +1330,7 @@ JSON
         };
 
         let result =
-            render_external_plugin_response(response, &[]).expect("response should prepare");
+            cli_result_from_plugin_response(response, &[]).expect("response should prepare");
         assert!(!result.messages.is_empty());
     }
 

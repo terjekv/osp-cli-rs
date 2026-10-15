@@ -124,13 +124,12 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         .plugins()
         .dispatch("hello", &[], &dispatch_context)
         .expect("plugin dispatch should succeed");
-    let prepared = match super::super::prepare_plugin_response(response, &stages)
-        .expect("plugin response should prepare")
-    {
-        super::super::PreparedPluginResponse::Output(prepared) => prepared,
-        super::super::PreparedPluginResponse::Failure(failure) => {
-            panic!("unexpected plugin failure: {}", failure.report)
-        }
+    let result = super::super::cli_result_from_plugin_response(response, &stages)
+        .expect("plugin response should prepare");
+    assert_eq!(result.exit_code, 0);
+    assert!(result.failure_report.is_none());
+    let Some(ReplCommandOutput::Output(prepared)) = result.output else {
+        panic!("expected structured plugin output");
     };
     let cli_rendered = render_output(
         &prepared.output,
