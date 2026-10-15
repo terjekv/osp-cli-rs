@@ -501,6 +501,21 @@ pub(crate) fn push_missing_config_key_messages(
     config: &ResolvedConfig,
     key: &str,
 ) {
+    if let Some((_, entry)) = ConfigSchema::default()
+        .entries()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+    {
+        let mut message = format!("{key} is not set");
+        if let Some(allowed) = entry.allowed_values() {
+            message.push_str(&format!(" (allowed: {})", allowed.join(", ")));
+        }
+        messages.push_titled(
+            MessageLevel::Error,
+            "Configuration value is not set",
+            message,
+        );
+        return;
+    }
     let suggestions = suggest_config_keys(config, key);
     messages.push_titled(
         MessageLevel::Error,
@@ -522,6 +537,7 @@ pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<Str
         .chain(config.aliases().keys())
         .cloned()
         .chain(schema_keys)
+        .filter(|candidate| fold_case(candidate) != key_lc)
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<String>>();
