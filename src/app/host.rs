@@ -106,6 +106,7 @@ struct BoxedContextError {
     context: &'static str,
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
     backtrace: Backtrace,
+    command_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -435,9 +436,11 @@ fn handle_clap_parse_error(
             sink.write_stdout(&err.to_string());
             Ok(0)
         }
-        _ => Err(report_std_error_with_context(
+        _ => Err(report_clap_error_with_context(
             err,
             "failed to parse CLI arguments",
+            command.clone(),
+            scan_cli_argv(args)?.argv,
         )),
     }
 }
@@ -946,7 +949,10 @@ fn known_error_hint(known: &KnownErrorChain<'_>) -> Option<String> {
     }
 
     if let Some(clap) = known.clap {
-        return Some(clap_error_action(clap));
+        let path = known
+            .boxed_context
+            .and_then(|context| context.command_path.as_deref());
+        return Some(clap_error_action(clap, path));
     }
 
     None
@@ -973,10 +979,18 @@ fn terse_clap_error(error: &clap::Error) -> String {
             terse.push_str(argument);
         }
     }
+    for tip in rendered
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("tip:"))
+    {
+        terse.push('\n');
+        terse.push_str(tip);
+    }
     terse
 }
 
-fn clap_error_action(error: &clap::Error) -> String {
+fn clap_error_action(error: &clap::Error, command_path: Option<&str>) -> String {
     let rendered = error.to_string();
     let suggestions = rendered
         .lines()
@@ -990,15 +1004,7 @@ fn clap_error_action(error: &clap::Error) -> String {
         .map(|value| value.trim().trim_matches(['`', '\'', '"']))
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>();
-    let prefix = rendered.lines().find_map(|line| {
-        let usage = line.trim().strip_prefix("Usage:")?.trim();
-        let words = usage
-            .split_whitespace()
-            .take_while(|word| !word.starts_with(['[', '<']))
-            .skip_while(|word| *word == "osp")
-            .collect::<Vec<_>>();
-        (!words.is_empty()).then(|| words.join(" "))
-    });
+    let prefix = command_path.filter(|path| !path.is_empty());
     match (prefix, suggestions.as_slice()) {
         (Some(prefix), [suggestion]) => format!("use `{prefix} {suggestion}`"),
         (Some(prefix), suggestions) if !suggestions.is_empty() => format!(
@@ -1062,6 +1068,36 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
     }
 }
 
+pub(crate) fn report_clap_error_with_context<I, T>(
+    err: clap::Error,
+    context: &'static str,
+    command: clap::Command,
+    args: I,
+) -> miette::Report
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let mut path = if command.get_name() == "osp" {
+        Vec::new()
+    } else {
+        vec![command.get_name().to_string()]
+    };
+    if let Ok(matches) = crate::cli::passive_command(command).try_get_matches_from(args) {
+        let mut current = &matches;
+        while let Some((name, child)) = current.subcommand() {
+            path.push(name.to_string());
+            current = child;
+        }
+    }
+    miette::Report::new(BoxedContextError {
+        context,
+        source: Box::new(err),
+        backtrace: Backtrace::force_capture(),
+        command_path: Some(path.join(" ")),
+    })
+}
+
 pub(crate) fn report_std_error_with_context<E>(err: E, context: &'static str) -> miette::Report
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -1070,6 +1106,7 @@ where
         context,
         source: Box::new(err),
         backtrace: Backtrace::force_capture(),
+        command_path: None,
     })
 }
 
@@ -1081,6 +1118,7 @@ pub(crate) fn report_anyhow_with_context(
         context,
         source: err.into_boxed_dyn_error(),
         backtrace: Backtrace::force_capture(),
+        command_path: None,
     })
 }
 

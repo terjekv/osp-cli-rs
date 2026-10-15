@@ -402,9 +402,12 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                     || described_path_has_subcommands(&description, &path)
                     || invocation_ends_at_command
                 {
-                    return Err(crate::app::report_std_error_with_context(
+                    return Err(super::host::report_clap_error_with_context(
                         err,
                         "native command syntax is invalid",
+                        native_command.command(),
+                        std::iter::once(command.as_str())
+                            .chain(parsed_args.iter().map(String::as_str)),
                     ));
                 }
             }
@@ -585,9 +588,12 @@ fn run_native_command(
             .map_err(|err| match err.downcast::<clap::Error>() {
                 Ok(err) => {
                     mark_repl_command_rejected(accepted);
-                    crate::app::report_std_error_with_context(
+                    super::host::report_clap_error_with_context(
                         err,
                         "native command execution failed",
+                        command.command(),
+                        std::iter::once(command.command().get_name().to_string())
+                            .chain(input.args.iter().cloned()),
                     )
                 }
                 Err(err) => {

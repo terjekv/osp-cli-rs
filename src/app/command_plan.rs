@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use clap::CommandFactory;
+
 use miette::{Result, miette};
 
 use super::{
@@ -40,12 +42,14 @@ pub(crate) fn parse_inline_command(
             if help {
                 return Ok(InlineCommandPlan::Help(error));
             }
-            Err(super::report_std_error_with_context(
+            Err(super::host::report_clap_error_with_context(
                 error,
                 match surface {
                     CommandSurface::Repl => "failed to parse REPL command",
                     CommandSurface::External => "failed to parse external inline command",
                 },
+                crate::cli::InlineCommandCli::command(),
+                tokens,
             ))
         }
     }

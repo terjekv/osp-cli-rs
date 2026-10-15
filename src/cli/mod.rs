@@ -903,23 +903,24 @@ pub fn parse_inline_command_tokens(tokens: &[String]) -> Result<Option<Commands>
     InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str)).map(|parsed| parsed.command)
 }
 
+pub(crate) fn passive_command(command: clap::Command) -> clap::Command {
+    command
+        .disable_help_subcommand(true)
+        .ignore_errors(true)
+        .mut_args(|arg| match arg.get_action() {
+            clap::ArgAction::Help | clap::ArgAction::HelpShort | clap::ArgAction::HelpLong => {
+                arg.action(clap::ArgAction::SetTrue)
+            }
+            _ => arg,
+        })
+        .mut_subcommands(passive_command)
+}
+
 /// Select the help target with clap's parser, then read that command's metadata.
 pub(crate) fn command_help_document(
     mut command: clap::Command,
     tokens: &[String],
 ) -> (crate::core::document::Document, bool, bool) {
-    fn passive(command: clap::Command) -> clap::Command {
-        command
-            .disable_help_subcommand(true)
-            .ignore_errors(true)
-            .mut_args(|arg| match arg.get_action() {
-                clap::ArgAction::Help | clap::ArgAction::HelpShort | clap::ArgAction::HelpLong => {
-                    arg.action(clap::ArgAction::SetTrue)
-                }
-                _ => arg,
-            })
-            .mut_subcommands(passive)
-    }
     // Clap answers at the first help flag, so later words cannot pick the target.
     let options_end = tokens
         .iter()
@@ -930,7 +931,7 @@ pub(crate) fn command_help_document(
         .position(|token| token == "-h" || token == "--help")
         .map_or(tokens, |index| &tokens[..=index]);
     command.build();
-    let parser = passive(command.clone());
+    let parser = passive_command(command.clone());
     let matches = parser.try_get_matches_from(tokens);
     let mut selected = &command;
     let mut root = true;
