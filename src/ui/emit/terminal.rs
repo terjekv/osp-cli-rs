@@ -5,15 +5,15 @@ use crate::ui::chrome::{
     FULL_HELP_LAYOUT_CHROME, GUIDE_SECTION_CHROME, PLAIN_SECTION_CHROME, RenderedTitle,
 };
 use crate::ui::doc::{
-    Block, Doc, GuideEntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
-    ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock, ParagraphBlock,
+    SectionBlock, SectionTitleChrome, TableBlock,
 };
 use crate::ui::settings::{RenderBackend, ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
 use crate::ui::text::{crop_display_width, wrap_display_width};
 
+use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
-use super::guide_entries::{PreparedGuideEntriesBlock, PreparedGuideEntryRow};
 use super::key_value::{aligned_display_key_width, display_key};
 use super::shared::{format_list_item, indent_lines};
 use super::table::{PreparedCell, PreparedTable};
@@ -40,7 +40,7 @@ fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
             Block::Paragraph(block) => out.push(emit_paragraph(block, settings)),
             Block::Section(block) => out.push(emit_section(block, settings)),
             Block::Table(block) => out.push(emit_table(block, settings)),
-            Block::GuideEntries(block) => out.push(emit_guide_entries(block, settings)),
+            Block::Entries(block) => out.push(emit_entries(block, settings)),
             Block::KeyValue(block) => out.push(emit_key_value(block, settings)),
             Block::List(block) => out.push(emit_list(block, settings)),
             Block::Json(block) => out.push(indent_lines(&block.text, settings.margin)),
@@ -118,27 +118,27 @@ fn emit_key_value(block: &KeyValueBlock, settings: &ResolvedRenderSettings) -> S
     indent_lines(&rendered, settings.margin)
 }
 
-fn emit_guide_entries(block: &GuideEntriesBlock, settings: &ResolvedRenderSettings) -> String {
-    emit_prepared_guide_entries(
-        &PreparedGuideEntriesBlock::from_block(block).rows,
+fn emit_entries(block: &EntriesBlock, settings: &ResolvedRenderSettings) -> String {
+    emit_prepared_entries(
+        &PreparedEntriesBlock::from_block(block).rows,
         settings.margin,
         settings,
     )
 }
 
-fn emit_prepared_guide_entries(
-    rows: &[PreparedGuideEntryRow],
+fn emit_prepared_entries(
+    rows: &[PreparedEntryRow],
     margin: usize,
     settings: &ResolvedRenderSettings,
 ) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     rows.iter()
-        .map(|row| indent_lines(&emit_guide_entry_row(row, &styler), margin))
+        .map(|row| indent_lines(&emit_entry_row(row, &styler), margin))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn emit_guide_entry_row(row: &PreparedGuideEntryRow, styler: &ThemeStyler<'_>) -> String {
+fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>) -> String {
     let key = styler.paint(&row.key, StyleToken::Key);
     if row.value.is_empty() {
         format!("{}{}", row.indent, key)

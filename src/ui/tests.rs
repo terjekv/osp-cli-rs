@@ -1,3 +1,4 @@
+use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::output_model::{
     ColumnAlignment, Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta,
@@ -12,8 +13,9 @@ use super::doc::{Block, SectionTitleChrome};
 use super::settings::TableBorderOverride;
 use super::{
     GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings,
-    StructuredGuideRenderOptions, plan_output, render_guide_with_layout, render_output,
-    render_output_for_copy, render_structured_output_with_guide_options, resolve_settings,
+    StructuredGuideRenderOptions, plan_output, render_document, render_guide_with_layout,
+    render_output, render_output_for_copy, render_structured_output_with_guide_options,
+    resolve_settings,
 };
 
 #[test]
@@ -47,6 +49,34 @@ fn ui2_renders_generic_rows_as_markdown_table_unit() {
     assert!(rendered.contains("| uid"));
     assert!(rendered.contains("alice"));
     assert!(rendered.contains("bob"));
+}
+
+#[test]
+fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
+    let document = Document {
+        blocks: vec![
+            DocBlock::Section {
+                title: "Options".to_string(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "--json".to_string(),
+                        description: "Emit JSON".to_string(),
+                    }],
+                }],
+            },
+            DocBlock::List {
+                items: vec!["first".to_string(), "second".to_string()],
+            },
+        ],
+    };
+    let settings = RenderSettings::test_plain(OutputFormat::Markdown);
+
+    let rendered = render_document(&document, &settings);
+
+    assert!(rendered.contains("## Options"));
+    assert!(rendered.contains("- `--json` Emit JSON"));
+    assert!(rendered.contains("- first\n- second"));
 }
 
 #[test]
@@ -646,7 +676,7 @@ fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
     let Block::Section(block) = &doc.blocks[0] else {
         panic!("expected help section block");
     };
-    let Block::GuideEntries(entries) = &block.blocks[0] else {
+    let Block::Entries(entries) = &block.blocks[0] else {
         panic!("expected guide entries block");
     };
 
@@ -830,7 +860,7 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     let Block::Section(shortcuts) = &doc.blocks[4] else {
         panic!("expected shortcuts section");
     };
-    assert!(matches!(shortcuts.blocks[0], Block::GuideEntries(_)));
+    assert!(matches!(shortcuts.blocks[0], Block::Entries(_)));
     let Block::Section(matrix) = &doc.blocks[6] else {
         panic!("expected matrix section");
     };

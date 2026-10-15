@@ -1,6 +1,6 @@
 use crate::core::output_model::ColumnAlignment;
 use crate::ui::doc::{
-    Block, Doc, GuideEntriesBlock, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
+    Block, Doc, EntriesBlock, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 
@@ -27,7 +27,7 @@ fn emit_blocks(blocks: &[Block]) -> String {
             Block::Paragraph(block) => out.push(emit_paragraph(block)),
             Block::Section(block) => out.push(emit_section(block)),
             Block::Table(block) => out.push(emit_table(block)),
-            Block::GuideEntries(block) => out.push(emit_guide_entries(block)),
+            Block::Entries(block) => out.push(emit_entries(block)),
             Block::KeyValue(block) => out.push(emit_key_value(block)),
             Block::List(block) => out.push(emit_list(block)),
             Block::Json(JsonBlock { text }) => out.push(format!("```json\n{text}\n```")),
@@ -67,7 +67,7 @@ fn emit_key_value(block: &KeyValueBlock) -> String {
     emit_plain_rows(&block.rows, 0)
 }
 
-fn emit_guide_entries(block: &GuideEntriesBlock) -> String {
+fn emit_entries(block: &EntriesBlock) -> String {
     block
         .rows
         .iter()
@@ -277,7 +277,7 @@ mod tests {
     use super::{emit_doc, emit_table};
     use crate::core::output_model::ColumnAlignment;
     use crate::ui::doc::{
-        Block, Doc, GuideEntriesBlock, GuideEntryRow, KeyValueRow, KeyValueValue, ParagraphBlock,
+        Block, Doc, EntriesBlock, EntryRow, KeyValueRow, KeyValueValue, ParagraphBlock,
         SectionBlock, SectionTitleChrome, TableBlock,
     };
 
@@ -304,10 +304,10 @@ mod tests {
                     body_indent: 0,
                     inline_title_suffix: None,
                     trailing_newline: false,
-                    blocks: vec![Block::GuideEntries(GuideEntriesBlock {
+                    blocks: vec![Block::Entries(EntriesBlock {
                         default_indent: "  ".to_string(),
                         default_gap: None,
-                        rows: vec![GuideEntryRow {
+                        rows: vec![EntryRow {
                             key: "list".to_string(),
                             value: "List history entries".to_string(),
                             indent_hint: None,

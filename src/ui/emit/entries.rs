@@ -1,22 +1,22 @@
 use unicode_width::UnicodeWidthStr;
 
-use crate::ui::doc::{GuideEntriesBlock, GuideEntryRow};
+use crate::ui::doc::{EntriesBlock, EntryRow};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PreparedGuideEntriesBlock {
-    pub rows: Vec<PreparedGuideEntryRow>,
+pub(super) struct PreparedEntriesBlock {
+    pub rows: Vec<PreparedEntryRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PreparedGuideEntryRow {
+pub(super) struct PreparedEntryRow {
     pub key: String,
     pub value: String,
     pub indent: String,
     pub gap: String,
 }
 
-impl PreparedGuideEntriesBlock {
-    pub(super) fn from_block(block: &GuideEntriesBlock) -> Self {
+impl PreparedEntriesBlock {
+    pub(super) fn from_block(block: &EntriesBlock) -> Self {
         let key_width = block
             .rows
             .iter()
@@ -29,7 +29,7 @@ impl PreparedGuideEntriesBlock {
                 .rows
                 .iter()
                 .map(|row| {
-                    PreparedGuideEntryRow::new(
+                    PreparedEntryRow::new(
                         row,
                         key_width,
                         &block.default_indent,
@@ -41,9 +41,9 @@ impl PreparedGuideEntriesBlock {
     }
 }
 
-impl PreparedGuideEntryRow {
+impl PreparedEntryRow {
     fn new(
-        row: &GuideEntryRow,
+        row: &EntryRow,
         key_width: usize,
         default_indent: &str,
         default_gap: Option<&str>,
@@ -68,22 +68,22 @@ impl PreparedGuideEntryRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreparedGuideEntriesBlock, PreparedGuideEntryRow};
-    use crate::ui::doc::{GuideEntriesBlock, GuideEntryRow};
+    use super::{PreparedEntriesBlock, PreparedEntryRow};
+    use crate::ui::doc::{EntriesBlock, EntryRow};
 
     #[test]
-    fn prepared_direct_guide_entries_ignore_help_indent_defaults_unit() {
-        let block = GuideEntriesBlock {
+    fn prepared_direct_entries_ignore_help_indent_defaults_unit() {
+        let block = EntriesBlock {
             default_indent: String::new(),
             default_gap: None,
             rows: vec![
-                GuideEntryRow {
+                EntryRow {
                     key: "list".to_string(),
                     value: "List history entries".to_string(),
                     indent_hint: Some("  ".to_string()),
                     gap_hint: Some("   ".to_string()),
                 },
-                GuideEntryRow {
+                EntryRow {
                     key: "clear".to_string(),
                     value: "Clear history entries".to_string(),
                     indent_hint: None,
@@ -92,11 +92,11 @@ mod tests {
             ],
         };
 
-        let prepared = PreparedGuideEntriesBlock::from_block(&block);
+        let prepared = PreparedEntriesBlock::from_block(&block);
 
         assert_eq!(
             prepared.rows[0],
-            PreparedGuideEntryRow {
+            PreparedEntryRow {
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),
@@ -105,7 +105,7 @@ mod tests {
         );
         assert_eq!(
             prepared.rows[1],
-            PreparedGuideEntryRow {
+            PreparedEntryRow {
                 key: "clear".to_string(),
                 value: "Clear history entries".to_string(),
                 indent: String::new(),
@@ -115,11 +115,11 @@ mod tests {
     }
 
     #[test]
-    fn prepared_help_guide_entries_default_to_help_indent_unit() {
-        let block = GuideEntriesBlock {
+    fn prepared_help_entries_default_to_help_indent_unit() {
+        let block = EntriesBlock {
             default_indent: "  ".to_string(),
             default_gap: None,
-            rows: vec![GuideEntryRow {
+            rows: vec![EntryRow {
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent_hint: None,
@@ -127,11 +127,11 @@ mod tests {
             }],
         };
 
-        let prepared = PreparedGuideEntriesBlock::from_block(&block);
+        let prepared = PreparedEntriesBlock::from_block(&block);
 
         assert_eq!(
             prepared.rows[0],
-            PreparedGuideEntryRow {
+            PreparedEntryRow {
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),
@@ -141,11 +141,11 @@ mod tests {
     }
 
     #[test]
-    fn prepared_guide_entries_can_override_default_gap_unit() {
-        let block = GuideEntriesBlock {
+    fn prepared_entries_can_override_default_gap_unit() {
+        let block = EntriesBlock {
             default_indent: "  ".to_string(),
             default_gap: Some(" -> ".to_string()),
-            rows: vec![GuideEntryRow {
+            rows: vec![EntryRow {
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent_hint: None,
@@ -153,11 +153,11 @@ mod tests {
             }],
         };
 
-        let prepared = PreparedGuideEntriesBlock::from_block(&block);
+        let prepared = PreparedEntriesBlock::from_block(&block);
 
         assert_eq!(
             prepared.rows[0],
-            PreparedGuideEntryRow {
+            PreparedEntryRow {
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),

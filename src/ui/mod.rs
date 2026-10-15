@@ -64,6 +64,7 @@ pub(crate) mod settings;
 mod text;
 
 use crate::config::ResolvedConfig;
+use crate::core::document::Document;
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
 use crate::guide::{GuideSection, GuideSectionKind, GuideView};
@@ -230,6 +231,20 @@ pub fn render_rows(rows: &[crate::core::row::Row], settings: &RenderSettings) ->
 /// ```
 pub fn render_output(output: &OutputResult, settings: &RenderSettings) -> String {
     render_output_with_profile(output, settings, RenderProfile::Normal)
+}
+
+/// Renders a semantic document through the shared UI lowering and emitters.
+pub fn render_document(document: &Document, settings: &RenderSettings) -> String {
+    let format = settings.format;
+    if matches!(format, OutputFormat::Json) {
+        let value = serde_json::to_value(document).unwrap_or(serde_json::Value::Null);
+        return render_json_value(&value, settings);
+    }
+
+    let resolved = resolve_settings(settings, RenderProfile::Normal);
+    let mut doc = lower::lower_document(document, format, settings.indent_size);
+    lower::sanitize_doc(&mut doc);
+    emit::emit_doc(&doc, format, &resolved)
 }
 
 pub(crate) fn render_presentation_lines(lines: &[String], settings: &RenderSettings) -> String {

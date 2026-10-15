@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
+use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
     ColumnAlignment, Group, OutputDocumentKind, OutputItems, OutputResult, group_rows,
@@ -27,8 +28,8 @@ use crate::guide::{
 };
 
 use super::doc::{
-    Block, Doc, GuideEntriesBlock, GuideEntryRow, JsonBlock, KeyValueBlock, KeyValueRow,
-    KeyValueValue, ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, EntryRow, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue,
+    ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::RenderPlan;
 use super::settings::{HelpLayout, ResolvedHelpChromeSettings};
@@ -200,6 +201,67 @@ fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
     }
 }
 
+pub(crate) fn lower_document(document: &Document, format: OutputFormat, indent_size: usize) -> Doc {
+    Doc {
+        blocks: lower_document_blocks(&document.blocks, format, indent_size),
+    }
+}
+
+fn lower_document_blocks(
+    blocks: &[DocBlock],
+    format: OutputFormat,
+    indent_size: usize,
+) -> Vec<Block> {
+    let mut lowered = Vec::new();
+    for block in blocks {
+        let next = match block {
+            DocBlock::Section { title, blocks, .. } => vec![Block::Section(SectionBlock {
+                title: Some(title.clone()),
+                title_chrome: if matches!(format, OutputFormat::Markdown) {
+                    SectionTitleChrome::Ruled
+                } else {
+                    SectionTitleChrome::Plain
+                },
+                body_indent: if matches!(format, OutputFormat::Markdown) {
+                    0
+                } else {
+                    indent_size
+                },
+                inline_title_suffix: None,
+                trailing_newline: !matches!(format, OutputFormat::Markdown),
+                blocks: lower_document_blocks(blocks, format, indent_size),
+            })],
+            DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
+                text: text.clone(),
+                indent: 0,
+                inline_markup: true,
+            })],
+            DocBlock::Entries { entries } => vec![Block::Entries(EntriesBlock {
+                default_indent: " ".repeat(indent_size),
+                default_gap: None,
+                rows: entries
+                    .iter()
+                    .map(|entry| EntryRow {
+                        key: entry.name.clone(),
+                        value: entry.description.clone(),
+                        indent_hint: None,
+                        gap_hint: None,
+                    })
+                    .collect(),
+            })],
+            DocBlock::List { items } => vec![Block::List(ListBlock {
+                items: items.clone(),
+                indent: 0,
+                inline_markup: true,
+                auto_grid: false,
+            })],
+            DocBlock::Data { value } => lower_value_blocks(value),
+        };
+        extend_with_blank_between(&mut lowered, next);
+    }
+    lowered
+}
+
 fn wrap_presentation_line(line: &str, width: Option<usize>) -> Vec<String> {
     let Some(width) = width.filter(|width| *width > 0) else {
         return vec![line.to_string()];
@@ -301,7 +363,7 @@ fn take_presentation_chunk(text: &str, width: usize) -> (String, String) {
     )
 }
 
-fn sanitize_doc(doc: &mut Doc) {
+pub(crate) fn sanitize_doc(doc: &mut Doc) {
     sanitize_blocks(&mut doc.blocks);
 }
 
@@ -334,7 +396,7 @@ fn sanitize_blocks(blocks: &mut [Block]) {
                     }
                 }
             }
-            Block::GuideEntries(entries) => {
+            Block::Entries(entries) => {
                 entries.default_indent = sanitize_human_text(&entries.default_indent);
                 if let Some(gap) = &mut entries.default_gap {
                     *gap = sanitize_human_text(gap);
@@ -1004,7 +1066,7 @@ fn entry_blocks(entries: &[GuideEntry]) -> Vec<Block> {
     if entries.is_empty() {
         return Vec::new();
     }
-    vec![Block::GuideEntries(guide_entries_block(entries))]
+    vec![Block::Entries(entries_block(entries))]
 }
 
 fn help_layout_blocks(
@@ -1054,7 +1116,7 @@ fn help_layout_section_block(
     if !section.entries.is_empty() {
         extend_with_blank_between(
             &mut blocks,
-            vec![Block::GuideEntries(guide_entries_block_with_defaults(
+            vec![Block::Entries(entries_block_with_defaults(
                 section.entries,
                 help_chrome.entry_indent,
                 help_chrome.entry_gap,
@@ -1103,7 +1165,7 @@ fn help_layout_blocks_from_value(
                 .map(payload_entry_value_as_entry)
                 .collect::<Option<Vec<_>>>()
             {
-                vec![Block::GuideEntries(guide_entries_block_with_defaults(
+                vec![Block::Entries(entries_block_with_defaults(
                     &entries,
                     help_chrome.entry_indent,
                     help_chrome.entry_gap,
@@ -1496,19 +1558,19 @@ fn trimmed_lines(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn guide_entries_block(entries: &[GuideEntry]) -> GuideEntriesBlock {
-    guide_entries_block_with_defaults(entries, 0, None)
+fn entries_block(entries: &[GuideEntry]) -> EntriesBlock {
+    entries_block_with_defaults(entries, 0, None)
 }
 
-fn guide_entries_block_with_defaults(
+fn entries_block_with_defaults(
     entries: &[GuideEntry],
     entry_indent: usize,
     entry_gap: Option<usize>,
-) -> GuideEntriesBlock {
-    GuideEntriesBlock {
+) -> EntriesBlock {
+    EntriesBlock {
         default_indent: " ".repeat(entry_indent),
         default_gap: entry_gap.map(|value| " ".repeat(value)),
-        rows: entries.iter().map(guide_entry_row).collect(),
+        rows: entries.iter().map(entry_row).collect(),
     }
 }
 
@@ -1519,8 +1581,8 @@ fn help_layout_title_chrome(layout: HelpLayout) -> SectionTitleChrome {
     }
 }
 
-fn guide_entry_row(entry: &GuideEntry) -> GuideEntryRow {
-    GuideEntryRow {
+fn entry_row(entry: &GuideEntry) -> EntryRow {
+    EntryRow {
         key: entry.name.clone(),
         value: entry.short_help.clone(),
         indent_hint: entry.display_indent.clone(),

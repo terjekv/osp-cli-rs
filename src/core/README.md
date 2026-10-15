@@ -13,6 +13,7 @@ one feature. `core` is not a place for helpers without a home.
 | File | Owns |
 |---|---|
 | `row.rs` | `Row`, the record type commands, the DSL and the UI pass around |
+| `document.rs` | Ordered semantic blocks shared by help, intro, and UI rendering |
 | `output_model.rs` | `OutputResult`: rows, documents, groups and render hints |
 | `output.rs` | Output format and mode enums shared by flags, config and UI |
 | `command_def.rs` | `CommandDef`, `FlagDef`, `ArgDef`: commands as data for help, completion and catalogs |
@@ -27,5 +28,5 @@ one feature. `core` is not a place for helpers without a home.
   Additive fields with defaults keep old plugins working; anything else needs
   a protocol version bump.
 - **New command metadata (e.g. a flag property):** add it to `command_def.rs`,
-  then carry it through `completion/tree.rs` and `guide` as needed. Clap-built
-  commands get it from the clap conversion in the same file.
+  then carry it through `completion/tree.rs` and `document.rs` as needed.
+  Clap-built commands get it from the clap conversion in the same file.

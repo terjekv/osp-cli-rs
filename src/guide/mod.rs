@@ -29,32 +29,12 @@ pub(crate) mod pipeline;
 pub(crate) mod template;
 
 use crate::core::command_def::{ArgDef, CommandDef, FlagDef};
+pub(crate) use crate::core::document::HelpLevel;
 use crate::core::output_model::{
     OutputDocument, OutputDocumentKind, OutputItems, OutputResult, RenderRecommendation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum HelpLevel {
-    None,
-    Tiny,
-    #[default]
-    Normal,
-    Verbose,
-}
-
-impl HelpLevel {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "none" | "off" => Some(Self::None),
-            "tiny" => Some(Self::Tiny),
-            "normal" => Some(Self::Normal),
-            "verbose" => Some(Self::Verbose),
-            _ => None,
-        }
-    }
-}
 
 /// Structured help/guide payload shared by the CLI, REPL, renderers, and
 /// semantic output pipeline.
