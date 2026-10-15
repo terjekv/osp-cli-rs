@@ -95,7 +95,7 @@ fn unroll_path_value(value: Value, path: &PathExpression) -> Value {
         .filter(|entry| matches!(entry.value, Value::Array(_)))
         .collect::<Vec<_>>();
     if matches.is_empty() {
-        return Value::Null;
+        return value;
     }
     unroll_matches(value, &matches)
 }

@@ -108,6 +108,7 @@ ordinary unregistered words are quick-search text.
 Keys may use the column labels a table shows (`F state=failed` on a STATE
 column resolves to its field). A key that matches no field in any row is an
 error listing the columns, not an empty result or a single `null` group.
+`U` leaves rows unchanged when its target path finds no array.
 Shape-changing stages (`G`, `A`, `Z`) derive their columns from the result but
 keep field formatting such as relative times for fields that survive.
 
