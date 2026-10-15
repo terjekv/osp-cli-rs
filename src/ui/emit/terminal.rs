@@ -14,7 +14,7 @@ use crate::ui::text::{crop_display_width, wrap_display_width};
 
 use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
-use super::key_value::{aligned_display_key_width, display_key};
+use super::key_value::{aligned_display_key_width, display_key, scalar_text};
 use super::shared::{format_list_item, indent_lines};
 use super::table::{PreparedCell, PreparedTable};
 
@@ -205,31 +205,14 @@ fn emit_grid_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> Strin
         .saturating_sub(settings.margin + block.indent)
         .max(1);
     let grid = PreparedGridList::from_items(&visible, available_width);
-    let prefix = " ".repeat(settings.margin + block.indent);
-    let mut out = String::new();
-
-    for row in &grid.rows {
-        out.push_str(&prefix);
-        let mut first = true;
-        for (column_index, cell) in row.iter().enumerate() {
-            if cell.is_empty() {
-                continue;
-            }
-            if !first {
-                out.push_str(&" ".repeat(grid.gap));
-            }
-            first = false;
-            out.push_str(cell);
-            if column_index + 1 != grid.column_widths.len() {
-                let pad = grid.column_widths[column_index]
-                    .saturating_sub(UnicodeWidthStr::width(cell.as_str()));
-                out.push_str(&" ".repeat(pad));
-            }
-        }
-        out.push('\n');
-    }
-
-    out.trim_end_matches('\n').to_string()
+    render_grid_rows(
+        &grid,
+        &" ".repeat(settings.margin + block.indent),
+        str::to_owned,
+    )
+    .join("\n")
+    .trim_end_matches('\n')
+    .to_string()
 }
 
 fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
@@ -525,7 +508,7 @@ fn format_summary(
                 "{}{} {}",
                 styler.paint(&display_key(row), StyleToken::Key),
                 styler.paint(":", StyleToken::Punctuation),
-                styler.paint_value(value_scalar_text(&row.value).unwrap_or_default())
+                styler.paint_value(scalar_text(&row.value).unwrap_or_default())
             )
         })
         .collect::<Vec<_>>()
@@ -611,17 +594,13 @@ fn emit_plain_array_lines(
     settings: &ResolvedRenderSettings,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
-    let Some(scalar_items) = items
-        .iter()
-        .map(value_scalar_text)
-        .collect::<Option<Vec<_>>>()
-    else {
+    let Some(scalar_items) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>() else {
         return emit_plain_complex_array_lines(items, label, child_indent, settings, styler);
     };
 
     match scalar_items.as_slice() {
         [] => vec![label.to_string()],
-        [only] if items.len() == 1 && !array_uses_count(items) => {
+        [only] => {
             vec![format!("{inline_prefix}{}", styler.paint_value(only))]
         }
         values if values.len() > settings.medium_list_max => {
@@ -724,8 +703,15 @@ fn render_terminal_scalar_grid(
         .saturating_sub(settings.margin + UnicodeWidthStr::width(indent))
         .max(1);
     let grid = PreparedGridList::from_items(&visible, available_width);
-    let mut lines = Vec::new();
+    render_grid_rows(&grid, indent, |cell| styler.paint_value(cell))
+}
 
+fn render_grid_rows(
+    grid: &PreparedGridList,
+    indent: &str,
+    paint: impl Fn(&str) -> String,
+) -> Vec<String> {
+    let mut lines = Vec::new();
     for row in &grid.rows {
         let mut line = indent.to_string();
         let mut first = true;
@@ -737,7 +723,7 @@ fn render_terminal_scalar_grid(
                 line.push_str(&" ".repeat(grid.gap));
             }
             first = false;
-            line.push_str(&styler.paint_value(cell));
+            line.push_str(&paint(cell));
             if column_index + 1 != grid.column_widths.len() {
                 let pad = grid.column_widths[column_index]
                     .saturating_sub(UnicodeWidthStr::width(cell.as_str()));
@@ -746,16 +732,7 @@ fn render_terminal_scalar_grid(
         }
         lines.push(line);
     }
-
     lines
-}
-
-fn value_scalar_text(value: &KeyValueValue) -> Option<&str> {
-    match value {
-        KeyValueValue::Empty => Some(""),
-        KeyValueValue::Scalar(text) => Some(text),
-        KeyValueValue::Array(_) | KeyValueValue::Object(_) => None,
-    }
 }
 
 fn value_requires_block(value: &KeyValueValue) -> bool {
@@ -772,13 +749,6 @@ fn value_requires_block(value: &KeyValueValue) -> bool {
     }
 }
 
-fn array_uses_count(items: &[KeyValueValue]) -> bool {
-    items.is_empty()
-        || items.len() > 1
-        || items
-            .first()
-            .is_some_and(|value| !matches!(value, KeyValueValue::Empty | KeyValueValue::Scalar(_)))
-}
 fn table_row(
     cells: &[PreparedCell],
     widths: &[usize],

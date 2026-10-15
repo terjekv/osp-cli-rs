@@ -23,6 +23,14 @@ fn should_include_count(items: &[KeyValueValue]) -> bool {
     items.len() != 1
 }
 
+pub(super) fn scalar_text(value: &KeyValueValue) -> Option<&str> {
+    match value {
+        KeyValueValue::Empty => Some(""),
+        KeyValueValue::Scalar(text) => Some(text),
+        KeyValueValue::Array(_) | KeyValueValue::Object(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{aligned_display_key_width, display_key};

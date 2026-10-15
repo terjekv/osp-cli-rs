@@ -4,7 +4,7 @@ use crate::ui::doc::{
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 
-use super::key_value::display_key;
+use super::key_value::{display_key, scalar_text};
 use super::shared::format_list_item;
 use super::shared::indent_lines;
 use super::table::{PreparedCell, PreparedTable};
@@ -207,11 +207,7 @@ fn emit_markdown_array_lines(
     label: &str,
     child_indent: usize,
 ) -> Vec<String> {
-    let Some(scalar_items) = items
-        .iter()
-        .map(markdown_scalar_text)
-        .collect::<Option<Vec<_>>>()
-    else {
+    let Some(scalar_items) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>() else {
         let mut lines = vec![format!("{prefix}{label}:")];
         lines.extend(emit_markdown_nested_items(items, child_indent));
         return lines;
@@ -219,7 +215,7 @@ fn emit_markdown_array_lines(
 
     match scalar_items.as_slice() {
         [] => vec![format!("{prefix}{label}:")],
-        [only] if items.len() == 1 && !markdown_array_uses_count(items) => {
+        [only] => {
             vec![format!("{prefix}{label}: {only}")]
         }
         values => {
@@ -254,22 +250,6 @@ fn emit_markdown_nested_items(items: &[KeyValueValue], indent: usize) -> Vec<Str
         }
     }
     lines
-}
-
-fn markdown_scalar_text(value: &KeyValueValue) -> Option<&str> {
-    match value {
-        KeyValueValue::Empty => Some(""),
-        KeyValueValue::Scalar(text) => Some(text),
-        KeyValueValue::Array(_) | KeyValueValue::Object(_) => None,
-    }
-}
-
-fn markdown_array_uses_count(items: &[KeyValueValue]) -> bool {
-    items.is_empty()
-        || items.len() > 1
-        || items
-            .first()
-            .is_some_and(|value| !matches!(value, KeyValueValue::Empty | KeyValueValue::Scalar(_)))
 }
 
 #[cfg(test)]
