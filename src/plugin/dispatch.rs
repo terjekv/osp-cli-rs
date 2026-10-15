@@ -21,7 +21,7 @@
 use super::manager::{
     DiscoveredPlugin, PluginDispatchContext, PluginDispatchError, PluginManager, RawPluginOutput,
 };
-use crate::core::plugin::{DescribeV1, ResponseV1};
+use crate::core::plugin::{DescribeV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseV1};
 use anyhow::{Result, anyhow};
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -74,6 +74,7 @@ pub(super) struct CapturedOutput {
 struct ExecutedPluginCommand {
     provider: DiscoveredPlugin,
     raw: CapturedPluginOutput,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -91,15 +92,25 @@ impl ExecutedPluginCommand {
         context: &PluginDispatchContext,
     ) -> std::result::Result<Self, PluginDispatchError> {
         let provider = manager.resolve_provider(command, context.provider_override.as_deref())?;
+        let warnings = context
+            .env_issues_for(&provider.plugin_id)
+            .map(|issue| format!("plugin config value omitted: {issue}"))
+            .collect();
         let raw = run_provider(&provider, command, args, context, manager.process_timeout)?;
-        Ok(Self { provider, raw })
+        Ok(Self {
+            provider,
+            raw,
+            warnings,
+        })
     }
 
     fn into_raw(self) -> RawPluginOutput {
+        let mut stderr = self.raw.stderr;
+        append_stderr_warnings(&mut stderr, &self.warnings);
         RawPluginOutput {
             status_code: self.raw.status_code,
             stdout: String::from_utf8_lossy(&self.raw.stdout).into_owned(),
-            stderr: self.raw.stderr,
+            stderr,
         }
     }
 
@@ -119,18 +130,19 @@ impl ExecutedPluginCommand {
             });
         }
 
-        let response: ResponseV1 = serde_json::from_slice(&self.raw.stdout).map_err(|source| {
-            tracing::warn!(
-                plugin_id = %self.provider.plugin_id,
-                command = %command,
-                error = %source,
-                "plugin command returned invalid JSON"
-            );
-            PluginDispatchError::InvalidJsonResponse {
-                plugin_id: self.provider.plugin_id.clone(),
-                source,
-            }
-        })?;
+        let mut response: ResponseV1 =
+            serde_json::from_slice(&self.raw.stdout).map_err(|source| {
+                tracing::warn!(
+                    plugin_id = %self.provider.plugin_id,
+                    command = %command,
+                    error = %source,
+                    "plugin command returned invalid JSON"
+                );
+                PluginDispatchError::InvalidJsonResponse {
+                    plugin_id: self.provider.plugin_id.clone(),
+                    source,
+                }
+            })?;
 
         response.validate_v1().map_err(|reason| {
             tracing::warn!(
@@ -145,7 +157,25 @@ impl ExecutedPluginCommand {
             }
         })?;
 
+        response
+            .messages
+            .extend(self.warnings.into_iter().map(|text| ResponseMessageV1 {
+                level: ResponseMessageLevelV1::Warning,
+                text,
+            }));
+
         Ok(response)
+    }
+}
+
+fn append_stderr_warnings(stderr: &mut String, warnings: &[String]) {
+    for warning in warnings {
+        if !stderr.is_empty() && !stderr.ends_with('\n') {
+            stderr.push('\n');
+        }
+        stderr.push_str("Warning: ");
+        stderr.push_str(warning);
+        stderr.push('\n');
     }
 }
 
@@ -329,23 +359,6 @@ pub(super) fn run_provider(
     context: &PluginDispatchContext,
     timeout: Duration,
 ) -> std::result::Result<CapturedPluginOutput, PluginDispatchError> {
-    let env_issues = context
-        .env_issues_for(&provider.plugin_id)
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if !env_issues.is_empty() {
-        tracing::warn!(
-            plugin_id = %provider.plugin_id,
-            command = %selected_command,
-            issue_count = env_issues.len(),
-            "plugin command blocked by invalid injected environment config"
-        );
-        return Err(PluginDispatchError::InvalidEnvironment {
-            plugin_id: provider.plugin_id.clone(),
-            issues: env_issues,
-        });
-    }
-
     let mut command = Command::new(&provider.executable);
     configure_plugin_environment(&mut command);
     let started_at = Instant::now();

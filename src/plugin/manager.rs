@@ -342,12 +342,13 @@ pub struct PluginDispatchContext {
     pub runtime_hints: RuntimeHints,
     /// Environment pairs injected into every plugin process.
     pub shared_env: Vec<(String, String)>,
-    /// Shared environment issues that should block dispatch instead of
-    /// silently dropping configuration.
+    /// Shared environment issues omitted from dispatch and surfaced as
+    /// warnings after the plugin runs.
     pub(crate) shared_env_issues: Vec<String>,
     /// Additional environment pairs injected for specific plugins.
     pub plugin_env: HashMap<String, Vec<(String, String)>>,
-    /// Plugin-specific environment issues keyed by provider id.
+    /// Plugin-specific environment issues omitted from dispatch and surfaced
+    /// as warnings after the plugin runs, keyed by provider id.
     pub(crate) plugin_env_issues: HashMap<String, Vec<String>>,
     /// Provider identifier forced by the caller, if any.
     pub provider_override: Option<String>,

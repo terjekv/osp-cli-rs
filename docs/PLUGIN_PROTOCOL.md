@@ -267,7 +267,8 @@ Env mapping rules:
   name across shared and plugin-specific config.
 - collisions within the same scope after env-name normalization are surfaced as
   config issues and the colliding values are not injected into the plugin
-  subprocess env.
+  subprocess env. The command still runs with the remaining values; osp emits a
+  warning for the dispatch and includes the issue in `osp plugins doctor`.
 - scalar config values are stringified directly.
 - list values are encoded as JSON arrays.
 

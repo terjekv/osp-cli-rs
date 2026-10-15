@@ -239,7 +239,7 @@ fn plugin_dispatch_context_filters_colliding_projected_env_entries_unit() {
 #[cfg(unix)]
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
 #[test]
-fn external_plugin_dispatch_fails_when_config_env_collides_unit() {
+fn external_plugin_dispatch_warns_when_config_env_collides_unit() {
     let root = make_temp_dir("osp-cli-plugin-config-collision-dispatch");
     let plugins_dir = root.join("plugins");
     std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
@@ -264,7 +264,7 @@ fn external_plugin_dispatch_fails_when_config_env_collides_unit() {
         &state.runtime.ui,
         &crate::cli::invocation::InvocationOptions::default(),
     );
-    let err = crate::app::run_external_command_with_help_renderer(
+    let result = crate::app::run_external_command_with_help_renderer(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
@@ -272,11 +272,13 @@ fn external_plugin_dispatch_fails_when_config_env_collides_unit() {
         &invocation,
         crate::core::document::Document::from_help_text,
     )
-    .expect_err("colliding injected env config should block dispatch");
+    .expect("colliding config entries should not block dispatch");
 
-    let message = format!("{err:#}");
-    assert!(message.contains("invalid injected environment config"));
-    assert!(message.contains("OSP_PLUGIN_CFG_API_TOKEN"));
+    assert_eq!(result.exit_code, 0);
+    assert!(result.messages.entries().iter().any(|message| {
+        message.level == crate::ui::messages::MessageLevel::Warning
+            && message.text.contains("OSP_PLUGIN_CFG_API_TOKEN")
+    }));
 }
 
 #[cfg(unix)]

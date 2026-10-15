@@ -370,7 +370,9 @@ Plugin-specific values override shared values for the same key.
 
 If two raw config keys in the same scope normalize to the same env name, `osp`
 surfaces that as a config issue and skips the colliding env vars rather than
-silently picking one.
+silently picking one. The plugin command still runs with the remaining values;
+`osp` emits a warning for the dispatch and includes the issue in
+`osp plugins doctor`.
 
 ## Discovery
 

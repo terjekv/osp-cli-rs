@@ -95,7 +95,7 @@ fn plugin_signal_exit_uses_the_conventional_shell_status_unit() {
 #[cfg(unix)]
 #[cfg_attr(miri, ignore = "plugin subprocess integration test")]
 #[test]
-fn dispatch_fails_fast_when_injected_env_config_has_collisions_unit() {
+fn dispatch_warns_and_skips_colliding_injected_env_config_unit() {
     let root = make_temp_dir("osp-cli-plugin-manager-invalid-env");
     let plugins_dir = root.join("plugins");
     std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
@@ -110,18 +110,15 @@ fn dispatch_fails_fast_when_injected_env_config_has_collisions_unit() {
             ],
         )]));
 
-    let err = manager
+    let response = manager
         .dispatch("shared", &[], &context)
-        .expect_err("invalid injected env config should block dispatch");
+        .expect("a config collision should not block dispatch");
 
-    match err {
-        PluginDispatchError::InvalidEnvironment { plugin_id, issues } => {
-            assert_eq!(plugin_id, "alpha");
-            assert_eq!(issues.len(), 1);
-            assert!(issues[0].contains("OSP_PLUGIN_CFG_API_TOKEN"));
-        }
-        other => panic!("expected invalid environment error, got {other}"),
-    }
+    assert!(response.ok);
+    assert!(response.messages.iter().any(|message| {
+        message.level == crate::core::plugin::ResponseMessageLevelV1::Warning
+            && message.text.contains("OSP_PLUGIN_CFG_API_TOKEN")
+    }));
 }
 
 #[test]

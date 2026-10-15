@@ -91,7 +91,7 @@ pub(crate) fn run_plugins_command(
         PluginsCommands::Doctor => {
             let report = plugin_manager.doctor();
             Ok(CliCommandResult::output(
-                rows_to_output_result(doctor_rows(&report)),
+                rows_to_output_result(plugin_doctor_rows(context, &report)),
                 None,
             ))
         }
@@ -546,6 +546,49 @@ pub(crate) fn doctor_rows(report: &DoctorReport) -> Vec<Row> {
             "kind" => "conflict",
             "command" => conflict.command.clone(),
             "providers" => providers,
+        });
+    }
+
+    rows
+}
+
+fn plugin_doctor_rows(context: PluginsCommandContext<'_>, report: &DoctorReport) -> Vec<Row> {
+    let mut rows = doctor_rows(report);
+    let (Some(config_state), Some(clients)) = (context.config_state, context.clients) else {
+        return rows;
+    };
+    let config_env = clients.plugin_config_env(config_state);
+    let mut plugin_ids = config_env.by_plugin_id.keys().cloned().collect::<Vec<_>>();
+    plugin_ids.sort();
+
+    for plugin_id in plugin_ids {
+        for entry in config_env
+            .effective_entries(&plugin_id)
+            .into_iter()
+            .filter(|entry| entry.scope == PluginConfigScope::Plugin && entry.issue.is_some())
+        {
+            rows.push(crate::row! {
+                "kind" => "config_issue",
+                "scope" => "plugin",
+                "plugin_id" => plugin_id.clone(),
+                "env_key" => entry.env_key,
+                "config_key" => entry.config_key,
+                "issue" => entry.issue.unwrap_or_default(),
+            });
+        }
+    }
+
+    for entry in config_env
+        .effective_entries("")
+        .into_iter()
+        .filter(|entry| entry.scope == PluginConfigScope::Shared && entry.issue.is_some())
+    {
+        rows.push(crate::row! {
+            "kind" => "config_issue",
+            "scope" => "shared",
+            "env_key" => entry.env_key,
+            "config_key" => entry.config_key,
+            "issue" => entry.issue.unwrap_or_default(),
         });
     }
 

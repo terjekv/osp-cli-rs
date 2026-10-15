@@ -8,7 +8,7 @@
 
 use crate::config::{ConfigValue, ResolvedConfig};
 use crate::core::runtime::{RuntimeHints, RuntimeTerminalKind, UiVerbosity};
-use crate::plugin::config::config_value_to_plugin_env;
+use crate::plugin::config::{PluginConfigScope, config_value_to_plugin_env};
 use crate::plugin::{DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchContext};
 use crate::ui::RenderRuntime;
 use crate::ui::messages::MessageLevel;
@@ -119,9 +119,10 @@ fn build_plugin_dispatch_context(
     let config_env = clients.plugin_config_env(config);
     let ui = invocation.map(|value| &value.ui).unwrap_or(runtime_ui);
     let provider_override = invocation.and_then(|value| value.plugin_provider.clone());
-    let shared_env_issues = config_env
-        .shared
+    let shared_entries = config_env.effective_entries("");
+    let shared_env_issues = shared_entries
         .iter()
+        .filter(|entry| entry.scope == PluginConfigScope::Shared)
         .filter_map(plugin_env_issue_text)
         .collect::<Vec<_>>();
 
@@ -131,10 +132,9 @@ fn build_plugin_dispatch_context(
         ui,
     ))
     .with_shared_env(
-        config_env
-            .shared
+        shared_entries
             .iter()
-            .filter(|entry| entry.issue.is_none())
+            .filter(|entry| entry.scope == PluginConfigScope::Shared && entry.issue.is_none())
             .map(|entry| {
                 (
                     entry.env_key.clone(),
@@ -147,14 +147,16 @@ fn build_plugin_dispatch_context(
     .with_plugin_env(
         config_env
             .by_plugin_id
-            .clone()
-            .into_iter()
-            .map(|(plugin_id, entries)| {
+            .keys()
+            .map(|plugin_id| {
+                let entries = config_env.effective_entries(plugin_id);
                 (
-                    plugin_id,
+                    plugin_id.clone(),
                     entries
                         .into_iter()
-                        .filter(|entry| entry.issue.is_none())
+                        .filter(|entry| {
+                            entry.scope == PluginConfigScope::Plugin && entry.issue.is_none()
+                        })
                         .map(|entry| (entry.env_key, config_value_to_plugin_env(&entry.value)))
                         .collect(),
                 )
@@ -164,13 +166,15 @@ fn build_plugin_dispatch_context(
     .with_plugin_env_issues(
         config_env
             .by_plugin_id
-            .into_iter()
-            .filter_map(|(plugin_id, entries)| {
-                let issues = entries
+            .keys()
+            .filter_map(|plugin_id| {
+                let issues = config_env
+                    .effective_entries(plugin_id)
                     .iter()
+                    .filter(|entry| entry.scope == PluginConfigScope::Plugin)
                     .filter_map(plugin_env_issue_text)
                     .collect::<Vec<_>>();
-                (!issues.is_empty()).then_some((plugin_id, issues))
+                (!issues.is_empty()).then_some((plugin_id.clone(), issues))
             })
             .collect(),
     )
