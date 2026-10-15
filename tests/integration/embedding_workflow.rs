@@ -336,7 +336,8 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         } else {
             json!({
                 "ok": false,
-                "error": {"code": "command_failed", "message": "command failed"},
+                "error": {"code": "command_failed", "message": "command failed", "details": null},
+                "exit_code": 3,
                 "messages": [],
                 "data": data,
             })

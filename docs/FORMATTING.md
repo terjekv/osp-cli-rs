@@ -192,6 +192,18 @@ osp help --format auto
 
 ## Stream Separation
 
-Machine-readable output stays on `stdout`.
+Machine-readable output stays on `stdout`, including failures when JSON output
+is in effect. Failures use one envelope:
+
+```json
+{"ok":false,"error":{"code":"command_failed","message":"...","details":null},"exit_code":1,"messages":[],"data":null}
+```
+
+`error.code` is a stable machine code: `usage_error` for invalid syntax,
+`command_error` for process/dispatch errors, or `command_failed` for command
+results without a backend code. Backend codes and structured `details` are
+preserved. `exit_code` is the process status, `messages` contains visible
+command messages, and `data` contains any failure payload. Unavailable details
+and data are `null`; absent messages are an empty array.
 
 Messages, warnings, and debug logs stay on `stderr`.

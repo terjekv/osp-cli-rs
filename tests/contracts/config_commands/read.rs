@@ -313,8 +313,8 @@ ui.format = "json"
         ]);
     let output = cmd.assert().failure().get_output().clone();
     let payload = parse_json_stdout(&output.stdout);
-    assert_eq!(payload["error"]["code"], "config key not found");
-    assert_eq!(payload["error"]["message"], "ui.formt");
+    assert_eq!(payload["error"]["code"], "command_failed");
+    assert_eq!(payload["error"]["message"], "config key not found: ui.formt");
     assert!(payload["messages"][1]["text"]
         .as_str()
         .is_some_and(|text| text.contains("did you mean: ui.format")));

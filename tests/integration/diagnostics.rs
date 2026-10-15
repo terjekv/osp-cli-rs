@@ -146,7 +146,7 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
     let mut machine = BufferedUiSink::default();
     let exit = app.run_process_with_sink(read_args, &mut machine);
     assert_eq!(exit, 1);
-    let envelope: serde_json::Value = serde_json::from_str(&machine.stderr)
+    let envelope: serde_json::Value = serde_json::from_str(&machine.stdout)
         .expect("machine clients should receive a complete JSON error envelope");
     let message = envelope["error"]["message"]
         .as_str()
@@ -157,8 +157,10 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         envelope,
         json!({
             "ok": false,
-            "error": {"code": "command_error", "message": message},
-            "exit_code": 1
+            "error": {"code": "command_error", "message": message, "details": null},
+            "exit_code": 1,
+            "messages": [],
+            "data": null
         }),
     );
 

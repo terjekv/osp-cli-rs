@@ -503,7 +503,11 @@ impl App {
                     &error_render_settings,
                     message_verbosity,
                 );
-                sink.write_stderr(&rendered);
+                if error_render_settings.format == OutputFormat::Json {
+                    sink.write_stdout(&rendered);
+                } else {
+                    sink.write_stderr(&rendered);
+                }
                 classify_exit_code(&err)
             }
         };
@@ -800,17 +804,11 @@ fn render_process_error(
             host::EXIT_CODE_USAGE => "usage_error",
             _ => "command_error",
         };
-        return format!(
-            "{}\n",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "ok": false,
-                "error": {"code": code, "message": message},
-                "exit_code": exit_code,
-            }))
-            .unwrap_or_else(|_| {
-                r#"{"ok":false,"error":{"code":"serialization_error","message":"failed to serialize process error"},"exit_code":1}"#
-                    .to_string()
-            })
+        return command_output::render_json_failure(
+            serde_json::json!({"code": code, "message": message, "details": null}),
+            exit_code,
+            Vec::new(),
+            serde_json::Value::Null,
         );
     }
 

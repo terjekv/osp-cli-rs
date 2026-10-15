@@ -230,6 +230,25 @@ impl<'a> CommandRenderRuntime<'a> {
     }
 }
 
+pub(crate) fn render_json_failure(
+    error: Value,
+    exit_code: i32,
+    messages: Vec<Value>,
+    data: Value,
+) -> String {
+    let payload = serde_json::json!({
+        "ok": false,
+        "error": error,
+        "exit_code": exit_code,
+        "messages": messages,
+        "data": data,
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+    )
+}
+
 pub(crate) fn run_cli_command(
     runtime: &CommandRenderRuntime<'_>,
     result: CliCommandResult,
@@ -267,33 +286,17 @@ pub(crate) fn run_cli_command(
         {
             serde_json::json!(backend.error)
         } else {
-            let (code, message) = primary_error
-                .and_then(|text| text.split_once(": "))
-                .map(|(code, message)| (code.to_string(), message.to_string()))
-                .unwrap_or_else(|| {
-                    (
-                        "command_failed".to_string(),
-                        primary_error
-                            .map(str::to_string)
-                            .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
-                            .unwrap_or_else(|| "command failed".to_string()),
-                    )
-                });
-            serde_json::json!({"code": code, "message": message})
+            let message = primary_error
+                .map(str::to_string)
+                .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
+                .unwrap_or_else(|| "command failed".to_string());
+            serde_json::json!({"code": "command_failed", "message": message, "details": null})
         };
-        let payload = serde_json::json!({
-            "ok": false,
-            "error": error,
-            "messages": messages,
-            "data": data,
-        });
-        sink.write_stdout(&format!(
-            "{}\n",
-            serde_json::to_string_pretty(&payload)
-                .unwrap_or_else(|_| {
-                    r#"{"ok":false,"error":{"code":"serialization_error","message":"failed to serialize command failure"}}"#
-                        .to_string()
-                })
+        sink.write_stdout(&render_json_failure(
+            error,
+            result.exit_code,
+            messages,
+            data,
         ));
         return Ok(result.exit_code);
     }
