@@ -274,10 +274,14 @@ pub(crate) fn split_command_tokens(tokens: &[String]) -> SplitCommandTokens {
     let stages = iter
         .map(|segment| {
             // A whole explicit stage may be passed as one shell argument,
-            // just as a whole command line may be. Keep its DSL quotes intact.
+            // just as a whole command line may be. Keep its DSL quotes intact,
+            // and keep unknown verbs so they fail as they do in a string.
             if segment.len() == 1
                 && let Ok(stage) = parse_stage(&segment[0])
-                && (stage.kind == ParsedStageKind::Explicit || is_cli_help_stage(&stage))
+                && matches!(
+                    stage.kind,
+                    ParsedStageKind::Explicit | ParsedStageKind::UnknownExplicit
+                )
             {
                 return segment[0].clone();
             }
