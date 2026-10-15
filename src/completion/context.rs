@@ -96,8 +96,14 @@ impl<'a> TreeResolver<'a> {
     }
 
     pub(crate) fn resolve_exact(&self, path: &[String]) -> Option<&'a CompletionNode> {
-        let (node, matched) = self.resolve_context(path);
-        (matched.len() == path.len()).then_some(node)
+        let mut node = &self.tree.root;
+        for (index, segment) in path.iter().enumerate() {
+            node = node.children.get(segment)?;
+            if node.value_leaf && index + 1 < path.len() {
+                return None;
+            }
+        }
+        Some(node)
     }
 }
 
