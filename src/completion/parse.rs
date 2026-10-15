@@ -534,7 +534,7 @@ impl CommandLineParser {
         self.parse_with_flag_arity(tokens, &|_, _| None)
     }
 
-    fn parse_with_flag_arity(
+    pub(crate) fn parse_with_flag_arity(
         &self,
         tokens: &[String],
         flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,

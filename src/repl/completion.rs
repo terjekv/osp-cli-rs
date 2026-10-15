@@ -11,8 +11,8 @@ use crate::app::CMD_CONFIG;
 use crate::cli::invocation::scan_command_tokens;
 use crate::cli::pipeline::{is_cli_help_stage, validate_cli_dsl_stages};
 use crate::completion::{
-    ArgNode, CommandLineParser, CompletionNode, CompletionTree, CompletionTreeBuilder,
-    ContextScope, FlagNode, SuggestionEntry,
+    ArgNode, CompletionEngine, CompletionNode, CompletionTree, CompletionTreeBuilder, ContextScope,
+    FlagNode, SuggestionEntry,
 };
 use crate::dsl::parse::pipeline::parse_stage;
 use crate::dsl::{registered_verbs, verb_info};
@@ -96,13 +96,18 @@ fn inject_alias_nodes(
     fallback_root: Option<&CompletionNode>,
     aliases: &[ReplAliasEntry],
 ) {
+    let parse_root = fallback_root.unwrap_or(preferred_root);
+    let parse_engine = CompletionEngine::new(CompletionTree {
+        root: parse_root.clone(),
+        ..CompletionTree::default()
+    });
     for alias in aliases {
         if target_root.children.contains_key(alias.name.as_str()) {
             continue;
         }
         target_root.children.insert(
             alias.name.clone(),
-            alias_completion_node(preferred_root, fallback_root, alias),
+            alias_completion_node(preferred_root, fallback_root, alias, &parse_engine),
         );
     }
 }
@@ -111,8 +116,9 @@ fn alias_completion_node(
     preferred_root: &CompletionNode,
     fallback_root: Option<&CompletionNode>,
     alias: &ReplAliasEntry,
+    parse_engine: &CompletionEngine,
 ) -> CompletionNode {
-    let Some(parsed) = alias_completion_command(&alias.template) else {
+    let Some(parsed) = alias_completion_command(&alias.template, parse_engine) else {
         return CompletionNode {
             tooltip: Some(alias.tooltip.clone()),
             ..CompletionNode::default()
@@ -143,7 +149,10 @@ fn alias_completion_node(
     node
 }
 
-fn alias_completion_command(template: &str) -> Option<AliasCompletionCommand> {
+fn alias_completion_command(
+    template: &str,
+    parse_engine: &CompletionEngine,
+) -> Option<AliasCompletionCommand> {
     // Alias templates may contain `${...}` placeholders that are meaningful at
     // execution time but would break completion parsing. Replace them with a
     // stable sentinel so the completer can still resolve the alias shape.
@@ -157,9 +166,8 @@ fn alias_completion_command(template: &str) -> Option<AliasCompletionCommand> {
         return None;
     }
 
-    let parser = CommandLineParser;
     Some(AliasCompletionCommand {
-        command: parser.parse(&scanned.tokens),
+        command: parse_engine.parse_command_tokens(&scanned.tokens),
         prefilled_flags: invocation_prefilled_flags(&scanned.invocation),
     })
 }
@@ -204,7 +212,12 @@ fn resolved_alias_target_node(
     }
 
     let mut prefilled_positionals = Vec::new();
-    for segment in command.head().iter().skip(matched) {
+    for segment in command
+        .head()
+        .iter()
+        .skip(matched)
+        .chain(command.positional_args())
+    {
         if segment == ALIAS_PLACEHOLDER_TOKEN {
             break;
         }
@@ -554,7 +567,9 @@ mod tests {
         AppState, AppStateBuilder, LaunchContext, ReplScopeStack, RuntimeContext, TerminalKind,
         UiState,
     };
-    use crate::completion::{CompletionNode, CompletionTree, ContextScope, FlagNode};
+    use crate::completion::{
+        CompletionEngine, CompletionNode, CompletionTree, ContextScope, FlagNode,
+    };
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
@@ -694,8 +709,9 @@ mod tests {
 
     #[test]
     fn alias_completion_helpers_cover_prefilled_flags_missing_targets_and_collisions_unit() {
+        let parse_engine = CompletionEngine::new(CompletionTree::default());
         for template in ["--json --no-color ldap user ${uid}", "--json --no-color"] {
-            let parsed = alias_completion_command(template).expect("alias parses");
+            let parsed = alias_completion_command(template, &parse_engine).expect("alias parses");
             assert_eq!(
                 parsed.prefilled_flags.get("--format"),
                 Some(&vec!["json".to_string()])
@@ -714,7 +730,7 @@ mod tests {
             template: "missing user ${uid}".to_string(),
             tooltip: "Lookup a user".to_string(),
         };
-        let node = alias_completion_node(&CompletionNode::default(), None, &alias);
+        let node = alias_completion_node(&CompletionNode::default(), None, &alias, &parse_engine);
         assert_eq!(node.tooltip.as_deref(), Some("Lookup a user"));
         assert!(node.children.is_empty());
 

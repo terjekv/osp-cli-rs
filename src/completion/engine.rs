@@ -94,6 +94,11 @@ impl CompletionEngine {
         self.analyze_command_parts(parsed.parsed, parsed.cursor)
     }
 
+    pub(crate) fn parse_command_tokens(&self, tokens: &[String]) -> CommandLine {
+        self.parser
+            .parse_with_flag_arity(tokens, &|path, flag| self.flag_arity(path, flag))
+    }
+
     /// Resolves completion state from pre-parsed command representations.
     ///
     /// This is mainly useful for tests or callers that already have split
