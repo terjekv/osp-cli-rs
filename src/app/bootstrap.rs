@@ -127,7 +127,10 @@ fn runtime_pipeline_for_request(
 pub(crate) fn prepare_runtime_config(
     request: RuntimeConfigRequest,
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
-    let paths = RuntimeConfigPaths::discover_with(request.runtime_load);
+    let paths = {
+        let _phase = crate::startup_trace::phase("config path discovery");
+        RuntimeConfigPaths::discover_with(request.runtime_load)
+    };
     let options = runtime_resolve_options(&request);
     let base_resolved =
         runtime_pipeline_for_request(&request, &paths, None).resolve(options.clone())?;
@@ -240,6 +243,7 @@ pub(crate) fn debug_verbosity_from_config(config: &ResolvedConfig) -> u8 {
 }
 
 pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<ResolvedConfig> {
+    let _phase = crate::startup_trace::phase("runtime config resolution");
     let has_session_layer = request.session_layer.is_some();
     tracing::debug!(
         profile_override = ?request.profile_override,

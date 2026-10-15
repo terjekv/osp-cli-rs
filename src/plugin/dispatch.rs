@@ -219,6 +219,8 @@ impl PluginManager {
 }
 
 pub(super) fn describe_plugin(path: &std::path::Path, timeout: Duration) -> Result<DescribeV1> {
+    let _phase =
+        crate::startup_trace::phase_with_name(|| format!("plugin --describe {}", path.display()));
     let mut command = Command::new(path);
     configure_plugin_environment(&mut command);
     command.arg("--describe");

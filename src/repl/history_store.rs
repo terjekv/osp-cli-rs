@@ -518,6 +518,9 @@ impl OspHistoryStore {
         if config.persist_enabled()
             && let Some(path) = &config.path
         {
+            let _phase = crate::startup_trace::phase_with_name(|| {
+                format!("history load {}", path.display())
+            });
             records = load_records(path);
         }
         let mut store = Self {

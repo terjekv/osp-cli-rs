@@ -35,6 +35,10 @@ Error-detail ladder:
 Use `-d/-dd/-ddd` when you need host debug logs and timing. Use `-v/-vv/-vvv`
 when you need a better failure report.
 
+For startup delays before the first REPL prompt or a one-shot command, run
+`OSP_TRACE_STARTUP=1 osp` or `OSP_TRACE_STARTUP=json osp ...` and inspect the
+phase tree on `stderr`. See [startup tracing](LOGGING.md#startup-tracing).
+
 In the REPL, the normal loop is:
 
 1. let the command fail normally

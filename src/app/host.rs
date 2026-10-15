@@ -235,8 +235,11 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
+    crate::startup_trace::initialize();
     let mut sink = StdIoUiSink;
-    run_from_with_sink(args, &mut sink)
+    let result = run_from_with_sink(args, &mut sink);
+    crate::startup_trace::finish();
+    result
 }
 
 pub(crate) fn run_from_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> Result<i32>
@@ -256,44 +259,58 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let argv = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
-    init_developer_logging(bootstrap_logging_config(&argv));
-    let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
-    let suffix = argv[pipe..]
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let scanned = scan_cli_argv(&argv[..pipe])?;
-    let mut stage_tokens = vec!["command".to_string()];
-    stage_tokens.extend(suffix.iter().cloned());
-    let stages = crate::cli::pipeline::split_command_tokens(&stage_tokens).stages;
-    crate::cli::validate_cli_dsl_stages(&stages)?;
-    let mut command = Cli::command();
-    for &(name, help, key, _) in &app.config_flags {
-        let conflicts = app
-            .config_flags
-            .iter()
-            .filter(|&&(other, _, other_key, _)| other != name && other_key == key)
-            .map(|&(other, _, _, _)| other);
-        command = command.arg(
-            clap::Arg::new(name)
-                .long(name)
-                .help(help)
-                .action(clap::ArgAction::SetTrue)
-                .conflicts_with_all(conflicts),
-        );
+    crate::startup_trace::initialize();
+    let argv = {
+        let _phase = crate::startup_trace::phase("argv collection");
+        args.into_iter().map(Into::into).collect::<Vec<OsString>>()
+    };
+    {
+        let _phase = crate::startup_trace::phase("developer logging bootstrap");
+        init_developer_logging(bootstrap_logging_config(&argv));
     }
-    let parsed = command
-        .try_get_matches_from(scanned.argv.iter().cloned())
-        .and_then(|matches| {
-            let mut cli = Cli::from_arg_matches(&matches)?;
-            for &(name, _, key, value) in &app.config_flags {
-                if matches.get_flag(name) {
-                    cli.product_overrides.set(key, value);
+    let (pipe, scanned, suffix, stages) = {
+        let _phase = crate::startup_trace::phase("argv/invocation scan");
+        let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
+        let suffix = argv[pipe..]
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let scanned = scan_cli_argv(&argv[..pipe])?;
+        let mut stage_tokens = vec!["command".to_string()];
+        stage_tokens.extend(suffix.iter().cloned());
+        let stages = crate::cli::pipeline::split_command_tokens(&stage_tokens).stages;
+        crate::cli::validate_cli_dsl_stages(&stages)?;
+        (pipe, scanned, suffix, stages)
+    };
+    let parsed = {
+        let _phase = crate::startup_trace::phase("clap parse");
+        let mut command = Cli::command();
+        for &(name, help, key, _) in &app.config_flags {
+            let conflicts = app
+                .config_flags
+                .iter()
+                .filter(|&&(other, _, other_key, _)| other != name && other_key == key)
+                .map(|&(other, _, _, _)| other);
+            command = command.arg(
+                clap::Arg::new(name)
+                    .long(name)
+                    .help(help)
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(conflicts),
+            );
+        }
+        command
+            .try_get_matches_from(scanned.argv.iter().cloned())
+            .and_then(|matches| {
+                let mut cli = Cli::from_arg_matches(&matches)?;
+                for &(name, _, key, value) in &app.config_flags {
+                    if matches.get_flag(name) {
+                        cli.product_overrides.set(key, value);
+                    }
                 }
-            }
-            Ok(cli)
-        });
+                Ok(cli)
+            })
+    };
     match parsed {
         Ok(Cli {
             command: Some(Commands::Completions(args)),
@@ -304,6 +321,7 @@ where
                     "shell completion scripts do not support DSL pipeline stages"
                 ));
             }
+            let _phase = crate::startup_trace::phase("command execution");
             sink.write_stdout(&crate::cli::render_shell_completions(args));
             Ok(0)
         }
@@ -329,8 +347,10 @@ fn handle_clap_parse_error(
     match err.kind() {
         clap::error::ErrorKind::DisplayHelp
         | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+            let _phase = crate::startup_trace::phase("command execution");
             let help_context = help::render_settings_for_help(args, &app.product_defaults);
             if let Some(config) = &help_context.config {
+                let _phase = crate::startup_trace::phase("native command configure");
                 app.native_commands.configure(config);
             }
             let raw_help = err.to_string();
@@ -392,6 +412,7 @@ fn handle_clap_parse_error(
             if !stages.is_empty() {
                 return Err(miette!("version text does not support DSL pipeline stages"));
             }
+            let _phase = crate::startup_trace::phase("command execution");
             sink.write_stdout(&err.to_string());
             Ok(0)
         }
@@ -416,7 +437,10 @@ fn run(
         mut state,
         dispatch,
         invocation_ui,
-    } = prepare_host_run(&mut cli, &invocation, app, run_started)?;
+    } = {
+        let _phase = crate::startup_trace::phase("host startup");
+        prepare_host_run(&mut cli, &invocation, app, run_started)?
+    };
 
     if let Some(help) = crate::repl::completion::maybe_render_dsl_help(
         crate::repl::ReplViewContext::from_parts(&state.runtime, &state.session),
@@ -432,23 +456,26 @@ fn run(
     let action_started = Instant::now();
     let is_repl = matches!(dispatch.action, RunAction::Repl);
     let action = dispatch.action;
-    let result = match action {
-        RunAction::Repl => {
-            state.runtime.ui = invocation_ui.ui.clone();
-            repl::run_plugin_repl(&mut state)
+    let result = {
+        let _phase = (!is_repl).then(|| crate::startup_trace::phase("command execution"));
+        match action {
+            RunAction::Repl => {
+                state.runtime.ui = invocation_ui.ui.clone();
+                repl::run_plugin_repl(&mut state)
+            }
+            RunAction::External(tokens) => {
+                run_cli_external_command(&mut state, &tokens, &invocation, &invocation_ui, sink)
+            }
+            RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
+                &invocation_ui,
+                command,
+                stages,
+                sink,
+            ),
         }
-        RunAction::External(tokens) => {
-            run_cli_external_command(&mut state, &tokens, &invocation, &invocation_ui, sink)
-        }
-        RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &invocation_ui,
-            command,
-            stages,
-            sink,
-        ),
     };
 
     if !is_repl && invocation_ui.ui.debug_verbosity > 0 {
@@ -525,7 +552,10 @@ fn prepare_host_run(
     app: &super::AppDefinition,
     run_started: Instant,
 ) -> Result<PreparedHostRun> {
-    let dispatch = build_dispatch_plan(cli)?;
+    let dispatch = {
+        let _phase = crate::startup_trace::phase("dispatch planning");
+        build_dispatch_plan(cli)?
+    };
     tracing::debug!(
         action = %dispatch.action.name(),
         profile_override = ?dispatch.profile_override,
@@ -533,34 +563,46 @@ fn prepare_host_run(
     );
 
     let terminal_kind = dispatch.action.terminal_kind();
-    let prepared = prepare_startup_host(
-        cli,
-        dispatch.profile_override.clone(),
-        terminal_kind,
-        run_started,
-        &app.product_defaults,
-    )?;
-    let mut state = crate::app::AppStateBuilder::from_host_inputs(
-        prepared.runtime_context,
-        prepared.config,
-        prepared.host_inputs,
-    )
-    .with_launch(prepared.launch_context)
-    .with_native_commands(app.native_commands.clone())
-    .build();
+    let prepared = {
+        let _phase = crate::startup_trace::phase("runtime config and host inputs");
+        prepare_startup_host(
+            cli,
+            dispatch.profile_override.clone(),
+            terminal_kind,
+            run_started,
+            &app.product_defaults,
+        )?
+    };
+    let mut state = {
+        let _phase = crate::startup_trace::phase("host state assembly");
+        crate::app::AppStateBuilder::from_host_inputs(
+            prepared.runtime_context,
+            prepared.config,
+            prepared.host_inputs,
+        )
+        .with_launch(prepared.launch_context)
+        .with_native_commands(app.native_commands.clone())
+        .build()
+    };
     state
         .runtime
         .set_product_defaults(app.product_defaults.clone());
-    state.runtime.set_policy_context(app.policy_context.clone());
-    state
-        .runtime
-        .auth
-        .replace_builtin_policy(app.builtin_policy.clone());
-    state
-        .runtime
-        .set_access_recovery(app.access_recovery.clone());
-    if let Some(startup_hook) = &app.startup_hook {
-        startup_hook.prepare(&mut state.runtime)?;
+    {
+        let _phase = crate::startup_trace::phase("auth policy context setup");
+        state.runtime.set_policy_context(app.policy_context.clone());
+        state
+            .runtime
+            .auth
+            .replace_builtin_policy(app.builtin_policy.clone());
+        state
+            .runtime
+            .set_access_recovery(app.access_recovery.clone());
+    }
+    {
+        let _phase = crate::startup_trace::phase("startup hook");
+        if let Some(startup_hook) = &app.startup_hook {
+            startup_hook.prepare(&mut state.runtime)?;
+        }
     }
     let invocation_ui = resolve_invocation_ui(
         state.runtime.config.resolved(),

@@ -675,7 +675,10 @@ pub(crate) struct AppStateParts {
 
 impl AppStateParts {
     fn from_init(init: AppStateInit, session_override: Option<AppSession>) -> Self {
-        init.native_commands.configure(&init.config);
+        {
+            let _phase = crate::startup_trace::phase("native command configure");
+            init.native_commands.configure(&init.config);
+        }
         let clients = AppClients::new(init.plugins, init.native_commands);
         let config = crate::app::ConfigState::new(init.config);
         let ui = crate::app::UiState::new(
@@ -684,11 +687,14 @@ impl AppStateParts {
             init.debug_verbosity,
         )
         .with_error_detail(init.error_detail);
-        let auth = crate::app::AuthState::from_resolved_with_external_policies(
-            config.resolved(),
-            clients.plugins(),
-            clients.native_commands(),
-        );
+        let auth = {
+            let _phase = crate::startup_trace::phase("auth policy catalog setup");
+            crate::app::AuthState::from_resolved_with_external_policies(
+                config.resolved(),
+                clients.plugins(),
+                clients.native_commands(),
+            )
+        };
         let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);
         let session = session_override
             .unwrap_or_else(|| AppSession::from_resolved_config(runtime.config.resolved()));

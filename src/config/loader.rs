@@ -608,18 +608,26 @@ impl LoaderPipeline {
     /// This is the boundary between source I/O and config resolution.
     pub fn load_layers(&self) -> Result<LoadedLayers, ConfigError> {
         tracing::debug!("loading config layers");
+        let defaults = load_layer("defaults", || self.defaults.load())?;
+        let presentation = load_optional_layer("presentation", self.presentation.as_deref())?;
+        let file = load_optional_layer("file", self.file.as_deref())?;
+        let env = load_optional_layer("environment", self.env.as_deref())?;
+        let cli = load_optional_layer("CLI overrides", self.cli.as_deref())?;
+        let session = load_optional_layer("session", self.session.as_deref())?;
         let mut layers = LoadedLayers {
-            defaults: self.defaults.load()?,
-            presentation: load_optional_loader(self.presentation.as_deref())?,
-            file: load_optional_loader(self.file.as_deref())?,
+            defaults,
+            presentation,
+            file,
             secrets: ConfigLayer::default(),
-            env: load_optional_loader(self.env.as_deref())?,
-            cli: load_optional_loader(self.cli.as_deref())?,
-            session: load_optional_loader(self.session.as_deref())?,
+            env,
+            cli,
+            session,
         };
         layers.secrets = match self.secrets.as_ref() {
-            Some(SecretsPipelineLoader::Fixed(loader)) => loader.load()?,
-            Some(SecretsPipelineLoader::Runtime(loader)) => loader.load(&layers)?,
+            Some(SecretsPipelineLoader::Fixed(loader)) => load_layer("secrets", || loader.load())?,
+            Some(SecretsPipelineLoader::Runtime(loader)) => {
+                load_layer("secrets", || loader.load(&layers))?
+            }
             None => ConfigLayer::default(),
         };
         tracing::debug!(
@@ -666,15 +674,27 @@ impl LoaderPipeline {
     /// assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
     /// ```
     pub fn resolve(&self, options: ResolveOptions) -> Result<ResolvedConfig, ConfigError> {
+        let _phase = crate::startup_trace::phase("config resolution");
         self.resolver()?.resolve(options)
     }
 }
 
-fn load_optional_loader(loader: Option<&dyn ConfigLoader>) -> Result<ConfigLayer, ConfigError> {
+fn load_optional_layer(
+    name: &'static str,
+    loader: Option<&dyn ConfigLoader>,
+) -> Result<ConfigLayer, ConfigError> {
     match loader {
-        Some(loader) => loader.load(),
+        Some(loader) => load_layer(name, || loader.load()),
         None => Ok(ConfigLayer::default()),
     }
+}
+
+fn load_layer(
+    name: &'static str,
+    load: impl FnOnce() -> Result<ConfigLayer, ConfigError>,
+) -> Result<ConfigLayer, ConfigError> {
+    let _phase = crate::startup_trace::phase_with_name(|| format!("config layer {name}"));
+    load()
 }
 
 #[cfg(test)]

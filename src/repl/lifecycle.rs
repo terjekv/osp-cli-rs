@@ -116,7 +116,10 @@ impl ReplCycle {
         clients: &AppClients,
         include_help_text: bool,
     ) -> Result<Self> {
-        let prepared = prepare_repl_surface_state(runtime, session, clients)?;
+        let prepared = {
+            let _phase = crate::startup_trace::phase("REPL completion surface");
+            prepare_repl_surface_state(runtime, session, clients)?
+        };
         let view = ReplViewContext::from_parts(runtime, session);
         let intro_text = if include_help_text {
             render_repl_intro(view, &prepared.surface)

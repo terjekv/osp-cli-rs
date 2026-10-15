@@ -152,7 +152,10 @@ struct DescribeCacheSession {
 impl DescribeCacheSession {
     fn load(manager: &PluginManager) -> Self {
         Self {
-            file: manager.load_describe_cache_or_warn(),
+            file: {
+                let _phase = crate::startup_trace::phase("plugin describe cache load");
+                manager.load_describe_cache_or_warn()
+            },
             seen_paths: HashSet::new(),
             dirty: false,
         }
@@ -169,6 +172,7 @@ impl DescribeCacheSession {
     fn finish(mut self, manager: &PluginManager) -> bool {
         self.dirty |= prune_stale_describe_cache_entries(&mut self.file, &self.seen_paths);
         if self.dirty {
+            let _phase = crate::startup_trace::phase("plugin describe cache save");
             manager.save_describe_cache_or_warn(&self.file);
         }
         self.dirty
@@ -252,20 +256,34 @@ impl PluginManager {
     }
 
     fn discover_uncached(&self, policy: DiscoveryPolicy) -> (Vec<DiscoveredPlugin>, bool) {
-        let roots = self.search_roots();
+        let _phase = crate::startup_trace::phase("plugin discovery");
+        let roots = {
+            let _phase = crate::startup_trace::phase("plugin search root resolution");
+            self.search_roots()
+        };
         let mut plugins: Vec<DiscoveredPlugin> = Vec::new();
         let mut seen_paths: HashSet<PathBuf> = HashSet::new();
         let mut describe_cache = DescribeCacheSession::load(self);
 
         for root in &roots {
             let mut describe_cache_state = describe_cache.state();
-            plugins.extend(discover_plugins_in_root(
-                root,
-                &mut seen_paths,
-                &mut describe_cache_state,
-                self.process_timeout,
-                policy,
-            ));
+            let discovered = {
+                let _phase = crate::startup_trace::phase_with_name(|| {
+                    format!(
+                        "plugin discovery root {} ({})",
+                        root.path.display(),
+                        root.source
+                    )
+                });
+                discover_plugins_in_root(
+                    root,
+                    &mut seen_paths,
+                    &mut describe_cache_state,
+                    self.process_timeout,
+                    policy,
+                )
+            };
+            plugins.extend(discovered);
         }
 
         mark_duplicate_plugin_ids(&mut plugins);

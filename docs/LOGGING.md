@@ -62,6 +62,27 @@ Color bands:
 
 Higher debug levels may show more detailed timing breakdowns.
 
+## Startup Tracing
+
+Set `OSP_TRACE_STARTUP=1` to write a human-readable phase tree to `stderr`, or
+set it to `json` for one JSON document. The setting is read once when the
+process starts; it is off by default. Startup tracing is separate from `-d`
+developer logs and does not change their format.
+
+Each phase reports its start offset, elapsed duration, nesting depth, parent,
+and share of the total. Phase durations are inclusive, so nested phase shares
+can add up to more than 100%. A REPL trace ends at the final callback that
+assembles its first prompt, before the editor waits for input. A one-shot trace
+ends as the process wrapper returns and includes command execution.
+
+```bash
+OSP_TRACE_STARTUP=1 osp
+OSP_TRACE_STARTUP=json osp --defaults-only config show 2>startup.json
+```
+
+Use this trace to find repeated config passes, plugin discovery and `--describe`
+subprocesses, or work that runs before the command is known.
+
 ## REPL Behavior
 
 In the REPL, `-v/-q/-d` are command-local. They do not permanently change the

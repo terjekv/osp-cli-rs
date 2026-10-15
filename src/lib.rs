@@ -261,6 +261,7 @@ pub mod guide;
 pub mod plugin;
 /// Interactive REPL editor, prompt, history, and completion surface.
 pub mod repl;
+mod startup_trace;
 /// Rendering, theming, and structured output helpers.
 pub mod ui;
 

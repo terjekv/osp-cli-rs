@@ -40,6 +40,9 @@ mod ui_rendering;
 #[path = "contracts/version_commands.rs"]
 mod version_commands;
 
+#[path = "contracts/startup_trace.rs"]
+mod startup_trace;
+
 #[path = "contracts/snapshot_support.rs"]
 mod snapshot_support;
 

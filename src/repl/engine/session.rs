@@ -89,13 +89,16 @@ where
         line_projector,
     } = config;
 
-    let mut editor = build_interactive_editor(
-        completion_tree,
-        &appearance,
-        tab_mode,
-        line_projector,
-        history_store.clone(),
-    );
+    let mut editor = {
+        let _phase = crate::startup_trace::phase("editor construction");
+        build_interactive_editor(
+            completion_tree,
+            &appearance,
+            tab_mode,
+            line_projector,
+            history_store.clone(),
+        )
+    };
     drive_interactive_editor(
         prompt,
         &appearance,
@@ -163,6 +166,7 @@ where
     R: FnMut(&mut Reedline) -> io::Result<Signal>,
     B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplRunResult>,
 {
+    crate::startup_trace::begin_first_prompt();
     loop {
         // Keys typed during the startup probe: run lines finished with Enter
         // as if submitted, and leave an unfinished line in the editor.
@@ -204,9 +208,11 @@ where
     F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
 {
     crate::repl::notices::attach_basic();
+    crate::startup_trace::begin_first_prompt();
     loop {
         print!("{}{}", prompt.left(), prompt.indicator());
         io::stdout().flush()?;
+        crate::startup_trace::first_prompt_rendered();
 
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;

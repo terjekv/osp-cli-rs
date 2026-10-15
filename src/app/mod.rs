@@ -356,7 +356,10 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        host::run_from_with_sink_and_app(args, &mut StdIoUiSink, &self.definition)
+        crate::startup_trace::initialize();
+        let result = host::run_from_with_sink_and_app(args, &mut StdIoUiSink, &self.definition);
+        crate::startup_trace::finish();
+        result
     }
 
     /// Binds the application to a specific UI sink for repeated invocations.
@@ -411,7 +414,10 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        host::run_from_with_sink_and_app(args, sink, &self.definition)
+        crate::startup_trace::initialize();
+        let result = host::run_from_with_sink_and_app(args, sink, &self.definition);
+        crate::startup_trace::finish();
+        result
     }
 
     /// Runs the application and converts execution failures into process exit
@@ -435,6 +441,7 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
+        crate::startup_trace::initialize();
         let mut sink = StdIoUiSink;
         sink::take_stdout_write_failure();
         let code = self.run_process_with_sink(args, &mut sink);
@@ -471,13 +478,21 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        let args = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
-        let error_detail = bootstrap_error_detail(&args);
-        let message_verbosity = bootstrap_message_verbosity(&args);
-        let error_render_settings =
-            help::render_settings_for_help(&args, &self.definition.product_defaults).settings;
+        crate::startup_trace::initialize();
+        let args = {
+            let _phase = crate::startup_trace::phase("process argv collection");
+            args.into_iter().map(Into::into).collect::<Vec<OsString>>()
+        };
+        let (error_detail, message_verbosity, error_render_settings) = {
+            let _phase = crate::startup_trace::phase("process error display preparation");
+            let error_detail = bootstrap_error_detail(&args);
+            let message_verbosity = bootstrap_message_verbosity(&args);
+            let error_render_settings =
+                help::render_settings_for_help(&args, &self.definition.product_defaults).settings;
+            (error_detail, message_verbosity, error_render_settings)
+        };
 
-        match host::run_from_with_sink_and_app(args, sink, &self.definition) {
+        let code = match host::run_from_with_sink_and_app(args, sink, &self.definition) {
             Ok(code) => code,
             Err(err) => {
                 let rendered = render_process_error(
@@ -489,7 +504,9 @@ impl App {
                 sink.write_stderr(&rendered);
                 classify_exit_code(&err)
             }
-        }
+        };
+        crate::startup_trace::finish();
+        code
     }
 }
 
@@ -739,6 +756,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    crate::startup_trace::initialize();
     App::new().run_process(args)
 }
 

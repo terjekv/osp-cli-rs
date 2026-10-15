@@ -114,6 +114,7 @@ pub fn run_repl<F>(config: ReplRunConfig, mut execute: F) -> Result<ReplRunResul
 where
     F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
 {
+    crate::startup_trace::initialize();
     let ReplRunConfig {
         prompt,
         completion_tree,
@@ -130,7 +131,10 @@ where
         execute: &mut execute,
     };
     let prompt = OspPrompt::new(prompt.left, prompt.indicator, prompt_right);
-    let basic_reason = basic_input_reason(input_mode);
+    let basic_reason = {
+        let _phase = crate::startup_trace::phase("terminal capability/cursor probe");
+        basic_input_reason(input_mode)
+    };
 
     run_repl_with_reason(
         ReplRunContext {
