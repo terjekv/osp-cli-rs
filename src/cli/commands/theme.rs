@@ -7,7 +7,7 @@ use crate::app::{AppRuntime, UiState};
 use crate::app::{CliCommandResult, resolve_known_theme_name};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs, ThemeUseArgs};
-use crate::config::ConfigLayer;
+use crate::config::{ConfigLayer, Scope};
 use crate::core::command_def::{ArgDef, CommandDef, ValueChoice};
 use crate::core::output_model::{OutputDocument, OutputDocumentKind};
 use crate::core::row::Row;
@@ -65,7 +65,7 @@ pub(crate) fn run_theme_command(
         }
         ThemeCommands::Use(ThemeUseArgs { name }) => {
             let selected = resolve_known_theme_name(&name, context.themes)?;
-            config_overrides.set("theme.name", selected.clone());
+            config_overrides.replace_scoped("theme.name", selected.clone().into(), Scope::global());
 
             let mut result = CliCommandResult::exit(0);
             result

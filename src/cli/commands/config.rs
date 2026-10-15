@@ -619,7 +619,7 @@ fn run_config_set(
                 if !args.dry_run {
                     context
                         .config_overrides
-                        .insert(key.clone(), value.clone(), scope.clone());
+                        .replace_scoped(&key, value.clone(), scope.clone());
                 }
                 row.insert("path", serde_json::Value::Null);
                 row.insert("changed", true);

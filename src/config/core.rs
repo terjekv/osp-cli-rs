@@ -1451,6 +1451,13 @@ impl ConfigLayer {
         });
     }
 
+    pub(crate) fn replace_scoped(&mut self, key: &str, value: ConfigValue, scope: Scope) {
+        let scope = normalize_scope(scope);
+        self.entries
+            .retain(|entry| entry.key != key || entry.scope != scope);
+        self.insert(key, value, scope);
+    }
+
     /// Inserts an entry and records its external origin.
     pub fn insert_with_origin<K, V, O>(&mut self, key: K, value: V, scope: Scope, origin: Option<O>)
     where
