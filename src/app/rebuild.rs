@@ -14,7 +14,6 @@
 use miette::{Result, WrapErr};
 use std::sync::Arc;
 
-use crate::app::session::AppSessionRebuildState;
 use crate::config::ConfigLayer;
 use crate::core::command_policy::{CommandPolicyContext, CommandPolicyRegistry};
 use crate::core::output::OutputFormat;
@@ -40,7 +39,7 @@ pub(crate) struct ReplStateRebuilder {
     native_commands: NativeCommandRegistry,
     plugin_preferences: PluginCommandPreferences,
     config_plugin_preferences: PluginCommandPreferences,
-    preserved_session: AppSessionRebuildState,
+    preserved_session: AppSession,
 }
 
 impl ReplStateRebuilder {
@@ -71,9 +70,11 @@ impl ReplStateRebuilder {
     pub(crate) fn rebuild(self) -> Result<(AppRuntime, AppSession, AppClients)> {
         tracing::debug!(
             profile_override = ?self.context.profile_override(),
-            scoped = self.preserved_session.is_scoped(),
+            scoped = !self.preserved_session.scope.is_root(),
             "rebuilding REPL state after config/theme change"
         );
+        let session_layer = (!self.preserved_session.config_overrides.entries().is_empty())
+            .then(|| self.preserved_session.config_overrides.clone());
         let config = resolve_runtime_config(
             RuntimeConfigRequest::new(
                 self.context.profile_override().map(ToOwned::to_owned),
@@ -81,7 +82,7 @@ impl ReplStateRebuilder {
             )
             .with_runtime_load(self.launch.runtime_load)
             .with_product_defaults(self.product_defaults.clone())
-            .with_session_layer(self.preserved_session.session_layer()),
+            .with_session_layer(session_layer.clone()),
         )
         .wrap_err("failed to resolve config for REPL rebuild")?;
         let mut render_settings = self.render_settings.clone();
@@ -98,7 +99,7 @@ impl ReplStateRebuilder {
                 &self.config_plugin_preferences,
                 PluginCommandPreferences::from_resolved(&config),
             )),
-            self.preserved_session.session_layer(),
+            session_layer,
         )
         .wrap_err("failed to derive host runtime inputs for REPL rebuild")?;
         let mut next =

@@ -342,24 +342,6 @@ pub(crate) enum ReplExitTransition {
     LeftShell { frame: ReplScopeFrame },
 }
 
-#[derive(Clone)]
-pub(crate) struct AppSessionRebuildState(AppSession);
-
-impl AppSessionRebuildState {
-    pub(crate) fn is_scoped(&self) -> bool {
-        !self.0.scope.is_root()
-    }
-
-    pub(crate) fn session_layer(&self) -> Option<ConfigLayer> {
-        (!self.0.config_overrides.entries().is_empty()).then(|| self.0.config_overrides.clone())
-    }
-
-    fn restore_into(self, next: &mut AppSession) {
-        *next = self.0;
-        next.sync_history_shell_context();
-    }
-}
-
 impl AppSession {
     /// Creates a session with a bounded row-result cache.
     ///
@@ -477,14 +459,14 @@ impl AppSession {
     }
 
     /// Captures the session-scoped state that must survive a runtime rebuild.
-    pub(crate) fn capture_rebuild_state(&self) -> AppSessionRebuildState {
-        let state = self.clone();
-        AppSessionRebuildState(state)
+    pub(crate) fn capture_rebuild_state(&self) -> Self {
+        self.clone()
     }
 
     /// Restores session-scoped state after a runtime rebuild.
-    pub(crate) fn restore_rebuild_state(&mut self, state: AppSessionRebuildState) {
-        state.restore_into(self);
+    pub(crate) fn restore_rebuild_state(&mut self, state: Self) {
+        *self = state;
+        self.sync_history_shell_context();
     }
 
     /// Stores the latest successful row output and updates the result cache.
