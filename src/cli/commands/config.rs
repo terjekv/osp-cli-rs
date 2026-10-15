@@ -9,8 +9,8 @@ use crate::app::{AppRuntime, AppSession, RuntimeContext, TerminalKind, UiState};
 use crate::app::{
     CliCommandResult, ReplCommandOutput, RuntimeConfigRequest, config_explain_json,
     config_explain_result, config_value_to_json_for_key, explain_runtime_config, format_scope,
-    is_sensitive_key, push_missing_config_key_messages, render_config_explain_text,
-    resolve_runtime_config,
+    is_sensitive_key, prepare_runtime_config, push_missing_config_key_messages,
+    render_config_explain_text, resolve_runtime_config,
 };
 use crate::cli::pipeline::validate_alias_template;
 use crate::cli::rows::output::rows_to_output_result;
@@ -352,8 +352,11 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
             })
             .collect(),
     );
-    vec![crate::row! {
-        "status" => "ok",
+    let resolution_error = prepare_runtime_config(context.runtime_request(), false)
+        .and_then(crate::app::PreparedRuntimeConfig::resolve)
+        .err();
+    let mut row = crate::row! {
+        "status" => if resolution_error.is_some() { "error" } else { "ok" },
         "active_profile" => context.config.active_profile().to_string(),
         "known_profiles" => known_profiles,
         "resolved_keys" => (context.config.values().len()
@@ -369,7 +372,11 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
         "secrets_permissions_status" => secrets.status,
         "secrets_permissions_mode" => secrets.mode,
         "secrets_permissions_message" => secrets.message,
-    }]
+    };
+    if let Some(error) = resolution_error {
+        row.insert("resolution_error".to_string(), error.to_string().into());
+    }
+    vec![row]
 }
 
 struct SecretsPermissionsDiagnostic {
@@ -600,6 +607,16 @@ fn run_config_set(
         messages.warning("writing a sensitive key to config store; prefer --secrets");
     }
 
+    context
+        .config
+        .validate_candidate(&key, &value)
+        .map_err(|err| miette!("invalid proposed value for key `{key}`: {err}"))?;
+    let current = if args.dry_run && args.explain {
+        let explain = explain_runtime_config(context.read().runtime_request(), &key)?;
+        Some(config_explain_json(&explain, context.config, false))
+    } else {
+        None
+    };
     let paths = config_write_paths(context.runtime_load, store)?;
     for scope in &scopes {
         let display_value = if matches!(store, ConfigStore::Secrets) {
@@ -613,6 +630,9 @@ fn run_config_set(
         row.insert("scope", format_scope(scope));
         row.insert("store", config_store_name(store));
         row.insert("dry_run", args.dry_run);
+        if let Some(current) = &current {
+            row.insert("current", current.clone());
+        }
 
         match store {
             ConfigStore::Session => {
@@ -698,7 +718,7 @@ fn run_config_set(
         rows.push(row.build());
     }
 
-    let output = if args.explain {
+    let output = if args.explain && !args.dry_run {
         let request = context.read().runtime_request();
         let explain = explain_runtime_config(request.clone(), &key)
             .wrap_err_with(|| format!("failed to explain config for key `{key}` after set"))?;

@@ -73,7 +73,7 @@ pub(crate) fn explain_runtime_config(
     request: RuntimeConfigRequest,
     key: &str,
 ) -> Result<ConfigExplain> {
-    prepare_runtime_config(request)
+    prepare_runtime_config(request, false)
         .and_then(|prepared| prepared.explain_key(key))
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to explain config key `{key}`"))

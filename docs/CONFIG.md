@@ -201,6 +201,14 @@ sources are merged. Rules:
 - Cycles are errors.
 - Placeholders can reference other placeholders.
 - Placeholders may reference secrets but must be redacted in diagnostics.
+- `config set` validates the proposed value before changing a session or store,
+  using this invocation's selected values, including dry runs and values currently
+  masked by higher-priority sources.
+
+If a stored placeholder is broken, `config show --raw` and `config unset` load
+selected values without interpolation or schema adaptation so the file can be
+inspected and repaired. `doctor` uses the same raw view and reports resolution
+errors in its config diagnostics. Normal commands still require valid resolution.
 
 ## TOML Structure
 
@@ -440,3 +448,5 @@ config set ui.margin 4 --session
 The first command saves the default destination for all profiles. Subsequent
 plain writes go to profile `uio`; the last command remains temporary. Successful
 temporary writes show a concrete `--permanent` command with the resolved scope.
+`config set --dry-run --explain` retains the proposed value and destination and
+adds a `current` explanation of the key before the write.

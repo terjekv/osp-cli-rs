@@ -13,7 +13,7 @@ use crate::app::access_recovery::{
     AccessRecoveryOutcome, AccessRecoveryRequest, CommandAccessKind,
 };
 use crate::app::{AppClients, AuthState, TerminalKind};
-use crate::cli::{Cli, Commands};
+use crate::cli::{Cli, Commands, ConfigCommands};
 use crate::core::command_policy::{
     AccessReason, CommandAccess, CommandPath, CommandPolicyRegistry,
 };
@@ -53,6 +53,18 @@ impl RunAction {
             RunAction::Repl => "repl",
             RunAction::Builtin(_) => "builtin",
             RunAction::External(_) => "external",
+        }
+    }
+
+    pub(crate) fn uses_raw_config(&self) -> bool {
+        match self {
+            RunAction::Builtin(Commands::Doctor(_)) => true,
+            RunAction::Builtin(Commands::Config(args)) => match &args.command {
+                ConfigCommands::Unset(_) | ConfigCommands::Doctor => true,
+                ConfigCommands::Show(args) => args.output.raw,
+                _ => false,
+            },
+            _ => false,
         }
     }
 

@@ -179,13 +179,28 @@ impl ConfigResolver {
     /// assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
     /// ```
     pub fn resolve(&self, options: ResolveOptions) -> Result<ResolvedConfig, ConfigError> {
+        self.resolve_with_interpolation(options, true)
+    }
+
+    pub(crate) fn resolve_raw(
+        &self,
+        options: ResolveOptions,
+    ) -> Result<ResolvedConfig, ConfigError> {
+        self.resolve_with_interpolation(options, false)
+    }
+
+    fn resolve_with_interpolation(
+        &self,
+        options: ResolveOptions,
+        interpolate: bool,
+    ) -> Result<ResolvedConfig, ConfigError> {
         tracing::debug!(
             profile_override = ?options.profile_override,
             terminal = ?options.terminal,
             "resolving config"
         );
         let frame = prepare_resolution(self.layers(), options)?;
-        let resolved = self.resolve_maps_for_frame(&frame)?;
+        let resolved = self.resolve_maps_for_frame(&frame, interpolate)?;
         let config = ResolvedConfig {
             active_profile: frame.active_profile,
             terminal: frame.terminal,
@@ -243,7 +258,7 @@ impl ConfigResolver {
 
         let frame = prepare_resolution(self.layers(), options)?;
         let layers = explain_layers_for_runtime_key(self.layers(), key, &frame);
-        let resolved = self.resolve_maps_for_frame(&frame)?;
+        let resolved = self.resolve_maps_for_frame(&frame, true)?;
         let final_entry = if is_alias_key(key) {
             resolved.alias_values.get(key).cloned()
         } else {
@@ -287,7 +302,11 @@ impl ConfigResolver {
     /// Run the resolver's two actual phases:
     /// 1. select the winning raw value for each key
     /// 2. interpolate/adapt those winners into final values
-    fn resolve_maps_for_frame(&self, frame: &ResolutionFrame) -> Result<ResolvedMaps, ConfigError> {
+    fn resolve_maps_for_frame(
+        &self,
+        frame: &ResolutionFrame,
+        interpolate: bool,
+    ) -> Result<ResolvedMaps, ConfigError> {
         tracing::trace!(
             active_profile = %frame.active_profile,
             terminal = ?frame.terminal,
@@ -304,8 +323,10 @@ impl ConfigResolver {
         // `config explain` needs the selected raw winners alongside the final
         // interpolated/adapted view.
         let mut final_values = pre_interpolated.clone();
-        interpolate_all(&mut final_values)?;
-        self.schema.validate_and_adapt(&mut final_values)?;
+        if interpolate {
+            interpolate_all(&mut final_values)?;
+            self.schema.validate_and_adapt(&mut final_values)?;
+        }
 
         tracing::trace!(
             pre_interpolated = pre_interpolated.len(),
@@ -441,6 +462,31 @@ impl ConfigResolver {
                 layer: &self.layers.session,
             },
         ]
+    }
+}
+
+impl ResolvedConfig {
+    pub(crate) fn validate_candidate(
+        &self,
+        key: &str,
+        value: &ConfigValue,
+    ) -> Result<(), ConfigError> {
+        if is_bootstrap_only_key(key) || is_alias_key(key) {
+            return Ok(());
+        }
+        let mut values = self.values().clone();
+        // Validate the proposed value even when a higher source masks the write.
+        values.insert(
+            key.to_string(),
+            ResolvedValue {
+                raw_value: value.clone(),
+                value: value.clone(),
+                source: ConfigSource::Session,
+                scope: Scope::global(),
+                origin: None,
+            },
+        );
+        interpolate_all(&mut values)
     }
 }
 

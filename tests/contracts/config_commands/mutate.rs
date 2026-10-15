@@ -242,7 +242,7 @@ repl.history.exclude = []
         assert_eq!(explain["scope"], format!("profile:{profile} terminal:cli"));
     }
     let preview = run(&[
-        "--plain",
+        "--json",
         "config",
         "set",
         "repl.history.exclude",
@@ -253,10 +253,13 @@ repl.history.exclude = []
         "--dry-run",
         "--explain",
     ]);
-    assert!(
-        String::from_utf8_lossy(&preview.stdout)
-            .contains("value: [\"help\",\"config show\"] (list)")
-    );
+    let payload = parse_json_stdout(&preview.stdout);
+    for row in payload.as_array().expect("each profile should have a write plan") {
+        assert_eq!(row["value"], serde_json::json!([]));
+        assert_eq!(row["path"], config_path.to_str().unwrap());
+        assert_eq!(row["current"]["value"], exclusions);
+        assert_eq!(row["current"]["value_type"], "list");
+    }
     assert!(String::from_utf8_lossy(&preview.stderr).contains("would set"));
 
     for preview in [true, false] {

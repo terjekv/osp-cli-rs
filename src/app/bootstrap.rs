@@ -137,6 +137,7 @@ fn runtime_resolve_options(request: &RuntimeConfigRequest) -> ResolveOptions {
 
 pub(crate) fn prepare_runtime_config(
     request: RuntimeConfigRequest,
+    raw: bool,
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
     let paths = {
         let _phase = crate::startup_trace::phase("config path discovery");
@@ -154,7 +155,11 @@ pub(crate) fn prepare_runtime_config(
             request.session_layer,
         )
         .resolver()?;
-        let base_resolved = resolver.resolve(options.clone())?;
+        let base_resolved = if raw {
+            resolver.resolve_raw(options.clone())?
+        } else {
+            resolver.resolve(options.clone())?
+        };
         (resolver, base_resolved)
     };
     resolver.set_presentation(build_presentation_defaults_layer(&base_resolved));
@@ -185,6 +190,7 @@ pub(crate) fn build_runtime_context(
 
 pub(crate) fn prepare_startup_host(
     cli: &Cli,
+    action: &crate::app::RunAction,
     profile_override: Option<String>,
     terminal_kind: TerminalKind,
     run_started: Instant,
@@ -197,15 +203,20 @@ pub(crate) fn prepare_startup_host(
         .with_plugin_dirs(cli.plugin_dirs.clone())
         .with_runtime_load(runtime_load)
         .with_startup_started_at(run_started);
-    let config = resolve_runtime_config(
-        RuntimeConfigRequest::new(
-            runtime_context.profile_override().map(ToOwned::to_owned),
-            Some(runtime_context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(launch_context.runtime_load)
-        .with_product_defaults(product_defaults.clone())
-        .with_session_layer(session_layer.clone()),
+    let request = RuntimeConfigRequest::new(
+        runtime_context.profile_override().map(ToOwned::to_owned),
+        Some(runtime_context.terminal_kind().as_config_terminal()),
     )
+    .with_runtime_load(launch_context.runtime_load)
+    .with_product_defaults(product_defaults.clone())
+    .with_session_layer(session_layer.clone());
+    let config = if action.uses_raw_config() {
+        prepare_runtime_config(request, true)
+            .and_then(|prepared| prepared.resolver.resolve_raw(prepared.options))
+            .map_err(|err| report_std_error_with_context(err, "config resolution failed"))
+    } else {
+        resolve_runtime_config(request)
+    }
     .wrap_err("failed to resolve config with session layer")?;
     let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
         &runtime_context,
@@ -274,7 +285,7 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
         bootstrap_mode = ?request.runtime_load.bootstrap_mode,
         "resolving runtime config"
     );
-    let resolved = prepare_runtime_config(request)
+    let resolved = prepare_runtime_config(request, false)
         .and_then(PreparedRuntimeConfig::resolve)
         .map_err(|err| report_std_error_with_context(err, "config resolution failed"))?;
 

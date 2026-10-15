@@ -542,6 +542,7 @@ fn prepare_host_run(
         let _phase = crate::startup_trace::phase("runtime config and host inputs");
         prepare_startup_host(
             cli,
+            &dispatch.action,
             dispatch.profile_override.clone(),
             terminal_kind,
             run_started,
