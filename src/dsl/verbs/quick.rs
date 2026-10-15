@@ -138,9 +138,7 @@ pub(crate) fn apply_groups_with_plan(groups: Vec<Group>, plan: &QuickPlan) -> Re
 }
 
 fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
-    if let Some(matched) =
-        match_structural_value(&Value::Object(coalesce_flat_row(&flatten_row(row))), spec)
-    {
+    if let Some(matched) = match_structural_value(row, spec) {
         return matched;
     }
 
@@ -150,7 +148,9 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
     }
 
     let flat = flatten_row(row);
-    let matches = if spec.fuzzy {
+    let matches = if matches!(spec.scope, QuickScope::ValueOnly) {
+        Default::default()
+    } else if spec.fuzzy {
         match_row_keys_detailed_fuzzy(&flat, spec.token(), spec.exact())
     } else {
         match_row_keys_detailed(&flat, spec.token(), spec.exact())
@@ -214,12 +214,13 @@ fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool
     }
 }
 
-fn match_structural_value(root: &Value, spec: &CompiledQuickSpec) -> Option<bool> {
+fn match_structural_value(row: &Row, spec: &CompiledQuickSpec) -> Option<bool> {
     if !spec.is_structural() || spec.key_not_equals {
         return None;
     }
 
-    let matches = spec.selector.resolve_matches(root);
+    let root = Value::Object(coalesce_flat_row(&flatten_row(row)));
+    let matches = spec.selector.resolve_matches(&root);
     let found = if spec.existence() {
         matches.iter().any(|entry| is_truthy(&entry.value))
     } else if matches.is_empty() {
