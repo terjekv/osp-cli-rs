@@ -98,24 +98,18 @@ impl PreparedPluginOutput {
         meta: &ResponseMetaV1,
         messages: &[ResponseMessageV1],
         stages: &[String],
-    ) -> Result<Self> {
-        let (output, format_hint) = apply_output_stages(
-            plugin_data_to_output_result(data, Some(meta)),
-            stages,
-            parse_output_format_hint(meta.format_hint.as_deref()),
-        )
-        .wrap_err("failed to prepare plugin response output")?;
+    ) -> Self {
         let mut messages = plugin_response_messages(messages);
         if let Some(rest) = meta.partial_rows.as_deref().filter(|_| !stages.is_empty()) {
             messages.warning(format!(
                 "Pipe stages ran over this page only, so counts and groups are partial; {rest}"
             ));
         }
-        Ok(Self {
+        Self {
             messages,
-            output,
-            format_hint,
-        })
+            output: plugin_data_to_output_result(data, Some(meta)),
+            format_hint: parse_output_format_hint(meta.format_hint.as_deref()),
+        }
     }
 }
 
@@ -579,7 +573,7 @@ pub(crate) fn cli_result_from_plugin_response(
     stages: &[String],
 ) -> Result<CliCommandResult> {
     let prepared =
-        PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages)?;
+        PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages);
     let mut result = CliCommandResult::output(prepared.output, prepared.format_hint);
     result.messages = prepared.messages;
     if !response.ok {

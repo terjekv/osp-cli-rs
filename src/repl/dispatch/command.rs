@@ -8,7 +8,7 @@ use crate::app::sink::UiSink;
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
-use crate::cli::{Commands, ConfigCommands, PluginsCommands, ThemeCommands};
+use crate::cli::{Commands, ConfigCommands, ParsedCommandLine, PluginsCommands, ThemeCommands};
 use crate::core::document::{DocBlock, Document};
 
 use crate::repl::input;
@@ -400,6 +400,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 ReplRunInput {
                     command,
                     invocation: &effective,
+                    stages: &stages,
                     progress_sink: Some(sink),
                     accepted,
                 },
@@ -427,6 +428,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
 struct ReplRunInput<'invocation, 'sink, 'accepted> {
     command: Commands,
     invocation: &'invocation ResolvedInvocation,
+    stages: &'invocation [String],
     progress_sink: Option<&'sink mut dyn UiSink>,
     accepted: &'accepted mut bool,
 }
@@ -443,7 +445,10 @@ fn run_repl_command_with_progress(
             runtime,
             clients,
             session,
-            tokens,
+            ParsedCommandLine {
+                tokens,
+                stages: input.stages.to_vec(),
+            },
             input.invocation,
             input.progress_sink,
             input.accepted,
@@ -508,6 +513,7 @@ pub(super) fn run_repl_command(
         ReplRunInput {
             command,
             invocation,
+            stages: &[],
             progress_sink: None,
             accepted: &mut accepted,
         },
@@ -535,7 +541,7 @@ fn run_repl_external_command_with_progress(
     runtime: &mut AppRuntime,
     clients: &AppClients,
     session: &mut AppSession,
-    tokens: Vec<String>,
+    command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
@@ -544,7 +550,7 @@ fn run_repl_external_command_with_progress(
         runtime,
         session,
         clients,
-        &tokens,
+        command,
         invocation,
         Document::from_help_text,
         progress_sink,

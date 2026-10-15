@@ -24,7 +24,7 @@ use crate::repl::ReplViewContext;
 use crate::repl::completion;
 use crate::repl::is_repl_shellable_command;
 
-use super::command_output::PreparedPluginOutput;
+use super::command_output::{PreparedPluginOutput, apply_output_stages};
 use super::dispatch::{
     ExternalCommandSource, ExternalPathAccessRequirement, canonical_external_command_name,
     ensure_external_path_access, ensure_external_path_access_with_policy,
@@ -60,8 +60,19 @@ impl<'a> ExternalCommandRuntime<'a> {
 struct ParsedExternalInvocation {
     tokens: Vec<String>,
     stages: Vec<String>,
+    apply_output_stages: bool,
     inline_command: Option<Commands>,
     elevation: InvocationElevation,
+}
+
+impl ParsedExternalInvocation {
+    fn finish(&self, result: CliCommandResult) -> Result<CliCommandResult> {
+        if self.apply_output_stages {
+            super::command_output::apply_stages_to_cli_result(result, &self.stages)
+        } else {
+            Ok(result)
+        }
+    }
 }
 
 enum ExternalParse {
@@ -140,7 +151,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress(
     guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
 ) -> Result<CliCommandResult> {
-    let parsed = parse_external_invocation(runtime, session, tokens, invocation)?;
+    let parsed = parse_external_invocation(runtime, session, tokens, invocation, &[])?;
     run_external_command_with_help_renderer_and_progress_inner(
         runtime,
         session,
@@ -157,13 +168,19 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     clients: &AppClients,
-    tokens: &[String],
+    command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
 ) -> Result<CliCommandResult> {
-    let parsed = parse_external_invocation(runtime, session, tokens, invocation)?;
+    let parsed = parse_external_invocation(
+        runtime,
+        session,
+        &command.tokens,
+        invocation,
+        &command.stages,
+    )?;
     run_external_command_with_help_renderer_and_progress_inner(
         runtime,
         session,
@@ -216,7 +233,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
             command,
             &parsed.stages,
         )? {
-            return crate::app::command_output::apply_stages_to_cli_result(result, &parsed.stages);
+            return parsed.finish(result);
         }
     }
     if !parsed.stages.is_empty() {
@@ -229,7 +246,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
     let command = canonical_external_command_name(&runtime.auth, clients, command)?;
-    match resolve_external_command_source(
+    let result = match resolve_external_command_source(
         &runtime.auth,
         clients,
         &command,
@@ -379,10 +396,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                             "native help metadata refresh failed; using cached help"
                         ),
                     }
-                    return crate::app::command_output::apply_stages_to_cli_result(
-                        CliCommandResult::document(guide_help(&help)),
-                        &parsed.stages,
-                    );
+                    return parsed.finish(CliCommandResult::document(guide_help(&help)));
                 }
                 if path_ambiguous
                     || described_path_has_subcommands(&description, &path)
@@ -445,7 +459,8 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 &mut accepted,
             )
         }
-    }
+    }?;
+    parsed.finish(result)
 }
 
 fn mark_repl_command_accepted(accepted: &mut Option<&mut bool>) {
@@ -585,10 +600,7 @@ fn run_native_command(
     }
 
     match execution? {
-        NativeCommandOutcome::Help(text) => crate::app::command_output::apply_stages_to_cli_result(
-            CliCommandResult::document(guide_help(&text)),
-            input.stages,
-        ),
+        NativeCommandOutcome::Help(text) => Ok(CliCommandResult::document(guide_help(&text))),
         NativeCommandOutcome::Exit(code) => Ok(CliCommandResult::exit(code)),
         NativeCommandOutcome::Response(response) => render_native_response_with_context(
             *response,
@@ -628,8 +640,10 @@ impl NativeProgressRenderer<'_, '_> {
     }
 
     fn draw(&self, event: NativeProgressEvent, stages: &[String]) -> anyhow::Result<()> {
-        let result =
-            PreparedPluginOutput::from_data(event.data, &event.meta, &event.messages, stages)
+        let mut result =
+            PreparedPluginOutput::from_data(event.data, &event.meta, &event.messages, stages);
+        (result.output, result.format_hint) =
+            apply_output_stages(result.output, stages, result.format_hint)
                 .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
         let mut sink = self.sink.borrow_mut();
         run_progress_command_with_ui(self.config, self.ui, result, &mut *sink)
@@ -742,10 +756,12 @@ fn parse_external_invocation(
     session: &AppSession,
     tokens: &[String],
     invocation: &ResolvedInvocation,
+    stages: &[String],
 ) -> Result<ExternalParse> {
     expand_external_tokens(runtime, tokens)
         .and_then(|(mut parsed, elevation)| {
             parsed.tokens = scan_command_tokens(&parsed.tokens)?.tokens;
+            parsed.stages.extend_from_slice(stages);
             plan_external_invocation(runtime, session, parsed, elevation, invocation)
         })
         .wrap_err_with(|| external_parse_context(tokens))
@@ -758,6 +774,7 @@ fn plan_external_invocation(
     elevation: InvocationElevation,
     invocation: &ResolvedInvocation,
 ) -> Result<ExternalParse> {
+    let apply_output_stages = runtime.context.terminal_kind() == TerminalKind::Cli;
     if parsed.tokens.is_empty() {
         return Err(miette!("missing external command"));
     }
@@ -782,9 +799,13 @@ fn plan_external_invocation(
                 .filtered_for_help_level(invocation.help_level)
                 .to_output_result();
             output.meta.document_long_help = long_help;
-            let result = crate::app::command_output::apply_stages_to_cli_result(
+            let result = super::command_output::apply_stages_to_cli_result(
                 CliCommandResult::output(output, None),
-                &parsed.stages,
+                if apply_output_stages {
+                    &parsed.stages
+                } else {
+                    &[]
+                },
             )?;
             return Ok(ExternalParse::Handled(Box::new(result)));
         }
@@ -797,6 +818,7 @@ fn plan_external_invocation(
             invocation.plugin_provider.as_deref(),
         ),
         stages: parsed.stages,
+        apply_output_stages,
         inline_command,
         elevation,
     }))
@@ -887,7 +909,7 @@ fn run_external_plugin_command(
             result.stderr_text = Some(raw.stderr);
         }
         result.exit_code = raw.status_code;
-        return crate::app::command_output::apply_stages_to_cli_result(result, &parsed.stages);
+        return Ok(result);
     }
 
     let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
@@ -1321,7 +1343,7 @@ JSON
             &runtime.ui,
             &Default::default(),
         );
-        let parsed = parse_external_invocation(&runtime, &session, &tokens, &invocation)
+        let parsed = parse_external_invocation(&runtime, &session, &tokens, &invocation, &[])
             .expect("help should parse");
         assert!(matches!(
             parsed,

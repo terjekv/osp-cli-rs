@@ -1121,6 +1121,9 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
     };
     let prepared =
         super::command_output::cli_result_from_plugin_response(response, &["P uid".to_string()])
+            .and_then(|result| {
+                super::command_output::apply_stages_to_cli_result(result, &["P uid".to_string()])
+            })
             .expect("pipeline should apply");
     assert_eq!(prepared.exit_code, 0);
     assert!(prepared.failure_report.is_none());

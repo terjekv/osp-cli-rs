@@ -126,6 +126,7 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         .dispatch("hello", &[], &dispatch_context)
         .expect("plugin dispatch should succeed");
     let result = super::super::cli_result_from_plugin_response(response, &stages)
+        .and_then(|result| super::super::command_output::apply_stages_to_cli_result(result, &stages))
         .expect("plugin response should prepare");
     assert_eq!(result.exit_code, 0);
     assert!(result.failure_report.is_none());
