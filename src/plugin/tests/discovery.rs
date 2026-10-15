@@ -55,8 +55,10 @@ fn refresh_picks_up_filesystem_changes_and_prunes_stale_cache() {
 
     let cache_path = cache_root.join("describe-v1.json");
     let cache_raw = std::fs::read_to_string(&cache_path).expect("describe cache should be written");
-    assert!(cache_raw.contains("osp-beta"));
-    assert!(!cache_raw.contains("osp-alpha"));
+    let cache: DescribeCacheFile =
+        serde_json::from_str(&cache_raw).expect("describe cache should deserialize");
+    assert_eq!(cache.entries.len(), 1);
+    assert_eq!(cache.entries[0].describe.plugin_id, "beta");
 
 }
 

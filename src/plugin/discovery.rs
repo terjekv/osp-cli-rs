@@ -1081,10 +1081,27 @@ fn start_describe_with_cache(
 }
 
 fn describe_cache_key(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Some(text) = canonical.to_str() {
+        return text.to_string();
+    }
+    // Paths that are not UTF-8 would collide after lossy conversion, so key
+    // them by their exact bytes.
+    #[cfg(unix)]
+    {
+        use std::fmt::Write;
+        use std::os::unix::ffi::OsStrExt;
+
+        let mut key = String::from("unix-bytes:");
+        for byte in canonical.as_os_str().as_bytes() {
+            let _ = write!(key, "{byte:02x}");
+        }
+        key
+    }
+    #[cfg(not(unix))]
+    {
+        canonical.to_string_lossy().into_owned()
+    }
 }
 
 pub(super) fn find_cached_describe<'a>(
