@@ -32,11 +32,10 @@ pub(crate) fn plugin_data_to_output_result(
         .cloned()
         .unwrap_or(data);
     // Service JSON has no implicit knowledge of the engine's group envelope.
-    let items = OutputItems::Rows(rows_from_value(row_data));
-    let rows = output_items_to_rows(&items);
+    let rows = rows_from_value(row_data);
     let key_index = compute_key_index(&rows);
     OutputResult {
-        items,
+        items: OutputItems::Rows(rows),
         document,
         meta: OutputMeta {
             key_index,
