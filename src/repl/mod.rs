@@ -135,11 +135,12 @@ pub(crate) use engine::{
     CompletionTraceEvent, CompletionTraceMenuState, expand_history, trace_completion,
     trace_completion_enabled,
 };
-pub(crate) use host::{
-    ReplViewContext, repl_command_spec, run_plugin_repl, run_repl_debug_command_for,
-};
+pub(crate) use host::{ReplViewContext, run_plugin_repl, run_repl_debug_command_for};
 #[cfg(test)]
 pub(crate) use input::ReplParsedLine;
 pub(crate) use input::is_repl_shellable_command;
 #[cfg(test)]
 pub(crate) use presentation::render_repl_prompt_right_for_test;
+
+#[cfg(test)]
+pub(crate) use crate::app::command_plan::repl_command_spec;

@@ -19,6 +19,7 @@ modules should not import `app`; the one current exception is
 | `runtime.rs`, `session.rs` | State that lives for the process vs for one logical run |
 | `rebuild.rs`, `repl_lifecycle.rs` | Rebuilding state after config or auth changes |
 | `dispatch.rs` | Choosing builtin, native or plugin for a command line |
+| `command_plan.rs` | Shared inline parse/help classification and command pipeline policy |
 | `builtin.rs` | Running builtins after an access check |
 | `external.rs` | Native and plugin commands, including help and progress |
 | `command_output.rs` | Shaping the final result before rendering |

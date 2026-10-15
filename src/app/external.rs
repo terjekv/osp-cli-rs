@@ -11,9 +11,9 @@ use miette::{Result, WrapErr, miette};
 
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{RuntimeContext, TerminalKind, UiState};
+use crate::cli::Commands;
 use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_command_tokens};
-use crate::cli::pipeline::parse_command_tokens_with_aliases;
-use crate::cli::{Commands, parse_inline_command_tokens};
+use crate::cli::pipeline::{ParsedCommandLine, parse_command_tokens_with_aliases};
 use crate::guide::GuideView;
 use crate::native::{
     InvocationElevation, NativeCommandContext, NativeCommandOutcome, NativeProgressEvent,
@@ -74,14 +74,41 @@ pub(super) fn run_external_command(
     session: &mut AppSession,
     clients: &AppClients,
     tokens: &[String],
+    options: &InvocationOptions,
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress(
+) -> Result<i32> {
+    let expanded = expand_external_tokens(runtime, tokens);
+    // Report expansion failures during dispatch, with the same command context
+    // as the REPL. Invocation conflicts still fail before inline parsing.
+    let scanned = match &expanded {
+        Ok((parsed, _)) => Some(scan_command_tokens(&parsed.tokens)?),
+        Err(_) => None,
+    };
+    let merged;
+    let invocation = if let Some(scanned) = &scanned
+        && scanned.invocation != InvocationOptions::default()
+    {
+        let mut options = options.clone();
+        options.merge(scanned.invocation.clone())?;
+        merged = super::resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
+        &merged
+    } else {
+        invocation
+    };
+    let parsed = expanded
+        .and_then(|(mut parsed, elevation)| {
+            if let Some(scanned) = scanned {
+                parsed.tokens = scanned.tokens;
+            }
+            plan_external_invocation(runtime, session, parsed, elevation, invocation)
+        })
+        .wrap_err_with(|| external_parse_context(tokens))?;
+    let result = run_external_command_with_help_renderer_and_progress_inner(
         runtime,
         session,
         clients,
-        tokens,
+        parsed,
         invocation,
         |stdout| {
             let mut guide = GuideView::from_text(stdout);
@@ -89,7 +116,9 @@ pub(super) fn run_external_command(
             guide.filtered_for_help_level(invocation.help_level)
         },
         Some(sink),
-    )
+        None,
+    )?;
+    super::run_cli_command_with_ui(runtime.config.resolved(), &invocation.ui, result, sink)
 }
 
 pub(crate) fn run_external_command_with_help_renderer(
@@ -114,11 +143,12 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress(
     guide_help: impl Fn(&str) -> GuideView,
     progress_sink: Option<&mut dyn UiSink>,
 ) -> Result<CliCommandResult> {
+    let parsed = parse_external_invocation(runtime, session, tokens, invocation)?;
     run_external_command_with_help_renderer_and_progress_inner(
         runtime,
         session,
         clients,
-        tokens,
+        parsed,
         invocation,
         guide_help,
         progress_sink,
@@ -136,11 +166,12 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
 ) -> Result<CliCommandResult> {
+    let parsed = parse_external_invocation(runtime, session, tokens, invocation)?;
     run_external_command_with_help_renderer_and_progress_inner(
         runtime,
         session,
         clients,
-        tokens,
+        parsed,
         invocation,
         guide_help,
         progress_sink,
@@ -152,19 +183,13 @@ fn run_external_command_with_help_renderer_and_progress_inner(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     clients: &AppClients,
-    tokens: &[String],
+    parsed: ExternalParse,
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> GuideView,
     progress_sink: Option<&mut dyn UiSink>,
     mut accepted: Option<&mut bool>,
 ) -> Result<CliCommandResult> {
-    let mut parsed = match parse_external_invocation(runtime, session, tokens, invocation)
-        .wrap_err_with(|| {
-            format!(
-                "failed to parse external command invocation for `{}`",
-                tokens.first().map(String::as_str).unwrap_or("external")
-            )
-        })? {
+    let mut parsed = match parsed {
         ExternalParse::Handled(result) => {
             mark_repl_command_accepted(&mut accepted);
             return Ok(*result);
@@ -699,18 +724,20 @@ fn add_native_pagination_hint(result: &mut CliCommandResult, context: &NativeSes
 
 /// Returns invocation flags that only appear after alias or quoted-line
 /// expansion, so the host can apply them like flags typed on the command line.
-pub(super) fn expanded_invocation_options(
+fn expand_external_tokens(
     runtime: &AppRuntime,
     tokens: &[String],
-) -> Result<InvocationOptions> {
-    let expanded = parse_invocation_elevation(tokens).and_then(|(command_tokens, _)| {
-        parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())
-    });
-    // Expansion errors are reported with full context during dispatch.
-    let Ok(parsed) = expanded else {
-        return Ok(InvocationOptions::default());
-    };
-    Ok(scan_command_tokens(&parsed.tokens)?.invocation)
+) -> Result<(ParsedCommandLine, InvocationElevation)> {
+    let (tokens, elevation) = parse_invocation_elevation(tokens)?;
+    let parsed = parse_command_tokens_with_aliases(&tokens, runtime.config.resolved())?;
+    Ok((parsed, elevation))
+}
+
+fn external_parse_context(tokens: &[String]) -> String {
+    format!(
+        "failed to parse external command invocation for `{}`",
+        tokens.first().map(String::as_str).unwrap_or("external")
+    )
 }
 
 fn parse_external_invocation(
@@ -719,10 +746,21 @@ fn parse_external_invocation(
     tokens: &[String],
     invocation: &ResolvedInvocation,
 ) -> Result<ExternalParse> {
-    let (command_tokens, elevation) = parse_invocation_elevation(tokens)?;
-    let mut parsed = parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())?;
-    // Expansion may expose host flags; the host has already applied them.
-    parsed.tokens = scan_command_tokens(&parsed.tokens)?.tokens;
+    expand_external_tokens(runtime, tokens)
+        .and_then(|(mut parsed, elevation)| {
+            parsed.tokens = scan_command_tokens(&parsed.tokens)?.tokens;
+            plan_external_invocation(runtime, session, parsed, elevation, invocation)
+        })
+        .wrap_err_with(|| external_parse_context(tokens))
+}
+
+fn plan_external_invocation(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    parsed: ParsedCommandLine,
+    elevation: InvocationElevation,
+    invocation: &ResolvedInvocation,
+) -> Result<ExternalParse> {
     if parsed.tokens.is_empty() {
         return Err(miette!("missing external command"));
     }
@@ -735,25 +773,18 @@ fn parse_external_invocation(
         ))));
     }
 
-    let inline_command = match parse_inline_command_tokens(&parsed.tokens) {
-        Ok(command) => command,
-        Err(err) => {
-            if matches!(
-                err.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
-                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            ) {
-                let mut view = GuideView::from_text(&err.to_string());
-                extend_with_invocation_help(&mut view, invocation.help_level);
-                return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
-                    view.filtered_for_help_level(invocation.help_level),
-                ))));
-            }
-            return Err(crate::app::report_std_error_with_context(
-                err,
-                "failed to parse external inline command",
-            ));
+    let inline_command = match super::command_plan::parse_inline_command(
+        &parsed.tokens,
+        &parsed.stages,
+        super::command_plan::CommandSurface::External,
+    )? {
+        super::command_plan::InlineCommandPlan::Command(command) => command,
+        super::command_plan::InlineCommandPlan::Help(err) => {
+            let mut view = GuideView::from_text(&err.to_string());
+            extend_with_invocation_help(&mut view, invocation.help_level);
+            return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
+                view.filtered_for_help_level(invocation.help_level),
+            ))));
         }
     };
 

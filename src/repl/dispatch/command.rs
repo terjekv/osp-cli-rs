@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::time::Instant;
 
 use crate::repl::{ReplLineResult, ReplReloadKind, SharedHistory};
@@ -7,18 +6,12 @@ use miette::{Result, miette};
 use crate::app;
 use crate::app::sink::UiSink;
 use crate::app::{AppClients, AppRuntime, AppSession};
-use crate::app::{
-    CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HELP, CMD_HISTORY, CMD_INTRO, CMD_PLUGINS,
-    ReplCommandSpec, ResolvedInvocation,
-};
+use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
-use crate::cli::{
-    Commands, ConfigCommands, ContextCommands, DoctorCommands, HistoryCommands, PluginsCommands,
-    ThemeCommands, parse_inline_command_tokens,
-};
+use crate::cli::{Commands, ConfigCommands, PluginsCommands, ThemeCommands};
 use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 
-use crate::repl::{completion, input};
+use crate::repl::input;
 
 pub(super) struct ParsedReplInvocation {
     pub(super) command: Commands,
@@ -135,37 +128,27 @@ pub(super) fn parse_repl_invocation(
     // clap parsing so the rest of dispatch only has to reason about one shape.
     let scoped_tokens = input::rewrite_help_alias_tokens_at(&scanned.tokens, command_index)
         .unwrap_or_else(|| scanned.tokens.clone());
-    let command = match parse_inline_command_tokens(&scoped_tokens) {
-        Ok(Some(command)) => command,
-        Ok(None) => return Err(miette!("missing command")),
-        Err(err) => {
-            if renders_repl_inline_help(err.kind()) {
-                if !parsed.stages.is_empty() {
-                    return Err(crate::app::report_std_error_with_context(
-                        err,
-                        "failed to parse REPL command",
-                    ));
-                }
-                return Ok(repl_help_dispatch(
-                    parsed,
-                    &effective,
-                    crate::app::CliCommandResult::guide(render_repl_parse_help(
-                        effective.help_level,
-                        &err.to_string(),
-                    )),
-                ));
-            }
-            return Err(crate::app::report_std_error_with_context(
-                err,
-                "failed to parse REPL command",
+    let command = match app::command_plan::parse_inline_command(
+        &scoped_tokens,
+        &parsed.stages,
+        app::command_plan::CommandSurface::Repl,
+    )? {
+        app::command_plan::InlineCommandPlan::Command(Some(command)) => command,
+        app::command_plan::InlineCommandPlan::Command(None) => {
+            return Err(miette!("missing command"));
+        }
+        app::command_plan::InlineCommandPlan::Help(err) => {
+            return Ok(repl_help_dispatch(
+                parsed,
+                &effective,
+                crate::app::CliCommandResult::guide(render_repl_parse_help(
+                    effective.help_level,
+                    &err.to_string(),
+                )),
             ));
         }
     };
-    let spec = repl_command_spec(&command);
-    app::ensure_command_supports_dsl(&spec, &parsed.stages)?;
-    if !parsed.stages.is_empty() {
-        completion::validate_dsl_stages(&parsed.stages)?;
-    }
+    app::command_plan::validate_command_pipeline(&command, &parsed.stages)?;
 
     Ok(ParsedReplDispatch::Invocation(Box::new(
         ParsedReplInvocation {
@@ -211,15 +194,6 @@ fn render_invalid_help_alias(target: Option<&str>) -> GuideView {
         ],
         epilogue: Vec::new(),
     }
-}
-
-pub(super) fn renders_repl_inline_help(kind: clap::error::ErrorKind) -> bool {
-    matches!(
-        kind,
-        clap::error::ErrorKind::DisplayHelp
-            | clap::error::ErrorKind::DisplayVersion
-            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-    )
 }
 
 fn render_repl_parse_help(help_level: crate::guide::HelpLevel, error_text: &str) -> GuideView {
@@ -577,69 +551,4 @@ fn run_repl_external_command_with_progress(
         progress_sink,
         accepted,
     )
-}
-
-pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
-    let (name, supports_dsl) = match command {
-        Commands::Context(args) => (
-            CMD_CONTEXT,
-            matches!(args.command, None | Some(ContextCommands::Clear(_))),
-        ),
-        Commands::External(tokens) => {
-            return ReplCommandSpec {
-                name: Cow::Owned(
-                    tokens
-                        .first()
-                        .cloned()
-                        .unwrap_or_else(|| "external".to_string()),
-                ),
-                supports_dsl: true,
-            };
-        }
-        Commands::Plugins(args) => (
-            CMD_PLUGINS,
-            matches!(
-                args.command,
-                PluginsCommands::List
-                    | PluginsCommands::Commands
-                    | PluginsCommands::Doctor
-                    | PluginsCommands::Config(_)
-            ),
-        ),
-        Commands::Doctor(args) => (
-            CMD_DOCTOR,
-            matches!(
-                args.command,
-                Some(DoctorCommands::Config)
-                    | Some(DoctorCommands::Plugins)
-                    | Some(DoctorCommands::Theme)
-            ),
-        ),
-        Commands::History(args) => (
-            CMD_HISTORY,
-            matches!(args.command, HistoryCommands::List(_)),
-        ),
-        Commands::Completions(_) => ("completions", false),
-        Commands::Config(args) => (
-            CMD_CONFIG,
-            matches!(
-                args.command,
-                ConfigCommands::Show(_) | ConfigCommands::Get(_) | ConfigCommands::Doctor
-            ),
-        ),
-        Commands::Alias(args) => (
-            "alias",
-            matches!(args.command, crate::cli::AliasCommands::List(_)),
-        ),
-        Commands::Theme(args) => (
-            "theme",
-            matches!(args.command, ThemeCommands::List | ThemeCommands::Show(_)),
-        ),
-        Commands::Intro(_) => (CMD_INTRO, true),
-        Commands::Repl(_) => ("repl", false),
-    };
-    ReplCommandSpec {
-        name: Cow::Borrowed(name),
-        supports_dsl,
-    }
 }

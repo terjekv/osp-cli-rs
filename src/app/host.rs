@@ -31,7 +31,6 @@ use crate::cli::{Cli, Commands};
 use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
 
 pub(crate) use super::bootstrap::prepare_startup_host;
-pub(crate) use super::command_output::run_cli_command_with_ui;
 pub(crate) use super::dispatch::{
     DispatchPlan, RunAction, build_dispatch_plan, ensure_builtin_visible_for,
     normalize_profile_override,
@@ -463,9 +462,15 @@ fn run(
                 state.runtime.ui = invocation_ui.ui.clone();
                 repl::run_plugin_repl(&mut state)
             }
-            RunAction::External(tokens) => {
-                run_cli_external_command(&mut state, &tokens, &invocation, &invocation_ui, sink)
-            }
+            RunAction::External(tokens) => run_external_command(
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
+                &tokens,
+                &invocation,
+                &invocation_ui,
+                sink,
+            ),
             RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
                 &mut state.runtime,
                 &mut state.session,
@@ -506,40 +511,6 @@ fn run(
     }
 
     result
-}
-
-fn run_cli_external_command(
-    state: &mut AppState,
-    tokens: &[String],
-    invocation: &InvocationOptions,
-    invocation_ui: &ResolvedInvocation,
-    sink: &mut dyn UiSink,
-) -> Result<i32> {
-    let expanded = super::external::expanded_invocation_options(&state.runtime, tokens)?;
-    let merged;
-    let invocation_ui = if expanded == InvocationOptions::default() {
-        invocation_ui
-    } else {
-        let mut options = invocation.clone();
-        options.merge(expanded)?;
-        merged =
-            resolve_invocation_ui(state.runtime.config.resolved(), &state.runtime.ui, &options);
-        &merged
-    };
-    let result = run_external_command(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        tokens,
-        invocation_ui,
-        sink,
-    )?;
-    run_cli_command_with_ui(
-        state.runtime.config.resolved(),
-        &invocation_ui.ui,
-        result,
-        sink,
-    )
 }
 
 // Startup is phase-based:
@@ -715,17 +686,6 @@ pub(crate) fn resolve_invocation_ui(
         plugin_provider: invocation.plugin_provider.clone(),
         help_level: help_level(config, invocation.verbose, invocation.quiet),
     }
-}
-
-pub(crate) fn ensure_command_supports_dsl(spec: &ReplCommandSpec, stages: &[String]) -> Result<()> {
-    if stages.is_empty() || spec.supports_dsl {
-        return Ok(());
-    }
-
-    Err(miette!(
-        "`{}` does not support DSL pipeline stages",
-        spec.name
-    ))
 }
 
 pub(crate) fn enrich_dispatch_error(err: PluginDispatchError) -> miette::Report {

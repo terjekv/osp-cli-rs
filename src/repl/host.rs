@@ -21,7 +21,6 @@ use super::presentation::{ReplIntroStyle, intro_style, intro_style_with_verbosit
 use crate::app::CliCommandResult;
 use crate::cli::{DebugCompleteArgs, DebugHighlightArgs, DebugMenuArg, ReplArgs, ReplCommands};
 use crate::ui::messages::MessageLevel;
-pub(crate) use dispatch::repl_command_spec;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ReplViewContext<'a> {

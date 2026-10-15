@@ -11,7 +11,7 @@ use miette::{Result, miette};
 use super::{
     AppClients, AppRuntime, AppSession, CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY,
     CMD_PLUGINS, CMD_THEME, CliCommandResult, ResolvedInvocation, UiSink, UiState,
-    ensure_builtin_access, ensure_command_supports_dsl, run_cli_command_with_ui,
+    ensure_builtin_access, run_cli_command_with_ui,
 };
 use crate::cli::commands::{
     config as config_cmd, context as context_cmd, doctor as doctor_cmd, history as history_cmd,
@@ -29,7 +29,7 @@ pub(crate) fn run_cli_builtin_command_parts(
     stages: &[String],
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
-    ensure_command_supports_dsl(&repl::repl_command_spec(&command), stages)?;
+    super::command_plan::validate_command_pipeline(&command, stages)?;
     let result = BuiltinExecutor::new(runtime, session, clients)
         .dispatch(BuiltinSurface::Cli(&invocation.ui), command)?
         .ok_or_else(|| miette!("expected builtin command"))?;
@@ -49,8 +49,7 @@ pub(crate) fn run_inline_builtin_command(
         return Ok(None);
     }
 
-    let spec = repl::repl_command_spec(&command);
-    ensure_command_supports_dsl(&spec, stages)?;
+    super::command_plan::validate_command_pipeline(&command, stages)?;
     let ui = invocation
         .map(|invocation| invocation.ui.clone())
         .unwrap_or_else(|| runtime.ui.clone());

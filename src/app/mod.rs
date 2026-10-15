@@ -79,6 +79,7 @@ pub(crate) mod assembly;
 pub(crate) mod bootstrap;
 pub(crate) mod builtin;
 pub(crate) mod command_output;
+pub(crate) mod command_plan;
 pub(crate) mod config_explain;
 pub(crate) mod dispatch;
 pub(crate) mod external;
