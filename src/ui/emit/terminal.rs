@@ -145,10 +145,29 @@ fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>, inline_marku
     if row.value.is_empty() {
         format!("{}{}", row.indent, key)
     } else {
+        // Later description lines continue under the first one, which may
+        // start on its own line when the gap breaks the line.
+        let prefix = format!("{}{}{}", row.indent, row.key, row.gap);
+        let hang = " ".repeat(UnicodeWidthStr::width(
+            prefix.rsplit('\n').next().unwrap_or_default(),
+        ));
+        let text = row
+            .value
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 || line.is_empty() {
+                    line.to_string()
+                } else {
+                    format!("{hang}{line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let value = if inline_markup {
-            styler.paint_inline(&row.value, StyleToken::TextMuted)
+            styler.paint_inline(&text, StyleToken::TextMuted)
         } else {
-            styler.paint(&row.value, StyleToken::TextMuted)
+            styler.paint(&text, StyleToken::TextMuted)
         };
         format!("{}{}{}{}", row.indent, key, row.gap, value)
     }

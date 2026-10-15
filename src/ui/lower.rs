@@ -738,7 +738,7 @@ pub(crate) fn lower_document_help_layout(
                                         .lines()
                                         .filter(|line| !line.is_empty())
                                         .collect::<Vec<_>>()
-                                        .join("\n          ")
+                                        .join("\n")
                                 } else {
                                     entry.description.clone()
                                 },
