@@ -151,7 +151,9 @@ fn alias_completion_command(template: &str) -> Option<AliasCompletionCommand> {
     let parsed = crate::dsl::parse_pipeline(&sanitized).ok()?;
     let tokens = shell_words::split(&parsed.command).ok()?;
     let scanned = scan_command_tokens(&tokens).ok()?;
-    if scanned.tokens.is_empty() {
+    if scanned.tokens.is_empty()
+        && scanned.invocation == crate::cli::invocation::InvocationOptions::default()
+    {
         return None;
     }
 

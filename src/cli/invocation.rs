@@ -20,6 +20,7 @@ pub(crate) const INVOCATION_HELP_SECTION: &str = r#"Common Invocation Options:
   --render-mode <auto|plain|rich>           Render mode for this invocation
   --plain | --rich                          Convenience aliases for --render-mode
   --color <auto|always|never>               Color policy for this invocation
+  --no-color                                Alias for --color never
   --unicode <auto|always|never>             Unicode policy for this invocation
   --ascii                                   Alias for --unicode never
   -v, --verbose                             Increase message verbosity
@@ -179,6 +180,12 @@ pub(crate) fn scan_command_tokens_with_trace(
             continue;
         }
 
+        if token == "--no-color" {
+            set_color(&mut invocation, ColorMode::Never, token)?;
+            index += 1;
+            continue;
+        }
+
         if token == "--verbose" {
             invocation.verbose = invocation.verbose.saturating_add(1);
             index += 1;
@@ -288,6 +295,7 @@ pub(crate) fn hidden_invocation_completion_flags(
     }
     if hide_all || invocation.color.is_some() {
         hidden.insert("--color".to_string());
+        hidden.insert("--no-color".to_string());
     }
     if hide_all || invocation.unicode.is_some() {
         hidden.extend(["--unicode", "--ascii"].map(str::to_string));
