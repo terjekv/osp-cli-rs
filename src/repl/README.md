@@ -15,7 +15,7 @@ It sits at the host layer and imports `app`, `cli`, `completion`, `config`,
 | `engine/` | The reedline boundary: editor, menus, hinter, prompt, debug surfaces |
 | `dispatch/` | REPL builtins, shell scope and command handoff; shared inline parsing and pipeline policy live in `app/command_plan.rs` |
 | `host.rs`, `lifecycle.rs` | The loop: build a cycle, run it, restart on reload |
-| `surface.rs` | The browse/completion surface derived from the command catalog |
+| `surface.rs` | Browse/completion specs from clap and the command catalog, with REPL wording and live value overrides |
 | `completion.rs` | Shaping that surface into a completion tree: aliases, invocation flags, shell re-rooting |
 | `highlight.rs` | Input colouring and the first invalid word |
 | `menu.rs`, `menu_core.rs` | The completion menu: reedline adapter and editor-free layout/navigation |
