@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::app::help::help_level;
 use crate::app::{
-    CMD_CONFIG, CMD_DOCTOR, CMD_HISTORY, CMD_LIST, CMD_PLUGINS, CMD_SHOW, CMD_THEME, CMD_USE,
-    CURRENT_TERMINAL_SENTINEL,
+    CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY, CMD_LIST, CMD_PLUGINS, CMD_SHOW, CMD_THEME,
+    CMD_USE, CURRENT_TERMINAL_SENTINEL,
 };
 use crate::plugin::CommandCatalogEntry;
 use crate::ui::{HelpLayout, help_layout_from_config};
@@ -185,6 +185,14 @@ pub(crate) fn build_repl_surface(
         specs.push(command_spec_from_command_def(&def));
         overview_entries.push(overview_entry_from_command_def(&def));
     }
+    if view.auth.is_builtin_visible(CMD_CONTEXT) {
+        root_words.push(CMD_CONTEXT.to_string());
+        specs.push(context_command_spec(help_layout));
+        overview_entries.push(ReplOverviewEntry {
+            name: CMD_CONTEXT.to_string(),
+            summary: "Inspect or clear remembered session values".to_string(),
+        });
+    }
 
     overview_entries.extend(catalog.iter().map(|entry| {
         let mut overview = plugin_overview_entry(entry);
@@ -246,7 +254,8 @@ fn root_word_priority(word: &str) -> (u8, u8) {
         CMD_PLUGINS => (1, 2),
         CMD_DOCTOR => (1, 3),
         CMD_HISTORY => (1, 4),
-        "alias" => (1, 5),
+        CMD_CONTEXT => (1, 5),
+        "alias" => (1, 6),
         "|" | "F" | "P" | "V" => (4, 0),
         _ => {
             if word.starts_with('-') {
@@ -293,8 +302,19 @@ fn compact_command_priority(name: &str) -> (u8, u8) {
         CMD_PLUGINS => (1, 2),
         CMD_DOCTOR => (1, 3),
         CMD_HISTORY => (1, 4),
+        CMD_CONTEXT => (1, 5),
         _ => (9, 0),
     }
+}
+
+fn context_command_spec(help_layout: HelpLayout) -> CommandSpec {
+    CommandSpec::new(CMD_CONTEXT)
+        .tooltip("Show or clear session context")
+        .sort(command_sort_key(CMD_CONTEXT, help_layout))
+        .subcommands([CommandSpec::new("clear")
+            .tooltip("Remove context entries")
+            .sort("10")
+            .arg(ArgNode::named("kind"))])
 }
 
 pub(crate) fn catalog_completion_words(catalog: &[CommandCatalogEntry]) -> Vec<String> {

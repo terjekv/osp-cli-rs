@@ -9,13 +9,13 @@
 use miette::{Result, miette};
 
 use super::{
-    AppClients, AppRuntime, AppSession, CMD_CONFIG, CMD_DOCTOR, CMD_HISTORY, CMD_PLUGINS,
-    CMD_THEME, CliCommandResult, ResolvedInvocation, UiSink, UiState, ensure_builtin_access,
-    ensure_command_supports_dsl, run_cli_command_with_ui,
+    AppClients, AppRuntime, AppSession, CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY,
+    CMD_PLUGINS, CMD_THEME, CliCommandResult, ResolvedInvocation, UiSink, UiState,
+    ensure_builtin_access, ensure_command_supports_dsl, run_cli_command_with_ui,
 };
 use crate::cli::commands::{
-    config as config_cmd, doctor as doctor_cmd, history as history_cmd, intro as intro_cmd,
-    plugins as plugins_cmd, theme as theme_cmd,
+    config as config_cmd, context as context_cmd, doctor as doctor_cmd, history as history_cmd,
+    intro as intro_cmd, plugins as plugins_cmd, theme as theme_cmd,
 };
 use crate::cli::{Commands, IntroArgs, ReplArgs};
 use crate::repl::{self, SharedHistory};
@@ -160,6 +160,15 @@ impl<'a> BuiltinExecutor<'a> {
                 ensure_builtin_access(self.runtime, self.session, CMD_HISTORY)?;
                 self.run_history_command(surface, args).map(Some)
             }
+            Commands::Context(args) => match surface {
+                BuiltinSurface::Repl { .. } => {
+                    ensure_builtin_access(self.runtime, self.session, CMD_CONTEXT)?;
+                    context_cmd::run_context_command(self.session, args).map(Some)
+                }
+                BuiltinSurface::Cli(_) | BuiltinSurface::Inline(_) => {
+                    Err(miette!("`context` is available only in the REPL session"))
+                }
+            },
             Commands::Completions(_) => Err(miette!(
                 "`completions` is available only as a one-shot CLI command"
             )),

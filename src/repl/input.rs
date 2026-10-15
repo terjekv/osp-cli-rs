@@ -20,7 +20,8 @@ use crate::cli::pipeline::{ParsedCommandLine, parse_command_text_with_aliases};
 // These commands keep their root meaning inside every integration shell.
 // Dispatch and the editor's command tree must agree on this set.
 pub(crate) const REPL_GLOBAL_COMMANDS: &[&str] = &[
-    "plugins", "doctor", "theme", "config", "alias", "history", "intro", "last", "source",
+    "plugins", "doctor", "theme", "config", "alias", "history", "context", "intro", "last",
+    "source",
 ];
 
 #[derive(Clone, PartialEq, Eq)]

@@ -62,6 +62,7 @@ impl NativeCommand for GroupShapedServiceCommand {
             data: json!([{"groups": {}, "aggregates": {}, "rows": []}]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1::default(),
         })))
     }
@@ -116,6 +117,7 @@ impl NativeCommand for NativeProbeCommand {
             }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["active_profile".to_string(), "theme".to_string()]),
@@ -162,6 +164,76 @@ fn native_session_context_shares_selection_and_redacts_private_state() {
         session.value("selected_target").as_deref(),
         Some("private-resource-ref")
     );
+}
+
+struct NativeSubjectCommand {
+    observed: std::sync::Arc<std::sync::Mutex<Option<osp_cli::NativeSessionContext>>>,
+}
+
+impl NativeCommand for NativeSubjectCommand {
+    fn command(&self) -> Command {
+        Command::new("remember-host").arg(clap::Arg::new("host").required(true).index(1))
+    }
+
+    fn execute(
+        &self,
+        args: &[String],
+        context: &NativeCommandContext<'_>,
+    ) -> Result<NativeCommandOutcome> {
+        let host = args.first().cloned().unwrap_or_default();
+        context
+            .session_context
+            .set_context_value("host", host.clone());
+        *self
+            .observed
+            .lock()
+            .map_err(|_| anyhow::anyhow!("context lock poisoned"))? =
+            Some(context.session_context.clone());
+        Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            protocol_version: PLUGIN_PROTOCOL_V1,
+            ok: true,
+            data: json!([{"host": host}]),
+            error: None,
+            messages: Vec::new(),
+            context: None,
+            meta: ResponseMetaV1::default(),
+        })))
+    }
+}
+
+#[test]
+fn native_command_sets_session_context_with_source_and_time() {
+    let observed = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let command = NativeSubjectCommand {
+        observed: observed.clone(),
+    };
+    let app = App::builder()
+        .with_native_commands(NativeCommandRegistry::new().with_command(command))
+        .build();
+    let mut sink = BufferedUiSink::default();
+    assert_eq!(
+        app.run_with_sink(
+            [
+                "osp",
+                "--defaults-only",
+                "--json",
+                "remember-host",
+                "foo.uio.no"
+            ],
+            &mut sink
+        )
+        .unwrap(),
+        0
+    );
+
+    let context = observed.lock().unwrap().clone().unwrap();
+    let entries = context.context_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, "host");
+    assert_eq!(entries[0].value, "foo.uio.no");
+    assert_eq!(entries[0].command, "remember-host");
+    assert!(chrono::DateTime::parse_from_rfc3339(&entries[0].when).is_ok());
+    assert!(entries[0].prompt_label.is_none());
 }
 
 struct SiteStatusCommand;
@@ -226,6 +298,7 @@ impl NativeCommand for CuratedOrchRowsCommand {
                     text: "runtime target vmware:prod".to_string(),
                 },
             ],
+            context: None,
             meta: ResponseMetaV1 {
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
@@ -288,6 +361,7 @@ impl NativeCommand for SiteStatusCommand {
             }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["enabled".to_string(), "banner".to_string()]),

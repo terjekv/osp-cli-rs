@@ -215,6 +215,7 @@ impl NativeCommand for TestNativeCommand {
             data: json!([{ "args": args }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1::default(),
         })))
     }

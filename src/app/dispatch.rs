@@ -89,6 +89,9 @@ pub(crate) fn build_dispatch_plan(cli: &mut Cli) -> Result<DispatchPlan> {
     let command = cli.command.take();
 
     match command {
+        Some(Commands::Context(_)) => {
+            Err(miette!("`context` is available only in the REPL session"))
+        }
         None => Ok(DispatchPlan::repl(explicit_profile)),
         Some(Commands::Completions(_)) => Err(miette!(
             "`completions` is available only as a one-shot CLI command"

@@ -54,6 +54,7 @@ pub(crate) const CMD_DOCTOR: &str = "doctor";
 pub(crate) const CMD_CONFIG: &str = "config";
 pub(crate) const CMD_THEME: &str = "theme";
 pub(crate) const CMD_HISTORY: &str = "history";
+pub(crate) const CMD_CONTEXT: &str = "context";
 pub(crate) const CMD_INTRO: &str = "intro";
 pub(crate) const CMD_HELP: &str = "help";
 pub(crate) const CMD_LIST: &str = "list";

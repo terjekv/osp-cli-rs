@@ -111,6 +111,9 @@ Rules:
   "messages": [
     { "level": "info", "text": "Using profile: uio" }
   ],
+  "context": {
+    "host": "foo.uio.no"
+  },
   "meta": {
     "format_hint": "table",
     "columns": ["uid", "cn"],
@@ -125,6 +128,11 @@ Rules:
 - `ok=false` implies `error` is present.
 - `data` is always present (empty object/array is allowed).
 - `messages` is optional and defaults to an empty list.
+- `context` is optional and maps subject kinds to string values.
+- For a successful response, `context` updates the active REPL session. The
+  host records the selected command path and UTC update time, keeping only the
+  latest value for each kind. Failed responses do not update session context.
+- `context` is independent of `meta`, which controls output presentation.
 - `meta.columns` controls column order when the payload is rendered as a table.
 - With `meta.row_path`, column entries may be dotted paths into each row, such
   as `provider.name` or `compute.display`.
@@ -195,6 +203,7 @@ the normal verbosity gate.
 - Backbone rejects unsupported `protocol_version`.
 - Backbone may reject plugins below required `min_osp_version`.
 - New fields must be additive and optional.
+- Older protocol v1 plugins may omit `context`; the host treats it as empty.
 
 ## Runtime Hints Environment
 

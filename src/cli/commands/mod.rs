@@ -16,6 +16,7 @@
 //! or rendering concerns.
 
 pub(crate) mod config;
+pub(crate) mod context;
 pub(crate) mod doctor;
 pub(crate) mod history;
 pub(crate) mod intro;

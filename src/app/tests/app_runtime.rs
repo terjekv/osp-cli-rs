@@ -1057,6 +1057,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             level: ResponseMessageLevelV1::Warning,
             text: "queried fallback backend".to_string(),
         }],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
 
@@ -1092,6 +1093,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         data: serde_json::json!([{"uid": "alice"}]),
         error: None,
         messages: Vec::new(),
+        context: None,
         meta: ResponseMetaV1 {
             format_hint: Some("table".to_string()),
             columns: Some(vec!["uid".to_string()]),
@@ -1131,6 +1133,7 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
             }),
         }),
         messages: vec![],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
     let prepared = super::command_output::prepare_plugin_response(response, &[])
@@ -1172,6 +1175,7 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
             level: ResponseMessageLevelV1::Warning,
             text: "queried fallback backend".to_string(),
         }],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
     let prepared = super::command_output::prepare_plugin_response(response, &[])

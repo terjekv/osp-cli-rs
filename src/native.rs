@@ -221,13 +221,28 @@ pub trait NativeProgressSink {
     }
 }
 
-/// One prompt-visible session context value owned by a native command.
+/// Compatibility view of one prompt-visible session value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePromptContextEntry {
     /// Short label rendered in compact prompt surfaces.
     pub label: String,
     /// Current value for the context entry.
     pub value: String,
+}
+
+/// One operator-visible value remembered for the current REPL session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeSessionContextEntry {
+    /// Subject kind, such as `host`, `user`, or `group`.
+    pub kind: String,
+    /// Latest value stored for this kind.
+    pub value: String,
+    /// Command path that last set this value.
+    pub command: String,
+    /// UTC timestamp in RFC 3339 format when the value was last set.
+    pub when: String,
+    /// Optional short label that opts this entry into the REPL prompt.
+    pub prompt_label: Option<String>,
 }
 
 /// Trusted REPL commands for moving between pages produced by a native
@@ -255,17 +270,19 @@ struct PaginationState {
     carried: Option<Vec<Vec<String>>>,
 }
 
-/// Session-scoped context shared between native commands and the REPL host.
+/// Session-scoped context shared between native commands, plugins, and the REPL host.
 ///
 /// This is deliberately in-memory only. Native commands can retain small
-/// workflow values between commands and separately expose prompt-safe values
-/// without writing hidden target state to disk.
+/// private workflow values between commands and publish operator-visible
+/// values that the `context` builtin can inspect. The same visible entries may
+/// opt into the prompt without writing session state to disk.
 #[derive(Clone, Default)]
 pub struct NativeSessionContext {
     values: Arc<RwLock<BTreeMap<String, String>>>,
-    prompt_entries: Arc<RwLock<BTreeMap<String, NativePromptContextEntry>>>,
+    context_entries: Arc<RwLock<BTreeMap<String, NativeSessionContextEntry>>>,
     pagination: Arc<RwLock<PaginationState>>,
     completion_refresh_requested: Arc<AtomicBool>,
+    command_path: Option<Arc<str>>,
 }
 
 impl fmt::Debug for NativeSessionContext {
@@ -273,7 +290,7 @@ impl fmt::Debug for NativeSessionContext {
         formatter
             .debug_struct("NativeSessionContext")
             .field("values", &"[redacted]")
-            .field("prompt_entries", &self.prompt_entries)
+            .field("context_entries", &"[redacted]")
             .field("pagination", &"[redacted]")
             .field(
                 "completion_refresh_requested",
@@ -299,6 +316,81 @@ impl NativeSessionContext {
             .and_then(|values| values.get(key).cloned())
     }
 
+    /// Stores one operator-visible value for this REPL session.
+    ///
+    /// The active native command path is recorded as the source. Plugin
+    /// responses use the same store after the host receives their context
+    /// updates.
+    pub fn set_context_value(&self, kind: impl Into<String>, value: impl Into<String>) {
+        self.store_context_value(kind, value, None);
+    }
+
+    /// Stores one context value and opts it into the compact REPL prompt.
+    pub fn set_context_value_with_prompt(
+        &self,
+        kind: impl Into<String>,
+        value: impl Into<String>,
+        prompt_label: impl Into<String>,
+    ) {
+        self.store_context_value(kind, value, Some(prompt_label.into()));
+    }
+
+    fn store_context_value(
+        &self,
+        kind: impl Into<String>,
+        value: impl Into<String>,
+        prompt_label: Option<String>,
+    ) {
+        let kind = kind.into();
+        let command = self.command_path.as_deref().unwrap_or("native").to_string();
+        let when = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        if let Ok(mut entries) = self.context_entries.write() {
+            let entry = entries
+                .entry(kind.clone())
+                .or_insert_with(|| NativeSessionContextEntry {
+                    kind,
+                    value: String::new(),
+                    command: command.clone(),
+                    when: when.clone(),
+                    prompt_label: None,
+                });
+            entry.value = value.into();
+            entry.command = command;
+            entry.when = when;
+            if prompt_label.is_some() {
+                entry.prompt_label = prompt_label;
+            }
+        }
+    }
+
+    /// Returns all operator-visible context values in stable kind order.
+    pub fn context_entries(&self) -> Vec<NativeSessionContextEntry> {
+        self.context_entries
+            .read()
+            .map(|entries| entries.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Clears all context values, or only the named kind.
+    pub fn clear_context(&self, kind: Option<&str>) {
+        if let Ok(mut entries) = self.context_entries.write() {
+            match kind {
+                Some(kind) if !kind.is_empty() => {
+                    entries.remove(kind);
+                }
+                Some(_) => {}
+                None => entries.clear(),
+            }
+        }
+    }
+
+    pub(crate) fn for_command(&self, command_path: impl Into<String>) -> Self {
+        Self {
+            command_path: Some(Arc::from(command_path.into())),
+            ..self.clone()
+        }
+    }
+
     /// Sets one prompt-visible context entry.
     pub fn set_prompt_value(
         &self,
@@ -306,29 +398,38 @@ impl NativeSessionContext {
         label: impl Into<String>,
         value: impl Into<String>,
     ) {
-        if let Ok(mut entries) = self.prompt_entries.write() {
-            entries.insert(
-                key.into(),
-                NativePromptContextEntry {
-                    label: label.into(),
-                    value: value.into(),
-                },
-            );
-        }
+        self.set_context_value_with_prompt(key, value, label);
     }
 
     /// Removes one prompt-visible context entry.
     pub fn remove_prompt_value(&self, key: &str) {
-        if let Ok(mut entries) = self.prompt_entries.write() {
+        if let Ok(mut entries) = self.context_entries.write()
+            && entries
+                .get(key)
+                .is_some_and(|entry| entry.prompt_label.is_some())
+        {
             entries.remove(key);
         }
     }
 
     /// Returns all prompt-visible context entries in stable key order.
     pub fn prompt_entries(&self) -> Vec<NativePromptContextEntry> {
-        self.prompt_entries
+        self.context_entries
             .read()
-            .map(|entries| entries.values().cloned().collect())
+            .map(|entries| {
+                entries
+                    .values()
+                    .filter_map(|entry| {
+                        entry
+                            .prompt_label
+                            .as_ref()
+                            .map(|label| NativePromptContextEntry {
+                                label: label.clone(),
+                                value: entry.value.clone(),
+                            })
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

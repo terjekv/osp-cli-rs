@@ -16,7 +16,7 @@ commands or render; that is `app`. It imports widely (`app`, `config`, `core`,
 | `mod.rs` | `Cli`, `InlineCommandCli`, the `Commands` enum and shared flags |
 | `invocation.rs` | Scanning one-shot invocation flags out of a command line |
 | `pipeline.rs` | Alias expansion and splitting `command | stages` |
-| `commands/` | Builtin handlers: `config`, `plugins`, `theme`, `history`, `doctor`, `intro` |
+| `commands/` | Builtin handlers: `config`, `context`, `plugins`, `theme`, `history`, `doctor`, `intro` |
 | `rows/` | Helpers that turn handler rows into `OutputResult` |
 
 ## Common changes

@@ -233,6 +233,9 @@ print plain help text instead of `ResponseV1`.
   "messages": [
     { "level": "info", "text": "Found 2 results" }
   ],
+  "context": {
+    "user": "alice"
+  },
   "meta": {
     "format_hint": null,
     "columns": ["uid", "cn", "mail"],
@@ -250,7 +253,13 @@ print plain help text instead of `ResponseV1`.
 | `data` | any | yes | Array of row objects for table display, or any JSON value |
 | `error` | object | if `ok=false` | Error details (see below) |
 | `messages` | array | no | Diagnostic messages shown to user |
+| `context` | object | no | Successful session updates keyed by subject kind |
 | `meta` | object | yes | Output metadata |
+
+Set `context` when a successful command resolves a subject that should remain
+available during the current REPL session. For example, a host lookup may
+return `{ "host": "foo.uio.no" }`. The host records the command path and update
+time. Older protocol v1 plugins continue to work without this optional field.
 
 #### Validation rules
 

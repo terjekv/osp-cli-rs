@@ -182,6 +182,7 @@ impl NativeCommand for TestNativeCommand {
             data: json!([{ "command": "ldap", "args": args }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["command".to_string(), "args".to_string()]),

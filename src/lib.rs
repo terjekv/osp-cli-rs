@@ -269,7 +269,7 @@ pub use crate::core::command_policy;
 pub use crate::native::{
     InvocationElevation, NativeCommand, NativeCommandCatalogEntry, NativeCommandContext,
     NativeCommandOutcome, NativeCommandRegistry, NativePagination, NativeProgressEvent,
-    NativeProgressSink, NativeSessionContext,
+    NativeProgressSink, NativeSessionContext, NativeSessionContextEntry,
 };
 
 mod native;

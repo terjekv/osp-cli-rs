@@ -35,6 +35,7 @@ fn builtin_command_verbs_are_consistent() {
         "doctor",
         "theme",
         "config",
+        "context",
         "history",
         "alias",
         "completions",

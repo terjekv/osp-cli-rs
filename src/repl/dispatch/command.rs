@@ -8,14 +8,14 @@ use crate::app;
 use crate::app::sink::UiSink;
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{
-    CMD_CONFIG, CMD_DOCTOR, CMD_HELP, CMD_HISTORY, CMD_INTRO, CMD_PLUGINS, ReplCommandSpec,
-    ResolvedInvocation,
+    CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HELP, CMD_HISTORY, CMD_INTRO, CMD_PLUGINS,
+    ReplCommandSpec, ResolvedInvocation,
 };
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
 use crate::cli::{
-    Commands, ConfigCommands, DoctorCommands, HistoryCommands, PluginCommandClearArgs,
-    PluginCommandStateArgs, PluginProviderClearArgs, PluginProviderSelectArgs, PluginsCommands,
-    ThemeCommands, parse_inline_command_tokens,
+    Commands, ConfigCommands, ContextCommands, DoctorCommands, HistoryCommands,
+    PluginCommandClearArgs, PluginCommandStateArgs, PluginProviderClearArgs,
+    PluginProviderSelectArgs, PluginsCommands, ThemeCommands, parse_inline_command_tokens,
 };
 use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 
@@ -558,6 +558,11 @@ pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
 
 fn repl_command_behavior(command: &Commands) -> ReplCommandBehavior<'_> {
     match command {
+        Commands::Context(args) => ReplCommandBehavior {
+            name: Cow::Borrowed(CMD_CONTEXT),
+            supports_dsl: matches!(args.command, None | Some(ContextCommands::Clear(_))),
+            side_effects: CommandSideEffects::default(),
+        },
         Commands::External(tokens) => ReplCommandBehavior {
             name: Cow::Owned(
                 tokens

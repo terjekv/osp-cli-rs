@@ -531,6 +531,10 @@ pub struct ResponseV1 {
     pub messages: Vec<ResponseMessageV1>,
     /// Rendering and presentation metadata for the payload.
     pub meta: ResponseMetaV1,
+    /// Optional values the host should remember in its current session,
+    /// keyed by subject kind (for example `host` or `user`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<BTreeMap<String, String>>,
 }
 
 /// Structured error payload returned when `ok` is `false`.
@@ -1088,6 +1092,7 @@ impl ResponseV1 {
     ///     error: None,
     ///     messages: Vec::new(),
     ///     meta: ResponseMetaV1::default(),
+    ///     context: None,
     /// };
     ///
     /// assert!(response.validate_v1().is_ok());
@@ -1115,6 +1120,13 @@ impl ResponseV1 {
         }
         if !self.ok && self.error.is_none() {
             return Err("ok=false requires error payload".to_string());
+        }
+        if self
+            .context
+            .as_ref()
+            .is_some_and(|entries| entries.keys().any(|kind| kind.trim().is_empty()))
+        {
+            return Err("response context kinds must not be empty".to_string());
         }
         if self
             .messages
@@ -1631,6 +1643,7 @@ mod tests {
             }),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
@@ -1663,6 +1676,26 @@ mod tests {
     }
 
     #[test]
+    fn response_context_is_optional_and_round_trips_unit() {
+        let mut legacy = serde_json::from_value::<ResponseV1>(json!({
+            "protocol_version": 1,
+            "ok": true,
+            "data": [],
+            "error": null,
+            "meta": {}
+        }))
+        .expect("legacy response should deserialize");
+        assert!(legacy.context.is_none());
+
+        legacy.context = Some(BTreeMap::from([(
+            "host".to_string(),
+            "foo.uio.no".to_string(),
+        )]));
+        let wire = serde_json::to_value(legacy).expect("response should serialize");
+        assert_eq!(wire["context"]["host"], "foo.uio.no");
+    }
+
+    #[test]
     fn response_column_labels_align_with_columns_unit() {
         let response = ResponseV1 {
             protocol_version: PLUGIN_PROTOCOL_V1,
@@ -1670,6 +1703,7 @@ mod tests {
             data: json!({"items": [{"provider": {"name": "vmware"}}]}),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
                 columns: Some(vec!["provider.name".to_string()]),
                 column_labels: vec!["PROVIDER".to_string()],
@@ -1680,6 +1714,7 @@ mod tests {
         assert!(response.validate_v1().is_ok());
 
         let mismatched = ResponseV1 {
+            context: None,
             meta: ResponseMetaV1 {
                 column_labels: vec!["PROVIDER".to_string(), "STATE".to_string()],
                 ..response.meta.clone()

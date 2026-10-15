@@ -398,6 +398,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                     args: parsed_args,
                     stages: &parsed.stages,
                     invocation,
+                    command_path: path.as_slice().join(" "),
                     elevation: parsed.elevation,
                     progress_sink,
                 },
@@ -501,6 +502,7 @@ struct NativeRunInput<'args, 'stages, 'invocation, 'sink> {
     args: &'args [String],
     stages: &'stages [String],
     invocation: &'invocation ResolvedInvocation,
+    command_path: String,
     elevation: InvocationElevation,
     progress_sink: Option<&'sink mut dyn UiSink>,
 }
@@ -535,7 +537,7 @@ fn run_native_command(
         runtime_hints_for_invocation(runtime, input.invocation),
     )
     .with_invocation_elevation(input.elevation)
-    .with_session_context(session.native_context.clone());
+    .with_session_context(session.native_context.for_command(input.command_path));
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
     }
@@ -868,6 +870,17 @@ fn run_external_plugin_command(
         .dispatch(command, args, &dispatch_context)
         .map_err(enrich_dispatch_error)?;
 
+    if response.ok
+        && let Some(entries) = response.context.as_ref()
+    {
+        let context = session
+            .native_context
+            .for_command(path.as_slice().join(" "));
+        for (kind, value) in entries {
+            context.set_context_value(kind.clone(), value.clone());
+        }
+    }
+
     render_external_plugin_response(response, &parsed.stages)
 }
 
@@ -965,6 +978,7 @@ mod tests {
                             level: ResponseMessageLevelV1::Info,
                             text: "native ok".to_string(),
                         }],
+                        context: None,
                         meta: ResponseMetaV1 {
                             format_hint: Some("json".to_string()),
                             columns: None,
@@ -989,6 +1003,7 @@ mod tests {
                         data: serde_json::json!({"status": "waiting_approval"}),
                         error: None,
                         messages: Vec::new(),
+                        context: None,
                         meta: ResponseMetaV1 {
                             format_hint: Some("json".to_string()),
                             unix_timestamp_columns: Vec::new(),
@@ -1041,6 +1056,7 @@ mod tests {
                 data: serde_json::json!({"status": "completed"}),
                 error: None,
                 messages: Vec::new(),
+                context: None,
                 meta: ResponseMetaV1 {
                     format_hint: Some("json".to_string()),
                     unix_timestamp_columns: Vec::new(),
@@ -1079,6 +1095,7 @@ mod tests {
                 }),
                 error: None,
                 messages: Vec::new(),
+                context: None,
                 meta: ResponseMetaV1 {
                     format_hint: Some("json".to_string()),
                     columns: None,
@@ -1308,6 +1325,7 @@ JSON
                 level: ResponseMessageLevelV1::Warning,
                 text: "warning from plugin".to_string(),
             }],
+            context: None,
             meta: ResponseMetaV1 {
                 format_hint: Some("json".to_string()),
                 columns: None,

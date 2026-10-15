@@ -204,6 +204,9 @@ fn bootstrap_command(command: clap::Command) -> clap::Command {
 /// Top-level commands accepted by `osp`.
 #[derive(Subcommand)]
 pub enum Commands {
+    #[command(hide = true)]
+    /// Show or clear values remembered in this REPL session.
+    Context(ContextArgs),
     /// Inspect and manage discovered plugins.
     Plugins(PluginsArgs),
     /// Run diagnostics checks.
@@ -227,6 +230,28 @@ pub enum Commands {
     #[command(external_subcommand)]
     /// Dispatch an external or plugin-provided command line.
     External(Vec<String>),
+}
+
+/// Inspect or clear values remembered in the current REPL session.
+#[derive(Debug, Args)]
+pub struct ContextArgs {
+    /// Context operation to run.
+    #[command(subcommand)]
+    pub command: Option<ContextCommands>,
+}
+
+/// Operations for REPL session context.
+#[derive(Debug, Subcommand)]
+pub enum ContextCommands {
+    /// Remove all remembered values, or only the given kind.
+    Clear(ContextClearArgs),
+}
+
+/// Selects context values to clear.
+#[derive(Debug, Args)]
+pub struct ContextClearArgs {
+    /// Subject kind to remove, such as `host` or `user`.
+    pub kind: Option<String>,
 }
 
 /// Arguments for static shell-completion generation.

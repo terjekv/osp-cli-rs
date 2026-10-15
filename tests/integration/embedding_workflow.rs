@@ -73,6 +73,7 @@ impl NativeCommand for CredentialProbe {
             data: json!([{"resource": "db01", "cpu": 4, "ready": true}]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1::default(),
         })))
     }
@@ -249,6 +250,7 @@ impl NativeCommand for ApprovalWorkflow {
                 }]),
                 error: None,
                 messages: Vec::new(),
+                context: None,
                 meta: ResponseMetaV1::default(),
             }),
             exit_code: if approved { 0 } else { 3 },
