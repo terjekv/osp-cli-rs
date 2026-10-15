@@ -92,10 +92,23 @@ impl ExecutedPluginCommand {
         context: &PluginDispatchContext,
     ) -> std::result::Result<Self, PluginDispatchError> {
         let provider = manager.resolve_provider(command, context.provider_override.as_deref())?;
-        let warnings = context
-            .env_issues_for(&provider.plugin_id)
-            .map(|issue| format!("plugin config value omitted: {issue}"))
-            .collect();
+        let mut warnings = Vec::new();
+        if context.provider_override.is_none() {
+            let preferences = manager.command_preferences_snapshot();
+            if let Some(preferred_provider) = preferences.preferred_provider_for(command)
+                && preferred_provider != provider.plugin_id
+            {
+                warnings.push(format!(
+                    "preferred provider `{preferred_provider}` for command `{command}` is unavailable; using `{}`",
+                    provider.plugin_id
+                ));
+            }
+        }
+        warnings.extend(
+            context
+                .env_issues_for(&provider.plugin_id)
+                .map(|issue| format!("plugin config value omitted: {issue}")),
+        );
         let raw = run_provider(&provider, command, args, context, manager.process_timeout)?;
         Ok(Self {
             provider,

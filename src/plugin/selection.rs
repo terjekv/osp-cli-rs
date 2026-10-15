@@ -29,6 +29,10 @@ pub(crate) enum ProviderResolution<'a> {
 #[derive(Debug)]
 pub(crate) enum ProviderResolutionError<'a> {
     CommandNotFound,
+    RequestedProviderUnhealthy {
+        requested_provider: String,
+        issue: String,
+    },
     RequestedProviderUnavailable {
         requested_provider: String,
         providers: Vec<&'a DiscoveredPlugin>,

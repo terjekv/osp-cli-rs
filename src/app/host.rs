@@ -888,6 +888,9 @@ fn known_error_hint(known: &KnownErrorChain<'_>) -> Option<String> {
             PluginDispatchError::ProviderNotFound { .. } => {
                 "pick one of the available providers from `osp plugins commands` or `osp plugins doctor`"
             }
+            PluginDispatchError::ProviderUnhealthy { .. } => {
+                "inspect the provider issue with `osp plugins doctor`"
+            }
             PluginDispatchError::InvalidEnvironment { .. } => {
                 "inspect the colliding extensions.plugins.*.env keys and remove the normalization conflict"
             }

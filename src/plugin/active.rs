@@ -100,6 +100,24 @@ impl<'a> ActivePluginView<'a> {
         command: &str,
         provider_override: Option<&str>,
     ) -> std::result::Result<ProviderResolution<'a>, ProviderResolutionError<'a>> {
+        if let Some(requested_provider) = provider_override
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            && !self
+                .healthy
+                .iter()
+                .any(|plugin| plugin.plugin_id == requested_provider)
+            && let Some(plugin) = self
+                .discovered
+                .iter()
+                .find(|plugin| plugin.plugin_id == requested_provider && plugin.issue.is_some())
+        {
+            return Err(ProviderResolutionError::RequestedProviderUnhealthy {
+                requested_provider: requested_provider.to_string(),
+                issue: plugin.issue.clone().unwrap_or_default(),
+            });
+        }
+
         resolve_provider_for_command(command, &self.healthy, self.preferences, provider_override)
     }
 

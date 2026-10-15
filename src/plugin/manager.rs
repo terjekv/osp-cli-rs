@@ -499,6 +499,13 @@ pub enum PluginDispatchError {
         /// Provider labels that provide `command`.
         providers: Vec<String>,
     },
+    /// The caller explicitly requested a provider that failed discovery.
+    ProviderUnhealthy {
+        /// Provider identifier requested by the caller.
+        requested_provider: String,
+        /// Discovery or validation issue associated with the provider.
+        issue: String,
+    },
     /// Plugin environment configuration is internally inconsistent.
     InvalidEnvironment {
         /// Plugin identifier being invoked.
@@ -580,6 +587,10 @@ impl Display for PluginDispatchError {
                     providers.join(", ")
                 )
             }
+            PluginDispatchError::ProviderUnhealthy {
+                requested_provider,
+                issue,
+            } => write!(f, "plugin `{requested_provider}` is unhealthy: {issue}"),
             PluginDispatchError::InvalidEnvironment { plugin_id, issues } => {
                 write!(
                     f,
@@ -651,6 +662,7 @@ impl StdError for PluginDispatchError {
             PluginDispatchError::CommandNotFound { .. }
             | PluginDispatchError::CommandAmbiguous { .. }
             | PluginDispatchError::ProviderNotFound { .. }
+            | PluginDispatchError::ProviderUnhealthy { .. }
             | PluginDispatchError::InvalidEnvironment { .. }
             | PluginDispatchError::TimedOut { .. }
             | PluginDispatchError::OutputTooLarge { .. }
@@ -1233,6 +1245,21 @@ impl PluginManager {
                         command: command.to_string(),
                         requested_provider,
                         providers: provider_labels,
+                    })
+                }
+                Err(ProviderResolutionError::RequestedProviderUnhealthy {
+                    requested_provider,
+                    issue,
+                }) => {
+                    tracing::warn!(
+                        command = %command,
+                        requested_provider = %requested_provider,
+                        issue = %issue,
+                        "requested plugin provider is unhealthy"
+                    );
+                    Err(PluginDispatchError::ProviderUnhealthy {
+                        requested_provider,
+                        issue,
                     })
                 }
                 Err(ProviderResolutionError::CommandNotFound) => {
