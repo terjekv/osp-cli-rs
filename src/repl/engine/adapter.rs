@@ -133,11 +133,27 @@ impl Completer for ReplCompleter {
         if has_path_sentinel {
             // The pure completion engine reports that this slot expects a path;
             // filesystem enumeration happens here at the editor boundary.
+            let closing_quote = match cursor_state.quote_style {
+                Some(QuoteStyle::Single) => Some('\''),
+                Some(QuoteStyle::Double) => Some('"'),
+                None => None,
+            };
+            let path_span = if closing_quote.is_some_and(|quote| {
+                line.get(pos..)
+                    .is_some_and(|suffix| suffix.starts_with(quote))
+            }) {
+                Span {
+                    end: span.end + 1,
+                    ..span
+                }
+            } else {
+                span
+            };
             suggestions.extend(path_suggestions(
                 &cursor_state.raw_stub,
                 &cursor_state.token_stub,
                 cursor_state.quote_style,
-                span,
+                path_span,
             ));
         }
 
