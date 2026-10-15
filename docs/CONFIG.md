@@ -114,7 +114,11 @@ Lowest to highest priority, later sources override earlier ones:
 4. Environment variables
 5. Session overrides (in-memory)
 
-This order is the public contract. Changing it is a breaking change.
+An `OSP_SECRET__...` environment override is an exception: it wins over a plain
+`OSP__...` environment value for the same key. Session overrides still win.
+
+This order, including that exception, is the public contract. Changing it is a
+breaking change.
 
 Notes:
 
