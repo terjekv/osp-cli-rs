@@ -310,58 +310,26 @@ pub(crate) struct CompletionTraceMenuState {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CompletionTracePayload<'a> {
-    event: &'a str,
-    line: &'a str,
-    cursor: usize,
-    stub: &'a str,
-    matches: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    buffer_before: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    buffer_after: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cursor_before: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cursor_after: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accepted_value: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    replace_range: Option<[usize; 2]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_index: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_row: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_col: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    just_activated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    columns: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    visible_rows: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rows: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    menu_indent: Option<u16>,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct CompletionTraceEvent<'a> {
     pub event: &'a str,
     pub line: &'a str,
     pub cursor: usize,
     pub stub: &'a str,
     pub matches: Vec<String>,
-    pub replace_range: Option<[usize; 2]>,
-    pub menu: Option<CompletionTraceMenuState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub buffer_before: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub buffer_after: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_before: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_after: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub accepted_value: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replace_range: Option<[usize; 2]>,
+    #[serde(flatten)]
+    pub menu: Option<CompletionTraceMenuState>,
 }
 
 pub(crate) fn trace_completion(trace: CompletionTraceEvent<'_>) {
@@ -369,56 +337,7 @@ pub(crate) fn trace_completion(trace: CompletionTraceEvent<'_>) {
         return;
     }
 
-    let (
-        selected_index,
-        selected_row,
-        selected_col,
-        active,
-        just_activated,
-        columns,
-        visible_rows,
-        rows,
-        menu_indent,
-    ) = if let Some(menu) = trace.menu {
-        (
-            Some(menu.selected_index),
-            Some(menu.selected_row),
-            Some(menu.selected_col),
-            Some(menu.active),
-            Some(menu.just_activated),
-            Some(menu.columns),
-            Some(menu.visible_rows),
-            Some(menu.rows),
-            Some(menu.menu_indent),
-        )
-    } else {
-        (None, None, None, None, None, None, None, None, None)
-    };
-
-    let payload = CompletionTracePayload {
-        event: trace.event,
-        line: trace.line,
-        cursor: trace.cursor,
-        stub: trace.stub,
-        matches: trace.matches,
-        buffer_before: trace.buffer_before,
-        buffer_after: trace.buffer_after,
-        cursor_before: trace.cursor_before,
-        cursor_after: trace.cursor_after,
-        accepted_value: trace.accepted_value,
-        replace_range: trace.replace_range,
-        selected_index,
-        selected_row,
-        selected_col,
-        active,
-        just_activated,
-        columns,
-        visible_rows,
-        rows,
-        menu_indent,
-    };
-
-    let serialized = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    let serialized = serde_json::to_string(&trace).unwrap_or_else(|_| "{}".to_string());
     if let Ok(path) = std::env::var("OSP_REPL_TRACE_PATH")
         && !path.trim().is_empty()
     {
