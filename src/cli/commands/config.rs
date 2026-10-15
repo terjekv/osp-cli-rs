@@ -7,10 +7,10 @@
 use super::resolve_terminal_selector;
 use crate::app::{AppRuntime, AppSession, RuntimeContext, TerminalKind, UiState};
 use crate::app::{
-    CliCommandResult, ConfigExplainContext, ReplCommandOutput, RuntimeConfigRequest,
-    config_explain_json, config_explain_result, config_value_to_json_for_key,
-    explain_runtime_config, format_scope, is_sensitive_key, push_missing_config_key_messages,
-    render_config_explain_text, resolve_runtime_config,
+    CliCommandResult, ReplCommandOutput, RuntimeConfigRequest, config_explain_json,
+    config_explain_result, config_value_to_json_for_key, explain_runtime_config, format_scope,
+    is_sensitive_key, push_missing_config_key_messages, render_config_explain_text,
+    resolve_runtime_config,
 };
 use crate::cli::pipeline::validate_alias_template;
 use crate::cli::rows::output::rows_to_output_result;
@@ -125,17 +125,9 @@ pub(crate) fn run_config_command(
             None,
         )),
         ConfigCommands::Get(get) => run_config_get(read, get),
-        ConfigCommands::Explain(explain) => config_explain_result(
-            &ConfigExplainContext {
-                context: read.context,
-                config: read.config,
-                ui: read.ui,
-                session_layer: read.config_overrides,
-                product_defaults: read.product_defaults,
-                runtime_load: read.runtime_load,
-            },
-            explain,
-        ),
+        ConfigCommands::Explain(explain) => {
+            config_explain_result(read.config, read.ui, read.runtime_request(), explain)
+        }
         ConfigCommands::Set(set) => run_config_set(context, set),
         ConfigCommands::Unset(unset) => run_config_unset(context, unset),
         ConfigCommands::Doctor => Ok(CliCommandResult::output(

@@ -14,39 +14,23 @@ use crate::core::output::OutputFormat;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
 use miette::{IntoDiagnostic, Result, WrapErr};
 
-use crate::app::{RuntimeContext, UiState};
+use crate::app::UiState;
 use crate::cli::ConfigExplainArgs;
 use crate::ui::explain_presentation_effect;
 
 use super::{CliCommandResult, RuntimeConfigRequest, prepare_runtime_config};
 
-pub(crate) struct ConfigExplainContext<'a> {
-    pub(crate) context: &'a RuntimeContext,
-    pub(crate) config: &'a ResolvedConfig,
-    pub(crate) ui: &'a UiState,
-    pub(crate) session_layer: &'a crate::config::ConfigLayer,
-    pub(crate) product_defaults: &'a crate::config::ConfigLayer,
-    pub(crate) runtime_load: crate::config::RuntimeLoadOptions,
-}
-
 pub(crate) fn config_explain_result(
-    context: &ConfigExplainContext<'_>,
+    config: &ResolvedConfig,
+    ui: &UiState,
+    request: RuntimeConfigRequest,
     args: ConfigExplainArgs,
 ) -> Result<CliCommandResult> {
-    let explain = explain_runtime_config(
-        RuntimeConfigRequest::new(
-            context.context.profile_override().map(str::to_owned),
-            Some(context.context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(context.runtime_load)
-        .with_product_defaults(context.product_defaults.clone())
-        .with_session_layer(Some(context.session_layer.clone())),
-        &args.key,
-    )?;
+    let explain = explain_runtime_config(request, &args.key)?;
 
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
-        push_missing_config_key_messages(&mut messages, context.config, &args.key);
+        push_missing_config_key_messages(&mut messages, config, &args.key);
         return Ok(CliCommandResult {
             exit_code: 1,
             messages,
@@ -56,14 +40,14 @@ pub(crate) fn config_explain_result(
         });
     }
 
-    if matches!(context.ui.render_settings.format, OutputFormat::Json) {
-        let payload = config_explain_json(&explain, context.config, args.show_secrets);
+    if matches!(ui.render_settings.format, OutputFormat::Json) {
+        let payload = config_explain_json(&explain, config, args.show_secrets);
         return Ok(CliCommandResult::json(payload));
     }
 
     Ok(CliCommandResult::text(render_config_explain_text(
         &explain,
-        context.config,
+        config,
         args.show_secrets,
     )))
 }
