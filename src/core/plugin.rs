@@ -774,7 +774,9 @@ impl DescribeV1 {
                 self.protocol_version
             ));
         }
-        canonical_plugin_id(&self.plugin_id)?;
+        if canonical_plugin_id(&self.plugin_id)? != self.plugin_id {
+            return Err("plugin_id must not have leading or trailing whitespace".to_string());
+        }
         for command in &self.commands {
             validate_command(command)?;
         }
@@ -1364,7 +1366,9 @@ impl From<&DescribeSuggestionV1> for ValueChoice {
 }
 
 fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
-    canonical_plugin_command_name(&command.name)?;
+    if canonical_plugin_command_name(&command.name)? != command.name {
+        return Err("command name must not have leading or trailing whitespace".to_string());
+    }
     if let Some(auth) = &command.auth {
         validate_command_auth(auth)?;
     }

@@ -1049,6 +1049,12 @@ fn start_describe_with_cache(
     let failure_key = (key.clone(), (size, mtime_secs, mtime_nanos));
 
     if let Some(entry) = find_cached_describe(&cache.file, &key, size, mtime_secs, mtime_nanos) {
+        if let Err(reason) = entry.describe.validate_v1() {
+            return Ok(PendingDescribe::Failed(format!(
+                "invalid describe payload from {}: {reason}",
+                path.display()
+            )));
+        }
         tracing::trace!(path = %path.display(), "describe cache hit");
         return Ok(PendingDescribe::Ready(Some(entry.describe.clone())));
     }
