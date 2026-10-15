@@ -7,6 +7,7 @@ use regex::Regex;
 use crate::dsl::{
     eval::{
         matchers::{contains_case_insensitive, eq_case_insensitive, render_value},
+        numeric::{integer_value, parse_integer},
         resolve::{is_truthy, resolve_values},
     },
     parse::key_spec::{ExactMode, KeySpec},
@@ -296,31 +297,19 @@ fn matches_scalar(value: &serde_json::Value, operator: Operator, rhs: &Compariso
 }
 
 fn compare_numbers(left: &serde_json::Value, rhs: &str, operator: Operator) -> bool {
-    let left_num = value_to_f64(left);
-    let right_num = rhs.parse::<f64>().ok();
-    if let (Some(left_num), Some(right_num)) = (left_num, right_num) {
-        return match operator {
-            Operator::Gt => left_num > right_num,
-            Operator::Ge => left_num >= right_num,
-            Operator::Lt => left_num < right_num,
-            Operator::Le => left_num <= right_num,
-            _ => false,
-        };
-    }
+    let ordering = integer_value(left)
+        .zip(parse_integer(rhs))
+        .map(|(left, right)| left.cmp(&right))
+        .or_else(|| value_to_f64(left)?.partial_cmp(&rhs.parse::<f64>().ok()?))
+        .or_else(|| Some(value_to_timestamp(left)?.cmp(&parse_timestamp(rhs)?)));
 
-    let left_time = value_to_timestamp(left);
-    let right_time = parse_timestamp(rhs);
-    if let (Some(left_time), Some(right_time)) = (left_time, right_time) {
-        return match operator {
-            Operator::Gt => left_time > right_time,
-            Operator::Ge => left_time >= right_time,
-            Operator::Lt => left_time < right_time,
-            Operator::Le => left_time <= right_time,
-            _ => false,
-        };
-    }
-
-    false
+    ordering.is_some_and(|ordering| match operator {
+        Operator::Gt => ordering.is_gt(),
+        Operator::Ge => ordering.is_ge(),
+        Operator::Lt => ordering.is_lt(),
+        Operator::Le => ordering.is_le(),
+        _ => false,
+    })
 }
 
 fn compare_text_or_bool(left: &serde_json::Value, rhs: &ComparisonValue) -> bool {

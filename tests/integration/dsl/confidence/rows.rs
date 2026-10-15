@@ -101,9 +101,9 @@ fn grouped_pipeline_filter_then_aggregate_uses_member_rows_not_headers() {
 
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].groups["dept"], json!("eng"));
-    assert_eq!(groups[0].aggregates["total"], json!(50.0));
+    assert_eq!(groups[0].aggregates["total"], json!(50));
     assert_eq!(groups[1].groups["dept"], json!("sales"));
-    assert_eq!(groups[1].aggregates["total"], json!(100.0));
+    assert_eq!(groups[1].aggregates["total"], json!(100));
 }
 
 // Protects the "no matches" end state for a composed pipeline so later stages
@@ -143,7 +143,7 @@ fn grouped_pipeline_can_collapse_back_to_ranked_summary_rows() {
         panic!("expected summary rows");
     };
 
-    assert_eq!(rows, vec![row(json!({"dept": "sales", "total": 130.0}))]);
+    assert_eq!(rows, vec![row(json!({"dept": "sales", "total": 130}))]);
 }
 
 // A bare quick match keeps the complete matching row. Use `P` when the caller

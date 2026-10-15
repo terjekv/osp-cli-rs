@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::dsl::{
-    eval::{matchers::fold_case, resolve::resolve_first_value},
+    eval::{matchers::fold_case, numeric::integer_value, resolve::resolve_first_value},
     parse::key_spec::KeySpec,
     verbs::common::parse_stage_words,
 };
@@ -217,7 +217,9 @@ pub(super) fn compare_auto(left: &Value, right: &Value) -> Ordering {
     // Classification must depend on each value, never on its comparison
     // partner: pairwise numeric/text fallback produces ordering cycles.
     match (to_f64(left), to_f64(right)) {
-        (Some(left), Some(right)) => left.total_cmp(&right),
+        (Some(left_num), Some(right_num)) => {
+            compare_numeric_values(left, right, left_num, right_num)
+        }
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => compare_ip(left, right),
@@ -226,7 +228,9 @@ pub(super) fn compare_auto(left: &Value, right: &Value) -> Ordering {
 
 fn compare_numbers(left: &Value, right: &Value) -> Ordering {
     match (to_f64(left), to_f64(right)) {
-        (Some(left_num), Some(right_num)) => left_num.total_cmp(&right_num),
+        (Some(left_num), Some(right_num)) => {
+            compare_numeric_values(left, right, left_num, right_num)
+        }
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => to_string_normalized(left).cmp(&to_string_normalized(right)),
@@ -239,6 +243,13 @@ fn compare_ip(left: &Value, right: &Value) -> Ordering {
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => to_string_normalized(left).cmp(&to_string_normalized(right)),
+    }
+}
+
+fn compare_numeric_values(left: &Value, right: &Value, left_num: f64, right_num: f64) -> Ordering {
+    match (integer_value(left), integer_value(right)) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        _ => left_num.total_cmp(&right_num),
     }
 }
 

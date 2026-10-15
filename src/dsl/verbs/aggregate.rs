@@ -7,7 +7,10 @@ use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::dsl::{
-    eval::resolve::{resolve_values, resolve_values_truthy},
+    eval::{
+        numeric::integer_value,
+        resolve::{resolve_values, resolve_values_truthy},
+    },
     parse::key_spec::KeySpec,
     verbs::common::{parse_alias_after_as, parse_stage_words},
 };
@@ -182,7 +185,7 @@ fn aggregate_rows(rows: &[Row], spec: &AggregateSpec) -> Value {
 
     match spec.function {
         AggregateFn::Count => Value::from(count_values(&values) as i64),
-        AggregateFn::Sum => Value::from(sum_values(&values)),
+        AggregateFn::Sum => sum_values(&values),
         AggregateFn::Avg => {
             let numbers = numeric_values(&values);
             if numbers.is_empty() {
@@ -229,20 +232,39 @@ fn count_values(values: &[Value]) -> usize {
     values.iter().filter(|value| !value.is_null()).count()
 }
 
-fn sum_values(values: &[Value]) -> f64 {
-    numeric_values(values).iter().sum()
+fn sum_values(values: &[Value]) -> Value {
+    let mut integer_sum = Some(0i128);
+    let mut sum = 0.0;
+    for value in values {
+        let Some(number) = numeric_value(value) else {
+            continue;
+        };
+        sum += number;
+        integer_sum = integer_sum
+            .zip(integer_value(value))
+            .and_then(|(total, integer)| total.checked_add(integer));
+    }
+    integer_sum
+        .and_then(|total| {
+            i64::try_from(total)
+                .map(Value::from)
+                .or_else(|_| u64::try_from(total).map(Value::from))
+                .ok()
+        })
+        .unwrap_or_else(|| Value::from(sum))
 }
 
 fn numeric_values(values: &[Value]) -> Vec<f64> {
-    values
-        .iter()
-        .filter_map(|value| match value {
-            Value::Number(number) => number.as_f64(),
-            Value::String(text) => text.parse::<f64>().ok(),
-            Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-            _ => None,
-        })
-        .collect()
+    values.iter().filter_map(numeric_value).collect()
+}
+
+fn numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
+        _ => None,
+    }
 }
 
 fn min_value(values: &[Value]) -> Option<Value> {

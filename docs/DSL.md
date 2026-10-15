@@ -153,6 +153,8 @@ order, for example `S size desc AS num`. A missing sort field in a nonempty
 selection is an error. Empty input sorts successfully. Missing values sort
 last; numeric-looking values sort numerically under automatic casting.
 Text sorting uses the same Unicode case folding as case-insensitive filtering.
+Sorts, ordered filters and minimum/maximum compare supported integers exactly.
+Comparisons involving floating-point values use floating-point ordering.
 
 Ordered filters recognize RFC3339 timestamps and timezone-naive dates/times.
 Naive values use the machine's local timezone. Ambiguous or nonexistent local
@@ -211,6 +213,8 @@ produces no groups.
 
 `A count field` and `A count(field)` count non-null field values. Use `AS`
 to name an aggregate, for example `A count AS total` to count all rows.
+Integer-only sums stay integers while their total fits the JSON i64/u64 range;
+larger totals and sums containing floating-point inputs use floating point.
 
 ## Human tables
 

@@ -197,7 +197,7 @@ fn structural_six_stage_filter_project_group_aggregate_sort_limit_pipeline() {
 
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].groups["dept"], json!("sales"));
-    assert_eq!(groups[0].aggregates["revenue"], json!(250.0));
+    assert_eq!(groups[0].aggregates["revenue"], json!(250));
     assert_eq!(groups[1].groups["dept"], json!("eng"));
-    assert_eq!(groups[1].aggregates["revenue"], json!(400.0));
+    assert_eq!(groups[1].aggregates["revenue"], json!(400));
 }

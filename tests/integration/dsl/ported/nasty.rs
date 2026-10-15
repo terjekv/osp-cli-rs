@@ -82,7 +82,7 @@ fn nasty_group_filter_aggregate_keeps_only_matching_bucket() {
 
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].groups["dept"], json!("sales"));
-    assert_eq!(groups[0].aggregates["total"], json!(300.0));
+    assert_eq!(groups[0].aggregates["total"], json!(300));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn nasty_group_alias_aggregate_sort_handles_renamed_headers() {
 
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].groups["department"], json!("eng"));
-    assert_eq!(groups[0].aggregates["total"], json!(50.0));
+    assert_eq!(groups[0].aggregates["total"], json!(50));
     assert_eq!(groups[1].groups["department"], json!("sales"));
-    assert_eq!(groups[1].aggregates["total"], json!(300.0));
+    assert_eq!(groups[1].aggregates["total"], json!(300));
 }
