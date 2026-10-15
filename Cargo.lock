@@ -2184,6 +2184,7 @@ dependencies = [
  "terminal_size",
  "thiserror 2.0.20",
  "toml",
+ "toml_edit 0.22.27",
  "tracing",
  "tracing-subscriber",
  "unicode-width 0.2.2",

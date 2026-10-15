@@ -149,7 +149,8 @@ format = "json"
             .and_then(|value| value.get("repl"))
             .and_then(|value| value.get("profile"))
             .and_then(|value| value.get("tsd"))
-            .is_none()
+            .and_then(toml::Value::as_table)
+            .is_some_and(toml::value::Table::is_empty)
     );
 }
 
@@ -274,7 +275,11 @@ format = "json"
     .expect("unset should succeed");
     let payload = std::fs::read_to_string(&prune_path).expect("config should be readable");
     let root: toml::Value = payload.parse().expect("written config should stay valid");
-    assert!(root.get("terminal").is_none());
+    assert!(
+        root["terminal"]["repl"]["profile"]["ops"]
+            .as_table()
+            .is_some_and(toml::value::Table::is_empty)
+    );
 }
 
 #[cfg_attr(miri, ignore = "config store filesystem integration test")]

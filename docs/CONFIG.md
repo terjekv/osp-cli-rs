@@ -223,13 +223,17 @@ ui.format = "table"
 
 Notes:
 
-- The profile list is derived from the `[profile.*]` tables.
+- The profile list is derived from the `[profile.*]` tables. Removing the last
+  value from a profile keeps its declaration so it remains selectable.
 - Unscoped keys live in `[default]`.
 - Bootstrap keys such as `profile.default` may be set in `[default]` and
   `terminal.<term>`.
 - Bootstrap keys such as `profile.default` must not be set in `[profile.*]` or
   `terminal.<term>.profile.<name>`.
 - Fully scoped values use `terminal.<term>.profile.<name>`.
+
+Config edits preserve comments and formatting outside the changed values, follow
+existing symlinks to their targets, and retain existing config-file permissions.
 
 ## Environment Variable Mapping
 
