@@ -1029,7 +1029,7 @@ impl ConfigSchema {
 
     /// Rejects read-only keys for user-supplied config input.
     pub fn validate_writable_key(&self, key: &str) -> Result<(), ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         validate_plugin_config_key(&normalized)?;
         if let Some(entry) = self.entries.get(&normalized)
             && !entry.writable()
@@ -1054,7 +1054,7 @@ impl ConfigSchema {
         key: &str,
         value: &ConfigValue,
     ) -> Result<ConfigValue, ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         if !self.is_known_key(&normalized) {
             return Err(ConfigError::UnknownConfigKeys {
                 keys: vec![normalized],
@@ -1069,7 +1069,7 @@ impl ConfigSchema {
 
     /// Returns bootstrap metadata for the key, if it has bootstrap semantics.
     pub fn bootstrap_key_spec(&self, key: &str) -> Option<BootstrapKeySpec> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         self.entries
             .get(&normalized)
             .and_then(SchemaEntry::bootstrap_spec)
@@ -1084,7 +1084,7 @@ impl ConfigSchema {
 
     /// Returns the schema-owned description for a key, if one exists.
     pub fn doc_for_key(&self, key: &str) -> Option<&'static str> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         self.entries.get(&normalized).and_then(SchemaEntry::doc)
     }
 
@@ -1207,7 +1207,7 @@ impl ConfigSchema {
         key: &str,
         value: &ConfigValue,
     ) -> Result<(), ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         let Some(entry) = self.entries.get(&normalized) else {
             return Ok(());
         };
@@ -2038,10 +2038,11 @@ impl ResolvedConfig {
 
     /// Returns the resolved alias entry for a key.
     pub fn get_alias_entry(&self, key: &str) -> Option<&ResolvedValue> {
-        let normalized = if key.trim().to_ascii_lowercase().starts_with("alias.") {
-            key.trim().to_ascii_lowercase()
+        let normalized = normalize_identifier(key);
+        let normalized = if normalized.starts_with("alias.") {
+            normalized
         } else {
-            format!("alias.{}", key.trim().to_ascii_lowercase())
+            format!("alias.{normalized}")
         };
         self.aliases.get(&normalized)
     }
@@ -2108,7 +2109,7 @@ pub fn is_bootstrap_only_key(key: &str) -> bool {
 /// assert!(!is_alias_key("ui.format"));
 /// ```
 pub fn is_alias_key(key: &str) -> bool {
-    key.trim().to_ascii_lowercase().starts_with("alias.")
+    normalize_identifier(key).starts_with("alias.")
 }
 
 /// Validates that a key can be written in the provided scope.
@@ -2369,7 +2370,7 @@ fn validate_allowed_values(
 }
 
 fn dynamic_schema_key_kind(key: &str) -> Option<DynamicSchemaKeyKind> {
-    let normalized = key.trim().to_ascii_lowercase();
+    let normalized = normalize_identifier(key);
     // `user.display_names.<user>`: the name shown for one `-u` user.
     if let Some(user) = normalized.strip_prefix("user.display_names.") {
         return (!user.trim().is_empty() && !user.contains('.'))
