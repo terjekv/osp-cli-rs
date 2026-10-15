@@ -143,9 +143,9 @@ pub(crate) fn run_alias_command(
     args: AliasArgs,
 ) -> Result<CliCommandResult> {
     match args.command {
-        AliasCommands::List(list) => Ok(CliCommandResult::output(
-            rows_to_output_result(alias_list_rows(context.read(), list)),
-            None,
+        AliasCommands::List(list) => Ok(super::rows_with_empty_info(
+            alias_list_rows(context.read(), list),
+            "No aliases configured. Add one with `alias add NAME TEMPLATE`.",
         )),
         AliasCommands::Add(add) => run_alias_add(context, add),
         AliasCommands::Remove(remove) => run_alias_remove(context, remove),
@@ -153,7 +153,7 @@ pub(crate) fn run_alias_command(
 }
 
 fn alias_list_rows(context: ConfigReadContext<'_>, args: AliasListArgs) -> Vec<Row> {
-    let rows = context
+    context
         .config
         .aliases()
         .iter()
@@ -180,13 +180,7 @@ fn alias_list_rows(context: ConfigReadContext<'_>, args: AliasListArgs) -> Vec<R
             }
             row.build()
         })
-        .collect::<Vec<_>>();
-    if rows.is_empty() {
-        return vec![crate::row! {
-            "message" => "No aliases configured. Add one with `alias add NAME TEMPLATE`.",
-        }];
-    }
-    rows
+        .collect()
 }
 
 fn run_alias_add(

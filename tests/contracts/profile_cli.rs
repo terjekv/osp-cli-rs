@@ -58,7 +58,7 @@ ui.format = "json"
         .args(["--profile", "tsd", "plugins", "list"]);
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("No plugins discovered."));
+        .stdout(predicate::str::contains("[]"));
 }
 
 #[cfg(unix)]

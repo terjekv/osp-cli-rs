@@ -57,9 +57,9 @@ pub(crate) fn run_plugins_command(
         PluginsCommands::List => {
             let mut plugins = plugin_manager.list_plugins();
             plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
-            Ok(CliCommandResult::output(
-                rows_to_output_result(plugin_list_rows(&plugins)),
-                None,
+            Ok(super::rows_with_empty_info(
+                plugin_list_rows(&plugins),
+                "No plugins discovered.",
             ))
         }
         PluginsCommands::Commands => {
@@ -70,17 +70,17 @@ pub(crate) fn run_plugins_command(
                 .filter(|entry| context.auth.is_external_command_visible(&entry.name))
                 .collect::<Vec<_>>();
             commands.sort_by(|a, b| a.name.cmp(&b.name));
-            Ok(CliCommandResult::output(
-                rows_to_output_result(command_catalog_rows(&commands)),
-                None,
+            Ok(super::rows_with_empty_info(
+                command_catalog_rows(&commands),
+                "No plugin commands discovered.",
             ))
         }
-        PluginsCommands::Config(PluginConfigArgs { plugin_id }) => Ok(CliCommandResult::output(
-            rows_to_output_result(plugin_config_rows(
+        PluginsCommands::Config(PluginConfigArgs { plugin_id }) => Ok(super::rows_with_empty_info(
+            plugin_config_rows(
                 &plugin_id,
                 &projected_plugin_config_entries(context, &plugin_id),
-            )),
-            None,
+            ),
+            "No app-owned plugin config is projected for this plugin.",
         )),
         PluginsCommands::Refresh => {
             plugin_manager.invalidate_describe_cache();
@@ -349,13 +349,6 @@ fn projected_plugin_config_entries(
 }
 
 fn plugin_list_rows(plugins: &[PluginSummary]) -> Vec<Row> {
-    if plugins.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "message" => "No plugins discovered.",
-        }];
-    }
-
     plugins
         .iter()
         .map(|plugin| {
@@ -389,13 +382,6 @@ fn plugin_list_rows(plugins: &[PluginSummary]) -> Vec<Row> {
 }
 
 fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
-    if commands.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "message" => "No plugin commands discovered.",
-        }];
-    }
-
     commands
         .iter()
         .map(|command| {
@@ -489,14 +475,6 @@ fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
 }
 
 fn plugin_config_rows(plugin_id: &str, entries: &[crate::app::PluginConfigEntry]) -> Vec<Row> {
-    if entries.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "plugin_id" => plugin_id.to_string(),
-            "message" => "No app-owned plugin config is projected for this plugin.",
-        }];
-    }
-
     entries
         .iter()
         .map(|entry| {
@@ -620,19 +598,13 @@ mod tests {
     #[test]
     fn plugin_rows_render_empty_states_unit() {
         let list = plugin_list_rows(&[]);
-        assert_eq!(row_str(&list[0], "status"), Some("empty"));
-        assert_eq!(row_str(&list[0], "message"), Some("No plugins discovered."));
+        assert!(list.is_empty());
 
         let commands = command_catalog_rows(&[]);
-        assert_eq!(row_str(&commands[0], "status"), Some("empty"));
-        assert_eq!(
-            row_str(&commands[0], "message"),
-            Some("No plugin commands discovered.")
-        );
+        assert!(commands.is_empty());
 
         let config = plugin_config_rows("demo", &[]);
-        assert_eq!(row_str(&config[0], "status"), Some("empty"));
-        assert_eq!(row_str(&config[0], "plugin_id"), Some("demo"));
+        assert!(config.is_empty());
     }
 
     #[test]
