@@ -622,9 +622,6 @@ fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> Comm
             arg.help = None;
         }
         for flag in &mut child.flags {
-            if flag.long.as_deref() == Some("permanent") {
-                flag.long = Some("save".to_string());
-            }
             flag.help = match flag.long.as_deref() {
                 Some("sources") => Some("Include source layers"),
                 Some("raw") => Some("Show raw values"),
@@ -636,7 +633,7 @@ fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> Comm
                 Some("session") => Some("Change only this in-memory session"),
                 Some("config") => Some("Use the regular config store"),
                 Some("secrets") => Some("Use the secrets store"),
-                Some("save") => Some("Persist immediately after validation"),
+                Some("permanent") | Some("save") => Some("Persist immediately after validation"),
                 Some("dry-run") => Some("Show the write plan without changing config"),
                 Some("yes") => Some("Skip interactive confirmation"),
                 Some("explain") => Some("Explain the resolved write targets"),

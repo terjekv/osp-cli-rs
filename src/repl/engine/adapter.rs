@@ -109,6 +109,13 @@ impl Completer for ReplCompleter {
             hidden_suggestions
                 .retain(|value| !value.eq_ignore_ascii_case(cursor_state.token_stub.as_str()));
         }
+        if cursor_state.token_stub.starts_with("--") {
+            hidden_suggestions.retain(|value| {
+                !ranked
+                    .iter()
+                    .any(|item| item.text.eq_ignore_ascii_case(value))
+            });
+        }
 
         let mut suggestions = ranked
             .into_iter()
