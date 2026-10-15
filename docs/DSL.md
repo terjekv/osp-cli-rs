@@ -159,7 +159,9 @@ Comparisons involving floating-point values use floating-point ordering.
 Ordered filters recognize RFC3339 timestamps and timezone-naive dates/times.
 Naive values use the machine's local timezone. Ambiguous or nonexistent local
 DST times are rejected with guidance to supply an offset. Prefer explicit
-RFC3339 offsets in scripts:
+RFC3339 offsets in scripts. Comparisons preserve fractional seconds. A
+date-only `<=` bound includes the whole local day; a `>=` bound starts at
+local midnight:
 
 ```text
 F created_at >= 2026-09-25T10:00:00+02:00

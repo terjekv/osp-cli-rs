@@ -199,7 +199,7 @@ fn parse_filter_spec(spec: &str) -> Result<ParsedFilterSpec> {
         operator,
         Operator::Gt | Operator::Ge | Operator::Lt | Operator::Le
     ) && value.text.get(..10).and_then(parse_date).is_some()
-        && parse_timestamp(&value.text).is_none()
+        && parse_timestamp(&value.text, false).is_none()
     {
         return Err(anyhow!(
             "F: invalid or ambiguous local timestamp; specify an RFC3339 time with Z or an explicit UTC offset"
@@ -301,7 +301,9 @@ fn compare_numbers(left: &serde_json::Value, rhs: &str, operator: Operator) -> b
         .zip(parse_integer(rhs))
         .map(|(left, right)| left.cmp(&right))
         .or_else(|| value_to_f64(left)?.partial_cmp(&rhs.parse::<f64>().ok()?))
-        .or_else(|| Some(value_to_timestamp(left)?.cmp(&parse_timestamp(rhs)?)));
+        .or_else(|| {
+            Some(value_to_timestamp(left)?.cmp(&parse_timestamp(rhs, operator == Operator::Le)?))
+        });
 
     ordering.is_some_and(|ordering| match operator {
         Operator::Gt => ordering.is_gt(),
@@ -346,19 +348,24 @@ fn value_to_f64(value: &serde_json::Value) -> Option<f64> {
     }
 }
 
-fn value_to_timestamp(value: &serde_json::Value) -> Option<i64> {
+fn value_to_timestamp(value: &serde_json::Value) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     match value {
-        serde_json::Value::String(text) => parse_timestamp(text),
-        serde_json::Value::Number(number) => number.as_i64(),
+        serde_json::Value::String(text) => parse_timestamp(text, false),
+        serde_json::Value::Number(number) => {
+            chrono::DateTime::from_timestamp(number.as_i64()?, 0).map(|time| time.fixed_offset())
+        }
         _ => None,
     }
 }
 
-pub(crate) fn parse_timestamp(input: &str) -> Option<i64> {
+pub(crate) fn parse_timestamp(
+    input: &str,
+    end_of_day: bool,
+) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
     let text = input.trim();
     if let Ok(time) = DateTime::parse_from_rfc3339(text) {
-        return Some(time.timestamp());
+        return Some(time);
     }
     let naive = [
         "%Y-%m-%d %H:%M:%S%.f",
@@ -368,11 +375,18 @@ pub(crate) fn parse_timestamp(input: &str) -> Option<i64> {
     ]
     .iter()
     .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok())
-    .or_else(|| parse_date(text)?.and_hms_opt(0, 0, 0))?;
+    .or_else(|| {
+        let date = parse_date(text)?;
+        if end_of_day {
+            date.and_hms_nano_opt(23, 59, 59, 999_999_999)
+        } else {
+            date.and_hms_opt(0, 0, 0)
+        }
+    })?;
     Local
         .from_local_datetime(&naive)
         .single()
-        .map(|time| time.timestamp())
+        .map(|time| time.fixed_offset())
 }
 
 fn parse_date(input: &str) -> Option<chrono::NaiveDate> {
@@ -477,11 +491,12 @@ mod tests {
     #[test]
     fn parses_timestamps_for_ordered_comparison() {
         assert_eq!(
-            parse_timestamp("2026-02-13"),
-            parse_timestamp("2026-02-13 00:00:00")
+            parse_timestamp("2026-02-13", false),
+            parse_timestamp("2026-02-13 00:00:00", false)
         );
         assert!(
-            parse_timestamp("2026-02-13T20:00:00+00:00") > parse_timestamp("2026-02-13 00:00:00")
+            parse_timestamp("2026-02-13T20:00:00+00:00", false)
+                > parse_timestamp("2026-02-13 00:00:00", false)
         );
     }
 

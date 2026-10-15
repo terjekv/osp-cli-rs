@@ -235,8 +235,8 @@ pub(crate) fn run_history_repl_command(
 fn parse_history_timestamp(flag: &str, value: Option<&str>) -> Result<Option<i64>> {
     value
         .map(|value| {
-            crate::dsl::parse_timestamp(value)
-                .and_then(|seconds| seconds.checked_mul(1_000))
+            crate::dsl::parse_timestamp(value, flag == "--until")
+                .map(|time| time.timestamp_millis())
                 .ok_or_else(|| {
                     miette!("invalid {flag} timestamp `{value}`; {HISTORY_TIMESTAMP_EXAMPLES}")
                 })
