@@ -167,12 +167,12 @@ mod tests {
     #[test]
     fn markdown_template_parses_valid_osp_code_blocks_as_semantic_data_unit() {
         let document = parse(
-            "## Keybindings\n\n```osp\n[{\"name\":\"Ctrl-D\",\"short_help\":\"exit\"}]\n```\n",
+            "## Keybindings\n\n```osp\n[{\"name\":\"Ctrl-D\",\"description\":\"exit\"}]\n```\n",
             &Document::default(),
         );
         assert!(
             matches!(&document.blocks[0], DocBlock::Section { title, blocks, .. }
-            if title == "Keybindings" && blocks == &[DocBlock::Data { value: json!([{"name":"Ctrl-D","short_help":"exit"}]) }])
+            if title == "Keybindings" && blocks == &[DocBlock::Data { value: json!([{"name":"Ctrl-D","description":"exit"}]) }])
         );
     }
 

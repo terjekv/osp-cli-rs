@@ -127,7 +127,6 @@ fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::Rend
         help_chrome: crate::ui::HelpChromeSettings::default(),
         chrome_frame: crate::ui::section_chrome::SectionFrameStyle::Top,
         ruled_section_policy: crate::ui::section_chrome::RuledSectionPolicy::Shared,
-        guide_default_format: crate::ui::GuideDefaultFormat::Guide,
         runtime: crate::ui::RenderRuntime {
             stdout_is_tty: matches!(resolved.backend, crate::ui::RenderBackend::Rich),
             terminal: None,
@@ -154,8 +153,7 @@ mod tests {
     use crate::dsl::apply_output_pipeline;
     use crate::ui::style::StyleOverrides;
     use crate::ui::{
-        GuideDefaultFormat, RenderBackend, RenderSettings, ResolvedRenderSettings,
-        TableBorderStyle, TableOverflow,
+        RenderBackend, RenderSettings, ResolvedRenderSettings, TableBorderStyle, TableOverflow,
     };
     use clap::Parser;
 
@@ -183,7 +181,6 @@ mod tests {
                 section_spacing: 1,
             },
             chrome_frame: frame,
-            guide_default_format: GuideDefaultFormat::Guide,
         }
     }
 
@@ -305,31 +302,18 @@ mod tests {
     fn guide_rendering_prefers_semantic_help_until_explicit_format_wins_unit() {
         let guide = Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n");
 
-        let mut guide_default = RenderSettings::test_plain(OutputFormat::Json);
-        guide_default.guide_default_format = GuideDefaultFormat::Guide;
+        let configured = RenderSettings::test_plain(OutputFormat::Json);
         let rendered = crate::ui::render_structured_output_with_source_document(
             &guide.to_output_result(),
             Some(&guide),
-            &guide_default,
+            &configured,
             guide_render_layout(),
         );
         assert!(rendered.contains("Usage:"));
-        assert!(!rendered.trim_start().starts_with('['));
-
-        let mut inherited = RenderSettings::test_plain(OutputFormat::Json);
-        inherited.guide_default_format = GuideDefaultFormat::Inherit;
-        let rendered = crate::ui::render_structured_output_with_source_document(
-            &guide.to_output_result(),
-            Some(&guide),
-            &inherited,
-            guide_render_layout(),
-        );
-        assert!(rendered.contains("Usage"));
         assert!(rendered.contains("list"));
         assert!(!rendered.trim_start().starts_with('['));
 
         let mut explicit = RenderSettings::test_plain(OutputFormat::Json);
-        explicit.guide_default_format = GuideDefaultFormat::Guide;
         explicit.format_explicit = true;
         let rendered = crate::ui::render_structured_output_with_source_document(
             &guide.to_output_result(),
@@ -346,8 +330,7 @@ mod tests {
         let from_text =
             Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n")
                 .to_output_result();
-        let mut rehydrated = RenderSettings::test_plain(OutputFormat::Json);
-        rehydrated.guide_default_format = GuideDefaultFormat::Guide;
+        let rehydrated = RenderSettings::test_plain(OutputFormat::Json);
         let rendered = crate::ui::render_structured_output_with_document_options(
             &from_text,
             &rehydrated,
@@ -362,8 +345,7 @@ mod tests {
         assert!(!rendered.trim_start().starts_with('['));
 
         let filtered = filtered_guide_output();
-        let mut semantic = RenderSettings::test_plain(OutputFormat::Auto);
-        semantic.guide_default_format = GuideDefaultFormat::Guide;
+        let semantic = RenderSettings::test_plain(OutputFormat::Auto);
         let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
             &semantic,
@@ -379,7 +361,6 @@ mod tests {
         assert!(!rendered.trim_start().starts_with('['));
 
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
-        explicit_json.guide_default_format = GuideDefaultFormat::Guide;
         explicit_json.format_explicit = true;
         let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
@@ -397,7 +378,6 @@ mod tests {
 
         let mut markdown = RenderSettings::test_plain(OutputFormat::Markdown);
         markdown.format_explicit = true;
-        markdown.guide_default_format = GuideDefaultFormat::Guide;
         let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
             &markdown,

@@ -12,10 +12,9 @@ use unicode_width::UnicodeWidthStr;
 use super::doc::{Block, SectionTitleChrome};
 use super::settings::TableBorderOverride;
 use super::{
-    GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings,
-    StructuredDocumentRenderOptions, plan_output, render_document, render_document_with_layout,
-    render_output, render_output_for_copy, render_structured_output_with_document_options,
-    resolve_settings,
+    HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings, StructuredDocumentRenderOptions,
+    plan_output, render_document, render_document_with_layout, render_output,
+    render_output_for_copy, render_structured_output_with_document_options, resolve_settings,
 };
 
 #[test]
@@ -25,13 +24,11 @@ fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
             .to_output_result();
 
     let mut inherited_json = RenderSettings::test_plain(OutputFormat::Json);
-    inherited_json.guide_default_format = GuideDefaultFormat::Inherit;
     inherited_json.format_explicit = false;
     let inherited_plan = plan_output(&output, &inherited_json, super::RenderProfile::Normal);
     assert_eq!(inherited_plan.format, OutputFormat::Auto);
 
     let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
-    explicit_json.guide_default_format = GuideDefaultFormat::Guide;
     explicit_json.format_explicit = true;
     let explicit_plan = plan_output(&output, &explicit_json, super::RenderProfile::Normal);
     assert_eq!(explicit_plan.format, OutputFormat::Json);
@@ -906,8 +903,8 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
                 "Shortcuts",
                 vec![DocBlock::Data {
                     value: json!([
-                        {"name": "list", "short_help": "List history"},
-                        {"name": "clear", "short_help": "Clear history"}
+                        {"name": "list", "description": "List history"},
+                        {"name": "clear", "description": "Clear history"}
                     ]),
                 }],
             ),

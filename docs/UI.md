@@ -30,6 +30,10 @@ Selection order is:
 2. a command/plugin recommendation attached to the output
 3. automatic inference from the output shape
 
+Help and intro documents are the exception: they keep their document layout
+unless `--format` is given for that invocation, so a configured `ui.format`
+does not turn help into JSON.
+
 When `format=auto`, the current rules are:
 
 - grouped output renders as `table`
@@ -39,8 +43,8 @@ When `format=auto`, the current rules are:
 
 Help and intro producers build `core::document::Document`: ordered sections,
 paragraphs, named entries, lists, and data blocks. `auto` renders these as human
-documents using `ui.help.layout`. Ordinary records never become documents from
-field names such as `notes` or `commands`.
+documents laid out for the active `ui.presentation`. Ordinary records never
+become documents from field names such as `notes` or `commands`.
 
 Unstaged `--json` emits the document object, for example
 `{"blocks":[{"section":"Options","blocks":[{"entries":[{"name":"--json","description":"Emit JSON"}]}]}]}`.

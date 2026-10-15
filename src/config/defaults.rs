@@ -44,8 +44,6 @@ pub const DEFAULT_UI_INDENT: i64 = 2;
 pub const DEFAULT_UI_PRESENTATION: &str = "expressive";
 /// Default paging policy for tall one-shot terminal output.
 pub const DEFAULT_UI_PAGER: &str = "auto";
-/// Default semantic guide-format preference.
-pub const DEFAULT_UI_GUIDE_DEFAULT_FORMAT: &str = "guide";
 /// Default grouped-message layout mode.
 pub const DEFAULT_UI_MESSAGES_LAYOUT: &str = "grouped";
 /// Default section chrome frame style.
@@ -95,7 +93,6 @@ const LITERAL_DEFAULTS: &[LiteralDefault] = &[
     LiteralDefault::string("ui.presentation", DEFAULT_UI_PRESENTATION),
     LiteralDefault::string("ui.pager", DEFAULT_UI_PAGER),
     LiteralDefault::string("ui.help.level", "inherit"),
-    LiteralDefault::string("ui.guide.default_format", DEFAULT_UI_GUIDE_DEFAULT_FORMAT),
     LiteralDefault::string("ui.messages.layout", DEFAULT_UI_MESSAGES_LAYOUT),
     LiteralDefault::string("ui.message.verbosity", "success"),
     LiteralDefault::string("ui.chrome.frame", DEFAULT_UI_CHROME_FRAME),

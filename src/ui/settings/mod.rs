@@ -18,28 +18,6 @@ use crate::ui::style;
 use crate::ui::theme;
 use crate::ui::theme::{DEFAULT_THEME_NAME, ThemeDefinition};
 
-/// Default format to use when help/guide payloads are rendered in `auto`
-/// mode.
-///
-/// This keeps guide-like output readable without forcing all non-guide output
-/// away from the normal planner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GuideDefaultFormat {
-    #[default]
-    Guide,
-    Inherit,
-}
-
-impl GuideDefaultFormat {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "guide" => Some(Self::Guide),
-            "inherit" | "none" => Some(Self::Inherit),
-            _ => None,
-        }
-    }
-}
-
 /// Concrete renderer family chosen after settings resolution.
 ///
 /// `Plain` keeps output copy-safe and decoration-light. `Rich` enables the
@@ -244,8 +222,6 @@ impl RenderRuntimeBuilder {
 ///   intent
 /// - `format_explicit` says whether the caller forced the format and therefore
 ///   wants recommendation/auto inference to stop
-/// - `guide_default_format` controls how semantic guide/help payloads behave
-///   when format stays `auto`
 /// - `runtime` carries the ambient facts used to resolve the auto knobs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
@@ -270,7 +246,6 @@ pub struct RenderSettings {
     pub help_chrome: HelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
     pub ruled_section_policy: RuledSectionPolicy,
-    pub guide_default_format: GuideDefaultFormat,
     pub runtime: RenderRuntime,
 }
 
@@ -296,7 +271,6 @@ impl Default for RenderSettings {
             help_chrome: HelpChromeSettings::default(),
             chrome_frame: SectionFrameStyle::Top,
             ruled_section_policy: RuledSectionPolicy::Shared,
-            guide_default_format: GuideDefaultFormat::Guide,
             runtime: RenderRuntime::default(),
         }
     }
@@ -309,10 +283,6 @@ impl RenderSettings {
 
     pub fn test_plain(format: OutputFormat) -> Self {
         RenderSettingsBuilder::plain(format).build()
-    }
-
-    pub fn prefers_guide_rendering(&self) -> bool {
-        !self.format_explicit && matches!(self.guide_default_format, GuideDefaultFormat::Guide)
     }
 }
 
@@ -434,12 +404,6 @@ pub(crate) fn apply_render_config_overrides(
         && let Some(parsed) = RuledSectionPolicy::parse(value)
     {
         settings.ruled_section_policy = parsed;
-    }
-
-    if let Some(value) = config.get_string("ui.guide.default_format")
-        && let Some(parsed) = GuideDefaultFormat::parse(value)
-    {
-        settings.guide_default_format = parsed;
     }
 
     if settings.width.is_none()
@@ -709,7 +673,6 @@ pub struct ResolvedRenderSettings {
     pub style_overrides: style::StyleOverrides,
     pub help_chrome: ResolvedHelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
-    pub guide_default_format: GuideDefaultFormat,
 }
 
 impl RenderSettings {
@@ -802,7 +765,6 @@ impl RenderSettings {
             style_overrides: self.style_overrides.clone(),
             help_chrome,
             chrome_frame: self.chrome_frame,
-            guide_default_format: self.guide_default_format,
         }
     }
 
@@ -822,9 +784,8 @@ impl RenderSettings {
             return self.format;
         }
 
-        if output.meta.document_rows
-            && (matches!(self.format, OutputFormat::Auto) || self.prefers_guide_rendering())
-        {
+        // Documents keep their layout unless a format is asked for explicitly.
+        if output.meta.document_rows {
             return OutputFormat::Auto;
         }
 
@@ -869,8 +830,8 @@ pub fn resolve_settings(
 #[cfg(test)]
 mod tests {
     use super::{
-        GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderBackend, RenderProfile,
-        RenderRuntime, RenderSettingsBuilder, TableBorderOverride, TableBorderStyle, TableOverflow,
+        HelpChromeSettings, HelpLayout, RenderBackend, RenderProfile, RenderRuntime,
+        RenderSettingsBuilder, TableBorderOverride, TableBorderStyle, TableOverflow,
         UiPresentation, apply_render_config_overrides, config_int, config_usize_override,
         explain_presentation_effect, help_layout_from_config,
     };
@@ -1024,13 +985,6 @@ mod tests {
         assert_eq!(settings.chrome_frame, SectionFrameStyle::Square);
         assert_eq!(settings.table_border, TableBorderStyle::None);
 
-        let config = resolved_config_with_presentation(&[("ui.guide.default_format", "inherit")]);
-        let mut settings = RenderSettings::test_plain(OutputFormat::Json);
-
-        apply_render_config_overrides(&mut settings, &config);
-
-        assert_eq!(settings.guide_default_format, GuideDefaultFormat::Inherit);
-
         let config = resolved_config_with_presentation(&[
             ("ui.help.entry_indent", "4"),
             ("ui.help.entry_gap", "3"),
@@ -1167,10 +1121,6 @@ mod tests {
 
     #[test]
     fn parser_aliases_and_presentation_effects_remain_canonical_unit() {
-        assert_eq!(
-            GuideDefaultFormat::parse("none"),
-            Some(GuideDefaultFormat::Inherit)
-        );
         assert_eq!(
             TableBorderOverride::parse("boxed"),
             Some(TableBorderOverride::Square)

@@ -703,12 +703,6 @@ fn insert_ui_schema_keys(schema: &mut ConfigSchema) {
     );
     insert_builtin_schema_key(
         schema,
-        "ui.guide.default_format",
-        SchemaEntry::string().with_allowed_values(["guide", "inherit", "none"]),
-        "Guide rendering format used by help-like output",
-    );
-    insert_builtin_schema_key(
-        schema,
         "ui.messages.layout",
         SchemaEntry::string().with_allowed_values([
             "full", "compact", "austere", "plain", "none", "grouped", "minimal",

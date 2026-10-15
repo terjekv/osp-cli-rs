@@ -102,12 +102,6 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                         description.into()
                     }];
                 }
-                if row.len() == 3
-                    && row.contains_key("name")
-                    && let Some(description) = row.get("short_help")
-                {
-                    return vec![display_value(description)];
-                }
                 row.iter()
                     .filter(|(key, value)| key.as_str() != "section" && !value.is_null())
                     .map(|(_, value)| display_value(value))
@@ -949,14 +943,14 @@ fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::
     let map = value.as_object()?;
     if map
         .keys()
-        .any(|key| !matches!(key.as_str(), "name" | "short_help"))
+        .any(|key| !matches!(key.as_str(), "name" | "description"))
     {
         return None;
     }
     Some(crate::core::document::DocumentEntry {
         name: map.get("name")?.as_str()?.to_string(),
         description: map
-            .get("short_help")
+            .get("description")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
