@@ -32,31 +32,7 @@ pub(super) struct SearchRoot {
 }
 
 #[derive(Debug, Clone)]
-struct ScannedPluginCandidate {
-    source: PluginSource,
-    executable: PathBuf,
-    file_name: String,
-}
-
-impl ScannedPluginCandidate {
-    fn new(source: PluginSource, executable: PathBuf) -> Self {
-        let file_name = executable
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_string();
-        Self {
-            source,
-            executable,
-            file_name,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 struct SeededPluginCandidate {
-    source: PluginSource,
-    executable: PathBuf,
     plugin: DiscoveredPlugin,
     manifest_entry: Option<ManifestPlugin>,
 }
@@ -137,12 +113,6 @@ impl DiscoveryPolicy {
     }
 }
 
-struct DescribeCacheState<'a> {
-    file: &'a mut DescribeCacheFile,
-    seen_paths: &'a mut HashSet<String>,
-    dirty: &'a mut bool,
-}
-
 struct DescribeCacheSession {
     file: DescribeCacheFile,
     seen_paths: HashSet<String>,
@@ -158,14 +128,6 @@ impl DescribeCacheSession {
             },
             seen_paths: HashSet::new(),
             dirty: false,
-        }
-    }
-
-    fn state(&mut self) -> DescribeCacheState<'_> {
-        DescribeCacheState {
-            file: &mut self.file,
-            seen_paths: &mut self.seen_paths,
-            dirty: &mut self.dirty,
         }
     }
 
@@ -266,7 +228,6 @@ impl PluginManager {
         let mut describe_cache = DescribeCacheSession::load(self);
 
         for root in &roots {
-            let mut describe_cache_state = describe_cache.state();
             let discovered = {
                 let _phase = crate::startup_trace::phase_with_name(|| {
                     format!(
@@ -278,7 +239,7 @@ impl PluginManager {
                 discover_plugins_in_root(
                     root,
                     &mut seen_paths,
-                    &mut describe_cache_state,
+                    &mut describe_cache,
                     self.process_timeout,
                     policy,
                 )
@@ -500,7 +461,7 @@ pub(super) fn discover_root_executables(root: &Path) -> Vec<PathBuf> {
 fn discover_plugins_in_root(
     root: &SearchRoot,
     seen_paths: &mut HashSet<PathBuf>,
-    describe_cache: &mut DescribeCacheState<'_>,
+    describe_cache: &mut DescribeCacheSession,
     process_timeout: Duration,
     policy: DiscoveryPolicy,
 ) -> Vec<DiscoveredPlugin> {
@@ -588,32 +549,22 @@ pub(super) fn assemble_discovered_plugin(
     cache_dirty: &mut bool,
     process_timeout: Duration,
 ) -> DiscoveredPlugin {
-    let mut describe_cache_state = DescribeCacheState {
-        file: describe_cache,
-        seen_paths: seen_describe_paths,
-        dirty: cache_dirty,
+    let mut describe_cache_session = DescribeCacheSession {
+        file: std::mem::take(describe_cache),
+        seen_paths: std::mem::take(seen_describe_paths),
+        dirty: *cache_dirty,
     };
-    finalize_seeded_candidate(
-        seed_plugin_candidate(
-            ScannedPluginCandidate::new(source, executable),
-            manifest_state,
-        ),
+    let plugin = finalize_seeded_candidate(
+        seed_plugin_candidate(source, executable, manifest_state),
         manifest_state,
-        &mut describe_cache_state,
+        &mut describe_cache_session,
         process_timeout,
         DiscoveryPolicy::Passive,
-    )
-}
-
-fn scan_root_candidates(
-    root: &SearchRoot,
-    seen_paths: &mut HashSet<PathBuf>,
-) -> Vec<ScannedPluginCandidate> {
-    discover_root_executables(&root.path)
-        .into_iter()
-        .filter(|path| seen_paths.insert(path.clone()))
-        .map(|executable| ScannedPluginCandidate::new(root.source, executable))
-        .collect()
+    );
+    *describe_cache = describe_cache_session.file;
+    *seen_describe_paths = describe_cache_session.seen_paths;
+    *cache_dirty = describe_cache_session.dirty;
+    plugin
 }
 
 fn seed_root_candidates(
@@ -621,27 +572,27 @@ fn seed_root_candidates(
     manifest_state: &ManifestState,
     seen_paths: &mut HashSet<PathBuf>,
 ) -> Vec<SeededPluginCandidate> {
-    scan_root_candidates(root, seen_paths)
+    discover_root_executables(&root.path)
         .into_iter()
-        .map(|candidate| seed_plugin_candidate(candidate, manifest_state))
+        .filter(|path| seen_paths.insert(path.clone()))
+        .map(|executable| seed_plugin_candidate(root.source, executable, manifest_state))
         .collect()
 }
 
 fn seed_plugin_candidate(
-    candidate: ScannedPluginCandidate,
+    source: PluginSource,
+    executable: PathBuf,
     manifest_state: &ManifestState,
 ) -> SeededPluginCandidate {
-    let manifest_entry = manifest_entry_for_executable(manifest_state, &candidate.file_name);
-    let plugin = seeded_discovered_plugin(
-        candidate.source,
-        candidate.executable.clone(),
-        &candidate.file_name,
-        &manifest_entry,
-    );
+    let file_name = executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let manifest_entry = manifest_entry_for_executable(manifest_state, &file_name);
+    let plugin = seeded_discovered_plugin(source, executable, &file_name, &manifest_entry);
 
     SeededPluginCandidate {
-        source: candidate.source,
-        executable: candidate.executable,
         plugin,
         manifest_entry,
     }
@@ -650,27 +601,39 @@ fn seed_plugin_candidate(
 fn finalize_seeded_candidate(
     mut candidate: SeededPluginCandidate,
     manifest_state: &ManifestState,
-    describe_cache: &mut DescribeCacheState<'_>,
+    describe_cache: &mut DescribeCacheSession,
     process_timeout: Duration,
     policy: DiscoveryPolicy,
 ) -> DiscoveredPlugin {
-    apply_manifest_discovery_issue(
-        &mut candidate.plugin.issue,
+    if let Some(issue) = manifest_discovery_issue(manifest_state, candidate.manifest_entry.as_ref())
+    {
+        super::state::merge_issue(&mut candidate.plugin.issue, issue);
+    }
+    let describe = (|| match describe_eligibility(
+        candidate.plugin.source,
         manifest_state,
         candidate.manifest_entry.as_ref(),
-    );
-    apply_describe_phase(
-        &mut candidate.plugin,
-        DescribePhaseInput {
-            source: candidate.source,
-            manifest_state,
-            manifest_entry: candidate.manifest_entry.as_ref(),
-            executable: &candidate.executable,
+        &candidate.plugin.executable,
+    )? {
+        DescribeEligibility::Allowed => describe_with_cache(
+            &candidate.plugin.executable,
+            candidate.plugin.source,
             policy,
+            describe_cache,
             process_timeout,
-        },
-        describe_cache,
-    );
+        )
+        .map(Some),
+        DescribeEligibility::Skip => Ok(None),
+    })();
+    match describe {
+        Ok(Some(describe)) => apply_describe_metadata(
+            &mut candidate.plugin,
+            &describe,
+            candidate.manifest_entry.as_ref(),
+        ),
+        Ok(None) => {}
+        Err(err) => super::state::merge_issue(&mut candidate.plugin.issue, err.to_string()),
+    }
 
     tracing::debug!(
         plugin_id = %candidate.plugin.plugin_id,
@@ -729,63 +692,6 @@ fn seeded_discovered_plugin(
             .as_ref()
             .map(|entry| entry.enabled_by_default)
             .unwrap_or(true),
-    }
-}
-
-fn apply_manifest_discovery_issue(
-    issue: &mut Option<String>,
-    manifest_state: &ManifestState,
-    manifest_entry: Option<&ManifestPlugin>,
-) {
-    if let Some(message) = manifest_discovery_issue(manifest_state, manifest_entry) {
-        super::state::merge_issue(issue, message);
-    }
-}
-
-struct DescribePhaseInput<'a> {
-    source: PluginSource,
-    manifest_state: &'a ManifestState,
-    manifest_entry: Option<&'a ManifestPlugin>,
-    executable: &'a Path,
-    policy: DiscoveryPolicy,
-    process_timeout: Duration,
-}
-
-fn apply_describe_phase(
-    plugin: &mut DiscoveredPlugin,
-    input: DescribePhaseInput<'_>,
-    describe_cache: &mut DescribeCacheState<'_>,
-) {
-    match resolve_describe_phase(
-        input.source,
-        input.manifest_state,
-        input.manifest_entry,
-        input.executable,
-        input.policy,
-        describe_cache,
-        input.process_timeout,
-    ) {
-        Ok(Some(describe)) => apply_describe_metadata(plugin, &describe, input.manifest_entry),
-        Ok(None) => {}
-        Err(err) => super::state::merge_issue(&mut plugin.issue, err.to_string()),
-    }
-}
-
-fn resolve_describe_phase(
-    source: PluginSource,
-    manifest_state: &ManifestState,
-    manifest_entry: Option<&ManifestPlugin>,
-    executable: &Path,
-    policy: DiscoveryPolicy,
-    describe_cache: &mut DescribeCacheState<'_>,
-    process_timeout: Duration,
-) -> Result<Option<DescribeV1>> {
-    match describe_eligibility(source, manifest_state, manifest_entry, executable)? {
-        DescribeEligibility::Allowed => {
-            describe_with_cache(executable, source, policy, describe_cache, process_timeout)
-                .map(Some)
-        }
-        DescribeEligibility::Skip => Ok(None),
     }
 }
 
@@ -1028,14 +934,14 @@ fn describe_with_cache(
     path: &Path,
     source: PluginSource,
     policy: DiscoveryPolicy,
-    cache: &mut DescribeCacheState<'_>,
+    cache: &mut DescribeCacheSession,
     process_timeout: Duration,
 ) -> Result<DescribeV1> {
     let key = describe_cache_key(path);
     cache.seen_paths.insert(key.clone());
     let (size, mtime_secs, mtime_nanos) = file_fingerprint(path)?;
 
-    if let Some(entry) = find_cached_describe(cache.file, &key, size, mtime_secs, mtime_nanos) {
+    if let Some(entry) = find_cached_describe(&cache.file, &key, size, mtime_secs, mtime_nanos) {
         tracing::trace!(path = %path.display(), "describe cache hit");
         return Ok(entry.describe.clone());
     }
@@ -1048,14 +954,14 @@ fn describe_with_cache(
 
     let describe = super::dispatch::describe_plugin(path, process_timeout)?;
     upsert_cached_describe(
-        cache.file,
+        &mut cache.file,
         key,
         size,
         mtime_secs,
         mtime_nanos,
         describe.clone(),
     );
-    *cache.dirty = true;
+    cache.dirty = true;
 
     Ok(describe)
 }

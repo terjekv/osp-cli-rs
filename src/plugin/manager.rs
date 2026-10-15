@@ -26,9 +26,8 @@
 
 use super::active::ActivePluginView;
 use super::catalog::{
-    build_command_catalog, build_command_policy_registry, build_doctor_report,
-    command_provider_labels, list_plugins, register_describe_command_policies, render_repl_help,
-    selected_provider_label,
+    build_command_catalog, build_command_policy_registry, build_doctor_report, list_plugins,
+    register_describe_command_policies, render_repl_help, selected_provider_label,
 };
 use super::conversion::to_command_spec;
 use super::discovery::DiscoveryCache;
@@ -686,79 +685,6 @@ pub struct PluginManager {
     pub(crate) allow_bundled_roots: bool,
 }
 
-struct KnownCommandProviders<'a> {
-    command: &'a str,
-    providers: Vec<&'a DiscoveredPlugin>,
-}
-
-impl<'a> KnownCommandProviders<'a> {
-    fn collect(view: &ActivePluginView<'a>, command: &'a str) -> Self {
-        Self {
-            command,
-            providers: view.healthy_providers(command),
-        }
-    }
-
-    fn validate_command(&self) -> Result<()> {
-        if self.providers.is_empty() {
-            return Err(anyhow!(
-                "no healthy plugin provides command `{}`",
-                self.command
-            ));
-        }
-        Ok(())
-    }
-}
-
-struct AvailableCommandProviders<'a> {
-    command: &'a str,
-    available: Vec<&'a DiscoveredPlugin>,
-}
-
-impl<'a> AvailableCommandProviders<'a> {
-    fn collect(view: &ActivePluginView<'a>, command: &'a str) -> Self {
-        Self {
-            command,
-            available: view.available_providers(command),
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.available.len()
-    }
-
-    fn validate_command(&self) -> Result<()> {
-        if self.available.is_empty() {
-            return Err(anyhow!(
-                "no available plugin provides command `{}`",
-                self.command
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_provider(&self, plugin_id: &str) -> Result<()> {
-        self.validate_command()?;
-        if self
-            .available
-            .iter()
-            .any(|plugin| plugin.plugin_id == plugin_id)
-        {
-            return Ok(());
-        }
-
-        Err(anyhow!(
-            "plugin `{plugin_id}` is not currently available for command `{}`; available providers: {}",
-            self.command,
-            self.labels().join(", ")
-        ))
-    }
-
-    fn labels(&self) -> Vec<String> {
-        provider_labels(&self.available)
-    }
-}
-
 impl PluginManager {
     /// Creates a plugin manager with the provided explicit search roots.
     ///
@@ -945,7 +871,7 @@ impl PluginManager {
     /// assert!(catalog.is_empty());
     /// ```
     pub fn command_catalog(&self) -> Vec<CommandCatalogEntry> {
-        self.with_passive_catalog(|catalog| catalog)
+        self.with_passive_view(build_command_catalog)
     }
 
     pub(crate) fn command_catalog_for_dispatch(&self) -> Option<Vec<CommandCatalogEntry>> {
@@ -1022,7 +948,7 @@ impl PluginManager {
     /// assert!(help.contains("No plugin commands available."));
     /// ```
     pub fn repl_help_text(&self) -> String {
-        self.with_passive_catalog(|catalog| render_repl_help(&catalog))
+        render_repl_help(&self.command_catalog())
     }
 
     /// Returns the available provider labels for a command after health and
@@ -1041,7 +967,7 @@ impl PluginManager {
     /// assert!(providers.is_empty());
     /// ```
     pub fn command_providers(&self, command: &str) -> Vec<String> {
-        self.with_passive_view(|view| command_provider_labels(command, view))
+        self.with_passive_view(|view| view.provider_labels(command))
     }
 
     /// Returns the selected provider label when command resolution is
@@ -1086,7 +1012,10 @@ impl PluginManager {
         let command = canonical_plugin_command_name(command).map_err(anyhow::Error::msg)?;
 
         self.with_dispatch_view(|view| {
-            KnownCommandProviders::collect(view, &command).validate_command()
+            if view.healthy_providers(&command).is_empty() {
+                return Err(anyhow!("no healthy plugin provides command `{command}`"));
+            }
+            Ok(())
         })
     }
 
@@ -1245,7 +1174,17 @@ impl PluginManager {
         }
         let command = canonical_plugin_command_name(command).map_err(anyhow::Error::msg)?;
         self.with_dispatch_view(|view| {
-            AvailableCommandProviders::collect(view, &command).validate_provider(plugin_id)
+            let providers = view.available_providers(&command);
+            if providers.is_empty() {
+                return Err(anyhow!("no available plugin provides command `{command}`"));
+            }
+            if providers.iter().any(|plugin| plugin.plugin_id == plugin_id) {
+                return Ok(());
+            }
+            Err(anyhow!(
+                "plugin `{plugin_id}` is not currently available for command `{command}`; available providers: {}",
+                provider_labels(&providers).join(", ")
+            ))
         })
     }
 
@@ -1255,12 +1194,11 @@ impl PluginManager {
         provider_override: Option<&str>,
     ) -> std::result::Result<DiscoveredPlugin, PluginDispatchError> {
         self.with_dispatch_view(|view| {
-            let available = AvailableCommandProviders::collect(view, command);
             match view.resolve_provider(command, provider_override) {
                 Ok(ProviderResolution::Selected(selection)) => {
                     tracing::debug!(
                         command = %command,
-                        active_providers = available.len(),
+                        active_providers = view.available_providers(command).len(),
                         selected_provider = %selection.plugin.plugin_id,
                         selection_mode = ?selection.mode,
                         "resolved plugin provider"
@@ -1335,27 +1273,16 @@ impl PluginManager {
     where
         F: FnOnce(&ActivePluginView<'_>) -> R,
     {
-        let preferences = self.command_preferences();
+        let preferences = self.command_preferences_snapshot();
         let view = ActivePluginView::new(discovered.as_ref(), &preferences);
         apply(&view)
     }
 
-    fn with_passive_catalog<R, F>(&self, apply: F) -> R
-    where
-        F: FnOnce(Vec<CommandCatalogEntry>) -> R,
-    {
-        self.with_passive_view(|view| apply(build_command_catalog(view)))
-    }
-
-    fn command_preferences(&self) -> PluginCommandPreferences {
+    pub(crate) fn command_preferences_snapshot(&self) -> PluginCommandPreferences {
         self.command_preferences
             .read()
             .unwrap_or_else(|err| err.into_inner())
             .clone()
-    }
-
-    pub(crate) fn command_preferences_snapshot(&self) -> PluginCommandPreferences {
-        self.command_preferences()
     }
 
     pub(crate) fn replace_command_preferences(&self, preferences: PluginCommandPreferences) {

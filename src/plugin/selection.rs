@@ -6,7 +6,7 @@
 
 use super::manager::DiscoveredPlugin;
 use super::state::{PluginCommandPreferences, PluginCommandState};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderSelectionMode {
@@ -69,15 +69,15 @@ pub(crate) fn providers_for_command<'a>(
     plugins
         .iter()
         .copied()
-        .filter(|plugin| plugin_provides_command(plugin, command))
+        .filter(|plugin| plugin.canonical_command(command).is_some())
         .collect()
 }
 
 pub(crate) fn provider_labels_by_command(
     plugins: &[&DiscoveredPlugin],
     preferences: &PluginCommandPreferences,
-) -> HashMap<String, Vec<String>> {
-    let mut index = HashMap::new();
+) -> BTreeMap<String, Vec<String>> {
+    let mut index = BTreeMap::new();
     for plugin in plugins {
         let label = plugin_label(plugin);
         for command in plugin.canonical_command_names() {
@@ -169,17 +169,14 @@ pub(crate) fn resolve_provider_for_command<'a>(
     Ok(ProviderResolution::Ambiguous(providers))
 }
 
-fn plugin_provides_command(plugin: &DiscoveredPlugin, command: &str) -> bool {
-    plugin.canonical_command(command).is_some()
-}
-
 pub(crate) fn available_providers_for_command<'a>(
     command: &str,
     plugins: &[&'a DiscoveredPlugin],
     preferences: &PluginCommandPreferences,
 ) -> Vec<&'a DiscoveredPlugin> {
-    providers_for_command(command, plugins)
-        .into_iter()
+    plugins
+        .iter()
+        .copied()
         .filter(|plugin| provider_available(plugin, command, preferences))
         .collect()
 }

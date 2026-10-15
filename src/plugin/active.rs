@@ -12,15 +12,14 @@ use super::selection::{
     provider_labels_by_command, providers_for_command, resolve_provider_for_command,
 };
 use super::state::PluginCommandPreferences;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeMap;
 
 /// Borrowed view over the current active plugin working set.
 pub(crate) struct ActivePluginView<'a> {
     discovered: &'a [DiscoveredPlugin],
     preferences: &'a PluginCommandPreferences,
     healthy: Vec<&'a DiscoveredPlugin>,
-    available_provider_labels: HashMap<String, Vec<String>>,
-    active_command_names: BTreeSet<String>,
+    available_provider_labels: BTreeMap<String, Vec<String>>,
 }
 
 pub(crate) struct ResolvedActiveCommand<'a> {
@@ -52,14 +51,12 @@ impl<'a> ActivePluginView<'a> {
     ) -> Self {
         let healthy = healthy_plugins(discovered).collect::<Vec<_>>();
         let available_provider_labels = provider_labels_by_command(&healthy, preferences);
-        let active_command_names = available_provider_labels.keys().cloned().collect();
 
         Self {
             discovered,
             preferences,
             healthy,
             available_provider_labels,
-            active_command_names,
         }
     }
 
@@ -76,7 +73,7 @@ impl<'a> ActivePluginView<'a> {
     }
 
     pub(crate) fn active_command_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.active_command_names.iter().map(String::as_str)
+        self.available_provider_labels.keys().map(String::as_str)
     }
 
     pub(crate) fn provider_labels(&self, command: &str) -> Vec<String> {
@@ -86,7 +83,7 @@ impl<'a> ActivePluginView<'a> {
             .unwrap_or_default()
     }
 
-    pub(crate) fn provider_labels_by_command(&self) -> &HashMap<String, Vec<String>> {
+    pub(crate) fn provider_labels_by_command(&self) -> &BTreeMap<String, Vec<String>> {
         &self.available_provider_labels
     }
 

@@ -168,10 +168,6 @@ pub(crate) fn render_repl_help(catalog: &[CommandCatalogEntry]) -> String {
     out
 }
 
-pub(crate) fn command_provider_labels(command: &str, view: &ActivePluginView<'_>) -> Vec<String> {
-    view.provider_labels(command)
-}
-
 pub(crate) fn selected_provider_label(
     command: &str,
     view: &ActivePluginView<'_>,
