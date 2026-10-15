@@ -326,8 +326,7 @@ pub fn render_output_for_copy(output: &OutputResult, settings: &RenderSettings) 
 }
 
 pub(crate) fn render_json_value(value: &serde_json::Value, settings: &RenderSettings) -> String {
-    let render_settings = settings.plain_copy_settings();
-    let resolved = resolve_settings(&render_settings, RenderProfile::CopySafe);
+    let resolved = resolve_settings(settings, RenderProfile::CopySafe);
     emit::emit_doc(
         &doc::Doc {
             blocks: vec![doc::Block::Json(doc::JsonBlock {

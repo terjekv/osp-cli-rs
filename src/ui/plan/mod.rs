@@ -6,7 +6,6 @@ use super::settings::{RenderProfile, RenderSettings, ResolvedRenderSettings, res
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderPlan {
     pub format: OutputFormat,
-    pub profile: RenderProfile,
     pub settings: ResolvedRenderSettings,
     pub document_long_help: bool,
     pub document_entry_gap: Option<usize>,
@@ -25,7 +24,6 @@ pub fn plan_output(
     };
     RenderPlan {
         format,
-        profile: effective_profile,
         settings: resolve_settings(settings, effective_profile),
         document_entry_gap: output.meta.document_entry_gap,
         document_long_help: output.meta.document_long_help,

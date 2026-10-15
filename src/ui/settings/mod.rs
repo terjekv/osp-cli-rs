@@ -12,9 +12,7 @@
 
 use crate::config::{ConfigSource, ConfigValue, DEFAULT_UI_WIDTH_MAX, ResolvedConfig, Scope};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use crate::core::output_model::{
-    OutputItems, OutputResult, RenderRecommendation, output_items_to_rows,
-};
+use crate::core::output_model::{OutputItems, OutputResult, RenderRecommendation};
 use crate::ui::section_chrome::{RuledSectionPolicy, SectionFrameStyle};
 use crate::ui::style;
 use crate::ui::theme;
@@ -342,7 +340,11 @@ impl TableBorderStyle {
 }
 
 pub fn help_layout_from_config(config: &ResolvedConfig) -> HelpLayout {
-    help_layout_from_presentation_name(config.get_string("ui.presentation"))
+    match resolve_ui_presentation(config) {
+        UiPresentation::Expressive => HelpLayout::Full,
+        UiPresentation::Compact => HelpLayout::Compact,
+        UiPresentation::Austere => HelpLayout::Minimal,
+    }
 }
 
 pub(crate) fn resolve_ui_presentation(config: &ResolvedConfig) -> UiPresentation {
@@ -453,14 +455,6 @@ pub(crate) fn apply_render_config_overrides(
     }
 
     sync_render_config_overrides(settings, config);
-}
-
-fn help_layout_from_presentation_name(value: Option<&str>) -> HelpLayout {
-    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-        Some("compact") => HelpLayout::Compact,
-        Some("austere") | Some("gammel-og-bitter") => HelpLayout::Minimal,
-        _ => HelpLayout::Full,
-    }
 }
 
 const PRESENTATION_KEYS: &[&str] = &[
@@ -738,11 +732,7 @@ impl RenderSettings {
                 if matches!(self.runtime.terminal.as_deref(), Some("dumb")) {
                     return false;
                 }
-                match self.runtime.locale_utf8 {
-                    Some(true) => true,
-                    Some(false) => false,
-                    None => true,
-                }
+                self.runtime.locale_utf8.unwrap_or(true)
             }
         }
     }
@@ -762,11 +752,7 @@ impl RenderSettings {
             (None, None) => return None,
         };
 
-        Some(if self.width_max == 0 {
-            width
-        } else {
-            width.min(self.width_max)
-        })
+        Some(width.min(self.width_max))
     }
 
     pub fn resolve_render_settings(&self) -> ResolvedRenderSettings {
@@ -799,71 +785,35 @@ impl RenderSettings {
             section_spacing: self.help_chrome.section_spacing.unwrap_or(1),
         };
 
-        match backend {
-            RenderBackend::Plain => ResolvedRenderSettings {
-                backend,
-                color: false,
-                unicode: false,
-                width: self.resolve_width(),
-                margin: self.margin,
-                indent_size: self.indent_size.max(1),
-                medium_list_max: self.medium_list_max.max(1),
-                table_overflow: self.table_overflow,
-                table_border: self.table_border,
-                nested_table_border: self.nested_table_border.resolve(self.table_border),
-                help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
-                theme_name,
-                theme: theme.clone(),
-                style_overrides: self.style_overrides.clone(),
-                help_chrome,
-                chrome_frame: self.chrome_frame,
-                guide_default_format: self.guide_default_format,
-            },
-            RenderBackend::Rich => ResolvedRenderSettings {
-                backend,
-                color: self.resolve_color_mode(),
-                unicode: self.resolve_unicode_mode(),
-                width: self.resolve_width(),
-                margin: self.margin,
-                indent_size: self.indent_size.max(1),
-                medium_list_max: self.medium_list_max.max(1),
-                table_overflow: self.table_overflow,
-                table_border: self.table_border,
-                nested_table_border: self.nested_table_border.resolve(self.table_border),
-                help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
-                theme_name,
-                theme,
-                style_overrides: self.style_overrides.clone(),
-                help_chrome,
-                chrome_frame: self.chrome_frame,
-                guide_default_format: self.guide_default_format,
-            },
+        ResolvedRenderSettings {
+            backend,
+            color: backend == RenderBackend::Rich && self.resolve_color_mode(),
+            unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
+            width: self.resolve_width(),
+            margin: self.margin,
+            indent_size: self.indent_size.max(1),
+            medium_list_max: self.medium_list_max.max(1),
+            table_overflow: self.table_overflow,
+            table_border: self.table_border,
+            nested_table_border: self.nested_table_border.resolve(self.table_border),
+            help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
+            theme_name,
+            theme,
+            style_overrides: self.style_overrides.clone(),
+            help_chrome,
+            chrome_frame: self.chrome_frame,
+            guide_default_format: self.guide_default_format,
         }
     }
 
     pub(crate) fn plain_copy_settings(&self) -> Self {
         Self {
-            format: self.format,
-            format_explicit: self.format_explicit,
             mode: RenderMode::Plain,
             color: ColorMode::Never,
             unicode: UnicodeMode::Never,
             width: None,
             width_max: 0,
-            margin: self.margin,
-            indent_size: self.indent_size,
-            medium_list_max: self.medium_list_max,
-            table_overflow: self.table_overflow,
-            table_border: self.table_border,
-            nested_table_border: self.nested_table_border,
-            help_chrome: self.help_chrome,
-            theme_name: self.theme_name.clone(),
-            theme: self.theme.clone(),
-            style_overrides: self.style_overrides.clone(),
-            chrome_frame: self.chrome_frame,
-            ruled_section_policy: self.ruled_section_policy,
-            guide_default_format: self.guide_default_format,
-            runtime: self.runtime.clone(),
+            ..self.clone()
         }
     }
 
@@ -889,11 +839,9 @@ impl RenderSettings {
             return self.format;
         }
 
-        if matches!(output.items, OutputItems::Groups(_)) {
+        let OutputItems::Rows(rows) = &output.items else {
             return OutputFormat::Table;
-        }
-
-        let rows = output_items_to_rows(&output.items);
+        };
         if rows
             .iter()
             .all(|row| row.len() == 1 && row.contains_key("value"))
