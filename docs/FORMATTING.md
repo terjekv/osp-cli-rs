@@ -16,11 +16,10 @@ new default.
 
 Canonical form:
 
-- `--format {auto,guide,json,table,mreg,value,md}`
+- `--format {auto,json,table,mreg,value,md}`
 
 Convenience aliases:
 
-- `--guide`
 - `--json`
 - `--table`
 - `--value`
@@ -32,13 +31,13 @@ Examples:
 ```bash
 osp plugins commands --format table
 osp plugins commands --json
-osp help --guide
+osp help --format auto
 ```
 
 ```text
 plugins commands --format table
 plugins commands --json
-help --guide
+help --format auto
 ```
 
 Format guide:
@@ -53,7 +52,6 @@ Format guide:
   - extract one compact field/value surface
 - `md`
   - markdown-friendly output
-- `guide`
   - semantic help/intro/reference output
 - `auto`
   - let `osp` choose from the result shape
@@ -186,10 +184,10 @@ Keep the normal format but suppress color:
 osp --no-color plugins commands
 ```
 
-Ask for help/guide output in guide form:
+Render help as a document rather than rows:
 
 ```bash
-osp help --guide
+osp help --format auto
 ```
 
 ## Stream Separation

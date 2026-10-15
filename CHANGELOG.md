@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The current release flow requires one versioned changelog section and one
 matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
+## [Unreleased]
+
+- **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
+  types. Use `core::document::Document` and semantic blocks instead; guide
+  restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use
+  `OutputDocumentKind::Document` and `RenderRecommendation::Document`; output
+  metadata carries explicit document-row identity and presentation hints.
+- **Breaking:** Remove the `guide` output format, `OutputFormat::Guide`, and
+  `--guide`. `ui.format = guide` is invalid, and plugin `OSP_FORMAT` hints no
+  longer include `guide`. Use `auto` for human document rendering.
+- **Breaking:** Unstaged help and intro JSON now emit a `blocks` object. Pipes
+  emit flat rows carrying `section` and entry descriptions; sorting and limiting
+  retain their ordinary row meanings and never reconstruct a help envelope.
+- Build builtin help from clap metadata and retain external help continuations.
+  Intro templates preserve nested and loose Markdown lists.
+
 ## [1.5.1] - 2026-03-17
 
 - Stabilizes the internal host, UI, config, and REPL architecture with a broad behavior-preserving cleanup that centralizes ownership without changing the public release shape.

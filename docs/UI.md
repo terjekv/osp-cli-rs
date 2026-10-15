@@ -18,7 +18,6 @@ At a high level, rendering happens in this order:
 Supported formats:
 
 - `auto`
-- `guide`
 - `json`
 - `table`
 - `md`
@@ -38,9 +37,17 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg`
 - larger row sets render as `table`
 
-`guide` is a special-purpose format for semantic help/intro output. In
-practice you usually see it when a command explicitly produces guide-style
-content or when you ask for it directly.
+Help and intro producers build `core::document::Document`: ordered sections,
+paragraphs, named entries, lists, and data blocks. `auto` renders these as human
+documents using `ui.help.layout`. Ordinary records never become documents from
+field names such as `notes` or `commands`.
+
+Unstaged `--json` emits the document object, for example
+`{"blocks":[{"section":"Options","blocks":[{"entries":[{"name":"--json","description":"Emit JSON"}]}]}]}`.
+With any pipe stage, JSON emits the resulting flat rows instead. Document rows
+carry their section in a column; human rendering emits headings for consecutive
+runs without changing row order. Shape-changing stages return ordinary data.
+The former `guide` format and `--guide` shorthand are no longer accepted.
 
 ## Render Modes
 
@@ -147,7 +154,7 @@ What these do:
 - `ui.messages.layout` controls whether messages are grouped into sections or
   shown as plain indented groups or inline with minimal chrome
 - `ui.chrome.frame` controls section framing for grouped messages. Help and
-  guide headings follow the selected help layout.
+  document headings follow the selected help layout.
 - `ui.chrome.rule_policy` controls whether grouped message rules are rendered
   independently or shared across sibling message sections
 

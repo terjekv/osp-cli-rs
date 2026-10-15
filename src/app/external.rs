@@ -775,23 +775,21 @@ fn plan_external_invocation(
 
     let inline_command = match super::command_plan::parse_inline_command(
         &parsed.tokens,
-        &parsed.stages,
         super::command_plan::CommandSurface::External,
     )? {
         super::command_plan::InlineCommandPlan::Command(command) => command,
         super::command_plan::InlineCommandPlan::Help(_) => {
-            let mut view = crate::cli::inline_help_document(&parsed.tokens);
+            let (mut view, long_help) = crate::cli::inline_help_document(&parsed.tokens);
             extend_with_invocation_help(&mut view, invocation.help_level);
             let mut output = view
                 .filtered_for_help_level(invocation.help_level)
                 .to_output_result();
-            output.meta.document_long_help = parsed
-                .tokens
-                .iter()
-                .any(|token| token == "--help" || token == "help");
-            return Ok(ExternalParse::Handled(Box::new(CliCommandResult::output(
-                output, None,
-            ))));
+            output.meta.document_long_help = long_help;
+            let result = crate::app::command_output::apply_stages_to_cli_result(
+                CliCommandResult::output(output, None),
+                &parsed.stages,
+            )?;
+            return Ok(ExternalParse::Handled(Box::new(result)));
         }
     };
 

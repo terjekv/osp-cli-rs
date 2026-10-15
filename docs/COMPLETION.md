@@ -111,7 +111,6 @@ REPL completion also knows about the invocation-level flags shared with the
 CLI, such as:
 
 - `--format`
-- `--guide`
 - `--json`
 - `--verbose`
 - `--quiet`

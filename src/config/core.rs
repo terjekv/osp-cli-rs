@@ -627,8 +627,7 @@ fn insert_ui_schema_keys(schema: &mut ConfigSchema) {
     insert_builtin_schema_key(
         schema,
         "ui.format",
-        SchemaEntry::string()
-            .with_allowed_values(["auto", "guide", "json", "table", "md", "mreg", "value"]),
+        SchemaEntry::string().with_allowed_values(["auto", "json", "table", "md", "mreg", "value"]),
         "Default output format",
     );
     insert_builtin_schema_key(

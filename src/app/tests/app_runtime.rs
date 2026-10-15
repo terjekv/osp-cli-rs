@@ -748,7 +748,7 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
 )]
 #[test]
 fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let report = enrich_dispatch_error(PluginDispatchError::NonZeroExit {
         plugin_id: "ldap".to_string(),
         status_code: 7,
@@ -1152,7 +1152,7 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
     let report = result
         .failure_report
         .expect("failure should carry diagnostics");
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
     let terse = render_report_message(&report, ErrorDetail::Terse, &settings);
     assert!(

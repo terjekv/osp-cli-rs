@@ -52,7 +52,7 @@ help config
 ## Ask For Help In Guide Form
 
 ```bash
-osp help --guide
+osp help --format auto
 ```
 
 ```text

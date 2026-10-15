@@ -1,9 +1,9 @@
+use osp_cli::core::document::{DocBlock, Document, DocumentEntry};
 use osp_cli::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use osp_cli::core::output_model::{
     OutputDocument, OutputDocumentKind, OutputMeta, OutputResult, output_items_from_value,
 };
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::guide::{GuideSection, GuideSectionKind, GuideView};
 use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render_output};
 use serde_json::{Value, json};
 
@@ -216,101 +216,133 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
 
 #[test]
 fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Usage", GuideSectionKind::Usage)
-                .paragraph("osp site host apply HOST [OPTIONS]"),
-            GuideSection::new("Operations", GuideSectionKind::Custom)
-                .paragraph("Use `site host show` after **approval**.")
-                .entry("site host show", "Read the `canonical` host record")
-                .entry("site host apply", "Apply an approved change")
-                .entry("site whoami", "")
-                .entry("site host show | P uid", "Copy the `uid` field"),
-            GuideSection::new("Arguments", GuideSectionKind::Arguments)
-                .entry("HOST", "Canonical host name"),
-            GuideSection::new("Options", GuideSectionKind::Options)
-                .entry("--dry-run", "Preview the approved change"),
-            GuideSection::new(
+    let guide = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Usage",
+                vec![DocBlock::Paragraph {
+                    text: ("osp site host apply HOST [OPTIONS]").into(),
+                }],
+            ),
+            DocBlock::section(
+                "Operations",
+                vec![
+                    DocBlock::Paragraph {
+                        text: ("Use `site host show` after **approval**.").into(),
+                    },
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("site host show").into(),
+                            description: ("Read the `canonical` host record").into(),
+                        }],
+                    },
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("site host apply").into(),
+                            description: ("Apply an approved change").into(),
+                        }],
+                    },
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("site whoami").into(),
+                            description: ("").into(),
+                        }],
+                    },
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("site host show | P uid").into(),
+                            description: ("Copy the `uid` field").into(),
+                        }],
+                    },
+                ],
+            ),
+            DocBlock::section(
+                "Arguments",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: ("HOST").into(),
+                        description: ("Canonical host name").into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Options",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: ("--dry-run").into(),
+                        description: ("Preview the approved change").into(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
                 "Common Invocation Options",
-                GuideSectionKind::CommonInvocationOptions,
-            )
-            .entry("--profile", "Select the service profile")
-            .entry("--json", "Export typed results"),
-            GuideSection::new("Policy", GuideSectionKind::Custom).data(json!({
-                "owner": "alice",
-                "enabled": true,
-                "reviewers": ["bob", "carol"],
-                "service": {
-                    "name": "directory",
-                    "checks": [
-                        {"name": "identity", "required": true},
-                        ["dns", "network"]
-                    ]
-                }
-            })),
+                vec![
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("--profile").into(),
+                            description: ("Select the service profile").into(),
+                        }],
+                    },
+                    DocBlock::Entries {
+                        entries: vec![DocumentEntry {
+                            name: ("--json").into(),
+                            description: ("Export typed results").into(),
+                        }],
+                    },
+                ],
+            ),
+            DocBlock::section(
+                "Policy",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "owner": "alice",
+                        "enabled": true,
+                        "reviewers": ["bob", "carol"],
+                        "service": {
+                            "name": "directory",
+                            "checks": [
+                                {"name": "identity", "required": true},
+                                ["dns", "network"]
+                            ]
+                        }
+                    }),
+                }],
+            ),
         ],
-        ..Default::default()
     };
     let output = guide.to_output_result();
     let exported = render_output(&output, &export_settings(OutputFormat::Json));
     assert_eq!(
         serde_json::from_str::<Value>(&exported).unwrap(),
-        json!([guide.to_json_value()])
+        serde_json::to_value(&guide).unwrap()
     );
 
-    // An offline consumer restores the exported row payload without a live sidecar document.
-    let imported = OutputResult {
-        items: output_items_from_value(serde_json::from_str(&exported).unwrap()),
-        document: None,
-        meta: OutputMeta::default(),
-    };
-    let restored = GuideView::try_from_output_result(&imported).unwrap();
-    assert_eq!(restored.to_json_value(), guide.to_json_value());
-    assert_eq!(restored.usage, ["osp site host apply HOST [OPTIONS]"]);
-    assert_eq!(restored.arguments[0].name, "HOST");
-    assert_eq!(restored.options[0].name, "--dry-run");
+    let restored: Document = serde_json::from_str(&exported).unwrap();
+    assert_eq!(restored, guide);
     assert_eq!(
-        restored
-            .common_invocation_options
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        ["--profile", "--json"]
-    );
-    assert_eq!(
-        restored
-            .sections
-            .iter()
-            .map(|section| section.title.as_str())
-            .collect::<Vec<_>>(),
-        [
-            "Usage",
-            "Operations",
-            "Arguments",
-            "Options",
-            "Common Invocation Options",
-            "Policy"
-        ]
+        restored.rows()[0]["text"],
+        "osp site host apply HOST [OPTIONS]"
     );
 
     let reference = parse_pipeline("runbook | F name ~ ^--").unwrap();
     let flags = apply_output_pipeline(restored.to_output_result(), &reference.stages).unwrap();
-    let flag_guide = GuideView::try_from_output_result(&flags).unwrap();
-    assert_eq!(flag_guide.options[0].name, "--dry-run");
+    assert!(flags.meta.document_rows);
+    assert!(flags.document.is_none());
     assert_eq!(
-        flag_guide
-            .common_invocation_options
+        flags
+            .as_rows()
+            .unwrap()
             .iter()
-            .map(|entry| entry.name.as_str())
+            .map(|row| row["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["--profile", "--json"]
+        ["--dry-run", "--profile", "--json"]
     );
     let flag_markdown = render_output(&flags, &export_settings(OutputFormat::Markdown));
     for flag in ["--dry-run", "--profile", "--json"] {
         assert!(flag_markdown.contains(flag), "{flag_markdown}");
     }
 
-    let terminal = render_output(&output, &export_settings(OutputFormat::Guide));
+    let terminal = render_output(&output, &export_settings(OutputFormat::Auto));
     let visible_words = terminal.split_whitespace().collect::<Vec<_>>().join(" ");
     for expected in [
         "Operations",
@@ -377,9 +409,8 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
         );
     }
     assert_eq!(
-        GuideView::try_from_output_result(&output)
-            .unwrap()
-            .to_json_value(),
-        guide.to_json_value()
+        serde_json::from_value::<Document>(output.document.as_ref().unwrap().value.clone())
+            .unwrap(),
+        guide
     );
 }

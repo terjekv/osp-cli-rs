@@ -33,6 +33,19 @@ keep session state for the next prompt
 osp
 ```
 
+## Intro and help documents
+
+The intro and root `help` compose ordered semantic document blocks. Configure
+`repl.intro` and `repl.intro_template.minimal`, `.compact`, or `.full` to author
+an intro with Markdown headings, paragraphs, inline markup, and lists. Nested
+and loose list items retain their parent text. `{{ help }}` and `{{ overview }}`
+insert the root help blocks at that position.
+
+Fenced `osp` blocks contain passive JSON data; other fences and invalid JSON
+remain literal text. Repeated fences stay separate and ordered. Templates do
+not execute commands. `intro --json` emits a document object; `intro | L 2`
+limits its flat rows. Root help uses the same row pipeline and section headings.
+
 ## Same Grammar as the CLI
 
 If a command works as a one-shot invocation, the same command text should work

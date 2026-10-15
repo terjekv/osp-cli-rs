@@ -1,7 +1,7 @@
+use osp_cli::core::document::Document;
 use osp_cli::core::output_model::{OutputItems, OutputResult};
 use osp_cli::core::row::Row;
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::guide::{GuideEntry, GuideSection, GuideSectionKind, GuideView};
 use serde_json::Value;
 
 mod addressed;
@@ -22,82 +22,44 @@ fn run_rows_pipeline(rows: Vec<Row>, pipeline: &str) -> OutputResult {
         .expect("pipeline should succeed")
 }
 
-fn run_guide_pipeline(view: GuideView, pipeline: &str) -> OutputResult {
+fn run_guide_pipeline(view: Document, pipeline: &str) -> OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     apply_output_pipeline(view.to_output_result(), &parsed.stages).expect("pipeline should succeed")
 }
 
-fn help_like_guide() -> GuideView {
-    let commands = vec![
-        GuideEntry {
-            name: "apply".to_string(),
-            short_help: "Apply pending changes".to_string(),
-            display_indent: None,
-            display_gap: None,
-        },
-        GuideEntry {
-            name: "doctor".to_string(),
-            short_help: "Inspect runtime health".to_string(),
-            display_indent: None,
-            display_gap: None,
-        },
-        GuideEntry {
-            name: "status".to_string(),
-            short_help: "Show deployment status".to_string(),
-            display_indent: None,
-            display_gap: None,
-        },
-    ];
-    let options = vec![
-        GuideEntry {
-            name: "--verbose".to_string(),
-            short_help: "Show additional context".to_string(),
-            display_indent: None,
-            display_gap: None,
-        },
-        GuideEntry {
-            name: "--json".to_string(),
-            short_help: "Render machine-readable output".to_string(),
-            display_indent: None,
-            display_gap: None,
-        },
-    ];
+fn help_like_guide() -> Document {
+    Document::from_help_text(
+        "Deploy commands\n\nUsage: osp deploy <COMMAND>\n\nCommands:\n  apply   Apply pending changes\n  doctor  Inspect runtime health\n  status  Show deployment status\n\nOptions:\n  --verbose  Show additional context\n  --json     Render machine-readable output\n\nNotes:\nRun `doctor` before applying production changes.\n",
+    )
+}
 
-    GuideView {
-        preamble: vec!["Deploy commands".to_string()],
-        usage: vec!["osp deploy <COMMAND>".to_string()],
-        commands: commands.clone(),
-        options: options.clone(),
-        notes: vec!["Run `doctor` before applying production changes.".to_string()],
-        epilogue: vec!["footer text".to_string()],
-        sections: vec![
-            GuideSection {
-                title: "Commands".to_string(),
-                kind: GuideSectionKind::Commands,
-                paragraphs: vec!["pick one".to_string()],
-                entries: commands,
-                data: None,
-            },
-            GuideSection {
-                title: "Options".to_string(),
-                kind: GuideSectionKind::Options,
-                paragraphs: vec!["rendering".to_string()],
-                entries: options,
-                data: None,
-            },
-        ],
-        ..GuideView::default()
-    }
+fn help_like_record() -> Value {
+    let commands = serde_json::json!([
+        {"name":"apply","short_help":"Apply pending changes"},
+        {"name":"doctor","short_help":"Inspect runtime health"},
+        {"name":"status","short_help":"Show deployment status"},
+    ]);
+    let options = serde_json::json!([
+        {"name":"--verbose","short_help":"Show additional context"},
+        {"name":"--json","short_help":"Render machine-readable output"},
+    ]);
+    serde_json::json!({"preamble":["Deploy commands"], "usage":["osp deploy <COMMAND>"],
+    "commands":commands.clone(), "options":options.clone(),
+    "notes":["Run `doctor` before applying production changes."], "epilogue":["footer text"],
+    "sections":[
+        {"title":"Commands","kind":"commands","paragraphs":["pick one"],"entries":commands},
+        {"title":"Options","kind":"options","paragraphs":["rendering"],"entries":options},
+    ]})
 }
 
 // Structured JSON fixtures deliberately use the service/document boundary;
 // guide fixtures above use the declared guide-content boundary.
-fn run_document_pipeline(view: GuideView, pipeline: &str) -> OutputResult {
+fn run_document_pipeline(view: Value, pipeline: &str) -> OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     let output = OutputResult::from_rows(Vec::new()).with_document(
         osp_cli::core::output_model::OutputDocument::new(
             osp_cli::core::output_model::OutputDocumentKind::Json,
-            view.to_json_value(),
+            view,
         ),
     );
     apply_output_pipeline(output, &parsed.stages).expect("pipeline should succeed")

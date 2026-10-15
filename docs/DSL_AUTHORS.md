@@ -12,9 +12,11 @@ parallel implementations of verbs.
   hints never rename, remove or convert canonical values. A raw document can
   survive unstaged JSON rendering, but no staged service result retains its
   stale pagination/total envelope.
-- `GuideView` owns guide-to-row normalization and reconstruction. Explicitly
-  declared guides expose entries/text as rows and keep section/layout metadata
-  outside execution. Ordinary service fields never implicitly identify guides.
+- `core::document::Document` supplies flat rows once, before key validation.
+  Entries carry `section`, `name`, and `description`; text carries `section` and
+  `text`. Output metadata declares document intent. Preserve the current row
+  stream and never reconstruct sections by value equality. Existing stage
+  behavior flags clear the marker when row identity changes.
 - `dsl/engine.rs` compiles and dispatches each stage once over `RowSet`.
 - Verbs own algorithms over rows/partitions. Group keys and aggregates are
   deliberately metadata, not duplicate fields inserted into members.

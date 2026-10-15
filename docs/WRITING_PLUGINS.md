@@ -219,6 +219,12 @@ describes that grammar; this prevents a parent command's weaker policy from
 being used to reach a guarded child. In delegated-help mode the plugin may
 print plain help text instead of `ResponseV1`.
 
+The host turns delegated help into a semantic document. Keep continuation lines
+indented farther than their entry label so they remain part of its description.
+Unstaged `--json` help exposes document blocks; adding a pipe exposes flat entry
+rows with `section`, `name`, and `description`. Normal response data stays
+ordinary data even when it contains `notes` or other help-like field names.
+
 #### ResponseV1
 
 ```json
@@ -331,7 +337,7 @@ osp injects environment variables into the plugin process:
 |----------|--------|-------|
 | `OSP_UI_VERBOSITY` | `error`, `warning`, `success`, `info`, `trace` | User's verbosity level |
 | `OSP_DEBUG_LEVEL` | `0`-`3` | Debug verbosity from `-d` flags |
-| `OSP_FORMAT` | `auto`, `guide`, `json`, `table`, `md`, `mreg`, `value` | Requested output format |
+| `OSP_FORMAT` | `auto`, `json`, `table`, `md`, `mreg`, `value` | Requested output format |
 | `OSP_COLOR` | `auto`, `always`, `never` | Color preference |
 | `OSP_UNICODE` | `auto`, `always`, `never` | Unicode preference |
 | `OSP_TERMINAL_KIND` | `cli`, `repl`, `unknown` | Whether running in CLI or REPL |

@@ -2,22 +2,19 @@ use osp_cli::core::command_def::{
     ArgDef, CommandDef, CommandPolicyDef, FlagDef, ValueChoice, ValueKind,
 };
 use osp_cli::core::command_policy::VisibilityMode;
+use osp_cli::core::document::{DocBlock, Document};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::guide::{GuideSection, GuideSectionKind, GuideView};
 use osp_cli::ui::{RenderSettings, render_output};
 use serde_json::json;
 
-fn run_guide_pipeline(
-    view: GuideView,
-    pipeline: &str,
-) -> osp_cli::core::output_model::OutputResult {
+fn run_guide_pipeline(view: Document, pipeline: &str) -> osp_cli::core::output_model::OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     apply_output_pipeline(view.to_output_result(), &parsed.stages).expect("pipeline should succeed")
 }
 
-fn sample_guide() -> GuideView {
-    GuideView::from_text(
+fn sample_guide() -> Document {
+    Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n  clear  Clear history entries\n",
     )
 }
@@ -25,12 +22,14 @@ fn sample_guide() -> GuideView {
 #[test]
 fn guide_payload_narrowing_restores_and_renders_as_markdown_guide() {
     let output = run_guide_pipeline(sample_guide(), "list | ? | L 1");
-    let rebuilt = GuideView::try_from_output_result(&output).expect("guide should still restore");
-    assert_eq!(rebuilt.commands.len(), 1);
-    assert_eq!(rebuilt.commands[0].name, "list");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap().len(), 1);
+    assert_eq!(output.as_rows().unwrap()[0]["name"], "list");
 
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.width = Some(80);
+    settings.format_explicit = true;
     let markdown = render_output(&output, &settings);
 
     assert!(markdown.contains("list"));
@@ -61,7 +60,7 @@ fn one_shot_help_pipeline_explains_sort_syntax_and_examples() {
 #[test]
 fn guide_payload_value_extraction_degrades_and_renders_as_plain_values() {
     let output = run_guide_pipeline(sample_guide(), "P name | VALUE name | S value | L 2");
-    assert!(GuideView::try_from_output_result(&output).is_none());
+    assert!(!output.meta.document_rows);
 
     let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Value));
     assert!(rendered.contains("clear"));
@@ -182,56 +181,42 @@ fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts()
     let mut generated = authored.clone();
     generated.usage = None;
 
-    let guide = GuideView::from_command_def(&generated);
-    assert_eq!(
-        guide.preamble,
-        vec!["Before line 1".to_string(), "Before line 2".to_string()]
-    );
-    assert_eq!(
-        guide.epilogue,
-        vec!["After line 1".to_string(), "After line 2".to_string()]
-    );
-    assert_eq!(
-        guide.usage,
-        vec!["deploy [OPTIONS] PROFILE [id] <COMMAND>".to_string()]
-    );
-    assert_eq!(
-        guide
-            .commands
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["apply", "status"]
-    );
-    assert_eq!(
-        guide
-            .arguments
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["PROFILE", "id"]
-    );
-    assert!(guide.options.iter().any(|entry| {
-        entry.name == "-f, --format, <FORMAT>" && entry.short_help == "Select output format"
+    let guide = Document::from_command_def(&generated);
+    let rows = guide.rows();
+    assert_eq!(rows[0]["text"], "Before line 1");
+    assert_eq!(rows[1]["text"], "Before line 2");
+    assert_eq!(rows.last().unwrap()["text"], "After line 2");
+    assert!(rows.iter().any(|row| {
+        row.get("text")
+            .is_some_and(|value| value == "deploy [OPTIONS] PROFILE [id] <COMMAND>")
     }));
-    assert!(
-        guide
-            .options
-            .iter()
-            .any(|entry| entry.name == "--config, <PATH>" && entry.short_help == "Path to config")
-    );
-    assert!(
-        !guide
-            .options
-            .iter()
-            .any(|entry| entry.name.contains("quiet"))
-    );
+    let names = |section: &str| {
+        rows.iter()
+            .filter(|row| row["section"] == section)
+            .map(|row| row["name"].as_str().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names("Commands"), ["apply", "status"]);
+    assert_eq!(names("Arguments"), ["PROFILE", "id"]);
+    assert!(rows.iter().any(|row| {
+        row.get("name")
+            .is_some_and(|value| value == "-f, --format <FORMAT>")
+            && row["description"] == "Select output format"
+    }));
+    assert!(rows.iter().any(|row| {
+        row.get("name")
+            .is_some_and(|value| value == "--config <PATH>")
+            && row["description"] == "Path to config"
+    }));
+    assert!(!names("Options").iter().any(|name| name.contains("quiet")));
 
     let output = guide.to_output_result();
-    let restored = GuideView::try_from_output_result(&output).expect("guide should restore");
-    assert_eq!(restored.to_json_value(), guide.to_json_value());
+    let restored: Document =
+        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
+    assert_eq!(restored, guide);
 
-    let markdown = render_output(&output, &RenderSettings::test_plain(OutputFormat::Markdown));
+    let markdown =
+        osp_cli::ui::render_document(&guide, &RenderSettings::test_plain(OutputFormat::Markdown));
     assert!(markdown.contains("Usage"));
     assert!(markdown.contains("deploy [OPTIONS] PROFILE [id] <COMMAND>"));
     assert!(markdown.contains("Apply pending changes"));
@@ -313,129 +298,155 @@ fn clap_command_metadata_projects_into_command_defs_and_guides() {
     assert_eq!(def.subcommands.len(), 1);
     assert_eq!(def.subcommands[0].name, "list");
 
-    let guide = GuideView::from_command_def(&def);
-    assert_eq!(guide.preamble, vec!["Plugin preamble".to_string()]);
-    assert_eq!(guide.epilogue, vec!["Plugin epilogue".to_string()]);
-    assert_eq!(guide.commands[0].name, "list");
+    let guide = Document::from_command_def(&def);
+    let rows = guide.rows();
+    assert_eq!(rows[0]["text"], "Plugin preamble");
+    assert_eq!(rows.last().unwrap()["text"], "Plugin epilogue");
     assert!(
-        guide
-            .options
-            .iter()
-            .any(|entry| entry.name.contains("--format"))
+        rows.iter()
+            .any(|row| row.get("name").is_some_and(|value| value == "list"))
     );
-    assert!(guide.arguments.iter().any(|entry| entry.name == "ROOT"));
+    assert!(
+        rows.iter()
+            .any(|row| row.get("name").is_some_and(|value| value == "ROOT"))
+    );
+    assert!(
+        rows.iter().any(|row| row
+            .get("name")
+            .is_some_and(|value| { value.as_str().is_some_and(|name| name.contains("--format")) }))
+    );
 
-    let output = guide.to_output_result();
-    let markdown = render_output(&output, &RenderSettings::test_plain(OutputFormat::Markdown));
+    let markdown =
+        osp_cli::ui::render_document(&guide, &RenderSettings::test_plain(OutputFormat::Markdown));
     assert!(markdown.contains("List plugins"));
     assert!(markdown.contains("Plugin epilogue"));
 }
 
 #[test]
 fn parsed_and_authored_guides_merge_round_trip_and_render_through_semantic_output() {
-    let mut parsed = GuideView::from_text(
+    let mut parsed = Document::from_help_text(
         "Deploy overview\n\nUsage: osp deploy <COMMAND>\n\nCommands:\n  status  Show deployment status\n  apply   Apply pending changes\n\nOptions:\n  --json  Render machine output\n  --wait  Wait for completion\nHint: use doctor before prod.\n\nSession:\ncurrent profile: prod\n",
     );
-    let authored = GuideView {
-        sections: vec![
-            GuideSection::new("Notes", GuideSectionKind::Notes)
-                .paragraph("Run doctor before deploy"),
-            GuideSection::new("Runtime", GuideSectionKind::Custom).data(json!({
-                "profile": "prod",
-                "theme": "rose-pine-moon",
-                "count": 2,
-            })),
+    let authored = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Notes",
+                vec![DocBlock::Paragraph {
+                    text: ("Run doctor before deploy").into(),
+                }],
+            ),
+            DocBlock::section(
+                "Runtime",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "profile": "prod",
+                        "theme": "rose-pine-moon",
+                        "count": 2,
+                    }),
+                }],
+            ),
         ],
-        ..GuideView::default()
     };
 
-    parsed.merge(authored);
+    parsed.blocks.extend(authored.blocks);
     let output = parsed.to_output_result();
-    let restored = GuideView::try_from_output_result(&output).expect("guide should restore");
-
-    assert_eq!(restored.preamble, vec!["Deploy overview".to_string()]);
-    assert_eq!(restored.usage, vec!["osp deploy <COMMAND>".to_string()]);
+    let restored: Document =
+        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
+    assert_eq!(restored, parsed);
+    let titles = restored
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            DocBlock::Section { title, .. } => Some(title.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        restored
-            .commands
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["status", "apply"]
+        titles,
+        [
+            "Usage", "Commands", "Options", "Session", "Notes", "Runtime"
+        ]
     );
-    assert_eq!(
-        restored
-            .options
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["--json", "--wait"]
-    );
-    assert_eq!(
-        restored.epilogue,
-        vec!["Hint: use doctor before prod.".to_string()]
-    );
-    assert_eq!(restored.notes, vec!["Run doctor before deploy".to_string()]);
-    assert_eq!(
-        restored
-            .sections
-            .iter()
-            .map(|section| section.title.as_str())
-            .collect::<Vec<_>>(),
-        vec!["Session", "Notes", "Runtime"]
-    );
-
-    let markdown = restored.to_markdown_with_width(Some(80));
-    assert!(markdown.contains("## Usage"));
-    assert!(markdown.contains("## Session"));
+    let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
+    settings.format_explicit = true;
+    let markdown = render_output(&output, &settings);
+    assert!(markdown.contains("## Usage") && markdown.contains("## Session"));
     assert!(markdown.contains("current profile: prod"));
-
-    let value_lines = restored.to_value_lines();
-    assert!(value_lines.contains(&"Show deployment status".to_string()));
-    assert!(value_lines.contains(&"Run doctor before deploy".to_string()));
-    assert!(value_lines.contains(&"prod".to_string()));
-    assert!(value_lines.contains(&"rose-pine-moon".to_string()));
-    assert!(value_lines.contains(&"2".to_string()));
+    settings.format = OutputFormat::Value;
+    let values = render_output(&output, &settings);
+    for value in [
+        "Show deployment status",
+        "Run doctor before deploy",
+        "prod",
+        "rose-pine-moon",
+        "2",
+    ] {
+        assert!(values.lines().any(|line| line.trim() == value));
+    }
 }
 
 #[test]
 fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Session", GuideSectionKind::Custom).data(json!({
-                "profile": "prod",
-                "theme": "rose-pine-moon"
-            })),
-            GuideSection::new("Examples", GuideSectionKind::Custom).data(json!([
-                "osp history list",
-                "osp history clear",
-                "osp history last",
-                "osp history search",
-                "osp history export",
-                "osp history import"
-            ])),
-            GuideSection::new("Shortcuts", GuideSectionKind::Custom).data(json!([
-                {"name": "list", "short_help": "List history"},
-                {"name": "clear", "short_help": "Clear history"}
-            ])),
-            GuideSection::new("Matrix", GuideSectionKind::Custom).data(json!([
-                {"uid": "alice", "state": "ok"},
-                {"uid": "bob", "state": "warn"}
-            ])),
-            GuideSection::new("Reservation", GuideSectionKind::Custom).data(json!({
-                "approved": true,
-                "limits": {"cpu_cores": 4, "memory_mib": 8192},
-                "owners": ["alice", "bob"],
-                "networks": [{"name": "prod", "ipv4": "192.0.2.8"}]
-            })),
-            GuideSection::new("Ready", GuideSectionKind::Custom).data(json!(true)),
-            GuideSection::new("Capacity", GuideSectionKind::Custom).data(json!(4)),
+    let guide = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Session",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "profile": "prod",
+                        "theme": "rose-pine-moon"
+                    }),
+                }],
+            ),
+            DocBlock::section(
+                "Examples",
+                vec![DocBlock::Data {
+                    value: json!([
+                        "osp history list",
+                        "osp history clear",
+                        "osp history last",
+                        "osp history search",
+                        "osp history export",
+                        "osp history import"
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Shortcuts",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"name": "list", "short_help": "List history"},
+                        {"name": "clear", "short_help": "Clear history"}
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Matrix",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"uid": "alice", "state": "ok"},
+                        {"uid": "bob", "state": "warn"}
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Reservation",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "approved": true,
+                        "limits": {"cpu_cores": 4, "memory_mib": 8192},
+                        "owners": ["alice", "bob"],
+                        "networks": [{"name": "prod", "ipv4": "192.0.2.8"}]
+                    }),
+                }],
+            ),
+            DocBlock::section("Ready", vec![DocBlock::Data { value: json!(true) }]),
+            DocBlock::section("Capacity", vec![DocBlock::Data { value: json!(4) }]),
         ],
-        ..Default::default()
     };
     let output = guide.to_output_result();
 
-    let mut guide_settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut guide_settings = RenderSettings::test_plain(OutputFormat::Auto);
     guide_settings.width = Some(40);
     let rendered = render_output(&output, &guide_settings);
     assert!(rendered.contains("Session"));
@@ -452,14 +463,15 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     assert!(markdown.contains("List history"));
     assert!(markdown.contains("| uid"));
 
-    let restored = GuideView::try_from_output_result(&output).expect("mixed guide should restore");
-    assert_eq!(restored.to_json_value(), guide.to_json_value());
+    let restored: Document =
+        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
+    assert_eq!(restored, guide);
     let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
     json_settings.format_explicit = true;
     let json_output = render_output(&output, &json_settings);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&json_output).unwrap(),
-        json!([guide.to_json_value()]),
+        serde_json::to_value(&guide).unwrap(),
     );
     let mut value_settings = RenderSettings::test_plain(OutputFormat::Value);
     value_settings.format_explicit = true;
@@ -479,7 +491,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
         );
     }
 
-    let mut styled = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut styled = RenderSettings::test_plain(OutputFormat::Auto);
     styled.mode = osp_cli::core::output::RenderMode::Rich;
     styled.color = osp_cli::core::output::ColorMode::Always;
     styled.unicode = osp_cli::core::output::UnicodeMode::Always;
@@ -513,26 +525,30 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     mreg_settings.format_explicit = true;
     let mreg = render_output(&output, &mreg_settings);
     for entry in [
-        "title: Session",
-        "profile: prod",
-        "theme: rose-pine-moon",
-        "title: Examples",
+        "Session",
+        "profile",
+        "prod",
+        "theme",
+        "rose-pine-moon",
+        "Examples",
         "osp history list",
         "osp history clear",
         "osp history last",
         "osp history search",
         "osp history export",
         "osp history import",
-        "title: Shortcuts",
-        "name: list",
-        "short_help: List history",
-        "name: clear",
-        "short_help: Clear history",
-        "title: Matrix",
-        "uid: alice",
-        "state: ok",
-        "uid: bob",
-        "state: warn",
+        "Shortcuts",
+        "list",
+        "List history",
+        "clear",
+        "Clear history",
+        "Matrix",
+        "uid",
+        "alice",
+        "state",
+        "ok",
+        "bob",
+        "warn",
     ] {
         assert!(
             mreg.contains(entry),

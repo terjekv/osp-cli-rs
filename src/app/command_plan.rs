@@ -25,7 +25,6 @@ pub(crate) enum InlineCommandPlan {
 
 pub(crate) fn parse_inline_command(
     tokens: &[String],
-    stages: &[String],
     surface: CommandSurface,
 ) -> Result<InlineCommandPlan> {
     match parse_inline_command_tokens(tokens) {
@@ -37,9 +36,8 @@ pub(crate) fn parse_inline_command(
                     | clap::error::ErrorKind::DisplayVersion
                     | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
             );
-            // REPL help bypasses command execution and cannot consume stages;
-            // external inline help retains its existing early-return behavior.
-            if help && (stages.is_empty() || matches!(surface, CommandSurface::External)) {
+            // Help is a document; callers apply any stages to it once.
+            if help {
                 return Ok(InlineCommandPlan::Help(error));
             }
             Err(super::report_std_error_with_context(

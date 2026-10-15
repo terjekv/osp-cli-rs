@@ -7,12 +7,10 @@
 fn structural_five_stage_semantic_pipeline_preserves_document_and_applies_all_stages() {
     let output = run_guide_pipeline(sample_guide(), "show | S name | L 1 | ? | Y");
 
-    let guide = GuideView::try_from_output_result(&output)
-        .expect("document must survive five semantic stages");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap()[0]["name"], "config");
 
-    assert_eq!(guide.commands.len(), 1);
-    assert_eq!(guide.commands[0].name, "config");
-    assert!(output.document.is_some(), "document must still be attached");
 }
 
 // traverse_matching contract: when a filter matches entries in only one section,
@@ -21,12 +19,10 @@ fn structural_five_stage_semantic_pipeline_preserves_document_and_applies_all_st
 fn structural_semantic_filter_drops_section_entirely_when_no_entries_survive() {
     let output = run_guide_pipeline(guide_with_sections(), "F name=start");
 
-    let guide = GuideView::try_from_output_result(&output).expect("document must survive filter");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap(), &[row(json!({"section":"Actions", "name":"start", "description":"Start the VM"}))]);
 
-    assert_eq!(guide.sections.len(), 1, "Utilities section must be pruned");
-    assert_eq!(guide.sections[0].title, "Actions");
-    assert_eq!(guide.sections[0].entries.len(), 1);
-    assert_eq!(guide.sections[0].entries[0].name, "start");
 }
 
 // traverse_matching contract: envelope scalars (title, kind) must be kept in a
@@ -36,21 +32,10 @@ fn structural_semantic_filter_drops_section_entirely_when_no_entries_survive() {
 fn structural_semantic_filter_preserves_section_envelope_fields_with_surviving_entries() {
     let output = run_guide_pipeline(guide_with_sections(), "F name=version");
 
-    let guide = GuideView::try_from_output_result(&output).expect("document must survive");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap(), &[row(json!({"section":"Utilities", "name":"version", "description":"Show version info"}))]);
 
-    assert_eq!(guide.sections.len(), 1);
-    let section = &guide.sections[0];
-    assert_eq!(
-        section.title, "Utilities",
-        "section title must be preserved"
-    );
-    assert_eq!(
-        section.kind,
-        GuideSectionKind::Custom,
-        "section kind must be preserved"
-    );
-    assert_eq!(section.entries.len(), 1);
-    assert_eq!(section.entries[0].name, "version");
 }
 
 // Semantic sort must reorder guide commands without losing the document.
@@ -58,11 +43,10 @@ fn structural_semantic_filter_preserves_section_envelope_fields_with_surviving_e
 fn structural_semantic_sort_reorders_guide_commands_preserving_document() {
     let output = run_guide_pipeline(guide_with_sections(), "S name");
 
-    let guide = GuideView::try_from_output_result(&output).expect("document must survive sort");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap().iter().map(|row| row["name"].as_str().unwrap()).collect::<Vec<_>>(), ["delete", "deploy", "doctor", "list", "restart", "start", "stop", "version"]);
 
-    let names: Vec<&str> = guide.commands.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["delete", "deploy", "list"]);
-    assert!(output.document.is_some());
 }
 
 // Semantic limit trims top-level collections.
@@ -70,10 +54,10 @@ fn structural_semantic_sort_reorders_guide_commands_preserving_document() {
 fn structural_semantic_limit_trims_top_level_collections_per_array() {
     let output = run_guide_pipeline(guide_with_sections(), "L 2");
 
-    let guide = GuideView::try_from_output_result(&output).expect("document must survive limit");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap().len(), 2); assert!(output.as_rows().unwrap().iter().all(|row| row["section"] == "Commands"));
 
-    assert_eq!(guide.commands.len(), 2, "commands trimmed to 2");
-    assert!(guide.sections.is_empty(), "L limits the common content row stream");
 }
 
 // Regex filter selects rows whose field value matches a pattern.

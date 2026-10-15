@@ -60,6 +60,12 @@ print plain help text to stdout and stderr in this mode. Exit code 0 is
 preferred for normal help output; exit code 2 is acceptable for usage-style
 failures.
 
+The host parses delegated help text into semantic document blocks. Indented
+continuation lines belong to the preceding entry, including descriptions below
+a flag label. Unrecognized prose remains text. This does not change the plugin
+wire protocol: plugins still return help text, not document JSON. Normal service
+records with fields such as `notes` never implicitly become help documents.
+
 ## Describe Caching (Backbone Behavior)
 
 - Backbone caches successful `--describe` payloads.
@@ -213,7 +219,7 @@ Backbone injects runtime hints into each plugin subprocess. Plugins can use
 Required hints:
 - `OSP_UI_VERBOSITY=error|warning|success|info|trace`
 - `OSP_DEBUG_LEVEL=0|1|2|3`
-- `OSP_FORMAT=auto|guide|json|table|md|mreg|value`
+- `OSP_FORMAT=auto|json|table|md|mreg|value`
 - `OSP_COLOR=auto|always|never`
 - `OSP_UNICODE=auto|always|never`
 - `OSP_TERMINAL_KIND=cli|repl|unknown`

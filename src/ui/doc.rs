@@ -70,6 +70,7 @@ pub struct TableBlock {
 /// Keeping entries typed gives Markdown and terminal rendering one owner for
 /// labels and descriptions.
 pub struct EntriesBlock {
+    pub inline_markup: bool,
     pub default_indent: String,
     pub default_gap: Option<String>,
     pub rows: Vec<EntryRow>,

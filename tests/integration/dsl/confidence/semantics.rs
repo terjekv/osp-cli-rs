@@ -40,26 +40,11 @@ fn presentation_recommendations_do_not_change_pipeline_semantics() {
 #[test]
 fn help_like_payload_restores_after_narrowing_multistage_pipeline() {
     let output = run_guide_pipeline(help_like_guide(), "status | ? | S name | L 1");
-    let rebuilt = GuideView::try_from_output_result(&output).expect("guide should still restore");
-
-    assert_eq!(rebuilt.commands.len(), 1);
-    assert_eq!(rebuilt.commands[0].name, "status");
-    assert_eq!(rebuilt.commands[0].short_help, "Show deployment status");
-    assert!(
-        rebuilt.preamble.is_empty(),
-        "unmatched preamble should prune"
-    );
-    assert!(rebuilt.usage.is_empty(), "unmatched usage should prune");
-    assert!(rebuilt.notes.is_empty(), "unmatched notes should prune");
-    assert!(
-        rebuilt.epilogue.is_empty(),
-        "unmatched epilogue should prune"
-    );
-    assert!(
-        rebuilt.options.is_empty(),
-        "unmatched option entries should prune"
-    );
-    assert_eq!(rebuilt.sections.len(), 0);
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap().len(), 1);
+    assert_eq!(output.as_rows().unwrap()[0]["name"], "status");
+    assert_eq!(output.as_rows().unwrap()[0]["section"], "Commands");
 }
 
 // Protects the blunt quick contract for guide-shaped data: descendant matches
@@ -68,19 +53,11 @@ fn help_like_payload_restores_after_narrowing_multistage_pipeline() {
 #[test]
 fn help_like_payload_quick_prunes_unmatched_root_fields_for_partial_match() {
     let output = run_guide_pipeline(help_like_guide(), "status | ? | L 1");
-    let rebuilt = GuideView::try_from_output_result(&output).expect("guide should still restore");
-
-    assert!(
-        rebuilt.preamble.is_empty(),
-        "preamble should prune when only commands matched"
-    );
-    assert!(
-        rebuilt.usage.is_empty(),
-        "usage should prune when only commands matched"
-    );
-    assert_eq!(rebuilt.commands.len(), 1);
-    assert_eq!(rebuilt.commands[0].name, "status");
-    assert_eq!(rebuilt.sections.len(), 0);
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap().len(), 1);
+    assert_eq!(output.as_rows().unwrap()[0]["name"], "status");
+    assert_eq!(output.as_rows().unwrap()[0]["section"], "Commands");
 }
 
 // Protects the degrade path: once a semantic payload is structurally reshaped
@@ -93,7 +70,7 @@ fn help_like_payload_does_not_restore_after_value_extraction_pipeline() {
         "F name ~ ^[a-z] | P name | VALUE name | S value | L 2",
     );
 
-    assert!(GuideView::try_from_output_result(&output).is_none());
+    assert!(!output.meta.document_rows);
     let OutputItems::Rows(rows) = output.items else {
         panic!("expected flat value rows");
     };
@@ -113,7 +90,7 @@ fn help_like_payload_does_not_restore_after_value_extraction_pipeline() {
 fn help_like_payload_jq_fans_out_scalar_results() {
     let output = run_guide_pipeline(help_like_guide(), "F name ~ ^[a-z] | JQ '.[].name'");
 
-    assert!(GuideView::try_from_output_result(&output).is_none());
+    assert!(!output.meta.document_rows);
     let OutputItems::Rows(rows) = output.items else {
         panic!("expected flat value rows");
     };
@@ -144,9 +121,9 @@ fn help_like_payload_jq_empty_yields_no_rows() {
 // row-like fragments.
 #[test]
 fn help_like_payload_unroll_preserves_parent_section_shell() {
-    let output = run_document_pipeline(help_like_guide(), "U entries");
+    let output = run_document_pipeline(help_like_record(), "U entries");
 
-    assert!(GuideView::try_from_output_result(&output).is_none());
+    assert!(!output.meta.document_rows);
     assert!(output.document.is_none());
     let value = result_rows(&output)[0].clone();
     assert_eq!(
@@ -207,19 +184,25 @@ fn help_like_payload_unroll_preserves_parent_section_shell() {
 // survivor.
 #[test]
 fn help_like_payload_fuzzy_quick_restores_typo_matched_command() {
-    let output = run_guide_pipeline(help_like_guide(), "K name | %docter | ? | L 1");
+    let output = run_guide_pipeline(help_like_guide(), "K name | %docter | ?");
 
-    let rebuilt = GuideView::try_from_output_result(&output).expect("guide should still restore");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
     assert!(
-        rebuilt.commands.iter().any(|entry| entry.name == "doctor"),
-        "doctor should survive typo-tolerant fuzzy narrowing"
+        output
+            .as_rows()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "doctor")
     );
     assert!(
-        rebuilt.commands.iter().all(|entry| entry.name != "apply"),
-        "unrelated commands should not survive the narrowed guide"
+        output
+            .as_rows()
+            .unwrap()
+            .iter()
+            .filter(|row| row["name"] == "doctor")
+            .all(|row| row["section"] == "Commands")
     );
-    assert!(rebuilt.preamble.is_empty());
-    assert_eq!(rebuilt.options.len(), 0);
 }
 
 // Protects render recommendation on guide-shaped payloads: narrowing,
@@ -231,7 +214,7 @@ fn help_like_payload_keeps_render_recommendation_through_non_structural_stages()
         let output = run_guide_pipeline(help_like_guide(), pipeline);
         assert_eq!(
             output.meta.render_recommendation,
-            Some(osp_cli::core::output_model::RenderRecommendation::Guide),
+            Some(osp_cli::core::output_model::RenderRecommendation::Document),
             "pipeline={pipeline}"
         );
     }
@@ -242,7 +225,7 @@ fn help_like_payload_keeps_render_recommendation_through_non_structural_stages()
 // clear instead of surviving into generic row output.
 #[test]
 fn help_like_payload_clears_render_recommendation_after_structural_reshapes() {
-    for pipeline in ["P commands[].name", "U entries", "VALUE commands[].name"] {
+    for pipeline in ["P name", "U name", "VALUE name"] {
         let output = run_guide_pipeline(help_like_guide(), pipeline);
         assert_eq!(
             output.meta.render_recommendation, None,

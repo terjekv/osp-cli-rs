@@ -4,7 +4,7 @@ use crate::core::output_model::{
     ColumnAlignment, Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta,
     OutputResult,
 };
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+
 use crate::row;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
@@ -13,21 +13,22 @@ use super::doc::{Block, SectionTitleChrome};
 use super::settings::TableBorderOverride;
 use super::{
     GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings,
-    StructuredGuideRenderOptions, plan_output, render_document, render_guide_with_layout,
-    render_output, render_output_for_copy, render_structured_output_with_guide_options,
+    StructuredDocumentRenderOptions, plan_output, render_document, render_document_with_layout,
+    render_output, render_output_for_copy, render_structured_output_with_document_options,
     resolve_settings,
 };
 
 #[test]
 fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
-    let output = GuideView::from_text("Usage: osp history <COMMAND>\n\nCommands:\n  list  Show\n")
-        .to_output_result();
+    let output =
+        Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list  Show\n")
+            .to_output_result();
 
     let mut inherited_json = RenderSettings::test_plain(OutputFormat::Json);
     inherited_json.guide_default_format = GuideDefaultFormat::Inherit;
     inherited_json.format_explicit = false;
     let inherited_plan = plan_output(&output, &inherited_json, super::RenderProfile::Normal);
-    assert_eq!(inherited_plan.format, OutputFormat::Guide);
+    assert_eq!(inherited_plan.format, OutputFormat::Auto);
 
     let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
     explicit_json.guide_default_format = GuideDefaultFormat::Guide;
@@ -157,15 +158,15 @@ fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
 
 #[test]
 fn ui2_structured_guide_options_are_owned_by_one_entrypoint_unit() {
-    let guide = GuideView::from_text("Usage: osp history <COMMAND>\n");
+    let guide = Document::from_help_text("Usage: osp history <COMMAND>\n");
     let output = guide.to_output_result();
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let rendered = render_structured_output_with_guide_options(
+    let rendered = render_structured_output_with_document_options(
         &output,
         &settings,
-        StructuredGuideRenderOptions {
-            source_guide: Some(&guide),
+        StructuredDocumentRenderOptions {
+            source_document: Some(&guide),
             layout: HelpLayout::Compact,
             title_prefix: Some("Demo"),
             show_footer_rule: Some(false),
@@ -544,7 +545,10 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
 #[test]
 fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]).with_document(
-        OutputDocument::new(OutputDocumentKind::Guide, json!({"usage": ["osp history"]})),
+        OutputDocument::new(
+            OutputDocumentKind::Document,
+            json!({"blocks": [{"text": "osp history"}]}),
+        ),
     );
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
@@ -557,7 +561,7 @@ fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     };
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&json.text).unwrap(),
-        json!([{"usage": ["osp history"]}])
+        json!({"blocks": [{"text": "osp history"}]})
     );
 }
 
@@ -597,34 +601,37 @@ fn ui2_resolves_theme_catalog_from_caller_theme_name_unit() {
 
 #[test]
 fn ui2_full_help_layout_keeps_usage_inline_with_explicit_margin_unit() {
-    let guide = GuideView::from_text("Usage: osp history <COMMAND>\n");
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let guide = Document::from_help_text("Usage: osp history <COMMAND>\n");
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(60);
     settings.margin = 2;
 
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Full);
+    let rendered = render_document_with_layout(&guide, &settings, HelpLayout::Full);
 
     assert!(rendered.starts_with("  Usage: osp history <COMMAND>\n"));
 }
 
 #[test]
 fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
-    let guide = GuideView {
-        sections: vec![GuideSection {
-            title: "OSP".to_string(),
-            kind: GuideSectionKind::Custom,
-            paragraphs: vec!["Welcome Demo!".to_string()],
-            entries: Vec::new(),
-            data: Some(serde_json::json!({
-                "Logged in as": "oistes",
-                "Theme": "Rose Pine Moon",
-            })),
-        }],
-        ..Default::default()
+    let guide = Document {
+        blocks: vec![DocBlock::section(
+            "OSP".to_string(),
+            vec![
+                DocBlock::Paragraph {
+                    text: "Welcome Demo!".to_string(),
+                },
+                DocBlock::Data {
+                    value: serde_json::json!({
+                        "Logged in as": "oistes",
+                        "Theme": "Rose Pine Moon",
+                    }),
+                },
+            ],
+        )],
     };
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Full);
+    let rendered = render_document_with_layout(&guide, &settings, HelpLayout::Full);
 
     assert!(rendered.contains("Welcome Demo!\n\n  Logged in as"));
     assert!(rendered.contains("Theme"));
@@ -632,11 +639,11 @@ fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
 
 #[test]
 fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
-    let output = GuideView::from_text(
+    let output = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     )
     .to_output_result();
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(80);
 
     let rendered =
@@ -648,39 +655,31 @@ fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
 }
 
 #[test]
-fn ui2_structured_guide_output_prefers_source_guide_hints_unit() {
-    let guide = crate::guide::GuideView {
-        preamble: vec!["Usage: osp history <COMMAND>".to_string()],
-        commands: vec![crate::guide::GuideEntry {
-            name: "list".to_string(),
-            short_help: "List history entries".to_string(),
-            display_indent: Some(">>".to_string()),
-            display_gap: Some(" -> ".to_string()),
-        }],
-        ..Default::default()
-    };
-    let output = guide.to_output_result();
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
-
-    let rendered = super::render_structured_output_with_source_guide(
+fn ui2_structured_document_output_uses_presentation_metadata_unit() {
+    let document = Document::from_help_text("Commands:\n  list  List history entries\n");
+    let mut output = document.to_output_result();
+    output.meta.document_entry_gap = Some(4);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
+    settings.help_chrome.entry_indent = Some(4);
+    let rendered = super::render_structured_output_with_source_document(
         &output,
-        Some(&guide),
+        Some(&document),
         &settings,
         HelpLayout::Full,
     );
-
-    assert!(rendered.contains("\n>>list -> List history entries\n"));
+    assert!(rendered.contains("\n    list    List history entries\n"));
 }
 
 #[test]
 fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
-    let guide = GuideView::from_text(
+    let guide = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
 
-    let compact = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Compact, false);
+    let compact =
+        super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(usage) = &compact.blocks[0] else {
         panic!("expected usage section");
@@ -705,13 +704,13 @@ fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
 
 #[test]
 fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
-    let guide = GuideView::from_text(
+    let guide = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
 
-    let full = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Full, true);
+    let full = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, true);
 
     let Some(Block::Rule) = full.blocks.last() else {
         panic!("expected lowered footer rule block");
@@ -720,10 +719,10 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
 
 #[test]
 fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
-    let guide = GuideView::from_text("Commands:\n  list   List history entries\n");
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let guide = Document::from_help_text("Commands:\n  list   List history entries\n");
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
-    let doc = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Compact, false);
+    let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(block) = &doc.blocks[0] else {
         panic!("expected help section block");
@@ -738,18 +737,19 @@ fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
 
 #[test]
 fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Notes", GuideSectionKind::Notes)
-                .paragraph("Use `osp history list` for recent commands."),
-        ],
-        ..Default::default()
+    let guide = Document {
+        blocks: vec![DocBlock::section(
+            "Notes",
+            vec![DocBlock::Paragraph {
+                text: ("Use `osp history list` for recent commands.").into(),
+            }],
+        )],
     };
     let output = guide.to_output_result();
 
     let guide_plan = plan_output(
         &output,
-        &RenderSettings::test_plain(OutputFormat::Guide),
+        &RenderSettings::test_plain(OutputFormat::Auto),
         RenderProfile::Normal,
     );
     let guide_doc = super::lower::lower_output(&output, &guide_plan);
@@ -779,22 +779,29 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 
 #[test]
 fn ui2_help_chrome_settings_override_indent_gap_and_spacing_unit() {
-    let guide = crate::guide::GuideView {
-        commands: vec![crate::guide::GuideEntry {
-            name: "show".to_string(),
-            short_help: "Display current value".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        options: vec![crate::guide::GuideEntry {
-            name: "-h, --help".to_string(),
-            short_help: "Print help".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        ..Default::default()
+    let guide = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Commands",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "show".to_string(),
+                        description: "Display current value".to_string(),
+                    }],
+                }],
+            ),
+            DocBlock::section(
+                "Options",
+                vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "-h, --help".to_string(),
+                        description: "Print help".to_string(),
+                    }],
+                }],
+            ),
+        ],
     };
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.help_chrome = HelpChromeSettings {
         table_chrome: TableBorderOverride::None,
         entry_indent: Some(4),
@@ -802,7 +809,7 @@ fn ui2_help_chrome_settings_override_indent_gap_and_spacing_unit() {
         section_spacing: Some(0),
     };
 
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Compact);
+    let rendered = render_document_with_layout(&guide, &settings, HelpLayout::Compact);
 
     assert_eq!(
         rendered,
@@ -871,35 +878,54 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
 
 #[test]
 fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Session", GuideSectionKind::Custom).data(json!({
-                "profile": "prod",
-                "theme": "rose-pine-moon"
-            })),
-            GuideSection::new("Examples", GuideSectionKind::Custom).data(json!([
-                "osp history list",
-                "osp history clear",
-                "osp history last",
-                "osp history search",
-                "osp history export",
-                "osp history import"
-            ])),
-            GuideSection::new("Shortcuts", GuideSectionKind::Custom).data(json!([
-                {"name": "list", "short_help": "List history"},
-                {"name": "clear", "short_help": "Clear history"}
-            ])),
-            GuideSection::new("Matrix", GuideSectionKind::Custom).data(json!([
-                {"uid": "alice", "state": "ok"},
-                {"uid": "bob", "state": "warn"}
-            ])),
+    let guide = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Session",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "profile": "prod",
+                        "theme": "rose-pine-moon"
+                    }),
+                }],
+            ),
+            DocBlock::section(
+                "Examples",
+                vec![DocBlock::Data {
+                    value: json!([
+                        "osp history list",
+                        "osp history clear",
+                        "osp history last",
+                        "osp history search",
+                        "osp history export",
+                        "osp history import"
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Shortcuts",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"name": "list", "short_help": "List history"},
+                        {"name": "clear", "short_help": "Clear history"}
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Matrix",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"uid": "alice", "state": "ok"},
+                        {"uid": "bob", "state": "warn"}
+                    ]),
+                }],
+            ),
         ],
-        ..Default::default()
     };
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(40);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
-    let doc = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Full, false);
+    let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, false);
 
     let Block::Section(session) = &doc.blocks[0] else {
         panic!("expected session section");

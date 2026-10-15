@@ -125,8 +125,8 @@ pub struct OutputMeta {
 pub enum RenderRecommendation {
     /// Render using the specified output format.
     Format(OutputFormat),
-    /// Render as structured guide/help content.
-    Guide,
+    /// Render as semantic document content.
+    Document,
 }
 
 /// Stable identity for a semantic payload carried through the output pipeline.
@@ -134,8 +134,6 @@ pub enum RenderRecommendation {
 pub enum OutputDocumentKind {
     /// Ordered semantic blocks for help, intro, and command reference.
     Document,
-    /// Structured guide/help/intro payload.
-    Guide,
     /// Canonical JSON document supplied by a command implementation.
     Json,
 }
@@ -158,10 +156,10 @@ impl OutputDocument {
     /// use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind};
     /// use serde_json::json;
     ///
-    /// let document = OutputDocument::new(OutputDocumentKind::Guide, json!({"title": "Help"}));
+    /// let document = OutputDocument::new(OutputDocumentKind::Document, json!({"blocks": [{"text": "Help"}]}));
     ///
-    /// assert_eq!(document.kind, OutputDocumentKind::Guide);
-    /// assert_eq!(document.value["title"], "Help");
+    /// assert_eq!(document.kind, OutputDocumentKind::Document);
+    /// assert_eq!(document.value["blocks"][0]["text"], "Help");
     /// ```
     pub fn new(kind: OutputDocumentKind, value: Value) -> Self {
         Self { kind, value }
@@ -242,15 +240,30 @@ impl OutputResult {
     /// use serde_json::json;
     ///
     /// let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-    ///     OutputDocumentKind::Guide,
-    ///     json!({"title": "Help"}),
+    ///     OutputDocumentKind::Document,
+    ///     json!({"blocks": [{"text": "Help"}]}),
     /// ));
     ///
     /// assert!(output.document.is_some());
     /// ```
     #[must_use]
     pub fn with_document(mut self, document: OutputDocument) -> Self {
-        self.items = OutputItems::Rows(rows_from_value(document.value.clone()));
+        let semantic = (document.kind == OutputDocumentKind::Document)
+            .then(|| {
+                serde_json::from_value::<crate::core::document::Document>(document.value.clone())
+                    .ok()
+            })
+            .flatten();
+        self.meta.document_rows = semantic.is_some();
+        if self.meta.document_rows {
+            self.meta.render_recommendation = Some(RenderRecommendation::Document);
+        } else if self.meta.render_recommendation == Some(RenderRecommendation::Document) {
+            self.meta.render_recommendation = None;
+        }
+        self.items = OutputItems::Rows(match semantic {
+            Some(document) => document.rows(),
+            None => rows_from_value(document.value.clone()),
+        });
         self.meta.key_index = compute_key_index(self.as_rows().unwrap_or_default());
         self.document = Some(document);
         self
@@ -558,14 +571,16 @@ mod tests {
         assert_eq!(grouped_output.as_rows(), None);
         assert_eq!(grouped_output.into_rows(), None);
 
-        let document_output = OutputResult::from_rows(Vec::new()).with_document(
-            OutputDocument::new(OutputDocumentKind::Guide, json!({"usage": ["osp"]})),
-        );
+        let document_output =
+            OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
+                OutputDocumentKind::Document,
+                json!({"blocks": [{"section": "Usage", "blocks": [{"text": "osp"}]}]}),
+            ));
 
         assert!(matches!(
             document_output.document,
             Some(OutputDocument {
-                kind: OutputDocumentKind::Guide,
+                kind: OutputDocumentKind::Document,
                 value: Value::Object(_),
             })
         ));

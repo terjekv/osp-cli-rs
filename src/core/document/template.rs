@@ -141,3 +141,61 @@ fn finish_section(document: &mut Document, section: &mut Option<(String, Vec<Doc
         document.blocks.push(DocBlock::section(title, blocks));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn markdown_template_parses_headings_includes_lists_and_inline_markdown_unit() {
+        let help = Document::from_help_text("Usage: demo\n");
+        let document = parse(
+            "# Title\n\nHello _there_ and **strong**.\n\n{{ help }}\n\n- first\n- second\n",
+            &help,
+        );
+        assert!(
+            matches!(&document.blocks[0], DocBlock::Section { title, blocks, .. }
+            if title == "Title" && matches!(&blocks[0], DocBlock::Paragraph { text } if text == "Hello *there* and **strong**."))
+        );
+        assert_eq!(document.blocks[1], help.blocks[0]);
+        assert!(
+            matches!(&document.blocks[2], DocBlock::List { items } if items == &["first", "second"])
+        );
+    }
+
+    #[test]
+    fn markdown_template_parses_valid_osp_code_blocks_as_semantic_data_unit() {
+        let document = parse(
+            "## Keybindings\n\n```osp\n[{\"name\":\"Ctrl-D\",\"short_help\":\"exit\"}]\n```\n",
+            &Document::default(),
+        );
+        assert!(
+            matches!(&document.blocks[0], DocBlock::Section { title, blocks, .. }
+            if title == "Keybindings" && blocks == &[DocBlock::Data { value: json!([{"name":"Ctrl-D","short_help":"exit"}]) }])
+        );
+    }
+
+    #[test]
+    fn markdown_template_keeps_non_semantic_or_invalid_code_blocks_literal_unit() {
+        for (text, expected) in [
+            (
+                "```json\n[{\"name\":\"Ctrl-D\"}]\n```",
+                "`[{\"name\":\"Ctrl-D\"}]`",
+            ),
+            ("```osp\n[{name:\"Ctrl-D\"}]\n```", "`[{name:\"Ctrl-D\"}]`"),
+            (
+                "```osp\n[{\"name\":\"Ctrl-D\"\n```",
+                "`[{\"name\":\"Ctrl-D\"`",
+            ),
+        ] {
+            let document = parse(text, &Document::default());
+            assert_eq!(
+                document.blocks,
+                [DocBlock::Paragraph {
+                    text: expected.into()
+                }]
+            );
+        }
+    }
+}

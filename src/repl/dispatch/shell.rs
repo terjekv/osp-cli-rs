@@ -892,7 +892,7 @@ JSON
         assert!(json_rows[0].get("text").is_some());
 
         let mut guide_state = app_state();
-        let guide = render_root_help_line(&mut guide_state, "--guide help | L 1");
+        let guide = render_root_help_line(&mut guide_state, "--format auto help | L 1");
         assert!(guide.contains("Usage"));
         assert!(!guide.contains("Commands"));
 

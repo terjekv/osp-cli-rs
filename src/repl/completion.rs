@@ -355,7 +355,7 @@ fn repl_host_command_without_invocation_flags(name: &str) -> bool {
 }
 
 fn invocation_flag_nodes() -> Vec<(String, FlagNode)> {
-    let format_values = ["auto", "guide", "json", "table", "mreg", "value", "md"]
+    let format_values = ["auto", "json", "table", "mreg", "value", "md"]
         .into_iter()
         .map(SuggestionEntry::value)
         .collect::<Vec<_>>();
@@ -378,12 +378,6 @@ fn invocation_flag_nodes() -> Vec<(String, FlagNode)> {
             FlagNode::new()
                 .tooltip("Format this invocation only")
                 .suggestions(format_values),
-        ),
-        (
-            "--guide".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format guide"),
         ),
         (
             "--json".to_string(),
@@ -668,10 +662,10 @@ mod tests {
 
         inject_invocation_flags(&mut root);
 
-        assert!(root.flags.contains_key("--guide"));
+        assert!(!root.flags.contains_key("--guide"));
         assert!(root.flags.contains_key("--json"));
         assert!(root.flags.contains_key("--format"));
-        assert!(root.children["ldap"].flags.contains_key("--guide"));
+        assert!(!root.children["ldap"].flags.contains_key("--guide"));
         assert!(root.children["ldap"].flags.contains_key("--json"));
         assert!(root.children["ldap"].flags.contains_key("--format"));
         assert!(!root.children["exit"].flags.contains_key("--json"));
@@ -681,7 +675,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.value.as_str())
                 .collect::<Vec<_>>(),
-            vec!["auto", "guide", "json", "table", "mreg", "value", "md"]
+            vec!["auto", "json", "table", "mreg", "value", "md"]
         );
     }
 

@@ -63,9 +63,13 @@ impl Document {
                     DocBlock::Paragraph { text } => rows.extend(text.lines().map(|text| {
                         crate::row! { "section" => section, "text" => text }
                     })),
-                    DocBlock::List { items } => rows.extend(items.iter().map(|text| {
-                        crate::row! { "section" => section, "text" => format!("- {text}") }
-                    })),
+                    DocBlock::List { items } => {
+                        for item in items {
+                            for text in format!("- {item}").lines() {
+                                rows.push(crate::row! { "section" => section, "text" => text });
+                            }
+                        }
+                    }
                     DocBlock::Data { value } => {
                         rows.extend(
                             crate::core::output_model::rows_from_value(value.clone())
@@ -86,13 +90,16 @@ impl Document {
 
     /// Keeps the unstaged document alongside its canonical row projection.
     pub fn to_output_result(&self) -> crate::core::output_model::OutputResult {
-        use crate::core::output_model::{OutputDocument, OutputDocumentKind, OutputResult};
+        use crate::core::output_model::{
+            OutputDocument, OutputDocumentKind, OutputResult, RenderRecommendation,
+        };
         let mut output = OutputResult::from_rows(self.rows());
         output.document = Some(OutputDocument::new(
             OutputDocumentKind::Document,
             serde_json::to_value(self).unwrap_or(Value::Null),
         ));
         output.meta.document_rows = true;
+        output.meta.render_recommendation = Some(RenderRecommendation::Document);
         output
     }
 
@@ -142,7 +149,7 @@ impl Document {
             .filter(|subcommand| !subcommand.is_hide_set())
             .map(|subcommand| DocumentEntry {
                 name: subcommand.get_name().to_string(),
-                description: command_description(subcommand, long_help),
+                description: command_description(subcommand, false),
             })
             .collect::<Vec<_>>();
         if !subcommands.is_empty() {
@@ -293,27 +300,39 @@ impl Document {
         let mut document = Self::default();
         let mut section: Option<(String, Vec<DocBlock>)> = None;
         let mut entry_indent = None;
+        // Where the current entry's description text starts; deeper lines,
+        // even ones that begin with `-`, continue that description.
+        let mut description_column: Option<usize> = None;
+        let mut paragraph_break = false;
 
         for raw_line in help_text.lines() {
             let line = raw_line.trim_end();
             if line.trim().is_empty() {
-                entry_indent = None;
+                paragraph_break = true;
                 continue;
             }
-            let indent = line.len().saturating_sub(line.trim_start().len());
-            let content = &line[indent..];
+            let prefix = line.len().saturating_sub(line.trim_start().len());
+            let indent = line[..prefix].chars().fold(0, |column, ch| {
+                if ch == '\t' {
+                    (column / 8 + 1) * 8
+                } else {
+                    column + 1
+                }
+            });
+            let content = &line[prefix..];
 
             if indent == 0
                 && let Some(usage) = content.strip_prefix("Usage:")
             {
                 finish_help_section(&mut document.blocks, &mut section);
                 entry_indent = None;
+                description_column = None;
                 section = Some(("Usage".to_string(), Vec::new()));
                 let usage = usage.trim();
-                if !usage.is_empty() {
-                    if let Some((_, blocks)) = section.as_mut() {
-                        push_text_blocks(blocks, usage);
-                    }
+                if !usage.is_empty()
+                    && let Some((_, blocks)) = section.as_mut()
+                {
+                    push_text_blocks(blocks, usage);
                 }
                 continue;
             }
@@ -323,6 +342,7 @@ impl Document {
             {
                 finish_help_section(&mut document.blocks, &mut section);
                 entry_indent = None;
+                description_column = None;
                 section = Some((title, Vec::new()));
                 continue;
             }
@@ -341,7 +361,13 @@ impl Document {
             {
                 finish_help_section(&mut document.blocks, &mut section);
             }
-            let bare_entry = content.starts_with('-')
+            let option_label = content.starts_with('-')
+                && content.split_whitespace().all(|token| {
+                    token.starts_with(['-', '<', '['])
+                        || token == "|"
+                        || token.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_')
+                });
+            let bare_entry = option_label
                 || section.as_ref().is_some_and(|(title, _)| {
                     matches!(title.as_str(), "Commands" | "Arguments") && !content.contains(' ')
                 });
@@ -351,19 +377,34 @@ impl Document {
                 &mut document.blocks
             };
 
-            if let Some(base_indent) = entry_indent
-                && indent > base_indent
-                && append_help_continuation(blocks, content)
-            {
-                continue;
-            } else if indent > 0
-                && let Some((name, description)) = split_help_entry(content)
-                    .or_else(|| bare_entry.then(|| (content.to_string(), String::new())))
+            let mut entry = split_help_entry(content)
+                .or_else(|| bare_entry.then(|| (content.to_string(), String::new())));
+            if indent > 0
+                && content.starts_with('-')
+                && description_column.is_none_or(|column| indent < column)
+                && let Some((name, description)) = entry.take()
             {
                 entry_indent = Some(indent);
+                description_column = description_start(indent, content, &description);
+                paragraph_break = false;
+                push_help_entry(blocks, DocumentEntry { name, description });
+            } else if let Some(base_indent) = entry_indent
+                && indent > base_indent
+                && append_help_continuation(blocks, content, std::mem::take(&mut paragraph_break))
+            {
+                description_column.get_or_insert(indent);
+                continue;
+            } else if indent > 0
+                && let Some((name, description)) = entry
+            {
+                entry_indent = Some(indent);
+                description_column = description_start(indent, content, &description);
+                paragraph_break = false;
                 push_help_entry(blocks, DocumentEntry { name, description });
             } else {
                 entry_indent = None;
+                description_column = None;
+                paragraph_break = false;
                 push_text_blocks(blocks, content);
             }
         }
@@ -427,7 +468,10 @@ fn arg_description(arg: &clap::Arg, long_help: bool) -> String {
     };
     let mut description = help.map(ToString::to_string).unwrap_or_default();
     let mut annotations = Vec::new();
-    if !arg.is_hide_default_value_set() && !arg.get_default_values().is_empty() {
+    if arg.get_action().takes_values()
+        && !arg.is_hide_default_value_set()
+        && !arg.get_default_values().is_empty()
+    {
         annotations.push(format!(
             "[default: {}]",
             arg.get_default_values()
@@ -514,6 +558,16 @@ fn split_help_entry(line: &str) -> Option<(String, String)> {
     None
 }
 
+/// The column of an entry's inline description, if it has one.
+fn description_start(indent: usize, content: &str, description: &str) -> Option<usize> {
+    if description.is_empty() {
+        return None;
+    }
+    content
+        .rfind(description)
+        .map(|offset| indent + content[..offset].chars().count())
+}
+
 fn push_help_entry(blocks: &mut Vec<DocBlock>, entry: DocumentEntry) {
     if let Some(DocBlock::Entries { entries }) = blocks.last_mut() {
         entries.push(entry);
@@ -524,7 +578,7 @@ fn push_help_entry(blocks: &mut Vec<DocBlock>, entry: DocumentEntry) {
     }
 }
 
-fn append_help_continuation(blocks: &mut [DocBlock], text: &str) -> bool {
+fn append_help_continuation(blocks: &mut [DocBlock], text: &str, paragraph_break: bool) -> bool {
     let Some(DocBlock::Entries { entries }) = blocks.last_mut() else {
         return false;
     };
@@ -532,7 +586,9 @@ fn append_help_continuation(blocks: &mut [DocBlock], text: &str) -> bool {
         return false;
     };
     if !entry.description.is_empty() {
-        entry.description.push(' ');
+        entry
+            .description
+            .push(if paragraph_break { '\n' } else { ' ' });
     }
     entry.description.push_str(text.trim());
     true

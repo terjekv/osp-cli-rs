@@ -43,3 +43,7 @@ OSP_REPL_TRACE_COMPLETION=1 OSP_REPL_TRACE_PATH=/tmp/trace.jsonl osp
 
 The trace records every menu refresh, cycle and accept with the buffer before
 and after. It is the quickest way to tell a data problem from a paint problem.
+
+Intro templates and root help build `core::document::Document` blocks. Help
+includes append blocks in authored order; Markdown lists and repeated data
+fences retain their content. The DSL sees flat rows, not section groups.

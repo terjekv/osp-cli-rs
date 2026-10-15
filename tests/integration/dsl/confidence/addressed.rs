@@ -6,49 +6,42 @@ use serde_json::json;
 
 #[test]
 fn document_exact_index_projection_emits_selected_value_row() {
-    let output = run_document_pipeline(help_like_guide(), "P sections[1].entries[0].name");
+    let output = run_document_pipeline(help_like_record(), "P sections[1].entries[0].name");
     assert_eq!(result_rows(&output), json!([{"name":"--verbose"}]));
     assert!(output.document.is_none());
 }
 
 #[test]
 fn document_negative_index_projection_emits_last_entry_name() {
-    let output = run_document_pipeline(help_like_guide(), "P sections[-1].entries[-1].name");
+    let output = run_document_pipeline(help_like_record(), "P sections[-1].entries[-1].name");
     assert_eq!(result_rows(&output), json!([{"name":"--json"}]));
     assert!(output.document.is_none());
 }
 
 #[test]
 fn document_exact_index_filter_keeps_complete_matching_row() {
-    let output =
-        run_document_pipeline(help_like_guide(), "F sections[1].entries[0].name=--verbose");
-    assert_eq!(
-        result_rows(&output),
-        json!([help_like_guide().to_json_value()])
+    let output = run_document_pipeline(
+        help_like_record(),
+        "F sections[1].entries[0].name=--verbose",
     );
+    assert_eq!(result_rows(&output), json!([help_like_record()]));
 }
 
 #[test]
 fn document_negated_index_filter_keeps_complete_matching_row() {
-    let output = run_document_pipeline(help_like_guide(), "F sections[1].entries[0].name!=--json");
-    assert_eq!(
-        result_rows(&output),
-        json!([help_like_guide().to_json_value()])
-    );
+    let output = run_document_pipeline(help_like_record(), "F sections[1].entries[0].name!=--json");
+    assert_eq!(result_rows(&output), json!([help_like_record()]));
 }
 
 #[test]
 fn document_fanout_filter_keeps_all_members_of_matching_row() {
-    let output = run_document_pipeline(help_like_guide(), "F sections[].entries[].name=--json");
-    assert_eq!(
-        result_rows(&output),
-        json!([help_like_guide().to_json_value()])
-    );
+    let output = run_document_pipeline(help_like_record(), "F sections[].entries[].name=--json");
+    assert_eq!(result_rows(&output), json!([help_like_record()]));
 }
 
 #[test]
 fn document_slice_projection_emits_selected_names_in_order() {
-    let output = run_document_pipeline(help_like_guide(), "P sections[0].entries[1:3].name");
+    let output = run_document_pipeline(help_like_record(), "P sections[0].entries[1:3].name");
     assert_eq!(
         result_rows(&output),
         json!([{"name":"doctor"},{"name":"status"}])
@@ -71,10 +64,10 @@ fn document_projection_preserves_explicit_parent_fields_and_selected_names() {
             json!([{"name":"apply"},{"name":"doctor"},{"name":"status"},{"name":"--verbose"},{"name":"--json"}]),
         ),
     ] {
-        let output = run_document_pipeline(help_like_guide(), &format!("P {spec}"));
+        let output = run_document_pipeline(help_like_record(), &format!("P {spec}"));
         assert_eq!(result_rows(&output), expected, "{spec}");
     }
-    let output = run_document_pipeline(help_like_guide(), "P name");
+    let output = run_document_pipeline(help_like_record(), "P name");
     assert_eq!(
         result_rows(&output),
         json!([{
@@ -90,8 +83,8 @@ fn document_projection_preserves_explicit_parent_fields_and_selected_names() {
 
 #[test]
 fn document_fanout_projection_drops_only_addressed_names() {
-    let output = run_document_pipeline(help_like_guide(), "P !sections[].entries[].name");
-    let mut expected = help_like_guide().to_json_value();
+    let output = run_document_pipeline(help_like_record(), "P !sections[].entries[].name");
+    let mut expected = help_like_record();
     for section in expected["sections"].as_array_mut().unwrap() {
         for entry in section["entries"].as_array_mut().unwrap() {
             entry.as_object_mut().unwrap().remove("name");
@@ -102,17 +95,14 @@ fn document_fanout_projection_drops_only_addressed_names() {
 
 #[test]
 fn document_path_search_keeps_complete_matching_row() {
-    let output = run_document_pipeline(help_like_guide(), "sections[1].entries[0].name");
-    assert_eq!(
-        result_rows(&output),
-        json!([help_like_guide().to_json_value()])
-    );
+    let output = run_document_pipeline(help_like_record(), "sections[1].entries[0].name");
+    assert_eq!(result_rows(&output), json!([help_like_record()]));
 }
 
 #[test]
 fn document_projection_drops_one_entry_and_preserves_siblings() {
-    let output = run_document_pipeline(help_like_guide(), "P !sections[1].entries[0]");
-    let mut expected = help_like_guide().to_json_value();
+    let output = run_document_pipeline(help_like_record(), "P !sections[1].entries[0]");
+    let mut expected = help_like_record();
     expected["sections"][1]["entries"]
         .as_array_mut()
         .unwrap()
@@ -122,16 +112,13 @@ fn document_projection_drops_one_entry_and_preserves_siblings() {
 
 #[test]
 fn document_path_existence_keeps_complete_matching_row() {
-    let output = run_document_pipeline(help_like_guide(), "?sections[1].entries[0].name");
-    assert_eq!(
-        result_rows(&output),
-        json!([help_like_guide().to_json_value()])
-    );
+    let output = run_document_pipeline(help_like_record(), "?sections[1].entries[0].name");
+    assert_eq!(result_rows(&output), json!([help_like_record()]));
 }
 
 #[test]
 fn document_projection_rejects_duplicate_labels_and_accepts_slice() {
-    let input = OutputResult::from_rows(vec![row(help_like_guide().to_json_value())]);
+    let input = OutputResult::from_rows(vec![row(help_like_record())]);
     let err = apply_output_pipeline(
         input,
         &["P sections[0].entries[0].name sections[0].entries[1].name".into()],
@@ -141,7 +128,7 @@ fn document_projection_rejects_duplicate_labels_and_accepts_slice() {
         err.to_string()
             .contains("ambiguous dynamic projection label")
     );
-    let output = run_document_pipeline(help_like_guide(), "P sections[0].entries[0:2].name");
+    let output = run_document_pipeline(help_like_record(), "P sections[0].entries[0:2].name");
     assert_eq!(
         result_rows(&output),
         json!([{"name":"apply"},{"name":"doctor"}])

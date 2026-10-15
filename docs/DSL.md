@@ -49,12 +49,19 @@ terminal state. Filter the raw `stale` boolean to select stale tasks.
   pipeline produces a JSON array of the resulting rows, including `[]` and
   singleton arrays. Wrapper totals and cursors are discarded; they no longer
   describe the transformed result.
-- Structured help declares itself as a guide. Its entries and text lines
-  become rows for a pipeline; section headings remain presentation metadata.
-  Filtering and limiting operate on those entries, not on a singleton help
-  envelope. Human guide rendering restores surviving content into its sections.
-  Shape-changing stages, including field cleanup (`?`), instead display the
-  resulting rows without retaining the original guide layout.
+- Help and intro are semantic documents. Unstaged JSON emits `{"blocks": ...}`.
+  A pipeline consumes flat rows in document order: `{section, name, description}`
+  for entries and `{section, text}` for text lines. Preamble rows use an empty
+  section. Data blocks retain their fields, with `section` reserved for the
+  enclosing heading. Lists supply one row per text line.
+- Document rows are marked by producer metadata, never inferred from row shape.
+  `| L 2` selects the first two rows; `| S name` sorts entries across sections;
+  `| F name~json` filters entries. `section` is searchable like any other column.
+  Human rendering shows a heading where a run of rows with that section starts,
+  in current pipeline order. It never restores a document by matching values.
+- Row-preserving stages keep document-row metadata. Shape-changing stages
+  (`P`, `A`, `C`, `G`, `VALUE`, `JQ`, `U`, `Z`, or cleanup that changes fields)
+  clear it and render ordinary data. Every staged JSON result is a row array.
 
 `F`, bare search, `K`, `V`, and existence searches retain complete matching
 rows. They do not recursively remove members from arrays inside a row. For

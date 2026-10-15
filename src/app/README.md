@@ -44,3 +44,7 @@ modules should not import `app`; the one current exception is
   over the wrapper reaching into internals; `access_recovery.rs` is the model.
 - **Command chosen wrongly:** `dispatch.rs`, then `osp plugins doctor` for
   provider conflicts.
+
+Help results use `CliCommandResult::document`. Builtins supply clap metadata;
+plugins and native commands retain their text-help boundary. Only doctor keeps
+a separate data fallback beside a presentation document.

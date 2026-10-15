@@ -22,12 +22,12 @@ use crate::cli::invocation::{InvocationOptions, scan_cli_argv};
 use crate::cli::{Cli, Commands, ConfigCommands, PluginsCommands, ThemeCommands};
 use crate::config::{ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions, RuntimeLoadOptions};
 use crate::core::command_policy::{CommandPath, VisibilityMode};
+use crate::core::document::Document;
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
     ResponseErrorV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
-use crate::guide::GuideView;
 use crate::plugin::{
     CommandCatalogEntry, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchError, PluginManager,
     PluginSource,

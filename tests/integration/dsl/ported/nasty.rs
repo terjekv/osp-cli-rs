@@ -1,12 +1,10 @@
 #[test]
 fn nasty_semantic_quick_sort_limit_preserves_guide_shape() {
     let output = run_guide_pipeline(sample_guide(), "show | S name | L 1");
-    let rebuilt = GuideView::try_from_output_result(&output).expect("guide should still restore");
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap()[0]["name"], "config");
 
-    assert_eq!(rebuilt.commands.len(), 1);
-    assert_eq!(rebuilt.commands[0].name, "config");
-    assert!(rebuilt.sections.is_empty());
-    assert!(output.document.is_some());
 }
 
 #[test]
@@ -21,11 +19,11 @@ fn nasty_semantic_project_of_entry_field_preserves_guide_shape_with_narrowed_ent
 #[test]
 fn nasty_semantic_group_breaks_restore_but_keeps_grouped_payload() {
     let output = run_guide_pipeline(sample_guide(), "?name | G name");
-    assert!(GuideView::try_from_output_result(&output).is_none());
+    assert!(!output.meta.document_rows);
     let OutputItems::Groups(groups) = output.items else { panic!("expected grouped content rows"); };
     assert_eq!(groups.len(), 3);
     assert_eq!(groups[0].groups["name"], "help");
-    assert_eq!(groups[0].rows[0]["short_help"], "Show overview");
+    assert_eq!(groups[0].rows[0]["description"], "Show overview");
 }
 
 #[test]

@@ -57,7 +57,7 @@ pub fn apply_pipeline(rows: Vec<Row>, stages: &[String]) -> Result<OutputResult>
 ///
 /// Use this when the command already produced an [`OutputResult`]. An empty
 /// pipeline returns it unchanged. Transformations invalidate the original
-/// document and presentation metadata; render and guide metadata are retained
+/// document and presentation metadata; render and document-row metadata are retained
 /// or rebuilt only where the stages support them.
 ///
 /// # Examples
@@ -265,19 +265,11 @@ pub(crate) fn run_compiled(
     }
     // A transformed result describes the selected rows, never a stale service
     // envelope (whose total/cursors describe a different collection).
-    let guide_view = output
-        .document
-        .as_ref()
-        .and_then(crate::guide::GuideView::pipeline_document);
     output.document = None;
-    let mut preserve_guide = guide_view.is_some();
-    let mut rows = match &guide_view {
-        Some(guide) => RowSet::rows(guide.pipeline_rows()),
-        None => RowSet::from(output.items),
-    };
+    let mut rows = RowSet::from(output.items);
     for stage in &compiled.stages {
         // Cleanup is structural only when it changes rows. In particular, a
-        // no-op `?` must not discard a narrowed guide's layout and render hint.
+        // no-op `?` must not discard a narrowed document's layout and render hint.
         if matches!(stage, CompiledStage::Clean)
             && rows.partitions.iter().all(|partition| {
                 partition
@@ -307,10 +299,6 @@ pub(crate) fn run_compiled(
             stage.behavior().semantic_effect,
             crate::dsl::compiled::SemanticEffect::Preserve
         );
-        preserve_guide &= matches!(
-            stage.behavior().semantic_effect,
-            crate::dsl::compiled::SemanticEffect::Preserve
-        );
         rows = apply_stage(rows, stage)?;
         match stage.synthesized_fields() {
             Some(created) => forget_formatting(&mut output.meta, &created),
@@ -328,12 +316,6 @@ pub(crate) fn run_compiled(
             compute_key_index(&groups.iter().map(merged_group_header).collect::<Vec<_>>())
         }
     };
-    if preserve_guide && let (Some(view), OutputItems::Rows(rows)) = (&guide_view, &output.items) {
-        output.document = Some(crate::core::output_model::OutputDocument::new(
-            crate::core::output_model::OutputDocumentKind::Guide,
-            serde_json::to_value(view.select_pipeline_rows(rows))?,
-        ));
-    }
     Ok(output)
 }
 

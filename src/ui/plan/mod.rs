@@ -1,13 +1,7 @@
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
-use crate::guide::GuideView;
 
 use super::settings::{RenderProfile, RenderSettings, ResolvedRenderSettings, resolve_settings};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SemanticKind {
-    Guide,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderPlan {
@@ -16,7 +10,6 @@ pub struct RenderPlan {
     pub settings: ResolvedRenderSettings,
     pub document_long_help: bool,
     pub document_entry_gap: Option<usize>,
-    pub semantic_kind: Option<SemanticKind>,
 }
 
 pub fn plan_output(
@@ -34,12 +27,7 @@ pub fn plan_output(
         format,
         profile: effective_profile,
         settings: resolve_settings(settings, effective_profile),
-        semantic_kind: semantic_kind(output),
         document_entry_gap: output.meta.document_entry_gap,
         document_long_help: output.meta.document_long_help,
     }
-}
-
-fn semantic_kind(output: &OutputResult) -> Option<SemanticKind> {
-    GuideView::try_from_output_result(output).map(|_| SemanticKind::Guide)
 }

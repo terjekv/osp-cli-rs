@@ -74,6 +74,7 @@ mod tests {
     #[test]
     fn prepared_direct_entries_ignore_help_indent_defaults_unit() {
         let block = EntriesBlock {
+            inline_markup: true,
             default_indent: String::new(),
             default_gap: None,
             rows: vec![
@@ -117,6 +118,7 @@ mod tests {
     #[test]
     fn prepared_help_entries_default_to_help_indent_unit() {
         let block = EntriesBlock {
+            inline_markup: true,
             default_indent: "  ".to_string(),
             default_gap: None,
             rows: vec![EntryRow {
@@ -143,6 +145,7 @@ mod tests {
     #[test]
     fn prepared_entries_can_override_default_gap_unit() {
         let block = EntriesBlock {
+            inline_markup: true,
             default_indent: "  ".to_string(),
             default_gap: Some(" -> ".to_string()),
             rows: vec![EntryRow {

@@ -176,7 +176,7 @@ fn plugin_dispatch_context_owns_invocation_provider_override_unit() {
     let invocation = crate::app::ResolvedInvocation {
         ui: state.runtime.ui.clone(),
         plugin_provider: Some("cfg".to_string()),
-        help_level: crate::guide::HelpLevel::default(),
+        help_level: crate::core::document::HelpLevel::default(),
     };
 
     let context = super::plugin_dispatch_context_for_runtime(

@@ -173,7 +173,7 @@ fn nested_array_value_selection_preserves_every_branch_in_document_order() {
 fn nested_array_filter_preserves_every_matching_semantic_branch() {
     let document = deep_array_document();
 
-    // This is a service record, not a declared GuideView. Filtering selects
+    // This is a service record, not a declared Document. Filtering selects
     // the complete row; nested matching leaves do not become a new document.
     let mut filtered_outputs = Vec::new();
     for selector in ["clusters[].nodes[].disks[].ssd", "clusters.nodes.disks.ssd"] {

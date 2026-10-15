@@ -1,8 +1,8 @@
+use crate::core::document::Document;
 use crate::core::output_model::{
     OutputDocument, OutputDocumentKind, OutputItems, OutputResult, RenderRecommendation,
     output_items_to_value,
 };
-use crate::guide::GuideView;
 use serde_json::json;
 
 use super::{apply_output_pipeline, apply_pipeline, execute_pipeline};
@@ -440,23 +440,16 @@ fn semantic_document_rebuilds_from_document_source_unit() {
             .expect("object"),
     ]);
     output = output.with_document(
-        GuideView::from_text("Commands:\n  list  Show\n")
+        Document::from_help_text("Commands:\n  list  Show\n")
             .to_output_result()
             .document
             .expect("guide document"),
     );
-    output.meta.render_recommendation = Some(RenderRecommendation::Guide);
+    output.meta.render_recommendation = Some(RenderRecommendation::Document);
 
     let rebuilt = apply_output_pipeline(output, &[]).expect("pipeline should succeed");
-    let guide = GuideView::try_from_output_result(&rebuilt).expect("guide should restore");
-    assert_eq!(guide.commands.len(), 1);
-    assert_eq!(guide.commands[0].name, "list");
-    assert!(
-        rebuilt
-            .as_rows()
-            .expect("rows")
-            .first()
-            .expect("row")
-            .contains_key("commands")
-    );
+    let document: Document =
+        serde_json::from_value(rebuilt.document.as_ref().unwrap().value.clone()).unwrap();
+    assert_eq!(document.rows()[0]["name"], "list");
+    assert!(rebuilt.document.is_some());
 }

@@ -123,6 +123,7 @@ fn emit_entries(block: &EntriesBlock, settings: &ResolvedRenderSettings) -> Stri
         &PreparedEntriesBlock::from_block(block).rows,
         settings.margin,
         settings,
+        block.inline_markup,
     )
 }
 
@@ -130,20 +131,25 @@ fn emit_prepared_entries(
     rows: &[PreparedEntryRow],
     margin: usize,
     settings: &ResolvedRenderSettings,
+    inline_markup: bool,
 ) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     rows.iter()
-        .map(|row| indent_lines(&emit_entry_row(row, &styler), margin))
+        .map(|row| indent_lines(&emit_entry_row(row, &styler, inline_markup), margin))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>) -> String {
+fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>, inline_markup: bool) -> String {
     let key = styler.paint(&row.key, StyleToken::Key);
     if row.value.is_empty() {
         format!("{}{}", row.indent, key)
     } else {
-        let value = styler.paint_inline(&row.value, StyleToken::TextMuted);
+        let value = if inline_markup {
+            styler.paint_inline(&row.value, StyleToken::TextMuted)
+        } else {
+            styler.paint(&row.value, StyleToken::TextMuted)
+        };
         format!("{}{}{}{}", row.indent, key, row.gap, value)
     }
 }

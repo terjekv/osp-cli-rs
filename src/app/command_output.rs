@@ -201,7 +201,7 @@ impl CliCommandResult {
         output
             .meta
             .render_recommendation
-            .get_or_insert(RenderRecommendation::Guide);
+            .get_or_insert(RenderRecommendation::Document);
         let mut result = Self::output(output, format_hint);
         if let Some(ReplCommandOutput::Output(structured)) = result.output.as_mut() {
             structured.source_document = Some(document);
@@ -644,7 +644,6 @@ pub(crate) fn parse_output_format_hint(value: Option<&str>) -> Option<OutputForm
     let normalized = value?.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "auto" => Some(OutputFormat::Auto),
-        "guide" => Some(OutputFormat::Guide),
         "json" => Some(OutputFormat::Json),
         "table" => Some(OutputFormat::Table),
         "md" | "markdown" => Some(OutputFormat::Markdown),

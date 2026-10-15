@@ -13,7 +13,7 @@
 //! Broad-strokes flow:
 //!
 //! ```text
-//! OutputResult / GuideView
+//! OutputResult / Document
 //!        │
 //!        ▼ [ plan ]   choose effective format and render settings
 //!        ▼ [ lower ]  convert semantic output into one document IR
@@ -67,7 +67,6 @@ use crate::config::ResolvedConfig;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 
 pub(crate) use messages::{
     render_messages_from_settings as render_messages, render_messages_without_config,
@@ -189,7 +188,7 @@ pub(crate) fn render_structured_output_with_document_options(
 ) -> String {
     let output = prepare_output_for_sink(output, settings, RenderProfile::Normal);
     let plan = plan_output(&output, settings, RenderProfile::Normal);
-    if !matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown) {
+    if !matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown) {
         return emit::emit_doc(
             &lower::lower_output(&output, &plan),
             plan.format,
@@ -227,14 +226,6 @@ pub(crate) fn render_structured_output_with_document_options(
     };
     lower::sanitize_doc(&mut doc);
     emit::emit_doc(&doc, plan.format, &plan.settings)
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StructuredGuideRenderOptions<'a> {
-    pub(crate) source_guide: Option<&'a GuideView>,
-    pub(crate) layout: HelpLayout,
-    pub(crate) title_prefix: Option<&'a str>,
-    pub(crate) show_footer_rule: Option<bool>,
 }
 
 fn render_output_with_profile(
@@ -370,25 +361,7 @@ pub(crate) fn render_structured_output_with_layout(
     settings: &RenderSettings,
     layout: HelpLayout,
 ) -> String {
-    render_structured_output_with_source_guide(output, None, settings, layout)
-}
-
-pub(crate) fn render_structured_output_with_source_guide(
-    output: &OutputResult,
-    source_guide: Option<&GuideView>,
-    settings: &RenderSettings,
-    layout: HelpLayout,
-) -> String {
-    render_structured_output_with_guide_options(
-        output,
-        settings,
-        StructuredGuideRenderOptions {
-            source_guide,
-            layout,
-            title_prefix: None,
-            show_footer_rule: None,
-        },
-    )
+    render_structured_output_with_source_document(output, None, settings, layout)
 }
 
 pub(crate) fn render_structured_output_with_config(
@@ -409,88 +382,14 @@ pub(crate) fn render_structured_output_with_config(
     )
 }
 
-pub(crate) fn render_structured_output_with_guide_options(
-    output: &OutputResult,
-    settings: &RenderSettings,
-    options: StructuredGuideRenderOptions<'_>,
-) -> String {
-    let output = prepare_output_for_sink(output, settings, RenderProfile::Normal);
-    let plan = plan_output(&output, settings, RenderProfile::Normal);
-    if !matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown) {
-        return emit::emit_doc(
-            &lower::lower_output(&output, &plan),
-            plan.format,
-            &plan.settings,
-        );
-    }
-
-    if output.meta.document_rows
-        && let Some(document) = output
-            .document
-            .as_ref()
-            .filter(|document| {
-                document.kind == crate::core::output_model::OutputDocumentKind::Document
-            })
-            .and_then(|document| serde_json::from_value::<Document>(document.value.clone()).ok())
-    {
-        let mut doc = if plan.format == OutputFormat::Markdown {
-            lower::lower_document(&document, plan.format, plan.settings.indent_size)
-        } else {
-            lower::lower_document_help_layout(
-                &document,
-                &plan,
-                options.layout,
-                options
-                    .show_footer_rule
-                    .unwrap_or_else(|| default_show_footer_rule(options.layout)),
-            )
-        };
-        lower::sanitize_doc(&mut doc);
-        return emit::emit_doc(&doc, plan.format, &plan.settings);
-    }
-
-    let Some(guide) = options
-        .source_guide
-        .cloned()
-        .or_else(|| GuideView::try_from_output_result(&output))
-    else {
-        return render_output(&output, settings);
-    };
-
-    let guide = apply_title_prefix(&guide, options.title_prefix);
-    let guide_output = guide.to_output_result();
-    let guide_plan = plan_output(&guide_output, settings, RenderProfile::Normal);
-
-    if matches!(guide_plan.format, OutputFormat::Markdown) {
-        emit::emit_doc(
-            &lower::lower_output(&guide_output, &guide_plan),
-            OutputFormat::Markdown,
-            &guide_plan.settings,
-        )
-    } else {
-        emit::emit_doc(
-            &lower::lower_guide_help_layout(
-                &guide,
-                &guide_plan,
-                options.layout,
-                options
-                    .show_footer_rule
-                    .unwrap_or_else(|| default_show_footer_rule(options.layout)),
-            ),
-            OutputFormat::Guide,
-            &guide_plan.settings,
-        )
-    }
-}
-
 #[cfg(test)]
-pub(crate) fn render_guide_with_layout(
-    guide: &GuideView,
+pub(crate) fn render_document_with_layout(
+    document: &Document,
     settings: &RenderSettings,
     layout: HelpLayout,
 ) -> String {
-    render_guide_with_layout_with_chrome(
-        guide,
+    render_document_with_layout_with_chrome(
+        document,
         settings,
         layout,
         default_show_footer_rule(layout),
@@ -499,22 +398,21 @@ pub(crate) fn render_guide_with_layout(
 }
 
 #[cfg(test)]
-pub(crate) fn render_guide_with_layout_with_chrome(
-    guide: &GuideView,
+pub(crate) fn render_document_with_layout_with_chrome(
+    document: &Document,
     settings: &RenderSettings,
     layout: HelpLayout,
-    show_footer_rule: bool,
+    footer: bool,
     title_prefix: Option<&str>,
 ) -> String {
-    let output = guide.to_output_result();
-    render_structured_output_with_guide_options(
-        &output,
+    render_structured_output_with_document_options(
+        &document.to_output_result(),
         settings,
-        StructuredGuideRenderOptions {
-            source_guide: Some(guide),
+        StructuredDocumentRenderOptions {
+            source_document: Some(document),
             layout,
             title_prefix,
-            show_footer_rule: Some(show_footer_rule),
+            show_footer_rule: Some(footer),
         },
     )
 }
@@ -523,29 +421,8 @@ fn default_show_footer_rule(layout: HelpLayout) -> bool {
     matches!(layout, HelpLayout::Full)
 }
 
-fn apply_title_prefix(view: &GuideView, title_prefix: Option<&str>) -> GuideView {
-    let Some(prefix) = title_prefix else {
-        return view.clone();
-    };
-    let mut updated = view.clone();
-    if let Some(first) = updated.sections.first_mut() {
-        first.title = format!("{prefix} · {}", first.title);
-    } else if !updated.usage.is_empty() {
-        updated.sections.insert(
-            0,
-            GuideSection {
-                title: format!("{prefix} · Usage"),
-                kind: GuideSectionKind::Usage,
-                paragraphs: updated.usage.clone(),
-                entries: Vec::new(),
-                data: None,
-            },
-        );
-        updated.usage.clear();
-    }
-    updated
-}
-
+#[cfg(test)]
+mod document_tests;
 #[cfg(test)]
 mod tests;
 

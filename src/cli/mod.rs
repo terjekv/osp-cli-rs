@@ -898,7 +898,7 @@ pub fn parse_inline_command_tokens(tokens: &[String]) -> Result<Option<Commands>
 pub(crate) fn command_help_document(
     mut command: clap::Command,
     tokens: &[String],
-) -> (crate::core::document::Document, bool) {
+) -> (crate::core::document::Document, bool, bool) {
     fn passive(command: clap::Command) -> clap::Command {
         command
             .disable_help_subcommand(true)
@@ -911,6 +911,15 @@ pub(crate) fn command_help_document(
             })
             .mut_subcommands(passive)
     }
+    // Clap answers at the first help flag, so later words cannot pick the target.
+    let options_end = tokens
+        .iter()
+        .position(|token| token == "--")
+        .unwrap_or(tokens.len());
+    let tokens = tokens[..options_end]
+        .iter()
+        .position(|token| token == "-h" || token == "--help")
+        .map_or(tokens, |index| &tokens[..=index]);
     command.build();
     let parser = passive(command.clone());
     let matches = parser.try_get_matches_from(tokens);
@@ -941,11 +950,13 @@ pub(crate) fn command_help_document(
     (
         crate::core::document::Document::from_clap_command(selected, long),
         root,
+        long,
     )
 }
 
-pub(crate) fn inline_help_document(tokens: &[String]) -> crate::core::document::Document {
-    command_help_document(InlineCommandCli::command(), tokens).0
+pub(crate) fn inline_help_document(tokens: &[String]) -> (crate::core::document::Document, bool) {
+    let (document, _, long) = command_help_document(InlineCommandCli::command(), tokens);
+    (document, long)
 }
 
 #[cfg(test)]

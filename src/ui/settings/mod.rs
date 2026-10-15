@@ -314,9 +314,7 @@ impl RenderSettings {
     }
 
     pub fn prefers_guide_rendering(&self) -> bool {
-        matches!(self.format, OutputFormat::Guide)
-            || (!self.format_explicit
-                && matches!(self.guide_default_format, GuideDefaultFormat::Guide))
+        !self.format_explicit && matches!(self.guide_default_format, GuideDefaultFormat::Guide)
     }
 }
 
@@ -874,17 +872,16 @@ impl RenderSettings {
             return self.format;
         }
 
-        if (output.meta.document_rows
-            || crate::guide::GuideView::try_from_output_result(output).is_some())
-            && self.prefers_guide_rendering()
+        if output.meta.document_rows
+            && (matches!(self.format, OutputFormat::Auto) || self.prefers_guide_rendering())
         {
-            return OutputFormat::Guide;
+            return OutputFormat::Auto;
         }
 
         if let Some(recommended) = output.meta.render_recommendation {
             return match recommended {
                 RenderRecommendation::Format(format) => format,
-                RenderRecommendation::Guide => OutputFormat::Guide,
+                RenderRecommendation::Document => OutputFormat::Auto,
             };
         }
 
@@ -932,11 +929,11 @@ mod tests {
     use crate::config::{
         ConfigLayer, ConfigResolver, ConfigSource, ConfigValue, LoadedLayers, ResolveOptions,
     };
+    use crate::core::document::Document;
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
     use crate::core::output_model::{
         Group, OutputItems, OutputMeta, OutputResult, RenderRecommendation,
     };
-    use crate::guide::GuideView;
     use crate::row;
     use crate::ui::build_presentation_defaults_layer;
     use crate::ui::section_chrome::{RuledSectionPolicy, SectionFrameStyle};
@@ -1091,7 +1088,7 @@ mod tests {
             ("ui.help.entry_gap", "3"),
             ("ui.help.section_spacing", "inherit"),
         ]);
-        let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+        let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
 
         apply_render_config_overrides(&mut settings, &config);
 
@@ -1155,10 +1152,10 @@ mod tests {
         assert!(!resolved_copy.unicode);
 
         let guide_output =
-            GuideView::from_text("Usage: osp history <COMMAND>\n").to_output_result();
+            Document::from_help_text("Usage: osp history <COMMAND>\n").to_output_result();
         assert_eq!(
             plain_settings.resolve_output_format(&guide_output),
-            OutputFormat::Guide
+            OutputFormat::Auto
         );
 
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);

@@ -180,7 +180,7 @@
 //! Commands normalize service collections into rows before DSL execution.
 //! Raw response documents are available for unstaged rendering; a staged result
 //! describes the selected rows rather than stale service totals or cursors.
-//! Guide output retains its layout only through stages that preserve its shape.
+//! Document output retains its layout only through stages that preserve its shape.
 //! Group keys and aggregates are explicit metadata, not inferred from row fields.
 //!
 //! Architecture contracts worth keeping stable:
@@ -196,7 +196,7 @@
 //!
 //! Public API shape:
 //!
-//! - semantic payload modules such as [`guide`] and most of [`completion`]
+//! - semantic payload modules such as [`core::document`] and most of [`completion`]
 //!   stay intentionally cheap to compose and inspect
 //! - host machinery such as [`app::App`], [`app::AppBuilder`], and runtime
 //!   state is guided through constructors/builders/accessors rather than
@@ -237,7 +237,7 @@
 //! - "I want to embed the interactive editor loop directly" →
 //!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig::builder`]
 //! - "I need semantic payload generation for help/completion surfaces" →
-//!   [`guide::GuideView`] and [`completion::CompletionTreeBuilder`]
+//!   [`core::document::Document`] and [`completion::CompletionTreeBuilder`]
 //!
 //! The root crate module tree is the only supported code path. Older mirrored
 //! layouts have been removed so rustdoc and the source tree describe the same
@@ -255,8 +255,6 @@ pub mod config;
 pub mod core;
 /// Canonical pipeline parsing and execution.
 pub mod dsl;
-/// Structured help/guide view models and conversions.
-pub mod guide;
 /// External plugin discovery, protocol, and dispatch support.
 pub mod plugin;
 /// Interactive REPL editor, prompt, history, and completion surface.

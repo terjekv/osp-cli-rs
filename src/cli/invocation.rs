@@ -13,9 +13,9 @@ use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use miette::{Result, miette};
 
 pub(crate) const INVOCATION_HELP_SECTION: &str = r#"Common Invocation Options:
-  --format <auto|guide|json|table|mreg|value|md>
+  --format <auto|json|table|mreg|value|md>
                                             Format this invocation only
-  --guide | --json | --table | --mreg | --value | --md
+  --json | --table | --mreg | --value | --md
                                             Convenience aliases for --format
   --render-mode <auto|plain|rich>           Render mode for this invocation
   --plain | --rich                          Convenience aliases for --render-mode
@@ -31,7 +31,6 @@ These flags may appear anywhere before `--` and affect only the current command.
 "#;
 
 const FORMAT_ALIASES: &[(&str, OutputFormat)] = &[
-    ("--guide", OutputFormat::Guide),
     ("--json", OutputFormat::Json),
     ("--table", OutputFormat::Table),
     ("--mreg", OutputFormat::Mreg),
@@ -472,8 +471,8 @@ mod tests {
         assert_eq!(clustered.invocation.debug, 1);
         assert_eq!(clustered.tokens, vec!["ldap", "user"]);
 
-        let guide = scan(&["ldap", "--guide"]);
-        assert_eq!(guide.invocation.format, Some(OutputFormat::Guide));
+        let guide = scan(&["ldap", "--format=auto"]);
+        assert_eq!(guide.invocation.format, Some(OutputFormat::Auto));
     }
 
     #[test]
@@ -522,7 +521,7 @@ mod tests {
     fn invocation_help_hidden_completion_and_cli_argv_follow_visibility_and_flag_only_inputs_unit()
     {
         let rendered = invocation_help_view().rows();
-        assert!(rendered.iter().any(|row| {
+        assert!(!rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|name| name.contains("--guide"))
@@ -532,8 +531,8 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|name| name.contains("--json"))
         }));
-        assert!(INVOCATION_HELP_SECTION.contains("--guide"));
-        assert!(INVOCATION_HELP_SECTION.contains("guide|json|table"));
+        assert!(!INVOCATION_HELP_SECTION.contains("--guide"));
+        assert!(INVOCATION_HELP_SECTION.contains("auto|json|table"));
 
         assert!(!should_show_invocation_help(&InvocationOptions::default()));
         assert!(should_show_invocation_help(&InvocationOptions {
@@ -560,7 +559,7 @@ mod tests {
         );
 
         let hidden = hidden_invocation_completion_flags(&InvocationOptions::default());
-        assert!(hidden.contains("--guide"));
+        assert!(!hidden.contains("--guide"));
         assert!(hidden.contains("--json"));
         assert!(hidden.contains("--plugin-provider"));
         assert!(hidden.contains("--debug"));
@@ -580,7 +579,7 @@ mod tests {
             ..InvocationOptions::default()
         });
         assert!(used_one_shots.contains("--format"));
-        assert!(used_one_shots.contains("--guide"));
+        assert!(!used_one_shots.contains("--guide"));
         assert!(used_one_shots.contains("--json"));
         assert!(used_one_shots.contains("--table"));
         assert!(used_one_shots.contains("--plugin-provider"));

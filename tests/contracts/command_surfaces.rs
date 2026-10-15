@@ -88,7 +88,7 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
         .unwrap();
     assert!(!usage["blocks"][0]["text"].as_str().unwrap().is_empty());
 
-    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--guide", "--help"]);
+    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--format=auto", "--help"]);
     assert!(guide.contains("Usage"));
     assert!(guide.contains("Commands"));
 
@@ -121,7 +121,7 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
 
 #[test]
 fn top_level_help_guide_contract() {
-    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--guide", "--help"]);
+    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--format=auto", "--help"]);
     assert!(guide.contains("Usage"));
     assert!(guide.contains("Commands"));
 }
@@ -133,7 +133,7 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
         serde_json::from_str(&json).expect("intro json should parse");
     assert!(json_value["blocks"].is_array());
 
-    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--guide", "intro"]);
+    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--format=auto", "intro"]);
     assert!(guide.contains("OSP"));
     assert!(guide.contains("Commands"));
     let osp = guide.find("OSP").expect("OSP section should render");
@@ -178,7 +178,7 @@ user.display_name = "Demo"
 user.name = "oistes"
 theme.name = "rose-pine-moon"
 "#;
-    let guide = run_cli_stdout_with_config(Some(config), &["--no-env", "--guide", "intro"]);
+    let guide = run_cli_stdout_with_config(Some(config), &["--no-env", "--format=auto", "intro"]);
     assert!(guide.contains("Demo"));
     assert!(guide.contains("Commands"));
     assert!(guide.contains("help"));
@@ -325,7 +325,7 @@ repl.intro = "full"
             "always",
             "--unicode",
             "always",
-            "--guide",
+            "--format=auto",
             "intro",
         ],
     );
@@ -343,7 +343,7 @@ repl.intro = "full"
             "always",
             "--unicode",
             "never",
-            "--guide",
+            "--format=auto",
             "intro",
         ],
     );
@@ -374,7 +374,7 @@ user.display_name = "Oistes"
 theme.name = "rose-pine-moon"
 "#,
         ),
-        &["--no-env", "--guide", "intro"],
+        &["--no-env", "--format=auto", "intro"],
     );
 
     assert!(guide.contains("OSP"), "{guide:?}");
@@ -397,7 +397,7 @@ user.name = "oistes"
 theme.name = "rose-pine-moon"
 "#,
         ),
-        &["--no-env", "--guide", "intro"],
+        &["--no-env", "--format=auto", "intro"],
     );
 
     let osp = guide.find("- OSP ").expect("OSP section should render");
@@ -435,7 +435,7 @@ user.name = "oistes"
 theme.name = "rose-pine-moon"
 "#,
         ),
-        &["--no-env", "--guide", "intro"],
+        &["--no-env", "--format=auto", "intro"],
     );
 
     assert!(stdout.contains("Welcome Demo!"), "{stdout}");
@@ -470,7 +470,7 @@ repl.simple_prompt = true
         Some(config),
         &[
             "--no-env",
-            "--guide",
+            "--format=auto",
             "--render-mode",
             "rich",
             "--color",
@@ -484,7 +484,7 @@ repl.simple_prompt = true
         Some(config),
         &[
             "--no-env",
-            "--guide",
+            "--format=auto",
             "--render-mode",
             "rich",
             "--color",

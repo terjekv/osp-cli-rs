@@ -550,7 +550,7 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
     );
     assert_eq!(projected, json!([{"provider":{"name":"vmware"}}]));
 
-    for format in ["--guide", "--md", "--mreg"] {
+    for format in ["--format=auto", "--md", "--mreg"] {
         let mut rendered = BufferedUiSink::default();
         assert_eq!(
             app.run_with_sink(

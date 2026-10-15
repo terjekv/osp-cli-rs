@@ -12,7 +12,7 @@ Lower layers must not import higher ones.
 | Layer | Modules | Role |
 |---|---|---|
 | Primitives | `core`, `normalize` | Rows, output model, command metadata, plugin wire DTOs; identifier normalization |
-| Building blocks | `config`, `completion`, `dsl`, `guide`, `ui` | Reusable on their own; no host state |
+| Building blocks | `config`, `completion`, `dsl`, `ui` | Reusable on their own; no host state |
 | Command providers | `plugin`, `native` | External and in-process commands as catalog metadata |
 | Grammar | `cli` | What a user may type, and one-shot flags |
 | Host | `app`, `repl` | Composition: load config, build the catalog, dispatch, render |
@@ -28,9 +28,8 @@ Non-test code, counted from `crate::` paths:
 | `core` | nothing |
 | `config` | `core`, `normalize`, `plugin` (one timeout constant) |
 | `completion` | `core` |
-| `dsl` | `core`, `guide`, `ui`, `cli` (one row adapter) |
-| `guide` | `core`, `ui` |
-| `ui` | `core`, `config`, `guide` |
+| `dsl` | `core`, `ui`, `cli` (one row adapter) |
+| `ui` | `core`, `config` |
 | `plugin` | `core`, `config`, `completion`, `native`, `app` (`ConfigState` only) |
 | `cli` | almost everything, including `app` |
 | `app`, `repl` | everything |

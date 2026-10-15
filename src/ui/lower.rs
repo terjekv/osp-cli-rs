@@ -7,7 +7,7 @@
 //!
 //! Keep the split here:
 //!
-//! - output semantics and guide shape come in from upstream modules
+//! - output semantics and document blocks come in from upstream modules
 //! - this module chooses document structure
 //! - emitters later decide spacing, borders, markdown markers, and terminal
 //!   chrome
@@ -15,17 +15,6 @@
 use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
-
-use crate::core::document::{DocBlock, Document};
-use crate::core::output::OutputFormat;
-use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocumentKind, OutputItems, OutputResult, group_rows,
-    output_items_to_rows, output_items_to_value,
-};
-use crate::core::row::Row;
-use crate::guide::{
-    GuideEntry, GuideSection, GuideSectionKind, GuideView, payload_entry_value_as_entry,
-};
 
 use super::doc::{
     Block, Doc, EntriesBlock, EntryRow, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue,
@@ -35,33 +24,13 @@ use super::plan::RenderPlan;
 use super::settings::{HelpLayout, ResolvedHelpChromeSettings};
 use super::text::{display_width, sanitize_human_text};
 use super::visible_inline_text;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GuidePresentation {
-    Direct,
-    HelpLayout(HelpLayout, bool),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct GuideSectionRef<'a> {
-    title: &'a str,
-    kind: GuideSectionKind,
-    paragraphs: &'a [String],
-    entries: &'a [GuideEntry],
-    data: Option<&'a Value>,
-}
-
-impl<'a> GuideSectionRef<'a> {
-    fn from_section(section: &'a GuideSection) -> Self {
-        Self {
-            title: &section.title,
-            kind: section.kind,
-            paragraphs: &section.paragraphs,
-            entries: &section.entries,
-            data: section.data.as_ref(),
-        }
-    }
-}
+use crate::core::document::{DocBlock, Document};
+use crate::core::output::OutputFormat;
+use crate::core::output_model::{
+    ColumnAlignment, Group, OutputDocumentKind, OutputItems, OutputResult, group_rows,
+    output_items_to_rows,
+};
+use crate::core::row::Row;
 
 pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     if plan.format != OutputFormat::Json && !output.meta.presentation_lines.is_empty() {
@@ -98,7 +67,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
 
     if output.meta.document_rows
-        && matches!(plan.format, OutputFormat::Guide | OutputFormat::Markdown)
+        && matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown)
     {
         let mut doc = match output
             .document
@@ -145,7 +114,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                     .collect()
             })
             .collect();
-        return Doc {
+        let mut doc = Doc {
             blocks: vec![Block::List(ListBlock {
                 items,
                 indent: 0,
@@ -153,9 +122,9 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 auto_grid: false,
             })],
         };
+        sanitize_doc(&mut doc);
+        return doc;
     }
-
-    let guide = GuideView::try_from_output_result(output);
 
     // Human projection is deliberately downstream of filtering and JSON output.
     let display;
@@ -171,26 +140,6 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
 
     let mut doc = match plan.format {
-        OutputFormat::Guide => {
-            if let Some(guide) = guide.as_ref() {
-                lower_guide(
-                    guide,
-                    plan.format,
-                    plan.settings.indent_size,
-                    GuidePresentation::Direct,
-                    None,
-                )
-            } else {
-                Doc {
-                    blocks: match &output.items {
-                        OutputItems::Rows(rows) if rows.len() == 1 => {
-                            lower_value_blocks(&Value::Object(rows[0].clone()))
-                        }
-                        _ => lower_value_blocks(&output_items_to_value(&output.items)),
-                    },
-                }
-            }
-        }
         OutputFormat::Json => Doc {
             blocks: vec![Block::Json(JsonBlock {
                 text: serde_json::to_string_pretty(&json_value(output))
@@ -198,33 +147,8 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
             })],
         },
         OutputFormat::Table => lower_table_doc(output),
-        OutputFormat::Markdown => {
-            if let Some(guide) = guide.as_ref() {
-                lower_guide(
-                    guide,
-                    plan.format,
-                    plan.settings.indent_size,
-                    GuidePresentation::Direct,
-                    None,
-                )
-            } else {
-                lower_markdown_doc(output)
-            }
-        }
-        OutputFormat::Value => {
-            if let Some(guide) = guide.as_ref() {
-                Doc {
-                    blocks: vec![Block::List(ListBlock {
-                        items: guide.to_value_lines(),
-                        indent: 0,
-                        inline_markup: false,
-                        auto_grid: false,
-                    })],
-                }
-            } else {
-                lower_value_doc(output)
-            }
-        }
+        OutputFormat::Markdown => lower_markdown_doc(output),
+        OutputFormat::Value => lower_value_doc(output),
         OutputFormat::Mreg => lower_mreg_doc(output),
         OutputFormat::Auto => Doc::default(),
     };
@@ -300,6 +224,7 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -
                     entries.rows.push(entry);
                 } else {
                     body.push(Block::Entries(EntriesBlock {
+                        inline_markup: true,
                         default_indent: " ".repeat(indent_size),
                         default_gap: None,
                         rows: vec![entry],
@@ -351,7 +276,7 @@ fn lower_document_blocks(
         let next = match block {
             DocBlock::Section { title, blocks, .. } => vec![Block::Section(SectionBlock {
                 title: Some(title.clone()),
-                title_chrome: if matches!(format, OutputFormat::Markdown) {
+                title_chrome: if matches!(format, OutputFormat::Auto | OutputFormat::Markdown) {
                     SectionTitleChrome::Ruled
                 } else {
                     SectionTitleChrome::Plain
@@ -371,6 +296,7 @@ fn lower_document_blocks(
                 inline_markup: true,
             })],
             DocBlock::Entries { entries } => vec![Block::Entries(EntriesBlock {
+                inline_markup: true,
                 default_indent: " ".repeat(indent_size),
                 default_gap: None,
                 rows: entries
@@ -384,7 +310,11 @@ fn lower_document_blocks(
                     .collect(),
             })],
             DocBlock::List { items } => vec![Block::List(ListBlock {
-                items: items.clone(),
+                items: if format == OutputFormat::Markdown {
+                    items.clone()
+                } else {
+                    items.iter().map(|item| format!("- {item}")).collect()
+                },
                 indent: 0,
                 inline_markup: true,
                 auto_grid: false,
@@ -783,47 +713,51 @@ pub(crate) fn lower_document_help_layout(
                     indent: if inside { 2 } else { 0 },
                     inline_markup: true,
                 })],
-                DocBlock::Entries { entries } => vec![Block::Entries(EntriesBlock {
-                    default_indent: " ".repeat(plan.settings.help_chrome.entry_indent),
-                    default_gap: plan
-                        .settings
-                        .help_chrome
-                        .entry_gap
-                        .map(|gap| " ".repeat(gap)),
-                    rows: entries
+                DocBlock::Entries { entries } => {
+                    let width = entries
                         .iter()
-                        .map(|entry| EntryRow {
-                            key: entry.name.clone(),
-                            value: if long_help && entry.name.starts_with('-') {
-                                entry
-                                    .description
-                                    .lines()
-                                    .filter(|line| !line.is_empty())
-                                    .collect::<Vec<_>>()
-                                    .join("\n          ")
-                            } else {
-                                entry.description.clone()
-                            },
-                            indent_hint: (long_help && entry.name.starts_with('-')).then(|| {
-                                " ".repeat(if entry.name.starts_with("--") { 6 } else { 2 })
-                            }),
-                            gap_hint: if long_help && entry.name.starts_with('-') {
-                                Some("\n          ".into())
-                            } else {
-                                plan.document_entry_gap.map(|gap| {
-                                    let width = entries
-                                        .iter()
-                                        .map(|entry| display_width(&entry.name))
-                                        .max()
-                                        .unwrap_or(0);
-                                    " ".repeat(
-                                        width.saturating_sub(display_width(&entry.name)) + gap,
-                                    )
-                                })
-                            },
-                        })
-                        .collect(),
-                })],
+                        .map(|entry| display_width(&entry.name))
+                        .max()
+                        .unwrap_or(0);
+                    vec![Block::Entries(EntriesBlock {
+                        inline_markup: !long_help
+                            || !entries.iter().all(|entry| entry.name.starts_with('-')),
+                        default_indent: " ".repeat(plan.settings.help_chrome.entry_indent),
+                        default_gap: plan
+                            .settings
+                            .help_chrome
+                            .entry_gap
+                            .map(|gap| " ".repeat(gap)),
+                        rows: entries
+                            .iter()
+                            .map(|entry| EntryRow {
+                                key: entry.name.clone(),
+                                value: if long_help && entry.name.starts_with('-') {
+                                    entry
+                                        .description
+                                        .lines()
+                                        .filter(|line| !line.is_empty())
+                                        .collect::<Vec<_>>()
+                                        .join("\n          ")
+                                } else {
+                                    entry.description.clone()
+                                },
+                                indent_hint: (long_help && entry.name.starts_with('-')).then(
+                                    || " ".repeat(if entry.name.starts_with("--") { 6 } else { 2 }),
+                                ),
+                                gap_hint: if long_help && entry.name.starts_with('-') {
+                                    Some("\n          ".into())
+                                } else {
+                                    plan.document_entry_gap.map(|gap| {
+                                        " ".repeat(
+                                            width.saturating_sub(display_width(&entry.name)) + gap,
+                                        )
+                                    })
+                                },
+                            })
+                            .collect(),
+                    })]
+                }
                 DocBlock::List { items } => vec![Block::List(ListBlock {
                     items: items.iter().map(|item| format!("- {item}")).collect(),
                     indent: if inside { 2 } else { 0 },
@@ -860,21 +794,6 @@ pub(crate) fn lower_document_help_layout(
         blocks.push(Block::Rule);
     }
     Doc { blocks }
-}
-
-pub(crate) fn lower_guide_help_layout(
-    view: &GuideView,
-    plan: &RenderPlan,
-    layout: HelpLayout,
-    show_footer_rule: bool,
-) -> Doc {
-    lower_guide(
-        view,
-        plan.format,
-        plan.settings.indent_size,
-        GuidePresentation::HelpLayout(layout, show_footer_rule),
-        Some(&plan.settings.help_chrome),
-    )
 }
 
 /// Shortens a long row set, or the long lists inside a one-record document,
@@ -984,12 +903,6 @@ fn json_group_value(group: &Group) -> Value {
 }
 
 fn lower_mreg_doc(output: &OutputResult) -> Doc {
-    if let Some(guide) = GuideView::try_from_output_result(output) {
-        return Doc {
-            blocks: lower_mreg_guide_blocks(&guide.to_json_value(), 0),
-        };
-    }
-
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
         OutputItems::Rows(rows) if rows.len() == 1 && row_has_table_arrays(&rows[0]) => Doc {
@@ -1059,258 +972,6 @@ fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
     out
 }
 
-fn lower_mreg_guide_blocks(value: &Value, indent: usize) -> Vec<Block> {
-    match value {
-        Value::Object(map) => ordered_keys_for_map(map)
-            .into_iter()
-            .flat_map(|key| {
-                map.get(&key)
-                    .map(|value| lower_mreg_guide_named_value(&key, value, indent))
-                    .unwrap_or_default()
-            })
-            .collect(),
-        _ => vec![Block::Paragraph(ParagraphBlock {
-            text: display_value(value),
-            indent,
-            inline_markup: false,
-        })],
-    }
-}
-
-fn lower_mreg_guide_named_value(key: &str, value: &Value, indent: usize) -> Vec<Block> {
-    match value {
-        Value::Null => vec![mreg_line_block(format!("{key}:"), indent)],
-        Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-            vec![mreg_line_block(
-                format!("{key}: {}", display_value(value)),
-                indent,
-            )]
-        }
-        Value::Array(items) if items.is_empty() => {
-            vec![mreg_line_block(format!("{key}: []"), indent)]
-        }
-        Value::Array(items)
-            if items
-                .iter()
-                .all(|item| !matches!(item, Value::Object(_) | Value::Array(_))) =>
-        {
-            if items.len() == 1 {
-                vec![mreg_line_block(
-                    format!("{key}: {}", display_value(&items[0])),
-                    indent,
-                )]
-            } else {
-                let mut blocks = vec![mreg_line_block(format!("{key} ({}):", items.len()), indent)];
-                blocks.extend(
-                    items
-                        .iter()
-                        .map(|item| mreg_line_block(display_value(item), indent + 2)),
-                );
-                blocks
-            }
-        }
-        Value::Array(items) => {
-            let mut blocks = vec![mreg_line_block(section_title(key, items.len()), indent)];
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    blocks.push(mreg_line_block("---".to_string(), indent + 2));
-                }
-                blocks.extend(lower_mreg_guide_blocks(item, indent + 2));
-            }
-            blocks
-        }
-        Value::Object(map) => {
-            let mut blocks = vec![mreg_line_block(format!("{key}:"), indent)];
-            blocks.extend(
-                ordered_keys_for_map(map)
-                    .into_iter()
-                    .flat_map(|nested_key| {
-                        map.get(&nested_key)
-                            .map(|nested| {
-                                lower_mreg_guide_named_value(&nested_key, nested, indent + 2)
-                            })
-                            .unwrap_or_default()
-                    }),
-            );
-            blocks
-        }
-    }
-}
-
-fn ordered_keys_for_map(map: &Map<String, Value>) -> Vec<String> {
-    let mut keys = map.keys().cloned().collect::<Vec<_>>();
-    keys.sort_by_key(|key| match key.as_str() {
-        "preamble" => (0usize, key.clone()),
-        "usage" => (1, key.clone()),
-        "commands" => (2, key.clone()),
-        "arguments" => (3, key.clone()),
-        "options" => (4, key.clone()),
-        "common_invocation_options" => (5, key.clone()),
-        "notes" => (6, key.clone()),
-        "sections" => (7, key.clone()),
-        "epilogue" => (8, key.clone()),
-        _ => (9, key.clone()),
-    });
-    keys
-}
-
-fn mreg_line_block(text: String, indent: usize) -> Block {
-    Block::Paragraph(ParagraphBlock {
-        text,
-        indent,
-        inline_markup: false,
-    })
-}
-
-fn lower_guide(
-    view: &GuideView,
-    format: OutputFormat,
-    indent_size: usize,
-    presentation: GuidePresentation,
-    help_chrome: Option<&ResolvedHelpChromeSettings>,
-) -> Doc {
-    let mut blocks = guide_paragraph_blocks(&view.preamble);
-    let sections = guide_sections(view);
-
-    match presentation {
-        GuidePresentation::HelpLayout(layout, show_footer_rule) => {
-            let Some(help_chrome) = help_chrome else {
-                return Doc::default();
-            };
-            extend_with_blank_between(
-                &mut blocks,
-                help_layout_blocks(&sections, layout, show_footer_rule, help_chrome),
-            );
-        }
-        GuidePresentation::Direct => {
-            extend_with_blank_between(
-                &mut blocks,
-                direct_guide_blocks(&sections, format, indent_size),
-            );
-        }
-    }
-
-    extend_with_blank_between(&mut blocks, guide_paragraph_blocks(&view.epilogue));
-    Doc { blocks }
-}
-
-fn guide_sections(view: &GuideView) -> Vec<GuideSectionRef<'_>> {
-    let use_ordered_sections = view.uses_ordered_section_representation();
-    let mut sections = Vec::new();
-    let builtin_sections = [
-        (
-            GuideSectionKind::Usage,
-            "Usage",
-            view.usage.as_slice(),
-            &[][..],
-        ),
-        (
-            GuideSectionKind::Commands,
-            "Commands",
-            &[][..],
-            view.commands.as_slice(),
-        ),
-        (
-            GuideSectionKind::Arguments,
-            "Arguments",
-            &[][..],
-            view.arguments.as_slice(),
-        ),
-        (
-            GuideSectionKind::Options,
-            "Options",
-            &[][..],
-            view.options.as_slice(),
-        ),
-        (
-            GuideSectionKind::CommonInvocationOptions,
-            "Common Invocation Options",
-            &[][..],
-            view.common_invocation_options.as_slice(),
-        ),
-        (
-            GuideSectionKind::Notes,
-            "Notes",
-            view.notes.as_slice(),
-            &[][..],
-        ),
-    ];
-    for (kind, title, paragraphs, entries) in builtin_sections {
-        if (paragraphs.is_empty() && entries.is_empty())
-            || (use_ordered_sections && view.has_canonical_builtin_section_kind(kind))
-        {
-            continue;
-        }
-
-        sections.push(GuideSectionRef {
-            title,
-            kind,
-            paragraphs,
-            entries,
-            data: None,
-        });
-    }
-
-    for section in &view.sections {
-        if !use_ordered_sections && section.is_canonical_builtin_section() {
-            continue;
-        }
-        sections.push(GuideSectionRef::from_section(section));
-    }
-
-    sections
-}
-
-fn direct_guide_blocks(
-    sections: &[GuideSectionRef<'_>],
-    format: OutputFormat,
-    indent_size: usize,
-) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    let title_chrome = if matches!(format, OutputFormat::Guide | OutputFormat::Markdown) {
-        SectionTitleChrome::Ruled
-    } else {
-        SectionTitleChrome::Plain
-    };
-    let body_indent = if matches!(format, OutputFormat::Guide) {
-        indent_size
-    } else {
-        0
-    };
-    let trailing_newline = matches!(format, OutputFormat::Guide);
-    for section in sections {
-        let section_blocks = direct_section_blocks(*section);
-        if section_blocks.is_empty() {
-            continue;
-        }
-
-        extend_with_blank_between(
-            &mut blocks,
-            vec![Block::Section(SectionBlock {
-                title: Some(section.title.to_string()),
-                title_chrome,
-                body_indent,
-                inline_title_suffix: None,
-                trailing_newline,
-                blocks: section_blocks,
-            })],
-        );
-    }
-    blocks
-}
-
-fn direct_section_blocks(section: GuideSectionRef<'_>) -> Vec<Block> {
-    let mut section_blocks = guide_paragraph_blocks(section.paragraphs);
-    let entry_blocks = entry_blocks(section.entries);
-    extend_with_blank_between(&mut section_blocks, entry_blocks);
-
-    if let Some(data) = section.data {
-        extend_with_blank_between(&mut section_blocks, lower_value_blocks(data));
-    }
-
-    section_blocks
-}
-
 fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
     if extra.is_empty() {
         return;
@@ -1321,102 +982,22 @@ fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
     blocks.append(&mut extra);
 }
 
-fn guide_paragraph_blocks(paragraphs: &[String]) -> Vec<Block> {
-    trimmed_lines(paragraphs)
-        .into_iter()
-        .map(|text| {
-            Block::Paragraph(ParagraphBlock {
-                text,
-                indent: 0,
-                inline_markup: true,
-            })
-        })
-        .collect()
-}
-
-fn entry_blocks(entries: &[GuideEntry]) -> Vec<Block> {
-    if entries.is_empty() {
-        return Vec::new();
-    }
-    vec![Block::Entries(entries_block(entries))]
-}
-
-fn help_layout_blocks(
-    sections: &[GuideSectionRef<'_>],
-    layout: HelpLayout,
-    show_footer_rule: bool,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    for section in sections {
-        let Some(section_block) = help_layout_section_block(*section, layout, help_chrome) else {
-            continue;
-        };
-        push_blank_lines(&mut blocks, help_chrome.section_spacing);
-        blocks.push(Block::Section(section_block));
-    }
-    if show_footer_rule && !blocks.is_empty() {
-        blocks.push(Block::Rule);
-    }
-    blocks
-}
-
-fn help_layout_section_block(
-    section: GuideSectionRef<'_>,
-    layout: HelpLayout,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Option<SectionBlock> {
-    let paragraph_indent = if section.kind == GuideSectionKind::Usage
-        && section.title.trim_end_matches(':') != "Usage"
+fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::DocumentEntry> {
+    let map = value.as_object()?;
+    if map
+        .keys()
+        .any(|key| !matches!(key.as_str(), "name" | "short_help"))
     {
-        0
-    } else {
-        2
-    };
-    let lines = trimmed_lines(section.paragraphs);
-    let inline_title_suffix = usage_title_suffix(section, &lines);
-    let mut blocks = if lines.is_empty() || inline_title_suffix.is_some() {
-        Vec::new()
-    } else {
-        vec![Block::Paragraph(ParagraphBlock {
-            text: lines.join("\n"),
-            indent: paragraph_indent,
-            inline_markup: true,
-        })]
-    };
-
-    if !section.entries.is_empty() {
-        extend_with_blank_between(
-            &mut blocks,
-            vec![Block::Entries(entries_block_with_defaults(
-                section.entries,
-                help_chrome.entry_indent,
-                help_chrome.entry_gap,
-            ))],
-        );
+        return None;
     }
-    if let Some(data) = section.data {
-        extend_with_blank_between(
-            &mut blocks,
-            help_layout_blocks_from_value(data, help_chrome),
-        );
-    }
-    if blocks.is_empty() && inline_title_suffix.is_none() {
-        None
-    } else {
-        Some(SectionBlock {
-            title: Some(section.title.to_string()),
-            title_chrome: if inline_title_suffix.is_some() {
-                SectionTitleChrome::Plain
-            } else {
-                help_layout_title_chrome(layout)
-            },
-            body_indent: 0,
-            inline_title_suffix,
-            trailing_newline: false,
-            blocks,
-        })
-    }
+    Some(crate::core::document::DocumentEntry {
+        name: map.get("name")?.as_str()?.to_string(),
+        description: map
+            .get("short_help")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
 fn help_layout_blocks_from_value(
@@ -1425,7 +1006,7 @@ fn help_layout_blocks_from_value(
 ) -> Vec<Block> {
     match value {
         Value::Object(map) if should_render_as_key_value_group(map) => {
-            vec![Block::KeyValue(key_value_from_guide_data_map(map))]
+            vec![Block::KeyValue(key_value_from_document_data_map(map))]
         }
         Value::Object(map) => vec![Block::KeyValue(KeyValueBlock {
             rows: key_value_from_map(map, None).rows,
@@ -1469,17 +1050,6 @@ fn help_layout_blocks_from_value(
             })]
         }
     }
-}
-
-fn usage_title_suffix(section: GuideSectionRef<'_>, lines: &[String]) -> Option<String> {
-    if section.title.trim_end_matches(':') != "Usage"
-        || lines.len() != 1
-        || !section.entries.is_empty()
-        || !matches!(section.data, None | Some(Value::Null))
-    {
-        return None;
-    }
-    Some(visible_inline_text(&lines[0]))
 }
 
 fn push_blank_lines(blocks: &mut Vec<Block>, count: usize) {
@@ -1807,7 +1377,7 @@ fn display_value(value: &Value) -> String {
     }
 }
 
-fn key_value_from_guide_data_map(map: &Map<String, Value>) -> KeyValueBlock {
+fn key_value_from_document_data_map(map: &Map<String, Value>) -> KeyValueBlock {
     KeyValueBlock {
         rows: map
             .iter()
@@ -1821,25 +1391,13 @@ fn key_value_from_guide_data_map(map: &Map<String, Value>) -> KeyValueBlock {
     }
 }
 
-fn trimmed_lines(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-fn entries_block(entries: &[GuideEntry]) -> EntriesBlock {
-    entries_block_with_defaults(entries, 0, None)
-}
-
 fn entries_block_with_defaults(
-    entries: &[GuideEntry],
+    entries: &[crate::core::document::DocumentEntry],
     entry_indent: usize,
     entry_gap: Option<usize>,
 ) -> EntriesBlock {
     EntriesBlock {
+        inline_markup: true,
         default_indent: " ".repeat(entry_indent),
         default_gap: entry_gap.map(|value| " ".repeat(value)),
         rows: entries.iter().map(entry_row).collect(),
@@ -1853,12 +1411,12 @@ fn help_layout_title_chrome(layout: HelpLayout) -> SectionTitleChrome {
     }
 }
 
-fn entry_row(entry: &GuideEntry) -> EntryRow {
+fn entry_row(entry: &crate::core::document::DocumentEntry) -> EntryRow {
     EntryRow {
         key: entry.name.clone(),
-        value: entry.short_help.clone(),
-        indent_hint: entry.display_indent.clone(),
-        gap_hint: entry.display_gap.clone(),
+        value: entry.description.clone(),
+        indent_hint: None,
+        gap_hint: None,
     }
 }
 

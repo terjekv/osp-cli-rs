@@ -177,10 +177,6 @@ pub(crate) fn parse_help_render_overrides(args: &[OsString]) -> HelpRenderOverri
     while let Some(token) = iter.next() {
         if fallback_invocation_parse {
             match token {
-                "--guide" => {
-                    out.format = Some(OutputFormat::Guide);
-                    continue;
-                }
                 "--verbose" => {
                     out.verbose = out.verbose.saturating_add(1);
                     continue;
@@ -447,11 +443,11 @@ mod tests {
             assert_eq!(context.settings.format, OutputFormat::Json);
             assert!(context.settings.format_explicit);
             let context = render_settings_for_help(
-                &help_args(&["osp", "--guide", "--defaults-only"]),
+                &help_args(&["osp", "--format=auto", "--defaults-only"]),
                 &product_defaults,
             );
 
-            assert_eq!(context.settings.format, OutputFormat::Guide);
+            assert_eq!(context.settings.format, OutputFormat::Auto);
             assert!(context.settings.format_explicit);
 
             for (args, expected_level) in [
@@ -507,7 +503,7 @@ mod tests {
 
         let parsed = parse_help_render_overrides(&help_args(&[
             "osp",
-            "--guide",
+            "--format=auto",
             "--render-mode",
             "rich",
             "--color",
@@ -522,7 +518,7 @@ mod tests {
             "--no-config",
             "--defaults-only",
         ]));
-        assert_eq!(parsed.format, Some(OutputFormat::Guide));
+        assert_eq!(parsed.format, Some(OutputFormat::Auto));
         assert_eq!(parsed.mode, Some(RenderMode::Rich));
         assert_eq!(parsed.color, Some(ColorMode::Always));
         assert_eq!(parsed.verbose, 2);

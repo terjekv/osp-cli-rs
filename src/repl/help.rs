@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::guide::GuideView;
+use crate::core::document::Document;
 #[cfg(test)]
 use crate::ui::ResolvedRenderSettings;
 
@@ -8,7 +8,7 @@ use super::ReplViewContext;
 #[cfg(test)]
 use crate::ui::HelpLayout;
 #[cfg(test)]
-use crate::ui::{StructuredGuideRenderOptions, help_layout_from_config};
+use crate::ui::{StructuredDocumentRenderOptions, help_layout_from_config};
 
 #[cfg(test)]
 pub(crate) fn render_repl_help_with_chrome(view: ReplViewContext<'_>, help_text: &str) -> String {
@@ -23,25 +23,27 @@ pub(crate) fn render_help_with_chrome(
     resolved: &ResolvedRenderSettings,
     layout: crate::ui::HelpLayout,
 ) -> String {
-    let parsed = GuideView::from_text(help_text);
-    if parsed.sections.is_empty()
-        && parsed.usage.is_empty()
-        && parsed.commands.is_empty()
-        && parsed.arguments.is_empty()
-        && parsed.options.is_empty()
-        && parsed.common_invocation_options.is_empty()
-        && parsed.notes.is_empty()
+    let parsed = Document::from_help_text(help_text);
+    if !parsed
+        .blocks
+        .iter()
+        .any(|block| matches!(block, crate::core::document::DocBlock::Section { .. }))
     {
         return help_text.to_string();
     }
     let settings = canonical_help_settings(resolved);
     let parsed = escape_inline_markup(parsed);
-    let mut rendered = crate::ui::render_guide_with_layout_with_chrome(
-        &parsed,
+    let mut output = parsed.to_output_result();
+    output.meta.document_long_help = help_text.lines().any(|line| line.starts_with("          "));
+    let mut rendered = crate::ui::render_structured_output_with_document_options(
+        &output,
         &settings,
-        layout,
-        matches!(layout, HelpLayout::Full),
-        None,
+        StructuredDocumentRenderOptions {
+            source_document: Some(&parsed),
+            layout,
+            title_prefix: None,
+            show_footer_rule: Some(matches!(layout, HelpLayout::Full)),
+        },
     );
     rendered = rendered.replace("\\`", "`").replace("\\*", "*");
     if !rendered.ends_with('\n') {
@@ -51,63 +53,46 @@ pub(crate) fn render_help_with_chrome(
 }
 
 #[cfg(test)]
-fn escape_inline_markup(mut guide: GuideView) -> GuideView {
-    fn escape(text: &str) -> String {
-        let mut out = String::with_capacity(text.len());
-        for ch in text.chars() {
-            if matches!(ch, '`' | '*') {
-                out.push('\\');
+fn escape_inline_markup(mut document: Document) -> Document {
+    fn escape(text: &mut String) {
+        *text = text.replace('`', "\\`").replace('*', "\\*");
+    }
+    fn escape_blocks(blocks: &mut [crate::core::document::DocBlock]) {
+        use crate::core::document::DocBlock;
+        for block in blocks {
+            match block {
+                DocBlock::Section {
+                    title,
+                    blocks: children,
+                    ..
+                } => {
+                    escape(title);
+                    escape_blocks(children);
+                }
+                DocBlock::Paragraph { text } => escape(text),
+                DocBlock::Entries { entries } => {
+                    for entry in entries {
+                        escape(&mut entry.name);
+                        escape(&mut entry.description);
+                    }
+                }
+                DocBlock::List { items } => {
+                    for item in items {
+                        escape(item);
+                    }
+                }
+                DocBlock::Data { .. } => {}
             }
-            out.push(ch);
-        }
-        out
-    }
-
-    fn escape_entry(entry: &mut crate::guide::GuideEntry) {
-        entry.name = escape(&entry.name);
-        entry.short_help = escape(&entry.short_help);
-        entry.display_indent = entry.display_indent.as_ref().map(|value| escape(value));
-        entry.display_gap = entry.display_gap.as_ref().map(|value| escape(value));
-    }
-
-    guide.preamble = guide
-        .preamble
-        .into_iter()
-        .map(|text| escape(&text))
-        .collect();
-    guide.usage = guide.usage.into_iter().map(|text| escape(&text)).collect();
-    guide.notes = guide.notes.into_iter().map(|text| escape(&text)).collect();
-    guide.epilogue = guide
-        .epilogue
-        .into_iter()
-        .map(|text| escape(&text))
-        .collect();
-    for entry in &mut guide.commands {
-        escape_entry(entry);
-    }
-    for entry in &mut guide.arguments {
-        escape_entry(entry);
-    }
-    for entry in &mut guide.options {
-        escape_entry(entry);
-    }
-    for entry in &mut guide.common_invocation_options {
-        escape_entry(entry);
-    }
-    for section in &mut guide.sections {
-        section.title = escape(&section.title);
-        section.paragraphs = section.paragraphs.iter().map(|text| escape(text)).collect();
-        for entry in &mut section.entries {
-            escape_entry(entry);
         }
     }
-    guide
+    escape_blocks(&mut document.blocks);
+    document
 }
 
 #[cfg(test)]
 fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::RenderSettings {
     crate::ui::RenderSettings {
-        format: crate::core::output::OutputFormat::Guide,
+        format: crate::core::output::OutputFormat::Auto,
         format_explicit: true,
         mode: match resolved.backend {
             crate::ui::RenderBackend::Plain => crate::core::output::RenderMode::Plain,
@@ -164,9 +149,9 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
+    use crate::core::document::{DocBlock, Document, DocumentEntry};
     use crate::core::output::OutputFormat;
     use crate::dsl::apply_output_pipeline;
-    use crate::guide::{GuideEntry, GuideView};
     use crate::ui::style::StyleOverrides;
     use crate::ui::{
         GuideDefaultFormat, RenderBackend, RenderSettings, ResolvedRenderSettings,
@@ -227,23 +212,30 @@ mod tests {
     }
 
     fn filtered_guide_output() -> crate::core::output_model::OutputResult {
-        let output = GuideView {
-            usage: vec!["history <COMMAND>".to_string()],
-            commands: vec![
-                GuideEntry {
-                    name: "list".to_string(),
-                    short_help: "List history entries".to_string(),
-                    display_indent: None,
-                    display_gap: None,
-                },
-                GuideEntry {
-                    name: "prune".to_string(),
-                    short_help: "Remove old history entries".to_string(),
-                    display_indent: None,
-                    display_gap: None,
-                },
+        let output = Document {
+            blocks: vec![
+                DocBlock::section(
+                    "Usage",
+                    vec![DocBlock::Paragraph {
+                        text: "history <COMMAND>".to_string(),
+                    }],
+                ),
+                DocBlock::section(
+                    "Commands",
+                    vec![DocBlock::Entries {
+                        entries: vec![
+                            DocumentEntry {
+                                name: "list".to_string(),
+                                description: "List history entries".to_string(),
+                            },
+                            DocumentEntry {
+                                name: "prune".to_string(),
+                                description: "Remove old history entries".to_string(),
+                            },
+                        ],
+                    }],
+                ),
             ],
-            ..GuideView::default()
         }
         .to_output_result();
         apply_output_pipeline(output, &["list".to_string()]).expect("guide quick should work")
@@ -311,11 +303,11 @@ mod tests {
 
     #[test]
     fn guide_rendering_prefers_semantic_help_until_explicit_format_wins_unit() {
-        let guide = GuideView::from_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n");
+        let guide = Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n");
 
         let mut guide_default = RenderSettings::test_plain(OutputFormat::Json);
         guide_default.guide_default_format = GuideDefaultFormat::Guide;
-        let rendered = crate::ui::render_structured_output_with_source_guide(
+        let rendered = crate::ui::render_structured_output_with_source_document(
             &guide.to_output_result(),
             Some(&guide),
             &guide_default,
@@ -326,7 +318,7 @@ mod tests {
 
         let mut inherited = RenderSettings::test_plain(OutputFormat::Json);
         inherited.guide_default_format = GuideDefaultFormat::Inherit;
-        let rendered = crate::ui::render_structured_output_with_source_guide(
+        let rendered = crate::ui::render_structured_output_with_source_document(
             &guide.to_output_result(),
             Some(&guide),
             &inherited,
@@ -339,27 +331,28 @@ mod tests {
         let mut explicit = RenderSettings::test_plain(OutputFormat::Json);
         explicit.guide_default_format = GuideDefaultFormat::Guide;
         explicit.format_explicit = true;
-        let rendered = crate::ui::render_structured_output_with_source_guide(
+        let rendered = crate::ui::render_structured_output_with_source_document(
             &guide.to_output_result(),
             Some(&guide),
             &explicit,
             guide_render_layout(),
         );
-        assert!(rendered.trim_start().starts_with('['));
+        assert!(rendered.trim_start().starts_with('{'));
     }
 
     #[test]
     fn guide_output_after_pipeline_preserves_recommendation_until_explicit_format_or_markdown_overrides_unit()
      {
-        let from_text = GuideView::from_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n")
-            .to_output_result();
+        let from_text =
+            Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n")
+                .to_output_result();
         let mut rehydrated = RenderSettings::test_plain(OutputFormat::Json);
         rehydrated.guide_default_format = GuideDefaultFormat::Guide;
-        let rendered = crate::ui::render_structured_output_with_guide_options(
+        let rendered = crate::ui::render_structured_output_with_document_options(
             &from_text,
             &rehydrated,
-            StructuredGuideRenderOptions {
-                source_guide: None,
+            StructuredDocumentRenderOptions {
+                source_document: None,
                 layout: guide_render_layout(),
                 title_prefix: None,
                 show_footer_rule: None,
@@ -371,11 +364,11 @@ mod tests {
         let filtered = filtered_guide_output();
         let mut semantic = RenderSettings::test_plain(OutputFormat::Auto);
         semantic.guide_default_format = GuideDefaultFormat::Guide;
-        let rendered = crate::ui::render_structured_output_with_guide_options(
+        let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
             &semantic,
-            StructuredGuideRenderOptions {
-                source_guide: None,
+            StructuredDocumentRenderOptions {
+                source_document: None,
                 layout: guide_render_layout(),
                 title_prefix: None,
                 show_footer_rule: None,
@@ -388,11 +381,11 @@ mod tests {
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
         explicit_json.guide_default_format = GuideDefaultFormat::Guide;
         explicit_json.format_explicit = true;
-        let rendered = crate::ui::render_structured_output_with_guide_options(
+        let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
             &explicit_json,
-            StructuredGuideRenderOptions {
-                source_guide: None,
+            StructuredDocumentRenderOptions {
+                source_document: None,
                 layout: guide_render_layout(),
                 title_prefix: None,
                 show_footer_rule: None,
@@ -400,16 +393,16 @@ mod tests {
         );
         assert!(rendered.trim_start().starts_with('['));
         assert!(rendered.contains("\"name\""));
-        assert!(rendered.contains("\"short_help\""));
+        assert!(rendered.contains("\"description\""));
 
         let mut markdown = RenderSettings::test_plain(OutputFormat::Markdown);
         markdown.format_explicit = true;
         markdown.guide_default_format = GuideDefaultFormat::Guide;
-        let rendered = crate::ui::render_structured_output_with_guide_options(
+        let rendered = crate::ui::render_structured_output_with_document_options(
             &filtered,
             &markdown,
-            StructuredGuideRenderOptions {
-                source_guide: None,
+            StructuredDocumentRenderOptions {
+                source_document: None,
                 layout: guide_render_layout(),
                 title_prefix: None,
                 show_footer_rule: None,

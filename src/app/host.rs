@@ -359,7 +359,8 @@ fn handle_clap_parse_error(
                 .iter()
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
-            let (mut body, root_help) = crate::cli::command_help_document(command.clone(), &tokens);
+            let (mut body, root_help, long_help) =
+                crate::cli::command_help_document(command.clone(), &tokens);
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);
@@ -400,9 +401,7 @@ fn handle_clap_parse_error(
             let stages = if dsl_help.is_some() { &[][..] } else { stages };
             let mut output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
                 .map_err(|error| miette!("failed to transform help output: {error}"))?;
-            output.meta.document_long_help = tokens
-                .iter()
-                .any(|token| token == "--help" || token == "help");
+            output.meta.document_long_help = long_help;
             let rendered = crate::ui::render_structured_output_with_source_document(
                 &output,
                 stages.is_empty().then_some(&filtered),

@@ -305,6 +305,7 @@ mod tests {
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: vec![Block::Entries(EntriesBlock {
+                        inline_markup: true,
                         default_indent: "  ".to_string(),
                         default_gap: None,
                         rows: vec![EntryRow {

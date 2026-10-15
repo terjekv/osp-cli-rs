@@ -83,7 +83,7 @@ fn configure_render_runtime(
     color: ColorMode,
     unicode: UnicodeMode,
 ) {
-    state.runtime.ui.render_settings.format = OutputFormat::Guide;
+    state.runtime.ui.render_settings.format = OutputFormat::Auto;
     state.runtime.ui.render_settings.mode = mode;
     state.runtime.ui.render_settings.color = color;
     state.runtime.ui.render_settings.unicode = unicode;

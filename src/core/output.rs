@@ -17,8 +17,6 @@
 pub enum OutputFormat {
     /// Chooses a format based on the command result and terminal context.
     Auto,
-    /// Renders guidance-oriented documents.
-    Guide,
     /// Emits JSON output.
     Json,
     /// Renders tabular output.
@@ -45,7 +43,6 @@ impl OutputFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             OutputFormat::Auto => "auto",
-            OutputFormat::Guide => "guide",
             OutputFormat::Json => "json",
             OutputFormat::Table => "table",
             OutputFormat::Markdown => "md",
@@ -62,7 +59,7 @@ impl OutputFormat {
     /// ```
     /// use osp_cli::core::output::OutputFormat;
     ///
-    /// assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
+    /// assert_eq!(OutputFormat::parse("guide"), None);
     /// assert_eq!(OutputFormat::parse(" markdown "), Some(OutputFormat::Markdown));
     /// assert_eq!(OutputFormat::parse("MD"), Some(OutputFormat::Markdown));
     /// assert_eq!(OutputFormat::parse("wat"), None);
@@ -70,7 +67,6 @@ impl OutputFormat {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Some(OutputFormat::Auto),
-            "guide" => Some(OutputFormat::Guide),
             "json" => Some(OutputFormat::Json),
             "table" => Some(OutputFormat::Table),
             "md" | "markdown" => Some(OutputFormat::Markdown),
@@ -238,13 +234,12 @@ mod tests {
     #[test]
     fn output_modes_round_trip_known_values_aliases_and_variants_unit() {
         assert_eq!(OutputFormat::Auto.as_str(), "auto");
-        assert_eq!(OutputFormat::Guide.as_str(), "guide");
         assert_eq!(OutputFormat::Json.as_str(), "json");
         assert_eq!(OutputFormat::Table.as_str(), "table");
         assert_eq!(OutputFormat::Markdown.as_str(), "md");
         assert_eq!(OutputFormat::Mreg.as_str(), "mreg");
         assert_eq!(OutputFormat::Value.as_str(), "value");
-        assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
+        assert_eq!(OutputFormat::parse("guide"), None);
         assert_eq!(OutputFormat::parse(" json "), Some(OutputFormat::Json));
         assert_eq!(OutputFormat::parse("auto"), Some(OutputFormat::Auto));
         assert_eq!(

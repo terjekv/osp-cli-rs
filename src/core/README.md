@@ -30,3 +30,7 @@ one feature. `core` is not a place for helpers without a home.
 - **New command metadata (e.g. a flag property):** add it to `command_def.rs`,
   then carry it through `completion/tree.rs` and `document.rs` as needed.
   Clap-built commands get it from the clap conversion in the same file.
+
+`Document` is the semantic help/intro model. Its clap metadata adapter, external
+text parser, and Markdown template parser produce ordered blocks. Its row
+projection carries section context explicitly, with no guide buckets or restore.
