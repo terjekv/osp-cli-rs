@@ -161,7 +161,7 @@ fn parse_filter_spec(spec: &str) -> Result<ParsedFilterSpec> {
             value = ComparisonValue {
                 text: rhs_spec.token,
                 exact: matches!(parsed_op, Operator::Eq | Operator::Ne),
-                strict: rhs_spec.exact == ExactMode::CaseSensitive,
+                strict: token == "==" || rhs_spec.exact == ExactMode::CaseSensitive,
                 negated: rhs_spec.negated,
                 regex: None,
             };
@@ -326,6 +326,13 @@ fn compare_numbers(left: &serde_json::Value, rhs: &str, operator: Operator) -> b
 fn compare_text_or_bool(left: &serde_json::Value, rhs: &ComparisonValue) -> bool {
     let left_rendered = render_value(left);
 
+    if rhs.strict {
+        if rhs.exact {
+            return left_rendered == rhs.text;
+        }
+        return left_rendered.contains(&rhs.text);
+    }
+
     if let serde_json::Value::Bool(flag) = left {
         if eq_case_insensitive(&rhs.text, "true") {
             return *flag;
@@ -333,13 +340,6 @@ fn compare_text_or_bool(left: &serde_json::Value, rhs: &ComparisonValue) -> bool
         if eq_case_insensitive(&rhs.text, "false") {
             return !*flag;
         }
-    }
-
-    if rhs.strict {
-        if rhs.exact {
-            return left_rendered == rhs.text;
-        }
-        return left_rendered.contains(&rhs.text);
     }
 
     if rhs.exact {

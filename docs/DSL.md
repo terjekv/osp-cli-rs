@@ -127,7 +127,8 @@ Quick search supports these prefixes, with or without intervening spaces:
 `K` and `V` restrict the search to keys or values. `K !=field` selects rows
 having a key unequal to that name. All whitespace variants of `!=` have the
 same interpretation; predicate `F field != value` also permits attached forms.
-`F field text` means a contains comparison; `F field=value` means equality.
+`F field text` means a contains comparison; `F field=value` means
+case-insensitive equality and `F field==value` means case-sensitive equality.
 Array-valued fields match if an element satisfies the predicate.
 
 A bare literal field selector prefers the root field and its leaves, falling
@@ -151,6 +152,7 @@ fields repeat alongside projected member rows.
 order, for example `S size desc AS num`. A missing sort field in a nonempty
 selection is an error. Empty input sorts successfully. Missing values sort
 last; numeric-looking values sort numerically under automatic casting.
+Text sorting uses the same Unicode case folding as case-insensitive filtering.
 
 Ordered filters recognize RFC3339 timestamps and timezone-naive dates/times.
 Naive values use the machine's local timezone. Ambiguous or nonexistent local

@@ -7,7 +7,9 @@ use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::dsl::{
-    eval::resolve::resolve_first_value, parse::key_spec::KeySpec, verbs::common::parse_stage_words,
+    eval::{matchers::fold_case, resolve::resolve_first_value},
+    parse::key_spec::KeySpec,
+    verbs::common::parse_stage_words,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,8 +261,8 @@ fn to_ip(value: &Value) -> Option<IpAddr> {
 
 fn to_string_normalized(value: &Value) -> String {
     match value {
-        Value::String(text) => text.to_ascii_lowercase(),
-        _ => value.to_string().to_ascii_lowercase(),
+        Value::String(text) => fold_case(text),
+        _ => fold_case(&value.to_string()),
     }
 }
 
