@@ -81,6 +81,7 @@ enum DiscoveryPolicy {
 pub(super) struct DiscoveryCache {
     passive: Option<Arc<[DiscoveredPlugin]>>,
     dispatch: Option<Arc<[DiscoveredPlugin]>>,
+    failed_describes: HashMap<(String, (u64, u64, u32)), String>,
 }
 
 impl DiscoveryPolicy {
@@ -110,14 +111,18 @@ impl DiscoveryPolicy {
     }
 }
 
-struct DescribeCacheSession {
+struct DescribeCacheSession<'a> {
     file: DescribeCacheFile,
     seen_paths: HashSet<String>,
     dirty: bool,
+    failed_describes: &'a mut HashMap<(String, (u64, u64, u32)), String>,
 }
 
-impl DescribeCacheSession {
-    fn load(manager: &PluginManager) -> Self {
+impl<'a> DescribeCacheSession<'a> {
+    fn load(
+        manager: &PluginManager,
+        failed_describes: &'a mut HashMap<(String, (u64, u64, u32)), String>,
+    ) -> Self {
         Self {
             file: {
                 let _phase = crate::startup_trace::phase("plugin describe cache load");
@@ -125,6 +130,7 @@ impl DescribeCacheSession {
             },
             seen_paths: HashSet::new(),
             dirty: false,
+            failed_describes,
         }
     }
 
@@ -205,7 +211,8 @@ impl PluginManager {
         if let Some(cached) = policy.snapshot(&guard).clone() {
             return cached;
         }
-        let (discovered, cache_changed) = self.discover_uncached(policy);
+        let (discovered, cache_changed) =
+            self.discover_uncached(policy, &mut guard.failed_describes);
         let shared = Arc::<[DiscoveredPlugin]>::from(discovered);
         policy.publish(&mut guard, shared.clone());
         if policy == DiscoveryPolicy::Dispatch && cache_changed {
@@ -214,7 +221,11 @@ impl PluginManager {
         shared
     }
 
-    fn discover_uncached(&self, policy: DiscoveryPolicy) -> (Vec<DiscoveredPlugin>, bool) {
+    fn discover_uncached(
+        &self,
+        policy: DiscoveryPolicy,
+        failed_describes: &mut HashMap<(String, (u64, u64, u32)), String>,
+    ) -> (Vec<DiscoveredPlugin>, bool) {
         let _phase = crate::startup_trace::phase("plugin discovery");
         let roots = {
             let _phase = crate::startup_trace::phase("plugin search root resolution");
@@ -222,7 +233,7 @@ impl PluginManager {
         };
         let mut plugins: Vec<DiscoveredPlugin> = Vec::new();
         let mut seen_paths: HashSet<PathBuf> = HashSet::new();
-        let mut describe_cache = DescribeCacheSession::load(self);
+        let mut describe_cache = DescribeCacheSession::load(self, failed_describes);
 
         for root in &roots {
             let discovered = {
@@ -458,7 +469,7 @@ pub(super) fn discover_root_executables(root: &Path) -> Vec<PathBuf> {
 fn discover_plugins_in_root(
     root: &SearchRoot,
     seen_paths: &mut HashSet<PathBuf>,
-    describe_cache: &mut DescribeCacheSession,
+    describe_cache: &mut DescribeCacheSession<'_>,
     process_timeout: Duration,
     policy: DiscoveryPolicy,
 ) -> Vec<DiscoveredPlugin> {
@@ -560,10 +571,12 @@ pub(super) fn assemble_discovered_plugin(
     cache_dirty: &mut bool,
     process_timeout: Duration,
 ) -> DiscoveredPlugin {
+    let mut failed_describes = HashMap::new();
     let mut describe_cache_session = DescribeCacheSession {
         file: std::mem::take(describe_cache),
         seen_paths: std::mem::take(seen_describe_paths),
         dirty: *cache_dirty,
+        failed_describes: &mut failed_describes,
     };
     let mut candidate = seed_plugin_candidate(source, executable, manifest_state);
     let describe = prepare_describe(
@@ -619,7 +632,7 @@ fn seed_plugin_candidate(
 fn prepare_describe(
     candidate: &mut SeededPluginCandidate,
     manifest_state: &ManifestState,
-    describe_cache: &mut DescribeCacheSession,
+    describe_cache: &mut DescribeCacheSession<'_>,
     process_timeout: Duration,
     policy: DiscoveryPolicy,
 ) -> Result<PendingDescribe> {
@@ -647,7 +660,7 @@ fn prepare_describe(
 fn finalize_seeded_candidate(
     mut candidate: SeededPluginCandidate,
     describe: Result<PendingDescribe>,
-    describe_cache: &mut DescribeCacheSession,
+    describe_cache: &mut DescribeCacheSession<'_>,
     process_timeout: Duration,
 ) -> DiscoveredPlugin {
     let describe = describe.and_then(|pending| {
@@ -964,6 +977,7 @@ fn validate_manifest_checksum(entry: &ManifestPlugin, path: &Path) -> Result<()>
 
 enum PendingDescribe {
     Ready(Option<DescribeV1>),
+    Failed(String),
     Running {
         key: String,
         fingerprint: (u64, u64, u32),
@@ -976,10 +990,11 @@ impl PendingDescribe {
         self,
         path: &Path,
         process_timeout: Duration,
-        cache: &mut DescribeCacheSession,
+        cache: &mut DescribeCacheSession<'_>,
     ) -> Result<Option<DescribeV1>> {
         let (key, fingerprint, worker) = match self {
             Self::Ready(describe) => return Ok(describe),
+            Self::Failed(issue) => return Err(anyhow!(issue)),
             Self::Running {
                 key,
                 fingerprint,
@@ -988,13 +1003,25 @@ impl PendingDescribe {
         };
         // Resource exhaustion must not turn a previously runnable describe
         // into a discovery failure: run it here if its worker could not start.
+        let failure_key = (key.clone(), fingerprint);
         let output = match worker {
-            Some(worker) => worker
-                .join()
-                .map_err(|_| anyhow!("--describe worker panicked for {}", path.display()))?,
+            Some(worker) => match worker.join() {
+                Ok(output) => output,
+                Err(_) => {
+                    let issue = format!("--describe worker panicked for {}", path.display());
+                    cache.failed_describes.insert(failure_key, issue.clone());
+                    return Err(anyhow!(issue));
+                }
+            },
             None => super::dispatch::capture_describe(path, process_timeout),
         };
-        let describe = super::dispatch::finish_describe(output, path)?;
+        let describe = match super::dispatch::finish_describe(output, path) {
+            Ok(describe) => describe,
+            Err(err) => {
+                cache.failed_describes.insert(failure_key, err.to_string());
+                return Err(err);
+            }
+        };
         let (size, mtime_secs, mtime_nanos) = fingerprint;
         upsert_cached_describe(
             &mut cache.file,
@@ -1013,16 +1040,21 @@ fn start_describe_with_cache(
     path: &Path,
     source: PluginSource,
     policy: DiscoveryPolicy,
-    cache: &mut DescribeCacheSession,
+    cache: &mut DescribeCacheSession<'_>,
     process_timeout: Duration,
 ) -> Result<PendingDescribe> {
     let key = describe_cache_key(path);
     cache.seen_paths.insert(key.clone());
     let (size, mtime_secs, mtime_nanos) = file_fingerprint(path)?;
+    let failure_key = (key.clone(), (size, mtime_secs, mtime_nanos));
 
     if let Some(entry) = find_cached_describe(&cache.file, &key, size, mtime_secs, mtime_nanos) {
         tracing::trace!(path = %path.display(), "describe cache hit");
         return Ok(PendingDescribe::Ready(Some(entry.describe.clone())));
+    }
+
+    if let Some(issue) = cache.failed_describes.get(&failure_key) {
+        return Ok(PendingDescribe::Failed(issue.clone()));
     }
 
     if !policy.allows_uncached_describe(source) {
