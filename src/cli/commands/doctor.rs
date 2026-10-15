@@ -155,10 +155,6 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
         return Ok(CliCommandResult::json(doctor_report_json_value(&sections)));
     }
 
-    if sections.is_empty() {
-        return Ok(CliCommandResult::text(String::new()));
-    }
-
     sections[0].1[0].insert(
         "credentials".to_string(),
         serde_json::json!(
