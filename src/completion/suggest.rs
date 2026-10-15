@@ -229,11 +229,12 @@ impl SuggestionEngine {
     }
 
     fn pipe_suggestions(&self, stub: &str) -> Vec<SuggestionOutput> {
+        let stub_lc = fold_case(stub);
         self.tree
             .pipe_verbs
             .iter()
             .filter_map(|(verb, tooltip)| {
-                let score = self.match_score(stub, verb)?;
+                let score = self.match_score(&stub_lc, verb)?;
                 Some(SuggestionOutput::Item(Suggestion {
                     text: verb.clone(),
                     meta: Some(tooltip.clone()),
@@ -253,6 +254,7 @@ impl SuggestionEngine {
         cmd: &CommandLine,
         provider: &ProviderSelection<'_>,
     ) -> Vec<Suggestion> {
+        let stub_lc = fold_case(stub);
         let allowlist = self.resolved_flag_allowlist(node, provider);
         let required = self.required_flags(node, provider);
         let provider_flags = provider
@@ -281,7 +283,7 @@ impl SuggestionEngine {
             .iter()
             .filter(|(flag, meta)| !is_hidden_alias(flag, meta))
             .filter_map(|(flag, meta)| {
-                let score = self.match_score(stub, flag)?;
+                let score = self.match_score(&stub_lc, flag)?;
                 let score = if matches!(stub, "-" | "--") {
                     MATCH_SCORE_EMPTY_STUB
                 } else {
@@ -444,14 +446,14 @@ impl SuggestionEngine {
                     .collect(),
             );
         }
+        let stub_lc = fold_case(stub);
         for catalog in catalogs {
-            let hits = catalog.scan(|values| {
-                best(
-                    values
-                        .iter()
-                        .filter_map(|value| Some((self.match_score(stub, value)?, value.as_str()))),
-                )
-            });
+            let hits =
+                catalog.scan(|values| {
+                    best(values.iter().filter_map(|value| {
+                        Some((self.match_score(&stub_lc, value)?, value.as_str()))
+                    }))
+                });
             if !hits.is_empty() {
                 return ranked(hits);
             }
@@ -459,7 +461,6 @@ impl SuggestionEngine {
         if stub.chars().count() < TYPO_RESCUE_MIN_CHARS {
             return Vec::new();
         }
-        let stub_lc = fold_case(stub);
         for catalog in catalogs {
             let hits = catalog.scan(|values| {
                 best(values.iter().filter_map(|value| {
@@ -481,10 +482,11 @@ impl SuggestionEngine {
     }
 
     fn subcommand_suggestions(&self, node: &CompletionNode, stub: &str) -> Vec<Suggestion> {
+        let stub_lc = fold_case(stub);
         node.children
             .iter()
             .filter_map(|(name, child)| {
-                let score = self.match_score(stub, name)?;
+                let score = self.match_score(&stub_lc, name)?;
                 Some(Suggestion {
                     text: name.clone(),
                     meta: child_completion_meta(child),
@@ -570,10 +572,11 @@ impl SuggestionEngine {
     }
 
     fn entry_suggestions(&self, entries: &[SuggestionEntry], stub: &str) -> Vec<SuggestionOutput> {
+        let stub_lc = fold_case(stub);
         entries
             .iter()
             .filter_map(|entry| {
-                let score = self.entry_match_score(stub, entry)?;
+                let score = self.entry_match_score(&stub_lc, entry)?;
                 Some(SuggestionOutput::Item(entry_to_suggestion(entry, score)))
             })
             .collect()
@@ -583,31 +586,30 @@ impl SuggestionEngine {
     ///
     /// An empty stub lists only the canonical values; aliases surface their
     /// value once typed input matches one of them.
-    fn entry_match_score(&self, stub: &str, entry: &SuggestionEntry) -> Option<u32> {
-        let own = self.match_score(stub, &entry.value);
-        if stub.is_empty() {
+    fn entry_match_score(&self, stub_lc: &str, entry: &SuggestionEntry) -> Option<u32> {
+        let own = self.match_score(stub_lc, &entry.value);
+        if stub_lc.is_empty() {
             return own;
         }
         entry
             .aliases
             .iter()
-            .filter_map(|alias| self.match_score(stub, alias))
+            .filter_map(|alias| self.match_score(stub_lc, alias))
             .chain(own)
             .min()
     }
 
-    fn match_score(&self, stub: &str, candidate: &str) -> Option<u32> {
+    fn match_score(&self, stub_lc: &str, candidate: &str) -> Option<u32> {
         // Lower scores are better:
         // - exact match wins with 0
         // - 100-range keeps ordinary prefix matches together
         // - 200-range keeps word-boundary prefixes behind direct prefixes
         // - 10_000+ is fuzzy fallback, where higher fuzzy scores reduce the
         //   penalty and therefore sort earlier
-        if stub.is_empty() {
+        if stub_lc.is_empty() {
             return Some(MATCH_SCORE_EMPTY_STUB);
         }
 
-        let stub_lc = fold_case(stub);
         let candidate_lc = fold_case(candidate);
 
         if stub_lc == candidate_lc {
@@ -615,17 +617,17 @@ impl SuggestionEngine {
         }
         // Prefer deterministic prefix classes before fuzzy fallback so short
         // tab-completion stubs stay predictable.
-        if candidate_lc.starts_with(&stub_lc) {
+        if candidate_lc.starts_with(stub_lc) {
             return Some(MATCH_SCORE_PREFIX_BASE + (candidate_lc.len() - stub_lc.len()) as u32);
         }
 
-        if let Some(boundary) = boundary_prefix_index(&candidate_lc, &stub_lc) {
+        if let Some(boundary) = boundary_prefix_index(&candidate_lc, stub_lc) {
             return Some(MATCH_SCORE_BOUNDARY_PREFIX_BASE + boundary as u32);
         }
 
         // Fuzzy matching is the rescue path, not the primary ranking model.
         // Its normalized penalty keeps rescues behind explicit prefix matches.
-        let fuzzy = completion_fuzzy_matcher().fuzzy_match(&candidate_lc, &stub_lc)?;
+        let fuzzy = completion_fuzzy_matcher().fuzzy_match(&candidate_lc, stub_lc)?;
         let normalized = fuzzy.max(0) as u32;
         let penalty = MATCH_SCORE_FUZZY_NORMALIZED_MAX.saturating_sub(normalized);
         Some(MATCH_SCORE_FUZZY_BASE + penalty)
