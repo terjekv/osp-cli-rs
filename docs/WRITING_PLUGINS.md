@@ -436,7 +436,7 @@ commands = ["mycommand"]
 | `plugin[].id` | string | yes | Unique plugin identifier |
 | `plugin[].exe` | string | yes | Executable filename (no path) |
 | `plugin[].version` | string | yes | Semantic version |
-| `plugin[].enabled_by_default` | bool | no | Default: `false` |
+| `plugin[].enabled_by_default` | bool | no | Default: `true` |
 | `plugin[].checksum_sha256` | string | no | SHA-256 of executable |
 | `plugin[].commands` | array | yes | List of top-level commands |
 
