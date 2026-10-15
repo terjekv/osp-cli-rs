@@ -82,10 +82,12 @@ pub(crate) fn derived_help_level(verbose: u8, quiet: u8) -> HelpLevel {
 pub(crate) fn render_settings_for_help(
     args: &[OsString],
     product_defaults: &ConfigLayer,
+    product_overrides: &ConfigLayer,
 ) -> HelpRenderContext {
     let overrides = parse_help_render_overrides(args);
     let profile_override = normalize_profile_override(overrides.profile.clone());
-    let help_override_layer = build_help_override_layer(&overrides);
+    let mut help_override_layer = product_overrides.clone();
+    help_override_layer.extend_from_layer(&build_help_override_layer(&overrides));
     let config = resolve_runtime_config(
         RuntimeConfigRequest::new(profile_override, Some("cli"))
             .with_runtime_load(overrides.runtime_load_options())
@@ -401,6 +403,7 @@ mod tests {
             let context = render_settings_for_help(
                 &help_args(&["osp", "--gammel-og-bitter", "--defaults-only"]),
                 &product_defaults,
+                &ConfigLayer::default(),
             );
 
             assert_eq!(context.layout, HelpLayout::Minimal);
@@ -425,6 +428,7 @@ mod tests {
                     "--defaults-only",
                 ]),
                 &product_defaults,
+                &ConfigLayer::default(),
             );
 
             assert_eq!(context.layout, HelpLayout::Compact);
@@ -438,6 +442,7 @@ mod tests {
             let context = render_settings_for_help(
                 &help_args(&["osp", "--json", "--defaults-only"]),
                 &product_defaults,
+                &ConfigLayer::default(),
             );
 
             assert_eq!(context.settings.format, OutputFormat::Json);
@@ -445,6 +450,7 @@ mod tests {
             let context = render_settings_for_help(
                 &help_args(&["osp", "--format=auto", "--defaults-only"]),
                 &product_defaults,
+                &ConfigLayer::default(),
             );
 
             assert_eq!(context.settings.format, OutputFormat::Auto);
@@ -455,7 +461,11 @@ mod tests {
                 (&["osp", "-q", "--defaults-only"][..], HelpLevel::Tiny),
                 (&["osp", "-qq", "--defaults-only"][..], HelpLevel::None),
             ] {
-                let context = render_settings_for_help(&help_args(args), &product_defaults);
+                let context = render_settings_for_help(
+                    &help_args(args),
+                    &product_defaults,
+                    &ConfigLayer::default(),
+                );
                 assert_eq!(context.help_level, expected_level);
             }
         });

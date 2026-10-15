@@ -319,11 +319,7 @@ where
             .try_get_matches_from_mut(scanned.argv.iter().cloned())
             .and_then(|matches| {
                 let mut cli = Cli::from_arg_matches(&matches)?;
-                for &(name, _, key, value) in &app.config_flags {
-                    if matches.get_flag(name) {
-                        cli.product_overrides.set(key, value);
-                    }
-                }
+                cli.product_overrides = product_config_overrides(app, &matches);
                 Ok(cli)
             });
         (parsed, command)
@@ -354,6 +350,19 @@ where
     }
 }
 
+fn product_config_overrides(
+    app: &super::AppDefinition,
+    matches: &clap::ArgMatches,
+) -> crate::config::ConfigLayer {
+    let mut overrides = crate::config::ConfigLayer::default();
+    for &(name, _, key, value) in &app.config_flags {
+        if matches.get_flag(name) {
+            overrides.set(key, value);
+        }
+    }
+    overrides
+}
+
 fn handle_clap_parse_error(
     args: &[OsString],
     command: &clap::Command,
@@ -366,16 +375,21 @@ fn handle_clap_parse_error(
         clap::error::ErrorKind::DisplayHelp
         | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
             let _phase = crate::startup_trace::phase("command execution");
-            let help_context = help::render_settings_for_help(args, &app.product_defaults);
-            if let Some(config) = &help_context.config {
-                let _phase = crate::startup_trace::phase("native command configure");
-                app.native_commands.configure(config);
-            }
             let tokens = scan_cli_argv(args)?
                 .argv
                 .iter()
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
+            let product_overrides = crate::cli::passive_command(command.clone())
+                .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
+                .map(|matches| product_config_overrides(app, &matches))
+                .unwrap_or_default();
+            let help_context =
+                help::render_settings_for_help(args, &app.product_defaults, &product_overrides);
+            if let Some(config) = &help_context.config {
+                let _phase = crate::startup_trace::phase("native command configure");
+                app.native_commands.configure(config);
+            }
             let (mut body, root_help, long_help) =
                 crate::cli::command_help_document(command.clone(), &tokens);
             extend_with_invocation_help(&mut body, help_context.help_level);

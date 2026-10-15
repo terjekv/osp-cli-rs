@@ -916,20 +916,24 @@ pub(crate) fn passive_command(command: clap::Command) -> clap::Command {
         .mut_subcommands(passive_command)
 }
 
-/// Select the help target with clap's parser, then read that command's metadata.
-pub(crate) fn command_help_document(
-    mut command: clap::Command,
-    tokens: &[String],
-) -> (crate::core::document::Document, bool, bool) {
+pub(crate) fn help_parse_tokens(tokens: &[String]) -> &[String] {
     // Clap answers at the first help flag, so later words cannot pick the target.
     let options_end = tokens
         .iter()
         .position(|token| token == "--")
         .unwrap_or(tokens.len());
-    let tokens = tokens[..options_end]
+    tokens[..options_end]
         .iter()
         .position(|token| token == "-h" || token == "--help")
-        .map_or(tokens, |index| &tokens[..=index]);
+        .map_or(tokens, |index| &tokens[..=index])
+}
+
+/// Select the help target with clap's parser, then read that command's metadata.
+pub(crate) fn command_help_document(
+    mut command: clap::Command,
+    tokens: &[String],
+) -> (crate::core::document::Document, bool, bool) {
+    let tokens = help_parse_tokens(tokens);
     command.build();
     let parser = passive_command(command.clone());
     let matches = parser.try_get_matches_from(tokens);

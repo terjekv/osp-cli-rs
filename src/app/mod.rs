@@ -503,6 +503,7 @@ impl App {
                         let error_render_settings = help::render_settings_for_help(
                             &args,
                             &self.definition.product_defaults,
+                            &crate::config::ConfigLayer::default(),
                         )
                         .settings;
                         (error_detail, message_verbosity, error_render_settings)
