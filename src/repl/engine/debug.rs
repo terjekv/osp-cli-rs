@@ -227,15 +227,7 @@ pub fn debug_completion(
     menu.menu_event(MenuEvent::Activate(false));
     menu.apply_event(&mut editor, completer.as_mut());
 
-    snapshot_completion_debug(
-        tree,
-        &mut menu,
-        &editor,
-        options.width,
-        options.height,
-        options.ansi,
-        options.unicode,
-    )
+    snapshot_completion_debug(tree, &mut menu, &editor, &options)
 }
 
 /// Builds a bounded history-menu diagnostic snapshot for `line` at `cursor`.
@@ -255,15 +247,7 @@ pub fn debug_history_menu(
     menu.menu_event(MenuEvent::Activate(false));
     menu.apply_event(&mut editor, completer.as_mut());
 
-    snapshot_history_debug(
-        &mut menu,
-        &editor,
-        cursor,
-        options.width,
-        options.height,
-        options.ansi,
-        options.unicode,
-    )
+    snapshot_history_debug(&mut menu, &editor, cursor, &options)
 }
 
 /// Replays a sequence of synthetic editor actions and captures each frame.
@@ -274,38 +258,17 @@ pub fn debug_completion_steps(
     options: CompletionDebugOptions<'_>,
     steps: &[DebugStep],
 ) -> Vec<CompletionDebugFrame> {
-    let (mut editor, mut completer, mut menu) = build_debug_completion_session(
-        tree,
-        line,
-        cursor,
-        options.appearance,
-        options.line_projector.cloned(),
-    );
-
-    let steps = steps.to_vec();
-    if steps.is_empty() {
-        return Vec::new();
-    }
-
-    let mut frames = Vec::with_capacity(steps.len());
-    for step in steps {
-        apply_debug_step(step, &mut menu, &mut editor, completer.as_mut());
-        let state = snapshot_completion_debug(
+    capture_debug_steps(
+        build_debug_completion_session(
             tree,
-            &mut menu,
-            &editor,
-            options.width,
-            options.height,
-            options.ansi,
-            options.unicode,
-        );
-        frames.push(CompletionDebugFrame {
-            step: step.as_str().to_string(),
-            state,
-        });
-    }
-
-    frames
+            line,
+            cursor,
+            options.appearance,
+            options.line_projector.cloned(),
+        ),
+        steps,
+        |menu, editor| snapshot_completion_debug(tree, menu, editor, &options),
+    )
 }
 
 /// Replays menu actions for the bounded history diagnostic and captures each
@@ -317,33 +280,28 @@ pub fn debug_history_menu_steps(
     options: CompletionDebugOptions<'_>,
     steps: &[DebugStep],
 ) -> Vec<CompletionDebugFrame> {
-    let (mut editor, mut completer, mut menu) =
-        build_debug_history_session(history, line, cursor, options.appearance);
+    capture_debug_steps(
+        build_debug_history_session(history, line, cursor, options.appearance),
+        steps,
+        |menu, editor| snapshot_history_debug(menu, editor, cursor, &options),
+    )
+}
 
-    let steps = steps.to_vec();
-    if steps.is_empty() {
-        return Vec::new();
-    }
-
-    let mut frames = Vec::with_capacity(steps.len());
-    for step in steps {
-        apply_debug_step(step, &mut menu, &mut editor, completer.as_mut());
-        let state = snapshot_history_debug(
-            &mut menu,
-            &editor,
-            cursor,
-            options.width,
-            options.height,
-            options.ansi,
-            options.unicode,
-        );
-        frames.push(CompletionDebugFrame {
-            step: step.as_str().to_string(),
-            state,
-        });
-    }
-
-    frames
+fn capture_debug_steps(
+    (mut editor, mut completer, mut menu): (Editor, Box<dyn Completer>, OspCompletionMenu),
+    steps: &[DebugStep],
+    snapshot: impl Fn(&mut OspCompletionMenu, &Editor) -> CompletionDebug,
+) -> Vec<CompletionDebugFrame> {
+    steps
+        .iter()
+        .map(|&step| {
+            apply_debug_step(step, &mut menu, &mut editor, completer.as_mut());
+            CompletionDebugFrame {
+                step: step.as_str().to_string(),
+                state: snapshot(&mut menu, &editor),
+            }
+        })
+        .collect()
 }
 
 fn build_debug_completion_session(
@@ -464,121 +422,74 @@ fn snapshot_completion_debug(
     tree: &CompletionTree,
     menu: &mut OspCompletionMenu,
     editor: &Editor,
-    width: u16,
-    height: u16,
-    ansi: bool,
-    unicode: bool,
+    options: &CompletionDebugOptions<'_>,
 ) -> CompletionDebug {
-    let line = editor.get_buffer().to_string();
     let cursor = editor.line_buffer().insertion_point();
-    let values = menu.get_values();
     let engine = CompletionEngine::new(tree.clone());
-    let analysis = engine.analyze(&line, cursor);
-
-    let (stub, replace_range) = if let Some(first) = values.first() {
-        let start = first.span.start;
-        let end = first.span.end;
-        let stub = line.get(start..end).unwrap_or("").to_string();
-        (stub, [start, end])
-    } else {
+    let analysis = engine.analyze(editor.get_buffer(), cursor);
+    snapshot_menu_debug(
+        menu,
+        editor,
+        cursor,
+        options,
         (
             analysis.cursor.raw_stub.clone(),
             [
                 analysis.cursor.replace_range.start,
                 analysis.cursor.replace_range.end,
             ],
-        )
-    };
-
-    let matches = values
-        .iter()
-        .map(|item| CompletionDebugMatch {
-            id: item.value.clone(),
-            label: display_text(item).to_string(),
-            description: item.description.clone(),
-            kind: engine
-                .classify_match(&analysis, &item.value)
-                .as_str()
-                .to_string(),
-        })
-        .collect::<Vec<_>>();
-
-    let MenuDebug {
-        columns,
-        rows,
-        visible_rows,
-        indent,
-        selected_index,
-        selected_row,
-        selected_col,
-        description,
-        description_rendered,
-        styles,
-        rendered,
-    } = debug_snapshot(menu, editor, width, height, ansi);
-
-    let selected = if matches.is_empty() {
-        -1
-    } else {
-        selected_index
-    };
-
-    CompletionDebug {
-        line,
-        cursor,
-        replace_range,
-        stub,
-        matches,
-        selected,
-        selected_row,
-        selected_col,
-        columns,
-        rows,
-        visible_rows,
-        menu_indent: indent,
-        menu_styles: styles,
-        menu_description: description,
-        menu_description_rendered: description_rendered,
-        width,
-        height,
-        unicode,
-        color: ansi,
-        rendered,
-    }
+        ),
+        |value| engine.classify_match(&analysis, value).as_str().to_string(),
+    )
 }
 
 fn snapshot_history_debug(
     menu: &mut OspCompletionMenu,
     editor: &Editor,
     cursor: usize,
-    width: u16,
-    height: u16,
-    ansi: bool,
-    unicode: bool,
+    options: &CompletionDebugOptions<'_>,
 ) -> CompletionDebug {
-    let line = editor.get_buffer().to_string();
+    let line = editor.get_buffer();
     let cursor = cursor
         .min(editor.line_buffer().insertion_point())
         .min(line.len());
-    let values = menu.get_values();
-    let query = line.get(..cursor).unwrap_or(&line).trim().to_string();
+    snapshot_menu_debug(
+        menu,
+        editor,
+        cursor,
+        options,
+        (
+            line.get(..cursor).unwrap_or(line).trim().to_string(),
+            [0, line.len()],
+        ),
+        |_| "history".to_string(),
+    )
+}
 
+fn snapshot_menu_debug(
+    menu: &mut OspCompletionMenu,
+    editor: &Editor,
+    cursor: usize,
+    options: &CompletionDebugOptions<'_>,
+    fallback: (String, [usize; 2]),
+    classify: impl Fn(&str) -> String,
+) -> CompletionDebug {
+    let line = editor.get_buffer().to_string();
+    let values = menu.get_values();
     let (stub, replace_range) = if let Some(first) = values.first() {
         let start = first.span.start;
         let end = first.span.end;
-        let stub = line.get(start..end).unwrap_or("").to_string();
-        (stub, [start, end])
+        (line.get(start..end).unwrap_or("").to_string(), [start, end])
     } else {
-        (query, [0, line.len()])
+        fallback
     };
-
     let matches = values
         .iter()
         .map(|item| CompletionDebugMatch {
             id: item.value.clone(),
             label: display_text(item).to_string(),
             description: item.description.clone(),
-            kind: "history".to_string(),
+            kind: classify(&item.value),
         })
         .collect::<Vec<_>>();
 
@@ -594,7 +505,7 @@ fn snapshot_history_debug(
         description_rendered,
         styles,
         rendered,
-    } = debug_snapshot(menu, editor, width, height, ansi);
+    } = debug_snapshot(menu, editor, options.width, options.height, options.ansi);
 
     let selected = if matches.is_empty() {
         -1
@@ -618,10 +529,10 @@ fn snapshot_history_debug(
         menu_styles: styles,
         menu_description: description,
         menu_description_rendered: description_rendered,
-        width,
-        height,
-        unicode,
-        color: ansi,
+        width: options.width,
+        height: options.height,
+        unicode: options.unicode,
+        color: options.ansi,
         rendered,
     }
 }
