@@ -180,7 +180,7 @@ fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_
         .filter(|credential| !credential.valid)
         .count();
 
-    let mut row = crate::row! {
+    let row = crate::row! {
         "status" => if invalid_credentials > 0 {
             "issue"
         } else if context.authenticated {
@@ -195,12 +195,6 @@ fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_
         "capability_count" => context.capabilities.len() as i64,
         "enabled_features" => context.enabled_features.iter().cloned().collect::<Vec<_>>(),
     };
-    if !context.authenticated {
-        row.insert(
-            "next_step".to_string(),
-            Value::String("osp --login".to_string()),
-        );
-    }
     vec![row]
 }
 
