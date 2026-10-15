@@ -25,11 +25,18 @@ use crate::core::plugin::{DescribeV1, ResponseV1};
 use anyhow::{Result, anyhow};
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const PROCESS_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+// After a timeout kill, how long to wait for the pipe readers to stop.
+const TIMED_OUT_STDERR_GRACE: Duration = Duration::from_millis(100);
+// How often a pipe reader checks whether it was asked to stop.
+#[cfg(unix)]
+const PIPE_STOP_POLL_MS: libc::c_int = 50;
 const ETXTBSY_RETRY_COUNT: usize = 5;
 const ETXTBSY_RETRY_DELAY: Duration = Duration::from_millis(10);
 const ENV_OSP_COMMAND: &str = "OSP_COMMAND";
@@ -424,14 +431,12 @@ fn run_command_with_timeout(
 
         if Instant::now() >= deadline {
             terminate_timed_out_child(child.child_mut());
-            let status = match status {
-                Some(status) => status,
-                None => child.wait().map_err(CommandRunError::Execute)?,
-            };
-            let output = child.finish(status).map_err(CommandRunError::Execute)?;
+            if status.is_none() {
+                child.wait().map_err(CommandRunError::Execute)?;
+            }
             return Err(CommandRunError::TimedOut {
                 timeout,
-                stderr: output.stderr.bytes,
+                stderr: child.timed_out_stderr(),
             });
         }
 
@@ -452,6 +457,7 @@ struct DrainedChild {
     child: Child,
     stdout: JoinHandle<std::io::Result<CapturedOutput>>,
     stderr: JoinHandle<std::io::Result<CapturedOutput>>,
+    stop_readers: Arc<AtomicBool>,
 }
 
 struct DrainedOutput {
@@ -493,10 +499,12 @@ impl DrainedChild {
             .stderr
             .take()
             .ok_or_else(|| std::io::Error::other("failed to capture child stderr"))?;
+        let stop_readers = Arc::new(AtomicBool::new(false));
         Ok(Self {
             child,
-            stdout: spawn_capture_thread(stdout),
-            stderr: spawn_capture_thread(stderr),
+            stdout: spawn_capture_thread(stdout, stop_readers.clone()),
+            stderr: spawn_capture_thread(stderr, stop_readers.clone()),
+            stop_readers,
         })
     }
 
@@ -518,6 +526,28 @@ impl DrainedChild {
             && process_group_finished(self.child.id())
     }
 
+    /// Stops the pipe readers and returns the stderr captured before a
+    /// timeout. A descendant outside the killed process group may keep the
+    /// pipes open, so readers stop on request instead of waiting for EOF.
+    /// Where readers cannot be interrupted, they are left to finish on their
+    /// own after the grace period.
+    fn timed_out_stderr(self) -> Vec<u8> {
+        self.stop_readers.store(true, Ordering::Relaxed);
+        let grace = Instant::now() + TIMED_OUT_STDERR_GRACE;
+        while !(self.stdout.is_finished() && self.stderr.is_finished()) && Instant::now() < grace {
+            thread::sleep(PROCESS_WAIT_POLL_INTERVAL);
+        }
+        if self.stdout.is_finished() {
+            let _ = join_capture(self.stdout);
+        }
+        if !self.stderr.is_finished() {
+            return Vec::new();
+        }
+        join_capture(self.stderr)
+            .map(|output| output.bytes)
+            .unwrap_or_default()
+    }
+
     fn finish(self, status: ExitStatus) -> std::io::Result<DrainedOutput> {
         Ok(DrainedOutput {
             status,
@@ -527,21 +557,65 @@ impl DrainedChild {
     }
 }
 
-fn spawn_capture_thread<R>(reader: R) -> JoinHandle<std::io::Result<CapturedOutput>>
+#[cfg(unix)]
+fn spawn_capture_thread<R>(
+    reader: R,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<std::io::Result<CapturedOutput>>
+where
+    R: Read + std::os::fd::AsRawFd + Send + 'static,
+{
+    thread::spawn(move || {
+        capture_reader_until(reader, MAX_PLUGIN_OUTPUT_BYTES, |reader| {
+            readable_unless_stopped(reader, &stop)
+        })
+    })
+}
+
+#[cfg(not(unix))]
+fn spawn_capture_thread<R>(
+    reader: R,
+    _stop: Arc<AtomicBool>,
+) -> JoinHandle<std::io::Result<CapturedOutput>>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || capture_reader(reader, MAX_PLUGIN_OUTPUT_BYTES))
 }
 
-pub(super) fn capture_reader<R: Read>(
+/// Waits until `reader` can be read without blocking; false once `stop` is set.
+#[cfg(unix)]
+fn readable_unless_stopped(reader: &impl std::os::fd::AsRawFd, stop: &AtomicBool) -> bool {
+    let mut poll_fd = libc::pollfd {
+        fd: reader.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    while !stop.load(Ordering::Relaxed) {
+        // SAFETY: `poll_fd` is a valid pollfd for the duration of the call.
+        // Readiness, hangup and errors all return non-zero; `read` reports them.
+        if unsafe { libc::poll(&mut poll_fd, 1, PIPE_STOP_POLL_MS) } != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(any(test, not(unix)))]
+pub(super) fn capture_reader<R: Read>(reader: R, limit: usize) -> std::io::Result<CapturedOutput> {
+    capture_reader_until(reader, limit, |_| true)
+}
+
+/// Reads until EOF or until `ready` declines to wait for more input.
+fn capture_reader_until<R: Read>(
     mut reader: R,
     limit: usize,
+    mut ready: impl FnMut(&R) -> bool,
 ) -> std::io::Result<CapturedOutput> {
     let mut bytes = Vec::new();
     let mut chunk = [0_u8; 8192];
     let mut exceeded_limit = false;
-    loop {
+    while ready(&reader) {
         let read = reader.read(&mut chunk)?;
         if read == 0 {
             break;
