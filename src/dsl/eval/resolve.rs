@@ -11,7 +11,7 @@
 //! path `{"a": {"b": 2}}`. It must not silently fall back to the literal
 //! dotted key.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::row::Row;
 use serde_json::Value;
@@ -159,15 +159,17 @@ pub fn resolve_descendant_matches(
         .map(|entry| (entry.flat_key.clone(), entry.value.clone()))
         .collect::<Row>();
     let matched = match_row_keys(&flattened, trimmed, exact);
+    let mut by_key = HashMap::<_, Vec<_>>::new();
+    for entry in addressed {
+        by_key
+            .entry(entry.flat_key.clone())
+            .or_default()
+            .push(entry);
+    }
     dedup_addressed_values(
         matched
             .into_iter()
-            .flat_map(|key| {
-                addressed
-                    .iter()
-                    .filter(move |entry| entry.flat_key == key)
-                    .cloned()
-            })
+            .flat_map(|key| by_key.remove(key).unwrap_or_default())
             .collect(),
     )
 }
