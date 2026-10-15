@@ -215,7 +215,10 @@ fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool
 }
 
 fn match_structural_value(row: &Row, spec: &CompiledQuickSpec) -> Option<bool> {
-    if !spec.is_structural() || spec.key_not_equals {
+    if !spec.is_structural()
+        || spec.key_not_equals
+        || (matches!(spec.scope, QuickScope::ValueOnly) && !spec.existence())
+    {
         return None;
     }
 
