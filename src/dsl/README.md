@@ -24,6 +24,7 @@ and one `cli` row adapter in `value.rs`. It never runs commands or reads config.
 ## Rules worth knowing
 
 - Verbs see canonical rows. Display formatting happens later, in `ui`.
+- Value and addressed-path resolution share one borrowed structural traversal.
 - Group keys and aggregates are metadata on the result; member rows stay intact.
 - Unknown fields in a non-empty result are errors, not silent empty columns.
 
