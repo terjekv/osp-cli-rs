@@ -13,9 +13,8 @@ use crate::app::{
 };
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
 use crate::cli::{
-    Commands, ConfigCommands, ContextCommands, DoctorCommands, HistoryCommands,
-    PluginCommandClearArgs, PluginCommandStateArgs, PluginProviderClearArgs,
-    PluginProviderSelectArgs, PluginsCommands, ThemeCommands, parse_inline_command_tokens,
+    Commands, ConfigCommands, ContextCommands, DoctorCommands, HistoryCommands, PluginsCommands,
+    ThemeCommands, parse_inline_command_tokens,
 };
 use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 
@@ -79,13 +78,6 @@ pub(super) struct CommandSideEffects {
 pub(super) struct ParsedClapHelp<'a> {
     pub(super) summary: Option<&'a str>,
     pub(super) body: &'a str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ReplCommandBehavior<'a> {
-    name: Cow<'a, str>,
-    supports_dsl: bool,
-    side_effects: CommandSideEffects,
 }
 
 pub(super) fn parse_repl_invocation(
@@ -296,7 +288,46 @@ fn line_end_offset(lines: &[&str], line_count: usize) -> usize {
 }
 
 pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
-    repl_command_behavior(command).side_effects
+    let show_intro_on_reload = match command {
+        Commands::Config(args) => match &args.command {
+            ConfigCommands::Set(set) if !set.dry_run => config_key_change_requires_intro(&set.key),
+            ConfigCommands::Unset(unset) if !unset.dry_run => {
+                config_key_change_requires_intro(&unset.key)
+            }
+            _ => return CommandSideEffects::default(),
+        },
+        Commands::Plugins(args)
+            if matches!(
+                args.command,
+                PluginsCommands::Enable(_)
+                    | PluginsCommands::Disable(_)
+                    | PluginsCommands::ClearState(_)
+                    | PluginsCommands::Refresh
+                    | PluginsCommands::SelectProvider(_)
+                    | PluginsCommands::ClearProvider(_)
+            ) =>
+        {
+            false
+        }
+        Commands::Alias(args)
+            if matches!(
+                args.command,
+                crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs { dry_run: false, .. })
+                    | crate::cli::AliasCommands::Remove(crate::cli::AliasRemoveArgs {
+                        dry_run: false,
+                        ..
+                    })
+            ) =>
+        {
+            false
+        }
+        Commands::Theme(args) if matches!(args.command, ThemeCommands::Use(_)) => true,
+        _ => return CommandSideEffects::default(),
+    };
+    CommandSideEffects {
+        restart_repl: true,
+        show_intro_on_reload,
+    }
 }
 
 pub(super) fn config_key_change_requires_intro(key: &str) -> bool {
@@ -549,134 +580,66 @@ fn run_repl_external_command_with_progress(
 }
 
 pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
-    let behavior = repl_command_behavior(command);
-    ReplCommandSpec {
-        name: Cow::Owned(behavior.name.into_owned()),
-        supports_dsl: behavior.supports_dsl,
-    }
-}
-
-fn repl_command_behavior(command: &Commands) -> ReplCommandBehavior<'_> {
-    match command {
-        Commands::Context(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_CONTEXT),
-            supports_dsl: matches!(args.command, None | Some(ContextCommands::Clear(_))),
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::External(tokens) => ReplCommandBehavior {
-            name: Cow::Owned(
-                tokens
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "external".to_string()),
-            ),
-            supports_dsl: true,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Plugins(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_PLUGINS),
-            supports_dsl: matches!(
+    let (name, supports_dsl) = match command {
+        Commands::Context(args) => (
+            CMD_CONTEXT,
+            matches!(args.command, None | Some(ContextCommands::Clear(_))),
+        ),
+        Commands::External(tokens) => {
+            return ReplCommandSpec {
+                name: Cow::Owned(
+                    tokens
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "external".to_string()),
+                ),
+                supports_dsl: true,
+            };
+        }
+        Commands::Plugins(args) => (
+            CMD_PLUGINS,
+            matches!(
                 args.command,
                 PluginsCommands::List
                     | PluginsCommands::Commands
                     | PluginsCommands::Doctor
                     | PluginsCommands::Config(_)
             ),
-            side_effects: if matches!(
-                args.command,
-                PluginsCommands::Enable(PluginCommandStateArgs { .. })
-                    | PluginsCommands::Disable(PluginCommandStateArgs { .. })
-                    | PluginsCommands::ClearState(PluginCommandClearArgs { .. })
-                    | PluginsCommands::Refresh
-                    | PluginsCommands::SelectProvider(PluginProviderSelectArgs { .. })
-                    | PluginsCommands::ClearProvider(PluginProviderClearArgs { .. })
-            ) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: false,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Doctor(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_DOCTOR),
-            supports_dsl: matches!(
+        ),
+        Commands::Doctor(args) => (
+            CMD_DOCTOR,
+            matches!(
                 args.command,
                 Some(DoctorCommands::Config)
                     | Some(DoctorCommands::Plugins)
                     | Some(DoctorCommands::Theme)
             ),
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::History(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_HISTORY),
-            supports_dsl: matches!(args.command, HistoryCommands::List(_)),
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Completions(_) => ReplCommandBehavior {
-            name: Cow::Borrowed("completions"),
-            supports_dsl: false,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Config(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_CONFIG),
-            supports_dsl: matches!(
+        ),
+        Commands::History(args) => (
+            CMD_HISTORY,
+            matches!(args.command, HistoryCommands::List(_)),
+        ),
+        Commands::Completions(_) => ("completions", false),
+        Commands::Config(args) => (
+            CMD_CONFIG,
+            matches!(
                 args.command,
                 ConfigCommands::Show(_) | ConfigCommands::Get(_) | ConfigCommands::Doctor
             ),
-            side_effects: match &args.command {
-                ConfigCommands::Set(set) if !set.dry_run => CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: config_key_change_requires_intro(&set.key),
-                },
-                ConfigCommands::Unset(unset) if !unset.dry_run => CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: config_key_change_requires_intro(&unset.key),
-                },
-                _ => CommandSideEffects::default(),
-            },
-        },
-        Commands::Alias(args) => ReplCommandBehavior {
-            name: Cow::Borrowed("alias"),
-            supports_dsl: matches!(args.command, crate::cli::AliasCommands::List(_)),
-            side_effects: if matches!(
-                args.command,
-                crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs { dry_run: false, .. })
-                    | crate::cli::AliasCommands::Remove(crate::cli::AliasRemoveArgs {
-                        dry_run: false,
-                        ..
-                    })
-            ) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: false,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Theme(args) => ReplCommandBehavior {
-            name: Cow::Borrowed("theme"),
-            supports_dsl: matches!(args.command, ThemeCommands::List | ThemeCommands::Show(_)),
-            side_effects: if matches!(args.command, ThemeCommands::Use(_)) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: true,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Intro(_) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_INTRO),
-            supports_dsl: true,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Repl(_) => ReplCommandBehavior {
-            name: Cow::Borrowed("repl"),
-            supports_dsl: false,
-            side_effects: CommandSideEffects::default(),
-        },
+        ),
+        Commands::Alias(args) => (
+            "alias",
+            matches!(args.command, crate::cli::AliasCommands::List(_)),
+        ),
+        Commands::Theme(args) => (
+            "theme",
+            matches!(args.command, ThemeCommands::List | ThemeCommands::Show(_)),
+        ),
+        Commands::Intro(_) => (CMD_INTRO, true),
+        Commands::Repl(_) => ("repl", false),
+    };
+    ReplCommandSpec {
+        name: Cow::Borrowed(name),
+        supports_dsl,
     }
 }
