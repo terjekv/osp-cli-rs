@@ -112,7 +112,12 @@ fn run_repl_cycle(
         .map(|executed| executed.result)
         .map_err(|err| anyhow::Error::from_boxed(err.into()))
     })
-    .map_err(|err| crate::app::report_anyhow_with_context(err, "interactive REPL execution failed"))
+    .map_err(|err| {
+        crate::app::report_anyhow_with_context(
+            err,
+            crate::app::host::ErrorContext::Operation("interactive REPL execution failed"),
+        )
+    })
 }
 
 fn should_show_repl_intro(config: &ResolvedConfig, verbosity: MessageLevel) -> bool {

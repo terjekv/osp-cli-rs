@@ -625,9 +625,12 @@ fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
     assert!(rendered.contains("backend exploded"));
     assert!(rendered.contains("Stack backtrace"));
 
-    let report = Err::<(), _>(miette::miette!("unknown theme: missing-theme"))
-        .wrap_err("failed to derive host runtime inputs for startup")
-        .expect_err("wrapped error should stay an error");
+    let report = crate::app::host::report_report_with_context(
+        miette::miette!("unknown theme: missing-theme"),
+        crate::app::host::ErrorContext::Operation(
+            "failed to derive host runtime inputs for startup",
+        ),
+    );
     let rendered = render_report_message(&report, ErrorDetail::Terse, &settings);
     assert!(rendered.contains("unknown theme: missing-theme"));
     assert!(!rendered.starts_with("failed to derive host runtime inputs for startup"));

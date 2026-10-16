@@ -305,7 +305,10 @@ pub(super) fn render_repl_command_output(
         sink,
     )
     .map_err(|err| {
-        crate::app::report_report_with_context(err, "failed to render REPL command output")
+        crate::app::report_report_with_context(
+            err,
+            crate::app::host::ErrorContext::Operation("failed to render REPL command output"),
+        )
     })
 }
 

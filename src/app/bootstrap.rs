@@ -197,11 +197,18 @@ pub(crate) fn prepare_startup_host(
     let config = if action.uses_raw_config() {
         prepare_runtime_config(request, true)
             .and_then(|prepared| prepared.resolver.resolve_raw(prepared.options))
-            .map_err(|err| report_std_error_with_context(err, "config resolution failed"))
+            .map_err(|err| {
+                report_std_error_with_context(err, crate::app::host::ErrorContext::Config)
+            })
     } else {
         resolve_runtime_config(request)
     }
-    .wrap_err("failed to resolve config with session layer")?;
+    .map_err(|err| {
+        super::host::report_report_with_context(
+            err,
+            super::host::ErrorContext::Operation("failed to resolve config with session layer"),
+        )
+    })?;
     let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
         &runtime_context,
         &config,
@@ -211,7 +218,14 @@ pub(crate) fn prepare_startup_host(
         None,
         session_layer,
     )
-    .wrap_err("failed to derive host runtime inputs for startup")?;
+    .map_err(|err| {
+        super::host::report_report_with_context(
+            err,
+            super::host::ErrorContext::Operation(
+                "failed to derive host runtime inputs for startup",
+            ),
+        )
+    })?;
 
     Ok(PreparedStartupHost {
         runtime_context,
@@ -271,7 +285,9 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
     );
     let resolved = prepare_runtime_config(request, false)
         .and_then(PreparedRuntimeConfig::resolve)
-        .map_err(|err| report_std_error_with_context(err, "config resolution failed"))?;
+        .map_err(|err| {
+            report_std_error_with_context(err, crate::app::host::ErrorContext::Config)
+        })?;
 
     tracing::debug!(
         active_profile = %resolved.active_profile(),

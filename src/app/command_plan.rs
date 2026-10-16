@@ -45,8 +45,12 @@ pub(crate) fn parse_inline_command(
             Err(super::host::report_clap_error_with_context(
                 error,
                 match surface {
-                    CommandSurface::Repl => "failed to parse REPL command",
-                    CommandSurface::External => "failed to parse external inline command",
+                    CommandSurface::Repl => {
+                        crate::app::host::ErrorContext::Operation("failed to parse REPL command")
+                    }
+                    CommandSurface::External => crate::app::host::ErrorContext::Operation(
+                        "failed to parse external inline command",
+                    ),
                 },
                 crate::cli::InlineCommandCli::command(),
                 tokens,

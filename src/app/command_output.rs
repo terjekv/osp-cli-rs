@@ -202,25 +202,13 @@ impl CommandOutput {
 
 #[derive(Debug)]
 pub(crate) struct CommandBackendDetails {
-    error: ResponseErrorV1,
+    pub(super) error: ResponseErrorV1,
     source: miette::Report,
 }
 
 impl std::fmt::Display for CommandBackendDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.error.details.is_null()
-            || self
-                .error
-                .details
-                .as_object()
-                .is_some_and(serde_json::Map::is_empty)
-        {
-            write!(f, "{}", self.source)
-        } else {
-            let details = serde_json::to_string_pretty(&self.error.details)
-                .unwrap_or_else(|_| self.error.details.to_string());
-            write!(f, "command failed\nBackend details:\n{details}")
-        }
+        std::fmt::Display::fmt(&self.source, f)
     }
 }
 
@@ -542,7 +530,10 @@ pub(crate) fn apply_output_stages(
         // callers on the canonical DSL entrypoint so semantic/output policy
         // stays consistent across CLI, REPL, and plugin flows.
         output = apply_output_pipeline(output, stages).map_err(|err| {
-            crate::app::report_anyhow_with_context(err, "failed to apply DSL output pipeline")
+            crate::app::report_anyhow_with_context(
+                err,
+                crate::app::host::ErrorContext::Operation("failed to apply DSL output pipeline"),
+            )
         })?;
         output.meta.display_limit = None;
         // Once a DSL pipeline runs, producer-side format hints stop being an

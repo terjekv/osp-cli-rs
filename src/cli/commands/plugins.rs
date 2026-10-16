@@ -128,7 +128,9 @@ pub(crate) fn run_plugins_command(
                 .map_err(|err| {
                     crate::app::report_anyhow_with_context(
                         err,
-                        "failed to validate provider selection",
+                        crate::app::host::ErrorContext::Operation(
+                            "failed to validate provider selection",
+                        ),
                     )
                 })?;
             persist_provider_selection(
@@ -176,7 +178,9 @@ fn validated_state_command(context: PluginsCommandContext<'_>, command: &str) ->
         .map_err(|err| {
             crate::app::report_anyhow_with_context(
                 err,
-                "failed to validate plugin command state change",
+                crate::app::host::ErrorContext::Operation(
+                    "failed to validate plugin command state change",
+                ),
             )
         })?;
     Ok(command)

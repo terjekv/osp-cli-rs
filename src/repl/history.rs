@@ -150,7 +150,10 @@ pub(crate) fn run_history_repl_command(
                 .map_err(anyhow::Error::msg)
                 .and_then(|result| result)
                 .map_err(|err| {
-                    crate::app::report_anyhow_with_context(err, "failed to prune REPL history")
+                    crate::app::report_anyhow_with_context(
+                        err,
+                        crate::app::host::ErrorContext::Operation("failed to prune REPL history"),
+                    )
                 })?;
             Ok(CommandOutput::text(if removed == 0 {
                 format!("No entries removed from {}.\n", scope.label)
@@ -168,7 +171,10 @@ pub(crate) fn run_history_repl_command(
                 .map_err(anyhow::Error::msg)
                 .and_then(|result| result)
                 .map_err(|err| {
-                    crate::app::report_anyhow_with_context(err, "failed to clear REPL history")
+                    crate::app::report_anyhow_with_context(
+                        err,
+                        crate::app::host::ErrorContext::Operation("failed to clear REPL history"),
+                    )
                 })?;
             Ok(CommandOutput::text(if removed == 0 {
                 format!("{} is already empty.\n", scope.label)

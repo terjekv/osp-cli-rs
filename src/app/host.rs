@@ -100,9 +100,28 @@ impl From<&UiState> for ErrorDisplaySettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ErrorContext {
+    NativeExecution,
+    Config,
+    Plugin,
+    Operation(&'static str),
+}
+
+impl std::fmt::Display for ErrorContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NativeExecution => "native command execution failed",
+            Self::Config => "config resolution failed",
+            Self::Plugin => "plugin command failed",
+            Self::Operation(text) => text,
+        })
+    }
+}
+
 #[derive(Debug)]
 struct BoxedContextError {
-    context: &'static str,
+    context: ErrorContext,
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
     backtrace: Backtrace,
     command_path: Option<String>,
@@ -110,7 +129,7 @@ struct BoxedContextError {
 
 #[derive(Debug)]
 struct ReportContextError {
-    context: Option<&'static str>,
+    context: Option<ErrorContext>,
     source: miette::Report,
     error_display: Option<ErrorDisplaySettings>,
 }
@@ -172,12 +191,7 @@ impl<'a> KnownErrorChain<'a> {
 
 impl std::fmt::Display for BoxedContextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string();
-        if source.is_empty() {
-            write!(f, "{}", self.context)
-        } else {
-            write!(f, "{}: {}", self.context, source)
-        }
+        std::fmt::Display::fmt(&self.context, f)
     }
 }
 
@@ -192,7 +206,7 @@ impl miette::Diagnostic for BoxedContextError {}
 impl std::fmt::Display for ReportContextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.context {
-            Some(context) => write!(f, "{context}: {}", self.source),
+            Some(context) => std::fmt::Display::fmt(&context, f),
             None => std::fmt::Display::fmt(&self.source, f),
         }
     }
@@ -482,7 +496,7 @@ fn handle_clap_parse_error(
         }
         _ => Err(report_clap_error_with_context(
             err,
-            "failed to parse CLI arguments",
+            crate::app::host::ErrorContext::Operation("failed to parse CLI arguments"),
             command.clone(),
             scanned.argv.clone(),
         )),
@@ -738,7 +752,7 @@ pub(crate) fn resolve_invocation_ui(
 }
 
 pub(crate) fn enrich_dispatch_error(err: PluginDispatchError) -> miette::Report {
-    report_std_error_with_context(err, "plugin command failed")
+    report_std_error_with_context(err, crate::app::host::ErrorContext::Plugin)
 }
 
 /// Maps a reported error to the CLI exit code family used by OSP.
@@ -784,15 +798,15 @@ pub fn render_report_message(
 
     if detail >= ErrorDetail::Normal && known.clap.is_some() {
         if let Some(context) = known.boxed_context
-            && context.context != "native command execution failed"
+            && context.context != ErrorContext::NativeExecution
         {
             message.push_str("\nContext: ");
-            message.push_str(context.context);
+            message.push_str(&context.context.to_string());
         }
     } else if detail >= ErrorDetail::Normal {
         let mut next: Option<&(dyn std::error::Error + 'static)> = known
             .boxed_context
-            .filter(|context| context.context == "native command execution failed")
+            .filter(|context| context.context == ErrorContext::NativeExecution)
             .map(|context| context.source.as_ref() as &(dyn std::error::Error + 'static))
             .or_else(|| Some(err.as_ref()));
         while let Some(source) = next {
@@ -816,7 +830,25 @@ pub fn render_report_message(
         }
     }
 
+    if detail >= ErrorDetail::Normal {
+        append_backend_details(err, &mut message);
+    }
     message
+}
+
+fn append_backend_details(err: &miette::Report, rendered: &mut String) {
+    if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
+        && !backend.error.details.is_null()
+        && backend
+            .error
+            .details
+            .as_object()
+            .is_none_or(|object| !object.is_empty())
+    {
+        rendered.push_str("\nBackend details:\n");
+        rendered
+            .push_str(&serde_json::to_string_pretty(&backend.error.details).unwrap_or_default());
+    }
 }
 
 pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
@@ -861,6 +893,7 @@ fn render_forensic_report_message(
 
 fn render_debug_report_message(err: &miette::Report, settings: &RenderSettings) -> String {
     let mut rendered = render_diagnostic_with_settings(err.as_ref(), settings);
+    append_backend_details(err, &mut rendered);
 
     if let Some(config_err) = find_error_in_chain::<crate::config::ConfigError>(err)
         && <crate::config::ConfigError as miette::Diagnostic>::source_code(config_err).is_some()
@@ -1092,7 +1125,7 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
     }
 
     if let Some(context) = known.boxed_context
-        && context.context == "native command execution failed"
+        && context.context == ErrorContext::NativeExecution
     {
         return context.source.to_string();
     }
@@ -1118,16 +1151,14 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
     match deepest_source {
         // Context wrappers are still useful for verbose output, but at default
         // message levels users usually need the concrete actionable cause.
-        Some(source) if outer.starts_with("failed to ") || outer.starts_with("unable to ") => {
-            source
-        }
+        Some(source) if find_error_in_chain::<ReportContextError>(err).is_some() => source,
         _ => outer,
     }
 }
 
 pub(crate) fn report_clap_error_with_context<I, T>(
     err: clap::Error,
-    context: &'static str,
+    context: ErrorContext,
     command: clap::Command,
     args: I,
 ) -> miette::Report
@@ -1155,7 +1186,7 @@ where
     })
 }
 
-pub(crate) fn report_std_error_with_context<E>(err: E, context: &'static str) -> miette::Report
+pub(crate) fn report_std_error_with_context<E>(err: E, context: ErrorContext) -> miette::Report
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -1169,7 +1200,7 @@ where
 
 pub(crate) fn report_anyhow_with_context(
     err: anyhow::Error,
-    context: &'static str,
+    context: ErrorContext,
 ) -> miette::Report {
     miette::Report::new(BoxedContextError {
         context,
@@ -1181,7 +1212,7 @@ pub(crate) fn report_anyhow_with_context(
 
 pub(crate) fn report_report_with_context(
     err: miette::Report,
-    context: &'static str,
+    context: ErrorContext,
 ) -> miette::Report {
     miette::Report::new(ReportContextError {
         context: Some(context),

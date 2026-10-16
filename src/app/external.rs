@@ -293,7 +293,9 @@ impl NativeParse {
         let args = command.normalize_args(args).map_err(|error| {
             crate::app::report_anyhow_with_context(
                 error,
-                "failed to normalize native command arguments",
+                crate::app::host::ErrorContext::Operation(
+                    "failed to normalize native command arguments",
+                ),
             )
         })?;
         let grammar = command.command();
@@ -373,7 +375,9 @@ fn refresh_native_parse(
     if refreshed.map_err(|error| {
         crate::app::report_anyhow_with_context(
             error,
-            "failed to prepare native invocation metadata",
+            crate::app::host::ErrorContext::Operation(
+                "failed to prepare native invocation metadata",
+            ),
         )
     })? {
         NativeParse::new(command, name, args)
@@ -441,7 +445,7 @@ fn run_native_invocation(
         if selected.has_subcommands() || parsed.args.len() + 1 == parsed.path.as_slice().len() {
             return Err(super::host::report_clap_error_with_context(
                 error,
-                "native command syntax is invalid",
+                crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
                 parsed.grammar,
                 std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
             ));
@@ -588,15 +592,16 @@ fn run_native_command(
                     mark_repl_command_rejected(accepted);
                     super::host::report_clap_error_with_context(
                         err,
-                        "native command execution failed",
+                        crate::app::host::ErrorContext::NativeExecution,
                         command.command(),
                         std::iter::once(command.command().get_name().to_string())
                             .chain(input.args.iter().cloned()),
                     )
                 }
-                Err(err) => {
-                    crate::app::report_anyhow_with_context(err, "native command execution failed")
-                }
+                Err(err) => crate::app::report_anyhow_with_context(
+                    err,
+                    crate::app::host::ErrorContext::NativeExecution,
+                ),
             });
     drop(context);
     if let Some(renderer) = progress_renderer.as_ref() {
