@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- `DisplayRule::Hyperlink` marks HTTP(S) URL fields for terminal hyperlinks.
+  The renderer alone emits OSC 8 in rich TTY output; plain output, exports,
+  pipelines and `last` replay retain the plain URL. Product text remains sanitized.
+
 - **Breaking:** `NativeCommand::repl_status` returns `ReplStatus` with semantic
   emphasis. Product text still strips terminal controls; error and warning
   emphasis uses the active theme and honours colour suppression.

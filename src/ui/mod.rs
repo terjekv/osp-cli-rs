@@ -51,7 +51,7 @@ mod text;
 
 use crate::core::document::DocBlock;
 use crate::core::output::OutputFormat;
-use crate::core::output_model::OutputResult;
+use crate::core::output_model::{DisplayRule, OutputResult};
 
 pub(crate) use lower::json_value;
 pub use messages::{MessageRequest, render as render_messages};
@@ -226,7 +226,45 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
         lower::lower_output(&output, &plan)
     };
     lower::sanitize_doc(&mut doc);
-    emit::emit_doc(&doc, plan.format, &plan.settings)
+    let text = emit::emit_doc(&doc, plan.format, &plan.settings);
+    if plan.settings.backend == RenderBackend::Rich
+        && request.settings.runtime.stdout_is_tty
+        && request.profile == RenderProfile::Normal
+        && !matches!(plan.format, OutputFormat::Json | OutputFormat::Markdown)
+    {
+        return link_urls(text, &output);
+    }
+    text
+}
+
+fn link_urls(text: String, output: &OutputResult) -> String {
+    let mut urls = std::collections::BTreeSet::new();
+    for row in output.as_rows().unwrap_or_default() {
+        let row = serde_json::Value::Object(row.clone());
+        for rule in &output.meta.display_rules {
+            if let DisplayRule::Hyperlink { field } = rule
+                && let Some(url) =
+                    lower::display_path(&row, field).and_then(serde_json::Value::as_str)
+                && (url.starts_with("https://") || url.starts_with("http://"))
+                && !url.chars().any(char::is_control)
+            {
+                urls.insert(url.to_owned());
+            }
+        }
+    }
+    let mut rendered = String::new();
+    let mut remaining = text.as_str();
+    while let Some((offset, url)) = urls
+        .iter()
+        .filter_map(|url| remaining.find(url.as_str()).map(|offset| (offset, url)))
+        .min_by_key(|(offset, url)| (*offset, std::cmp::Reverse(url.len())))
+    {
+        rendered.push_str(&remaining[..offset]);
+        rendered.push_str(&format!("\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\"));
+        remaining = &remaining[offset + url.len()..];
+    }
+    rendered.push_str(remaining);
+    rendered
 }
 
 fn prepare_output_for_sink<'a>(

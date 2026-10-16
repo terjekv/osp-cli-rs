@@ -706,7 +706,7 @@ fn display_labels(output: &OutputResult, columns: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+pub(super) fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     value.get(path).or_else(|| {
         if path.starts_with('/') {
             value.pointer(path)

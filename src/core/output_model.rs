@@ -28,6 +28,11 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Link an HTTP(S) URL value in rich terminal output only.
+    Hyperlink {
+        /// Canonical string field containing the URL and visible link text.
+        field: String,
+    },
     /// Hide array members marked by a boolean field in human output only.
     HideArrayItemsWhenTrue {
         /// Canonical array field path to project.

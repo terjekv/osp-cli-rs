@@ -3,7 +3,9 @@
 use crate::config::ResolvedConfig;
 use crate::core::document::Document;
 use crate::core::output::OutputFormat;
-use crate::core::output_model::{OutputDocument, OutputItems, OutputResult, RenderRecommendation};
+use crate::core::output_model::{
+    DisplayRule, OutputDocument, OutputItems, OutputResult, RenderRecommendation,
+};
 use crate::core::plugin::{ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use crate::dsl::apply_output_pipeline;
 use crate::ui::clipboard::ClipboardService;
@@ -174,8 +176,15 @@ impl CommandOutput {
 
     /// Retains successful command data for replay without diagnostic ownership.
     fn saved(&self) -> Self {
+        let mut body = self.body.clone();
+        if let CommandBody::Output(output) = &mut body {
+            output
+                .meta
+                .display_rules
+                .retain(|rule| !matches!(rule, DisplayRule::Hyperlink { .. }));
+        }
         Self {
-            body: self.body.clone(),
+            body,
             format_hint: self.format_hint,
             presentation: self.presentation.clone(),
             ..Self::exit(0)
@@ -646,6 +655,10 @@ pub(crate) fn apply_output_stages(
     }
 
     if !stages.is_empty() {
+        output
+            .meta
+            .display_rules
+            .retain(|rule| !matches!(rule, DisplayRule::Hyperlink { .. }));
         tracing::trace!(stage_count = stages.len(), "applying DSL output pipeline");
         // This is the central fan-in for staged structured output. Keep all
         // callers on the canonical DSL entrypoint so semantic/output policy

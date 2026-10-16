@@ -32,6 +32,11 @@ parallel implementations of verbs.
   row; missing target fields are not synthesized. JSON rendering preserves raw
   values, and filters use canonical values before these display changes.
 
+`DisplayRule::Hyperlink { field }` marks a string field whose value is an
+HTTP(S) URL. The renderer emits OSC 8 only for rich TTY output. Plain output,
+JSON, Markdown, CSV/TSV, pipelines and `last` replay keep the plain URL; product
+text remains sanitized. The marker never changes canonical values.
+
 A stage that changes shape clears curated columns, alignment, numeric timestamp
 hints, conditional display rules and renderer recommendations. Guide layout
 survives only row-preserving stages; cleanup (`?`), projection, aggregation and
