@@ -81,6 +81,7 @@ pub struct NativeCommandContext<'a> {
     pub invocation_elevation: InvocationElevation,
     /// Session-scoped native context that may be surfaced by the host REPL.
     pub session_context: NativeSessionContext,
+    command_scope: crate::core::CommandScope,
     progress: Option<&'a dyn NativeProgressSink>,
 }
 
@@ -92,8 +93,25 @@ impl<'a> NativeCommandContext<'a> {
             runtime_hints,
             invocation_elevation: InvocationElevation::Ordinary,
             session_context: NativeSessionContext::default(),
+            command_scope: Default::default(),
             progress: None,
         }
+    }
+
+    /// Sets where this invocation's reader types suggested commands.
+    pub fn with_command_scope(mut self, scope: crate::core::CommandScope) -> Self {
+        self.command_scope = scope;
+        self
+    }
+
+    /// Returns the reader's command scope for pure output helpers.
+    pub fn command_scope(&self) -> &crate::core::CommandScope {
+        &self.command_scope
+    }
+
+    /// Renders a root-form command for the reader's current prompt.
+    pub fn command(&self, line: &str) -> String {
+        self.command_scope.command(line)
     }
 
     /// Attaches explicit elevation intent to this execution only.

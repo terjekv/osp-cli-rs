@@ -18,7 +18,7 @@ use crate::cli::invocation::{hidden_invocation_completion_flags, scan_command_to
 use crate::cli::pipeline::{ParsedCommandLine, parse_command_text_with_aliases};
 
 // These commands keep their root meaning inside every integration shell.
-// Dispatch and the editor's command tree must agree on this set.
+// Dispatch, command suggestions, and the editor's command tree must agree on this set.
 pub(crate) const REPL_GLOBAL_COMMANDS: &[&str] = &[
     "plugins", "doctor", "theme", "config", "alias", "history", "context", "intro", "last",
     "source",

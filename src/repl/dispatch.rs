@@ -174,6 +174,7 @@ pub(crate) fn execute_repl_plugin_line(
     line: &str,
     sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
+    crate::app::facts::set_command_scope(runtime, &session.scope);
     let mut stdio = StdIoUiSink;
     let sink = sink.unwrap_or(&mut stdio);
     let mut accepted = false;

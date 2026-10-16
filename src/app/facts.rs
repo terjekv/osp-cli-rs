@@ -61,6 +61,7 @@ pub(crate) fn plugin_path_discovery_enabled(config: &ResolvedConfig) -> bool {
 
 pub(crate) fn build_render_runtime(terminal_env: Option<&str>) -> RenderRuntime {
     RenderRuntime {
+        command_scope: Default::default(),
         stdout_is_tty: std::io::stdout().is_terminal(),
         terminal: terminal_env.map(ToOwned::to_owned),
         no_color: std::env::var("NO_COLOR").is_ok(),
@@ -230,4 +231,30 @@ fn locale_utf8_hint_from_env() -> Option<bool> {
         }
     }
     None
+}
+
+/// Refreshes reader facts before the intro and each line, including live aliases.
+pub(crate) fn set_command_scope(runtime: &mut AppRuntime, scope: &super::ReplScopeStack) {
+    runtime.ui.render_settings.runtime.command_scope = match runtime.context.terminal_kind() {
+        TerminalKind::Cli => crate::core::CommandScope::OneShot,
+        TerminalKind::Repl => match scope.display_label() {
+            None => crate::core::CommandScope::ReplRoot,
+            Some(root) => crate::core::CommandScope::ReplShell {
+                root,
+                root_words: crate::repl::input::REPL_GLOBAL_COMMANDS
+                    .iter()
+                    .map(|word| (*word).to_string())
+                    .chain(
+                        runtime
+                            .config
+                            .resolved()
+                            .aliases()
+                            .keys()
+                            .filter_map(|key| key.strip_prefix("alias."))
+                            .map(|name| name.trim().to_string()),
+                    )
+                    .collect(),
+            },
+        },
+    };
 }

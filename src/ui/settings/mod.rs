@@ -163,6 +163,8 @@ impl TableBorderOverride {
 /// resolved against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RenderRuntime {
+    /// Where the reader types suggested commands.
+    pub command_scope: crate::core::CommandScope,
     /// Whether the visible stdout path is a tty.
     pub stdout_is_tty: bool,
     /// Raw terminal kind such as `xterm-256color`, if known.

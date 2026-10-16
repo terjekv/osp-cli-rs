@@ -555,6 +555,7 @@ fn run_native_command(
         runtime.config.resolved(),
         runtime_hints_for_invocation(runtime, input.invocation),
     )
+    .with_command_scope(input.invocation.ui.render_settings.runtime.command_scope.clone())
     .with_invocation_elevation(input.elevation)
     .with_session_context(
         session

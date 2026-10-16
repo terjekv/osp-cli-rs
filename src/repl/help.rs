@@ -127,6 +127,7 @@ fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::Rend
             no_color: !resolved.color,
             width: resolved.width,
             locale_utf8: Some(resolved.unicode),
+            command_scope: crate::core::CommandScope::ReplRoot,
         },
     }
 }

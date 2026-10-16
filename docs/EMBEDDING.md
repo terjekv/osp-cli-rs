@@ -328,6 +328,8 @@ in the host's help, completion, policy checks, and dispatch.
 When implementing native commands:
 
 - command implementations should consume a `NativeCommandContext`
+- write follow-up commands with `context.command("orch task wait 42")`, using
+  root-form input so terminal and REPL readers receive the appropriate spelling
 - long-running commands should emit `NativeProgressEvent` values through the
   context rather than writing directly to stdio
 - use `presentation_lines` with `progress_replace: true` for transient status;

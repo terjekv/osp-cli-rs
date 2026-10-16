@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** `RenderRuntime` gains a public `command_scope` field. Native
+  command contexts now carry the reader scope for follow-up commands.
+
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
 - **Breaking:** Inspect `LastFailure::detail` on demand instead of reading a
