@@ -248,6 +248,7 @@ fn external_plugin_dispatch_warns_when_config_env_collides_unit() {
         &["cfg".to_string()],
         &invocation,
         crate::core::document::Document::from_help_text,
+        None,
     )
     .expect("colliding config entries should not block dispatch");
 

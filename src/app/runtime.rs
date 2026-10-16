@@ -645,6 +645,25 @@ impl AuthState {
         filter(self, &mut document.blocks, path, false);
     }
 
+    pub(crate) fn visible_help_command(
+        &self,
+        command: clap::Command,
+        prefix: &[String],
+    ) -> clap::Command {
+        let mut path = prefix.to_vec();
+        path.push(command.get_name().to_string());
+        command.mut_subcommands(|child| {
+            let child_path = CommandPath::new(
+                path.iter()
+                    .cloned()
+                    .chain(std::iter::once(child.get_name().to_string())),
+            );
+            let hidden =
+                child.is_hide_set() || !self.external_command_path_access(&child_path).is_visible();
+            self.visible_help_command(child, &path).hide(hidden)
+        })
+    }
+
     pub(crate) fn filter_command_spec(
         &self,
         command: &mut crate::completion::CommandSpec,

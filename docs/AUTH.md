@@ -26,8 +26,13 @@ All methods have public, tokenless defaults. The hook is `Send + Sync`, and the
 same instance survives REPL rebuilds. Products should share their credential
 owner with native integrations instead of copying tokens into the host.
 
-Native dispatch invokes the execution hook before refreshing invocation metadata.
-Help and completion never acquire credentials.
+Native dispatch normalizes and parses arguments before calling the hook. If a
+cached grammar rejects an invocation, the hook receives the known canonical
+prefix before `prepare_invocation_metadata` runs. The host refreshes metadata at
+most once and authorizes the final canonical path using the refreshed auth
+metadata. Help may refresh metadata without acquisition; an unavailable refresh
+keeps cached help usable. Native help uses clap metadata directly. Explicit
+`NativeCommandOutcome::Help(String)` and plugin help still use the text parser.
 
 ## Declared authentication
 

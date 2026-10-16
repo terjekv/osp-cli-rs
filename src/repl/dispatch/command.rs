@@ -534,6 +534,7 @@ pub(super) fn run_repl_external_command(
         &tokens,
         invocation,
         Document::from_help_text,
+        None,
     )
 }
 
@@ -546,7 +547,7 @@ fn run_repl_external_command_with_progress(
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
 ) -> Result<crate::app::CliCommandResult> {
-    app::external::run_external_command_with_help_renderer_and_progress_for_repl(
+    app::external::run_external_command_for_repl(
         runtime,
         session,
         clients,

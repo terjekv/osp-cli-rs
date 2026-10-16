@@ -111,7 +111,7 @@ pub(super) fn run_external_command(
             plan_external_invocation(runtime, session, parsed, elevation, invocation)
         })
         .wrap_err_with(|| external_parse_context(tokens))?;
-    let result = run_external_command_with_help_renderer_and_progress_inner(
+    let result = dispatch_external_invocation(
         runtime,
         session,
         clients,
@@ -135,23 +135,10 @@ pub(crate) fn run_external_command_with_help_renderer(
     tokens: &[String],
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> Document,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress(
-        runtime, session, clients, tokens, invocation, guide_help, None,
-    )
-}
-
-pub(crate) fn run_external_command_with_help_renderer_and_progress(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    tokens: &[String],
-    invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
 ) -> Result<CliCommandResult> {
     let parsed = parse_external_invocation(runtime, session, tokens, invocation, &[])?;
-    run_external_command_with_help_renderer_and_progress_inner(
+    dispatch_external_invocation(
         runtime,
         session,
         clients,
@@ -163,7 +150,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress(
     )
 }
 
-pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
+pub(crate) fn run_external_command_for_repl(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     clients: &AppClients,
@@ -180,7 +167,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
         invocation,
         &command.stages,
     )?;
-    run_external_command_with_help_renderer_and_progress_inner(
+    dispatch_external_invocation(
         runtime,
         session,
         clients,
@@ -192,7 +179,7 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
     )
 }
 
-fn run_external_command_with_help_renderer_and_progress_inner(
+fn dispatch_external_invocation(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     clients: &AppClients,
@@ -256,192 +243,16 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 .native_commands()
                 .command(&command)
                 .ok_or_else(|| miette!("no native command provides `{command}`"))?;
-            if parsed.elevation.is_elevated() && !native_command.supports_invocation_elevation() {
-                return Err(miette!(
-                    "elevation prefix is unsupported for native command `{command}`"
-                ));
-            }
-            let mut canonical_args = native_command.normalize_args(args).map_err(|err| {
-                crate::app::report_anyhow_with_context(
-                    err,
-                    "failed to normalize native command arguments",
-                )
-            })?;
-            let mut description = native_command.describe();
-            let mut native_parse = native_command.command().try_get_matches_from(
-                std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
-            );
-            let help_requested = native_parse
-                .as_ref()
-                .is_err_and(|error| is_native_help_error(error.kind()))
-                || canonical_args.first().is_some_and(|arg| arg == "help")
-                || canonical_args
-                    .iter()
-                    .take_while(|arg| arg.as_str() != "--")
-                    .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version"));
-            let initial_path = native_parse
-                .as_ref()
-                .map(|matches| native_path_from_matches(&command, matches))
-                .unwrap_or_else(|_| description.resolve_invocation(&canonical_args).path);
-            before_external_run(
-                runtime,
-                &initial_path,
-                if help_requested {
-                    ExternalPathAccessRequirement::Visible
-                } else {
-                    ExternalPathAccessRequirement::Runnable
-                },
-                "command",
-            )?;
-            if native_parse
-                .as_ref()
-                .is_err_and(|error| !is_native_help_error(error.kind()))
-                && args.first().is_none_or(|arg| arg != "help")
-                && !args
-                    .iter()
-                    .take_while(|arg| arg.as_str() != "--")
-                    .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V"))
-            {
-                ensure_external_access(
-                    runtime,
-                    &crate::command_policy::CommandPath::new([command.clone()]),
-                    ExternalPathAccessRequirement::Runnable,
-                    "command",
-                )?;
-                if native_command
-                    .prepare_invocation_metadata(args, runtime.config.resolved())
-                    .map_err(|err| {
-                        crate::app::report_anyhow_with_context(
-                            err,
-                            "failed to prepare native invocation metadata",
-                        )
-                    })?
-                {
-                    canonical_args = native_command.normalize_args(args).map_err(|err| {
-                        crate::app::report_anyhow_with_context(
-                            err,
-                            "failed to normalize native command arguments",
-                        )
-                    })?;
-                    description = native_command.describe();
-                    native_parse = native_command.command().try_get_matches_from(
-                        std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
-                    );
-                    runtime.auth.refresh_native_auth(&native_command.describe());
-                }
-            }
-            let parsed_args = canonical_args.as_slice();
-            // A successful clap parse is authoritative for aliases, option
-            // values, and the selected nested command. The describe payload
-            // is only a conservative fallback for non-help errors. Clap does
-            // not return matches for help, so retry the parse without help
-            // markers to preserve canonical aliases on that path too.
-            let (path, path_ambiguous) = match native_parse.as_ref() {
-                Ok(matches) => (native_path_from_matches(&command, matches), false),
-                Err(error) if is_native_help_error(error.kind()) => (
-                    native_help_path(native_command.as_ref(), &command, parsed_args, &description),
-                    false,
-                ),
-                Err(_) => {
-                    let resolved = description.resolve_invocation(parsed_args);
-                    (resolved.path, resolved.ambiguous)
-                }
-            };
-            let invocation_ends_at_command = parsed_args.len() + 1 == path.as_slice().len();
-            if let Err(err) = native_parse {
-                if is_native_help_error(err.kind()) {
-                    mark_repl_command_accepted(&mut accepted);
-                    ensure_external_access(
-                        runtime,
-                        &path,
-                        ExternalPathAccessRequirement::Visible,
-                        "command",
-                    )?;
-
-                    let mut help = err.to_string();
-                    match native_command
-                        .prepare_invocation_metadata(args, runtime.config.resolved())
-                    {
-                        Ok(true) => match native_command.normalize_args(args) {
-                            Ok(refreshed_args) => {
-                                let refreshed_description = native_command.describe();
-                                let refreshed_parse =
-                                    native_command.command().try_get_matches_from(
-                                        std::iter::once(command.clone())
-                                            .chain(refreshed_args.iter().cloned()),
-                                    );
-                                if let Err(refreshed_error) = refreshed_parse
-                                    && is_native_help_error(refreshed_error.kind())
-                                {
-                                    let refreshed_path = native_help_path(
-                                        native_command.as_ref(),
-                                        &command,
-                                        &refreshed_args,
-                                        &refreshed_description,
-                                    );
-                                    runtime.auth.refresh_native_auth(&native_command.describe());
-                                    ensure_external_access(
-                                        runtime,
-                                        &refreshed_path,
-                                        ExternalPathAccessRequirement::Visible,
-                                        "command",
-                                    )?;
-                                    help = refreshed_error.to_string();
-                                }
-                            }
-                            Err(error) => tracing::debug!(
-                                command = %command,
-                                error = %error,
-                                "refreshed native help arguments could not be normalized"
-                            ),
-                        },
-                        Ok(false) => {}
-                        Err(error) => tracing::debug!(
-                            command = %command,
-                            error = %error,
-                            "native help metadata refresh failed; using cached help"
-                        ),
-                    }
-                    let mut document = guide_help(&help);
-                    runtime
-                        .auth
-                        .filter_help_document(&mut document, path.as_slice());
-                    return parsed.finish(CliCommandResult::document(document));
-                }
-                if path_ambiguous
-                    || described_path_has_subcommands(&description, &path)
-                    || invocation_ends_at_command
-                {
-                    return Err(super::host::report_clap_error_with_context(
-                        err,
-                        "native command syntax is invalid",
-                        native_command.command(),
-                        std::iter::once(command.as_str())
-                            .chain(parsed_args.iter().map(String::as_str)),
-                    ));
-                }
-            }
-            mark_repl_command_accepted(&mut accepted);
-            ensure_external_access(
-                runtime,
-                &path,
-                ExternalPathAccessRequirement::Runnable,
-                "command",
-            )?;
-
-            run_native_command(
+            run_native_invocation(
                 native_command.as_ref(),
                 runtime,
                 session,
-                NativeRunInput {
-                    args: parsed_args,
-                    stages: &parsed.stages,
-                    invocation,
-                    command_path: path.as_slice().join(" "),
-                    elevation: parsed.elevation,
-                    progress_sink,
-                },
+                &command,
+                args,
+                &parsed,
+                invocation,
                 guide_help,
+                progress_sink,
                 &mut accepted,
             )
         }
@@ -464,6 +275,192 @@ fn run_external_command_with_help_renderer_and_progress_inner(
         }
     }?;
     parsed.finish(result)
+}
+
+struct NativeParse {
+    args: Vec<String>,
+    grammar: clap::Command,
+    matches: std::result::Result<clap::ArgMatches, clap::Error>,
+    path: crate::command_policy::CommandPath,
+    render_help: bool,
+}
+
+impl NativeParse {
+    fn new(
+        command: &dyn crate::native::NativeCommand,
+        name: &str,
+        args: &[String],
+    ) -> Result<Self> {
+        let args = command.normalize_args(args).map_err(|error| {
+            crate::app::report_anyhow_with_context(
+                error,
+                "failed to normalize native command arguments",
+            )
+        })?;
+        let grammar = command.command();
+        let matches = grammar
+            .clone()
+            .try_get_matches_from(std::iter::once(name.to_string()).chain(args.iter().cloned()));
+        let path = native_resolved_path(&grammar, name, &args, matches.as_ref().ok());
+        let render_help = matches
+            .as_ref()
+            .is_err_and(|error| is_native_help_error(error.kind()));
+        Ok(Self {
+            args,
+            grammar,
+            matches,
+            path,
+            render_help,
+        })
+    }
+}
+
+struct NativeIntent {
+    requirement: ExternalPathAccessRequirement,
+    render_help: bool,
+    refresh_metadata: bool,
+}
+
+impl NativeIntent {
+    fn from_parse(parsed: &NativeParse) -> Self {
+        let render_help = parsed.render_help;
+        let help_requested = render_help
+            || parsed.args.first().is_some_and(|arg| arg == "help")
+            || parsed
+                .args
+                .iter()
+                .take_while(|arg| arg.as_str() != "--")
+                .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version"));
+        Self {
+            requirement: if help_requested {
+                ExternalPathAccessRequirement::Visible
+            } else {
+                ExternalPathAccessRequirement::Runnable
+            },
+            render_help,
+            refresh_metadata: parsed.matches.is_err() && (render_help || !help_requested),
+        }
+    }
+}
+
+fn refresh_native_parse(
+    command: &dyn crate::native::NativeCommand,
+    name: &str,
+    args: &[String],
+    config: &crate::config::ResolvedConfig,
+    parsed: NativeParse,
+    intent: &NativeIntent,
+) -> Result<NativeParse> {
+    if !intent.refresh_metadata {
+        return Ok(parsed);
+    }
+    let refreshed = command.prepare_invocation_metadata(args, config);
+    if intent.requirement == ExternalPathAccessRequirement::Visible {
+        match refreshed {
+            Ok(true) => match NativeParse::new(command, name, args) {
+                Ok(parsed) => return Ok(parsed),
+                Err(error) => {
+                    tracing::debug!(command = %name, error = %error, "refreshed native help arguments could not be normalized; using cached help")
+                }
+            },
+            Ok(false) => {}
+            Err(error) => {
+                tracing::debug!(command = %name, error = %error, "native help metadata refresh failed; using cached help")
+            }
+        }
+        return Ok(parsed);
+    }
+    if refreshed.map_err(|error| {
+        crate::app::report_anyhow_with_context(
+            error,
+            "failed to prepare native invocation metadata",
+        )
+    })? {
+        NativeParse::new(command, name, args)
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn run_native_invocation(
+    command: &dyn crate::native::NativeCommand,
+    runtime: &mut AppRuntime,
+    session: &mut AppSession,
+    name: &str,
+    args: &[String],
+    invocation_args: &ParsedExternalInvocation,
+    invocation: &ResolvedInvocation,
+    guide_help: impl Fn(&str) -> Document,
+    progress_sink: Option<&mut dyn UiSink>,
+    accepted: &mut Option<&mut bool>,
+) -> Result<CliCommandResult> {
+    if invocation_args.elevation.is_elevated() && !command.supports_invocation_elevation() {
+        return Err(miette!(
+            "elevation prefix is unsupported for native command `{name}`"
+        ));
+    }
+    let parsed = NativeParse::new(command, name, args)?;
+    let intent = NativeIntent::from_parse(&parsed);
+    before_external_run(runtime, &parsed.path, intent.requirement, "command")?;
+    let parsed = refresh_native_parse(
+        command,
+        name,
+        args,
+        runtime.config.resolved(),
+        parsed,
+        &intent,
+    )?;
+    runtime.auth.refresh_native_auth(&command.describe());
+    ensure_external_access(runtime, &parsed.path, intent.requirement, "command")?;
+
+    if intent.render_help || parsed.render_help {
+        mark_repl_command_accepted(accepted);
+        if let Err(error) = &parsed.matches
+            && error.kind() == clap::error::ErrorKind::DisplayVersion
+        {
+            return Ok(CliCommandResult::document(guide_help(&error.to_string())));
+        }
+        let tokens = std::iter::once(name.to_string())
+            .chain(parsed.args.iter().cloned())
+            .collect::<Vec<_>>();
+        let (document, _, _) = crate::cli::command_help_document(
+            runtime.auth.visible_help_command(parsed.grammar, &[]),
+            &tokens,
+        );
+        return Ok(CliCommandResult::document(document));
+    }
+    if let Err(error) = parsed.matches {
+        let mut selected = &parsed.grammar;
+        for segment in parsed.path.as_slice().iter().skip(1) {
+            if let Some(child) = selected.find_subcommand(segment) {
+                selected = child;
+            }
+        }
+        if selected.has_subcommands() || parsed.args.len() + 1 == parsed.path.as_slice().len() {
+            return Err(super::host::report_clap_error_with_context(
+                error,
+                "native command syntax is invalid",
+                parsed.grammar,
+                std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
+            ));
+        }
+    }
+    mark_repl_command_accepted(accepted);
+    run_native_command(
+        command,
+        runtime,
+        session,
+        NativeRunInput {
+            args: &parsed.args,
+            stages: &invocation_args.stages,
+            invocation,
+            command_path: parsed.path.as_slice().join(" "),
+            elevation: invocation_args.elevation,
+            progress_sink,
+        },
+        guide_help,
+        accepted,
+    )
 }
 
 fn mark_repl_command_accepted(accepted: &mut Option<&mut bool>) {
@@ -501,41 +498,25 @@ fn is_native_help_error(kind: clap::error::ErrorKind) -> bool {
     )
 }
 
-fn native_help_path(
-    command: &dyn crate::native::NativeCommand,
+fn native_resolved_path(
+    grammar: &clap::Command,
     name: &str,
     args: &[String],
-    description: &crate::core::plugin::DescribeCommandV1,
+    matches: Option<&clap::ArgMatches>,
 ) -> crate::command_policy::CommandPath {
-    let without_help = args
-        .iter()
-        .filter(|arg| !matches!(arg.as_str(), "--help" | "-h"))
-        .cloned();
-    let parsed = command
-        .command()
-        .try_get_matches_from(std::iter::once(name.to_string()).chain(without_help));
-    parsed
-        .as_ref()
-        .map(|matches| native_path_from_matches(name, matches))
-        .unwrap_or_else(|_| description.resolve_invocation(args).path)
-}
-
-fn described_path_has_subcommands(
-    command: &crate::core::plugin::DescribeCommandV1,
-    path: &crate::command_policy::CommandPath,
-) -> bool {
-    let mut current = command;
-    for segment in path.as_slice().iter().skip(1) {
-        let Some(child) = current
-            .subcommands
-            .iter()
-            .find(|child| child.name.eq_ignore_ascii_case(segment))
-        else {
-            return false;
-        };
-        current = child;
+    if let Some(matches) = matches {
+        return native_path_from_matches(name, matches);
     }
-    !current.subcommands.is_empty()
+    let mut tokens = args.iter().map(String::as_str).collect::<Vec<_>>();
+    // Clap's help subcommand names a command path rather than executing it.
+    if tokens.first() == Some(&"help") {
+        tokens.remove(0);
+    }
+    tokens.retain(|arg| !matches!(*arg, "--help" | "-h"));
+    crate::cli::passive_command(grammar.clone())
+        .try_get_matches_from(std::iter::once(name).chain(tokens))
+        .map(|matches| native_path_from_matches(name, &matches))
+        .unwrap_or_else(|_| crate::command_policy::CommandPath::new([name]))
 }
 
 struct NativeRunInput<'args, 'stages, 'invocation, 'sink> {
@@ -959,7 +940,6 @@ mod tests {
     use super::{
         ExternalParse, add_native_pagination_hint, cli_result_from_plugin_response,
         parse_external_invocation, run_external_command_with_help_renderer,
-        run_external_command_with_help_renderer_and_progress,
     };
     use crate::app::{
         AppClients, AppRuntime, AppSession, AuthState, ConfigState, LaunchContext, RuntimeContext,
@@ -1459,6 +1439,7 @@ JSON
                 &["ldap".to_string(), "user".to_string()],
                 &invocation,
                 |text| Document::from_help_text(&format!("HELP::{text}")),
+                None,
             )
             .expect("native command should dispatch");
 
@@ -1500,7 +1481,7 @@ JSON
         );
         let mut sink = BufferedUiSink::default();
 
-        let result = run_external_command_with_help_renderer_and_progress(
+        let result = run_external_command_with_help_renderer(
             &mut runtime,
             &mut session,
             &clients,
@@ -1535,6 +1516,7 @@ JSON
             &["verbosity".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect("native command should dispatch");
 
@@ -1564,6 +1546,7 @@ JSON
             &["ldap".to_string()],
             &invocation,
             |text| Document::from_help_text(&format!("HELP::{text}")),
+            None,
         )
         .expect("bare shellable root should rewrite to help");
 
@@ -1591,6 +1574,7 @@ JSON
             &["LDAP".to_string()],
             &invocation,
             |text| Document::from_help_text(&format!("HELP::{text}")),
+            None,
         )
         .expect("mixed-case native command should dispatch");
 
@@ -1618,6 +1602,7 @@ JSON
             &["lpad".to_string(), "user".to_string(), "oistes".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("misspelled command should fail with a suggestion");
 
@@ -1649,6 +1634,7 @@ JSON
             ],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("nested auth should block native external dispatch");
 
@@ -1675,6 +1661,7 @@ JSON
             &["lookup".to_string(), "u".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("the canonical aliased child policy should deny execution");
 
@@ -1700,6 +1687,7 @@ JSON
             &["ldap".to_string(), "help".to_string(), "user".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect("visible nested help should not require its run capability");
 
@@ -1712,6 +1700,7 @@ JSON
             &["ldap".to_string(), "user".to_string(), "alice".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("real execution should still require runnability");
         assert!(denied.to_string().contains("requires authentication"));
@@ -1747,6 +1736,7 @@ JSON
             &["ldap".into(), "user".into(), "--help".into()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("hidden command help must remain inaccessible");
         assert_eq!(error.to_string(), "Use the product's operator profile");
@@ -1780,6 +1770,7 @@ JSON
             &["ldap".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("native/plugin collision should fail");
 
@@ -1814,6 +1805,7 @@ JSON
             &["shared".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect_err("ambiguous plugin command should fail before dispatch");
 
@@ -1852,6 +1844,7 @@ JSON
             &["ldap".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect("provider override should route to plugin");
 
@@ -1893,6 +1886,7 @@ JSON
             &["SHARED".to_string()],
             &invocation,
             Document::from_help_text,
+            None,
         )
         .expect("mixed-case plugin command should dispatch");
 

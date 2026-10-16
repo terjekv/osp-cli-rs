@@ -72,6 +72,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   and `enabled_features`. Plugin command listings drop `required_capabilities`,
   `feature_flags` and `visible_session`; run requirements and hints show only
   supported fields. Credential validity and TTL diagnostics remain live.
+- Build native help from clap metadata and refresh native invocation metadata
+  at most once, with one linear parse, access, refresh and execution path.
 
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide
