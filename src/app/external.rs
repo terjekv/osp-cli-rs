@@ -546,18 +546,10 @@ pub(crate) fn run_repl_action(
         &state.runtime.ui,
         &crate::cli::invocation::InvocationOptions::default(),
     );
-    for entry in state.clients.native_commands().catalog() {
-        if !state
-            .runtime
-            .auth
-            .external_command_access(&entry.name)
-            .is_visible()
-        {
-            continue;
-        }
-        let Some(command) = state.clients.native_commands().command(&entry.name) else {
-            continue;
-        };
+    let commands = super::runtime::visible_native_commands(&state.runtime.auth, &state.clients)
+        .map(|(entry, command)| (entry, command.clone()))
+        .collect::<Vec<_>>();
+    for (entry, command) in commands {
         if command
             .repl_actions(state.runtime.config.resolved())
             .map_err(|e| miette!("{e:#}"))?

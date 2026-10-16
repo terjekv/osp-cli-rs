@@ -40,6 +40,30 @@ use crate::ui::RenderSettings;
 use crate::ui::messages::MessageLevel;
 use crate::ui::theme_catalog::ThemeCatalog;
 
+pub(crate) fn visible_native_commands<'a>(
+    auth: &'a AuthState,
+    clients: &'a AppClients,
+) -> impl Iterator<
+    Item = (
+        crate::plugin::CommandCatalogEntry,
+        &'a Arc<dyn crate::NativeCommand>,
+    ),
+> + 'a {
+    clients
+        .native_commands()
+        .catalog()
+        .into_iter()
+        .filter_map(|entry| {
+            if !auth.external_command_access(&entry.name).is_visible() {
+                return None;
+            }
+            clients
+                .native_commands()
+                .command(&entry.name)
+                .map(|command| (entry, command))
+        })
+}
+
 /// Identifies which top-level host surface is currently active.
 ///
 /// This lets config selection and runtime behavior distinguish between
