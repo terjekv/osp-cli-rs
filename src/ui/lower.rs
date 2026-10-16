@@ -595,6 +595,13 @@ fn display_output(output: &OutputResult) -> OutputResult {
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::HideArrayItemsWhenTrue { field, when } => {
+                        if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
+                            items.retain(|item| {
+                                display_path(item, when).and_then(Value::as_bool) != Some(true)
+                            });
+                        }
+                    }
                     DisplayRule::SuffixWhenTrue {
                         field,
                         when,

@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Add `DisplayRule::HideArrayItemsWhenTrue` for human-only
+  filtering of boolean-marked array members. Canonical JSON and DSL data
+  retain every member; exhaustive matches on `DisplayRule` need the new arm.
+
 - Human display paths accept JSON Pointers for literal field segments in
   columns, formatting rules and timestamp fields. Duplicate display labels
   retain separate cells with disambiguated headings.

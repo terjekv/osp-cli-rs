@@ -28,6 +28,13 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Hide array members marked by a boolean field in human output only.
+    HideArrayItemsWhenTrue {
+        /// Canonical array field path to project.
+        field: String,
+        /// Boolean path within each array member.
+        when: String,
+    },
     /// Append a literal suffix to a string when a boolean field is true.
     SuffixWhenTrue {
         /// Canonical field path to decorate.
