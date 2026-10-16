@@ -782,10 +782,19 @@ pub fn render_report_message(
         && <crate::config::ConfigError as miette::Diagnostic>::source_code(config).is_some()
     {
         rendered.push_str("\n\n");
-        rendered.push_str(&render_diagnostic_with_settings(
-            &SourceSnippet(config),
-            settings,
-        ));
+        let mut snippet = render_diagnostic_with_settings(&SourceSnippet(config), settings);
+        // Graphical handlers can omit zero-width labels at the end of a file.
+        if let Some(labels) = <crate::config::ConfigError as miette::Diagnostic>::labels(config) {
+            for label in labels {
+                if label.is_empty()
+                    && let Some(text) = label.label()
+                    && !snippet.contains(text)
+                {
+                    snippet.push_str(&format!("\n{text}\n"));
+                }
+            }
+        }
+        rendered.push_str(&snippet);
     }
     if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
         && !backend.error.details.is_null()
@@ -901,7 +910,11 @@ fn build_miette_handler(settings: &RenderSettings) -> miette::MietteHandler {
             .color(resolved.color)
             .unicode(resolved.unicode)
             .build(),
-        RenderBackend::Plain => opts.force_narrated(true).build(),
+        RenderBackend::Plain => opts
+            .force_graphical(true)
+            .color(false)
+            .unicode(false)
+            .build(),
     }
 }
 

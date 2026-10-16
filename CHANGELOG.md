@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- Plain detailed diagnostics use uncolored ASCII source annotations instead
+  of the narrated screen-reader report.
+
 - Startup failures now honor explicit mode, color and Unicode render flags
   even when configuration cannot load. Configured verbosity and debug bases
   also apply to startup diagnostics whenever configuration resolves.

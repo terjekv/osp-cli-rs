@@ -179,7 +179,7 @@ fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("Begin snippet"));
+    assert!(normalized.contains("config.toml"));
     assert!(normalized.contains("invalid TOML starts here"));
     assert!(!stderr.contains("Stack backtrace"));
 }
@@ -195,7 +195,7 @@ fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("Begin snippet"));
+    assert!(normalized.contains("config.toml"));
     assert!(normalized.contains("invalid TOML starts here"));
     assert!(normalized.contains("Stack backtrace"));
 }
