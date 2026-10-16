@@ -99,17 +99,32 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     assert!(!markdown.contains("| name"));
 
     let table = run_cli_stdout(&["--no-env", "--no-config-file", "--table", "--help"]);
-    assert!(table.contains("preamble"));
-    assert!(table.contains("usage"));
+    let mut rows = table.lines().filter(|line| line.starts_with('|'));
+    let cells = |line: &str| {
+        line.trim_matches('|')
+            .split('|')
+            .map(|cell| cell.trim().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        cells(rows.next().unwrap()),
+        ["section", "text", "name", "description"]
+    );
+    assert_eq!(cells(rows.next().unwrap()), ["", "OSP CLI", "", ""]);
+    assert_eq!(
+        cells(rows.next().unwrap()),
+        ["Usage", "osp [OPTIONS] [COMMAND]", "", ""]
+    );
+    let width = unicode_width::UnicodeWidthStr::width(table.lines().next().unwrap());
+    assert!(width > 80);
     assert!(
         table
             .lines()
-            .all(|line| unicode_width::UnicodeWidthStr::width(line) <= 80)
+            .all(|line| unicode_width::UnicodeWidthStr::width(line) == width)
     );
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "--help"]);
-    assert!(mreg.contains("preamble:"));
-    assert!(mreg.contains("commands ("));
+    assert_eq!(mreg, table);
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "--help"]);
     assert!(value.contains("OSP CLI"));
