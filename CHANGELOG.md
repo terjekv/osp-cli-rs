@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Terminal confirmations remain available in one-shot commands. `may_prompt()`
+  checks stdin/stderr terminals, JSON output and output pipelines; credential
+  acquisition retains its own command-scope restrictions.
+
 - Confirm successful `| Y` clipboard copies with the row or group count.
 
 - Default history exclusions use `history*`, covering every history command

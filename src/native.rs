@@ -145,13 +145,11 @@ impl<'a> NativeCommandContext<'a> {
         self.output_pipeline
     }
 
-    /// Whether a REPL invocation may read a confirmation from its terminal.
-    /// One-shot commands, JSON output and output pipelines never prompt.
+    /// Whether this invocation may read a confirmation from its terminal.
+    /// Requires stdin and stderr terminals, non-JSON output and no output pipeline.
+    /// Credential acquisition owns any additional command-scope restrictions.
     pub fn may_prompt(&self) -> bool {
-        !matches!(self.command_scope, crate::core::CommandScope::OneShot)
-            && self.human_output()
-            && std::io::stdin().is_terminal()
-            && std::io::stderr().is_terminal()
+        self.human_output() && std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
     }
 
     /// Whether live or preliminary documents can be presented on stderr.
