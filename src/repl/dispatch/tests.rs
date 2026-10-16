@@ -316,7 +316,6 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
         max_entries: 20,
         enabled: true,
         dedupe: true,
-        profile_scoped: false,
         shell_context: Default::default(),
         ..HistoryConfig::default()
     });
@@ -488,7 +487,6 @@ fn test_history() -> SharedHistory {
         max_entries: 8,
         enabled: true,
         dedupe: true,
-        profile_scoped: false,
         shell_context: Default::default(),
         ..HistoryConfig::default()
     })

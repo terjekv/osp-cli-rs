@@ -7,6 +7,15 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Remove `repl.history.profile_scoped` and history record metadata.
+  Identity/profile isolation comes from `repl.history.path`; use a path without
+  `${profile.active}` to share history across profiles. Old records still load
+  and are rewritten as command/timestamp pairs on the next write. Consecutive
+  duplicate suppression compares the last entry in the file across shell scopes.
+  Default filenames lowercase the effective identity, preserving separate ordinary
+  and drift histories. If the lowercase file is absent, an old mixed-case filename
+  is read until the first write creates the lowercase file; custom paths stay literal.
+
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 

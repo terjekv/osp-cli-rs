@@ -1,14 +1,11 @@
-//! Persistent REPL history with profile-aware visibility and shell-prefix
-//! scoping.
+//! Persistent REPL history scoped by file path and shell prefix.
 //!
 //! Records are stored oldest-to-newest. Public listing helpers preserve that
-//! order while filtering by the active profile scope, optional shell prefix,
+//! order while filtering by optional shell prefix,
 //! and configured exclusion patterns. Shell-scoped views strip the prefix back
 //! off so callers see the command as it was typed inside that shell.
 //!
 //! Pruning and clearing only remove records visible in the chosen scope. The
-//! store also records terminal identifiers on entries for provenance, but that
-//! metadata is not currently part of view scoping.
 //!
 //! Public API shape:
 //!
@@ -30,8 +27,6 @@ use reedline::{
     ReedlineErrorVariants, Result as ReedlineResult, SearchDirection, SearchFilter, SearchQuery,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::normalize::normalize_optional_identifier;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BangCommand {
@@ -63,20 +58,16 @@ pub(crate) fn split_bang_request(raw: &str) -> Option<(bool, &str)> {
 pub struct HistoryConfig {
     /// Path to the history file, when persistence is enabled.
     pub path: Option<PathBuf>,
+    /// Older file to read while the configured path does not exist.
+    pub legacy_path: Option<PathBuf>,
     /// Maximum number of retained history entries.
     pub max_entries: usize,
     /// Whether history capture is enabled.
     pub enabled: bool,
     /// Whether duplicate commands should be collapsed.
     pub dedupe: bool,
-    /// Whether entries should be partitioned by active profile.
-    pub profile_scoped: bool,
     /// Prefix patterns excluded from persistence.
     pub exclude_patterns: Vec<String>,
-    /// Active profile identifier used for scoping.
-    pub profile: Option<String>,
-    /// Active terminal identifier recorded on saved entries.
-    pub terminal: Option<String>,
     /// Shared shell-prefix scope used to filter and strip shell-prefixed views.
     pub shell_context: HistoryShellContext,
 }
@@ -85,26 +76,31 @@ impl Default for HistoryConfig {
     fn default() -> Self {
         Self {
             path: None,
+            legacy_path: None,
             max_entries: 1_000,
             enabled: true,
             dedupe: true,
-            profile_scoped: true,
             exclude_patterns: Vec::new(),
-            profile: None,
-            terminal: None,
             shell_context: HistoryShellContext::default(),
         }
     }
 }
 
 impl HistoryConfig {
-    /// Normalizes configured identifiers and exclusion patterns.
+    /// Normalizes configured exclusion patterns.
     pub fn normalized(mut self) -> Self {
         self.exclude_patterns =
             normalize_exclude_patterns(std::mem::take(&mut self.exclude_patterns));
-        self.profile = normalize_optional_identifier(self.profile.take());
-        self.terminal = normalize_optional_identifier(self.terminal.take());
         self
+    }
+
+    fn load_records(&self, path: &Path) -> std::io::Result<Vec<HistoryRecord>> {
+        let read_path = if !path.exists() {
+            self.legacy_path.as_deref().unwrap_or(path)
+        } else {
+            path
+        };
+        load_records_result(read_path)
     }
 
     fn persist_enabled(&self) -> bool {
@@ -148,24 +144,9 @@ impl HistoryShellContext {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct HistoryRecord {
-    id: i64,
     command_line: String,
     #[serde(default)]
     timestamp_ms: Option<i64>,
-    #[serde(default)]
-    duration_ms: Option<i64>,
-    #[serde(default)]
-    exit_status: Option<i64>,
-    #[serde(default)]
-    cwd: Option<String>,
-    #[serde(default)]
-    hostname: Option<String>,
-    #[serde(default)]
-    session_id: Option<i64>,
-    #[serde(default)]
-    profile: Option<String>,
-    #[serde(default)]
-    terminal: Option<String>,
 }
 
 #[derive(Clone)]
@@ -238,7 +219,7 @@ impl OspHistoryStore {
             && let Some(path) = &config.path
         {
             let _phase = tracing::info_span!(target: "osp_startup", "history load", name = %format_args!("history load {}", path.display())).entered();
-            records = load_records(path);
+            records = config.load_records(path).unwrap_or_default();
         }
         let mut store = Self {
             config,
@@ -261,7 +242,7 @@ impl OspHistoryStore {
     /// Returns visible commands in oldest-to-newest order for the provided
     /// shell prefix.
     ///
-    /// Profile scoping and exclusion patterns still apply.
+    /// Exclusion patterns still apply.
     pub fn recent_commands_for(&self, shell_prefix: Option<&str>) -> Vec<String> {
         self.visible_record_indices_for(shell_prefix)
             .into_iter()
@@ -321,7 +302,7 @@ impl OspHistoryStore {
             return Ok(0);
         };
         let _transaction_lock = crate::config::lock_file_transaction(&path)?;
-        let mut records = load_records_result(&path)?;
+        let mut records = self.config.load_records(&path)?;
         trim_records_to_capacity(&mut records, self.config.max_entries);
 
         let mut pending_index = self.pending_record.as_ref().map(|pending| {
@@ -482,17 +463,6 @@ impl OspHistoryStore {
         Ok(())
     }
 
-    fn profile_allows(&self, record: &HistoryRecord) -> bool {
-        if !self.config.profile_scoped {
-            return true;
-        }
-        match (self.config.profile.as_deref(), record.profile.as_deref()) {
-            (Some(active), Some(profile)) => active == profile,
-            (Some(_), None) => false,
-            _ => true,
-        }
-    }
-
     pub(crate) fn shell_prefix(&self) -> Option<String> {
         self.config.shell_context.prefix()
     }
@@ -511,9 +481,6 @@ impl OspHistoryStore {
         shell_prefix: Option<&str>,
         require_shell: bool,
     ) -> Option<String> {
-        if !self.profile_allows(record) {
-            return None;
-        }
         if require_shell && !self.shell_allows(record, shell_prefix) {
             return None;
         }
@@ -551,16 +518,11 @@ impl OspHistoryStore {
         is_excluded_command(command, &self.config.exclude_patterns)
     }
 
-    fn next_id(&self) -> i64 {
-        self.records.len() as i64
-    }
-
     fn trim_to_capacity(&mut self) {
         trim_records_to_capacity(&mut self.records, self.config.max_entries);
     }
 
-    fn append_record(&mut self, mut record: HistoryRecord) -> HistoryItemId {
-        record.id = self.next_id();
+    fn append_record(&mut self, record: HistoryRecord) -> HistoryItemId {
         self.records.push(record);
         self.trim_to_capacity();
         HistoryItemId::new(self.records.len() as i64 - 1)
@@ -624,17 +586,11 @@ impl OspHistoryStore {
             return Ok(());
         };
         let _transaction_lock = crate::config::lock_file_transaction(&path)?;
-        let mut records = load_records_result(&path)?;
+        let mut records = self.config.load_records(&path)?;
         trim_records_to_capacity(&mut records, self.config.max_entries);
-        let shell_prefix = self.shell_prefix();
         let duplicate = self.config.dedupe
             && records
-                .iter()
-                .rev()
-                .find(|record| {
-                    self.profile_allows(record)
-                        && self.shell_allows(record, shell_prefix.as_deref())
-                })
+                .last()
                 .is_some_and(|record| record.command_line == pending.record.command_line);
         if !duplicate {
             records.push(pending.record);
@@ -664,48 +620,13 @@ impl OspHistoryStore {
                 return false;
             }
         }
-        if let Some(hostname) = &filter.hostname
-            && record.hostname.as_deref() != Some(hostname.as_str())
-        {
-            return false;
-        }
-        if let Some(cwd) = &filter.cwd_exact
-            && record.cwd.as_deref() != Some(cwd.as_str())
-        {
-            return false;
-        }
-        if let Some(prefix) = &filter.cwd_prefix {
-            match record.cwd.as_deref() {
-                Some(value) if value.starts_with(prefix) => {}
-                _ => return false,
-            }
-        }
-        if let Some(exit_successful) = filter.exit_successful {
-            let is_success = record.exit_status == Some(0);
-            if exit_successful != is_success {
-                return false;
-            }
-        }
-        if let Some(session) = filter.session
-            && record.session_id != Some(i64::from(session))
-        {
-            return false;
-        }
         true
     }
 
     fn record_from_item(&self, item: &HistoryItem, command_line: String) -> HistoryRecord {
         HistoryRecord {
-            id: -1,
             command_line,
             timestamp_ms: item.start_timestamp.map(|ts| ts.timestamp_millis()),
-            duration_ms: item.duration.map(|value| value.as_millis() as i64),
-            exit_status: item.exit_status,
-            cwd: item.cwd.clone(),
-            hostname: item.hostname.clone(),
-            session_id: item.session_id.map(i64::from),
-            profile: self.config.profile.clone(),
-            terminal: self.config.terminal.clone(),
         }
     }
 
@@ -715,19 +636,7 @@ impl OspHistoryStore {
         shell_prefix: Option<&str>,
     ) -> HistoryItem {
         let command_line = self.view_command_line(&record.command_line, shell_prefix);
-        HistoryItem {
-            id: Some(HistoryItemId::new(record.id)),
-            start_timestamp: None,
-            command_line,
-            session_id: None,
-            hostname: record.hostname.clone(),
-            cwd: record.cwd.clone(),
-            duration: record
-                .duration_ms
-                .map(|value| Duration::from_millis(value as u64)),
-            exit_status: record.exit_status,
-            more_info: None,
-        }
+        HistoryItem::from_command_line(&command_line)
     }
 
     fn reedline_error(message: &'static str) -> ReedlineError {
@@ -788,15 +697,13 @@ impl OspHistoryStore {
         let shell_prefix = self.shell_prefix();
         let expanded_full = apply_shell_prefix(raw, shell_prefix.as_deref());
 
-        if self.config.dedupe {
-            let last_match = self.records.iter().rev().find(|record| {
-                self.profile_allows(record) && self.shell_allows(record, shell_prefix.as_deref())
-            });
-            if let Some(last) = last_match
-                && last.command_line == expanded_full
-            {
-                return Ok(h);
-            }
+        if self.config.dedupe
+            && self
+                .records
+                .last()
+                .is_some_and(|record| record.command_line == expanded_full)
+        {
+            return Ok(h);
         }
 
         let mut record = self.record_from_item(&h, expanded_full);
@@ -823,7 +730,9 @@ impl OspHistoryStore {
             .records
             .get(idx)
             .ok_or_else(|| Self::reedline_error("history item not found"))?;
-        Ok(self.history_item_from_record(record, shell_prefix.as_deref()))
+        let mut item = self.history_item_from_record(record, shell_prefix.as_deref());
+        item.id = Some(id);
+        Ok(item)
     }
 
     pub(crate) fn count(&self, query: SearchQuery) -> ReedlineResult<i64> {
@@ -931,10 +840,15 @@ impl OspHistoryStore {
         if let Some(path) = self.config.path.as_ref() {
             let _transaction_lock = crate::config::lock_file_transaction(path)
                 .map_err(|err| ReedlineError(ReedlineErrorVariants::IOError(err)))?;
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(ReedlineError(ReedlineErrorVariants::IOError(err))),
+            if self.config.legacy_path.is_some() {
+                write_records(path, &[])
+                    .map_err(|err| ReedlineError(ReedlineErrorVariants::IOError(err)))?;
+            } else {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(ReedlineError(ReedlineErrorVariants::IOError(err))),
+                }
             }
         }
         self.records.clear();
@@ -969,7 +883,7 @@ impl OspHistoryStore {
             return Ok(());
         };
         let _transaction_lock = crate::config::lock_file_transaction(path)?;
-        let mut records = load_records_result(path)?;
+        let mut records = self.config.load_records(path)?;
         trim_records_to_capacity(&mut records, self.config.max_entries);
         self.records = records;
         Ok(())
@@ -1030,10 +944,6 @@ impl History for SharedHistory {
     }
 }
 
-fn load_records(path: &Path) -> Vec<HistoryRecord> {
-    load_records_result(path).unwrap_or_default()
-}
-
 fn load_records_result(path: &Path) -> std::io::Result<Vec<HistoryRecord>> {
     let file = match File::open(path) {
         Ok(file) => file,
@@ -1075,9 +985,6 @@ fn trim_records_to_capacity(records: &mut Vec<HistoryRecord>, capacity: usize) -
         records.clear();
     } else if trimmed > 0 {
         *records = records.split_off(trimmed);
-    }
-    for (index, record) in records.iter_mut().enumerate() {
-        record.id = index as i64;
     }
     trimmed
 }

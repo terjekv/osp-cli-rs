@@ -369,12 +369,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from(true)),
             },
             BuiltinKey {
-                key: "repl.history.profile_scoped",
-                schema: SchemaEntry::boolean()
-                    .with_doc("Whether history files are scoped by profile"),
-                default: Some(ConfigValue::from(true)),
-            },
-            BuiltinKey {
                 key: "repl.history.menu_rows",
                 schema: SchemaEntry::positive_integer()
                     .with_doc("Maximum rows shown in the history menu"),

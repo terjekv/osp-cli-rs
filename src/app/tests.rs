@@ -339,21 +339,12 @@ fn make_test_history(state: &mut AppState) -> SharedHistory {
     state.sync_history_shell_context();
 
     let history_config = HistoryConfig {
+        legacy_path: None,
         path: miri_history_path(),
         max_entries: 128,
         enabled: true,
         dedupe: true,
-        profile_scoped: true,
         exclude_patterns: Vec::new(),
-        profile: Some(state.runtime.config.resolved().active_profile().to_string()),
-        terminal: Some(
-            state
-                .runtime
-                .context
-                .terminal_kind()
-                .as_config_terminal()
-                .to_string(),
-        ),
         shell_context: history_shell,
     }
     .normalized();

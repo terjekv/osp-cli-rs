@@ -39,14 +39,12 @@ mod tests {
     fn history_output_helpers_wrap_rows_and_ignore_text_results_unit() {
         let history = crate::repl::SharedHistory::new(
             HistoryConfig {
+                legacy_path: None,
                 path: None,
                 max_entries: 32,
                 enabled: true,
                 dedupe: true,
-                profile_scoped: false,
                 exclude_patterns: Vec::new(),
-                profile: None,
-                terminal: None,
                 shell_context: crate::repl::HistoryShellContext::default(),
             }
             .normalized(),

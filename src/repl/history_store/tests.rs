@@ -6,7 +6,6 @@ fn history_config() -> HistoryConfig {
         enabled: true,
         max_entries: 10,
         dedupe: false,
-        profile_scoped: false,
         ..HistoryConfig::default()
     }
 }
@@ -171,31 +170,19 @@ fn search_respects_filters_direction_bounds_and_skip_logic() {
     let mut store = OspHistoryStore::new(config);
 
     let mut first = HistoryItem::from_command_line("ldap user alice");
-    first.cwd = Some("/srv/ldap".to_string());
-    first.hostname = Some("ops-a".to_string());
-    first.exit_status = Some(0);
     first.start_timestamp = Some(Utc.timestamp_millis_opt(1_000).single().unwrap());
     store.save(first).expect("save should succeed");
 
     let mut second = HistoryItem::from_command_line("ldap user bob");
-    second.cwd = Some("/srv/ldap/cache".to_string());
-    second.hostname = Some("ops-b".to_string());
-    second.exit_status = Some(1);
     second.start_timestamp = Some(Utc.timestamp_millis_opt(2_000).single().unwrap());
     store.save(second).expect("save should succeed");
 
     let mut third = HistoryItem::from_command_line("mreg host a");
-    third.cwd = Some("/srv/mreg".to_string());
-    third.hostname = Some("ops-a".to_string());
-    third.exit_status = Some(0);
     third.start_timestamp = Some(Utc.timestamp_millis_opt(3_000).single().unwrap());
     store.save(third).expect("save should succeed");
 
     let mut filter = SearchFilter::anything(None);
     filter.command_line = Some(CommandLineSearch::Prefix("ldap".to_string()));
-    filter.cwd_prefix = Some("/srv/ldap".to_string());
-    filter.exit_successful = Some(true);
-    filter.hostname = Some("ops-a".to_string());
 
     let forward = SearchQuery {
         direction: SearchDirection::Forward,
@@ -464,7 +451,7 @@ fn history_never_records_recalls_help_or_inline_config_secrets() {
 
 #[cfg_attr(miri, ignore = "history store filesystem integration test")]
 #[test]
-fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
+fn file_scoped_history_loads_legacy_records_and_drops_rejected_commands() {
     let temp_dir = make_temp_dir("osp-repl-history-profiles");
     let path = temp_dir.join("history.jsonl");
     std::fs::write(
@@ -479,9 +466,7 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
     let shell = HistoryShellContext::new("ldap");
     let mut history = SharedHistory::new(HistoryConfig {
         path: Some(path.clone()),
-        profile_scoped: true,
-        profile: Some(" Dev ".to_string()),
-        terminal: Some("CLI".to_string()),
+
         shell_context: shell.clone(),
         ..history_config()
     });
@@ -489,7 +474,7 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
         history
             .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
             .unwrap_or_default(),
-        vec!["ldap user alice"]
+        vec!["ldap user legacy", "ldap user ops", "ldap user alice"]
     );
 
     history
@@ -512,7 +497,10 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
         .into_iter()
         .map(|entry| entry.command)
         .collect::<Vec<_>>();
-    assert_eq!(visible, vec!["user alice", "user bob"]);
+    assert_eq!(
+        visible,
+        vec!["user legacy", "user ops", "user alice", "user bob"]
+    );
 
     let count = |filter: SearchFilter| {
         let mut query = SearchQuery::everything(SearchDirection::Forward, None);
@@ -525,18 +513,6 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
     let mut substring = SearchFilter::anything(None);
     substring.command_line = Some(CommandLineSearch::Substring("ali".to_string()));
     assert_eq!(count(substring), 1);
-    let mut cwd = SearchFilter::anything(None);
-    cwd.cwd_exact = Some("/srv".to_string());
-    assert_eq!(count(cwd), 1);
-    let mut cwd_prefix = SearchFilter::anything(None);
-    cwd_prefix.cwd_prefix = Some("/srv".to_string());
-    assert_eq!(count(cwd_prefix), 1);
-    let mut failed = SearchFilter::anything(None);
-    failed.exit_successful = Some(false);
-    assert_eq!(count(failed), 1);
-    let mut host = SearchFilter::anything(None);
-    host.hostname = Some("ops-b".to_string());
-    assert_eq!(count(host), 0);
 
     assert!(History::update(&mut history, HistoryItemId::new(0), &|item| item).is_err());
     assert!(History::delete(&mut history, HistoryItemId::new(0)).is_err());
@@ -566,7 +542,7 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
             .with(|store| store.clear_for(store.shell_prefix().as_deref()))
             .expect("history lock should be available")
             .expect("clear should succeed"),
-        2
+        4
     );
     assert_eq!(
         history
@@ -576,8 +552,7 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
         0
     );
     let persisted = std::fs::read_to_string(&path).expect("history should persist");
-    assert_eq!(persisted.lines().count(), 2, "{persisted}");
-    assert!(persisted.contains("legacy") && persisted.contains("\"ops\""));
+    assert_eq!(persisted.lines().count(), 0, "{persisted}");
 
     let disabled = SharedHistory::new(HistoryConfig {
         enabled: false,

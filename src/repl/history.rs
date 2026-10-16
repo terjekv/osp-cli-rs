@@ -62,13 +62,46 @@ pub(crate) fn augment_history_completion(node: &mut crate::completion::Completio
 pub(crate) fn build_history_config(runtime: &AppRuntime, session: &AppSession) -> HistoryConfig {
     let config = runtime.config.resolved();
     session.sync_history_shell_context();
+    let mut path = config
+        .get_string("repl.history.path")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_repl_history_path);
+    let mut legacy_path = None;
+    if config
+        .get_value_entry("repl.history.path")
+        .is_some_and(|entry| entry.source == crate::config::ConfigSource::BuiltinDefaults)
+        && let Some((identity, profile)) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.rsplit_once('@'))
+    {
+        let profile = profile.to_string();
+        let name = format!("{}@{profile}", identity.to_lowercase());
+        path.set_file_name(&name);
+        if !path.exists() {
+            let suffix = format!("@{profile}");
+            let mut old_paths =
+                std::fs::read_dir(path.parent().unwrap_or(std::path::Path::new(".")))
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|old| {
+                        old.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|old_name| {
+                                old_name.ends_with(&suffix)
+                                    && old_name.to_lowercase() == name.to_lowercase()
+                            })
+                    })
+                    .collect::<Vec<_>>();
+            old_paths.sort();
+            legacy_path = old_paths.into_iter().next();
+        }
+    }
     HistoryConfig {
-        path: Some(
-            config
-                .get_string("repl.history.path")
-                .map(PathBuf::from)
-                .unwrap_or_else(default_repl_history_path),
-        ),
+        path: Some(path),
+        legacy_path,
         max_entries: config_usize(
             config,
             "repl.history.max_entries",
@@ -76,18 +109,7 @@ pub(crate) fn build_history_config(runtime: &AppRuntime, session: &AppSession) -
         ),
         enabled: repl_history_enabled(config) && session.history_enabled,
         dedupe: config.get_bool("repl.history.dedupe").unwrap_or(true),
-        profile_scoped: config
-            .get_bool("repl.history.profile_scoped")
-            .unwrap_or(true),
         exclude_patterns: repl_history_exclude_patterns(config),
-        profile: Some(config.active_profile().to_string()),
-        terminal: Some(
-            runtime
-                .context
-                .terminal_kind()
-                .as_config_terminal()
-                .to_string(),
-        ),
         shell_context: session.history_shell.clone(),
     }
     .normalized()
@@ -392,7 +414,6 @@ mod tests {
             ("repl.history.max_entries", "42"),
             ("repl.history.enabled", "true"),
             ("repl.history.dedupe", "false"),
-            ("repl.history.profile_scoped", "false"),
             ("repl.history.path", "/tmp/custom-history.jsonl"),
             ("repl.history.exclude", "help"),
         ]);
@@ -407,7 +428,6 @@ mod tests {
             Some(PathBuf::from("/tmp/custom-history.jsonl"))
         );
         assert!(!policy.dedupe);
-        assert!(!policy.profile_scoped);
         assert!(policy.exclude_patterns.contains(&"help".to_string()));
         assert!(policy.exclude_patterns.contains(&"exit".to_string()));
     }
@@ -536,7 +556,6 @@ mod tests {
             path: Some(path),
             max_entries: 32,
             dedupe: false,
-            profile_scoped: false,
             ..HistoryConfig::default()
         });
         let mut session = AppSession::default();
@@ -733,14 +752,12 @@ mod tests {
     fn shared_history(enabled: bool) -> SharedHistory {
         SharedHistory::new(
             HistoryConfig {
+                legacy_path: None,
                 path: None,
                 max_entries: 32,
                 enabled,
                 dedupe: false,
-                profile_scoped: false,
                 exclude_patterns: Vec::new(),
-                profile: None,
-                terminal: None,
                 shell_context: crate::repl::HistoryShellContext::default(),
             }
             .normalized(),

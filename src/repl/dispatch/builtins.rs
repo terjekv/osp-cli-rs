@@ -630,7 +630,6 @@ mod tests {
             max_entries: 20,
             enabled: true,
             dedupe: true,
-            profile_scoped: false,
             shell_context: Default::default(),
             ..HistoryConfig::default()
         })

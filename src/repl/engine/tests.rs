@@ -61,7 +61,6 @@ fn history_config() -> HistoryConfig {
         enabled: true,
         max_entries: 32,
         dedupe: false,
-        profile_scoped: false,
         ..HistoryConfig::default()
     }
 }

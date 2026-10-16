@@ -62,7 +62,7 @@ fn repl_history_capture_and_maintenance_survive_processes_with_profile_scope() {
         return;
     }
     let home = make_temp_dir("osp-e2e-history-lifecycle-home");
-    let history = home.path().join("operator-history.jsonl");
+    let history = home.path().join("operator-${profile.active}-history.jsonl");
     write_config(
         home.path(),
         r#"
