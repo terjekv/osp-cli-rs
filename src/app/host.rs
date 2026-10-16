@@ -407,7 +407,9 @@ fn handle_clap_parse_error(
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);
-                add_native_command_help(&mut body, &app.native_commands);
+                let auth =
+                    AuthState::for_policy(app.access_policy.clone(), help_context.config.as_ref());
+                add_native_command_help(&mut body, &app.native_commands, &auth);
             }
             let mut filtered = body.filtered_for_help_level(help_context.help_level);
             let dsl_help = stages.iter().find_map(|raw| {
@@ -1140,10 +1142,15 @@ where
     None
 }
 
-fn add_native_command_help(view: &mut Document, native_commands: &NativeCommandRegistry) {
+fn add_native_command_help(
+    view: &mut Document,
+    native_commands: &NativeCommandRegistry,
+    auth: &AuthState,
+) {
     let entries = native_commands
         .catalog()
         .into_iter()
+        .filter(|entry| auth.is_external_command_visible(&entry.name))
         .map(|entry| DocumentEntry {
             name: entry.name,
             description: entry.about.trim().to_string(),

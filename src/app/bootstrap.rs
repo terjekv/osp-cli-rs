@@ -180,7 +180,8 @@ pub(crate) fn prepare_startup_host(
     product_defaults: &ConfigLayer,
 ) -> Result<PreparedStartupHost> {
     let runtime_load = cli.runtime_load_options();
-    let runtime_context = build_runtime_context(profile_override, terminal_kind);
+    let mut runtime_context = build_runtime_context(profile_override, terminal_kind);
+    runtime_context.repl_start = matches!(action, crate::app::RunAction::Repl);
     let session_layer = build_cli_session_layer(cli);
     let launch_context = LaunchContext::default()
         .with_plugin_dirs(cli.plugin_dirs.clone())

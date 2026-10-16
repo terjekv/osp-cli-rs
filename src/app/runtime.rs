@@ -81,6 +81,7 @@ impl TerminalKind {
 pub struct RuntimeContext {
     profile_override: Option<String>,
     terminal_kind: TerminalKind,
+    pub(crate) repl_start: bool,
     terminal_env: Option<String>,
     authenticated_subject: Option<String>,
 }
@@ -113,6 +114,7 @@ impl RuntimeContext {
                 .map(|value| value.trim().to_ascii_lowercase())
                 .filter(|value| !value.is_empty()),
             terminal_kind,
+            repl_start: terminal_kind == TerminalKind::Repl,
             terminal_env,
             authenticated_subject: None,
         }
@@ -126,6 +128,12 @@ impl RuntimeContext {
     /// Returns the active terminal mode.
     pub fn terminal_kind(&self) -> TerminalKind {
         self.terminal_kind
+    }
+
+    /// Whether this process starts the interactive shell, rather than a one-shot
+    /// command that merely uses REPL-scoped presentation configuration.
+    pub fn is_repl(&self) -> bool {
+        self.repl_start
     }
 
     /// Returns the detected terminal environment string, if available.
@@ -535,7 +543,11 @@ impl AppRuntime {
     }
 
     pub(crate) fn set_access_policy(&mut self, policy: Option<Arc<dyn AccessPolicy>>) {
-        self.auth.access_policy = policy;
+        self.auth
+            .set_access_policy(policy, Some(self.config.resolved()));
+        if self.auth.access_policy.is_some() && !self.auth.session_facts().authenticated {
+            self.set_authenticated_subject(None);
+        }
     }
 }
 
@@ -547,6 +559,26 @@ pub struct AuthState {
 }
 
 impl AuthState {
+    pub(crate) fn for_policy(
+        policy: Option<Arc<dyn AccessPolicy>>,
+        config: Option<&ResolvedConfig>,
+    ) -> Self {
+        let mut auth = Self::default();
+        auth.set_access_policy(policy, config);
+        auth
+    }
+
+    fn set_access_policy(
+        &mut self,
+        policy: Option<Arc<dyn AccessPolicy>>,
+        config: Option<&ResolvedConfig>,
+    ) {
+        if let (Some(policy), Some(config)) = (&policy, config) {
+            policy.configure(config);
+        }
+        self.access_policy = policy;
+    }
+
     pub(crate) fn from_commands(
         plugins: &PluginManager,
         native_commands: &NativeCommandRegistry,

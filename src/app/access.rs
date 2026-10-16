@@ -16,6 +16,15 @@ pub enum Visibility {
 /// Visibility and session facts must be side-effect free: help, completion,
 /// the prompt and doctor read them without acquiring credentials.
 pub trait AccessPolicy: Send + Sync {
+    /// Refreshes side-effect-free product state from resolved configuration.
+    ///
+    /// Called only by the shared `AuthState` policy-attachment path, before
+    /// visibility is read in root help, runtime startup or REPL rebuilds.
+    /// Root help has resolved config but no runtime: it cannot call `startup`,
+    /// which may acquire credentials, and `visibility` has no config argument.
+    /// Implementations must not acquire credentials or perform network I/O.
+    fn configure(&self, _config: &crate::config::ResolvedConfig) {}
+
     /// Whether the canonical command path is offered to the current identity.
     fn visibility(&self, _path: &[String]) -> Visibility {
         Visibility::Shown
