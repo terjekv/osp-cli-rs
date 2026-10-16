@@ -301,6 +301,11 @@ pub(crate) fn json_failure_error(
         if let Some(id) = &error.request_id {
             details.insert("request_id".into(), serde_json::json!(id));
         }
+        let details = if details.is_empty() {
+            Value::Null
+        } else {
+            Value::Object(details)
+        };
         serde_json::json!({"code": code, "message": error.message, "details": details})
     } else {
         let error = crate::core::command_error::legacy_text_hint(&message);

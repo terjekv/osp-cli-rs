@@ -12,6 +12,36 @@ pub struct CommandError {
     pub request_id: Option<String>,
 }
 
+impl CommandError {
+    /// Creates a failure message without recovery advice or a request identifier.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            action: None,
+            request_id: None,
+        }
+    }
+
+    /// Attaches recovery advice without a `hint:` prefix.
+    pub fn with_action(mut self, action: impl Into<String>) -> Self {
+        self.action = Some(action.into());
+        self
+    }
+
+    /// Renders the message and recovery fields for embedding in text documents.
+    /// Native command failures should retain this error as structured data.
+    pub fn render(&self) -> String {
+        let mut text = self.message.clone();
+        if let Some(id) = &self.request_id {
+            text.push_str(&format!("\nrequest-id: {id}"));
+        }
+        if let Some(action) = &self.action {
+            text.push_str(&format!("\nhint: {action}"));
+        }
+        text
+    }
+}
+
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)

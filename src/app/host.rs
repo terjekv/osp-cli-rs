@@ -114,6 +114,7 @@ struct BoxedContextError {
     backtrace: Backtrace,
     command_path: Option<String>,
     command_suffix: Option<String>,
+    structured: Option<crate::core::CommandError>,
 }
 
 #[derive(Debug)]
@@ -788,7 +789,7 @@ pub fn render_report_message(
     let detailed = level >= MessageLevel::Info;
     let structured = find_error_in_chain::<crate::core::CommandError>(err);
     let mut rendered = if let Some(error) = structured {
-        error.message.clone()
+        error.render()
     } else if let Some(clap) = known.clap {
         if let Some(name) = clap
             .to_string()
@@ -816,14 +817,6 @@ pub fn render_report_message(
     } else {
         base_error_message(err, &known)
     };
-    if let Some(error) = structured {
-        if let Some(id) = &error.request_id {
-            rendered.push_str(&format!("\nrequest-id: {id}"));
-        }
-        if let Some(action) = &error.action {
-            rendered.push_str(&format!("\nhint: {action}"));
-        }
-    }
     if !detailed {
         if let Some(hint) = known_error_hint(&known, &settings.runtime.command_scope)
             && crate::core::command_error::legacy_text_hint(&rendered)
@@ -1204,6 +1197,7 @@ where
         backtrace: Backtrace::force_capture(),
         command_path: Some(path.join(" ")),
         command_suffix,
+        structured: None,
     })
 }
 
@@ -1217,6 +1211,7 @@ where
         backtrace: Backtrace::force_capture(),
         command_path: None,
         command_suffix: None,
+        structured: None,
     })
 }
 
@@ -1224,12 +1219,14 @@ pub(crate) fn report_anyhow_with_context(
     err: anyhow::Error,
     context: ErrorContext,
 ) -> miette::Report {
+    let structured = err.downcast_ref::<crate::core::CommandError>().cloned();
     miette::Report::new(BoxedContextError {
         context,
-        source: err.into_boxed_dyn_error(),
+        source: err.reallocate_into_boxed_dyn_error_without_backtrace(),
         backtrace: Backtrace::force_capture(),
         command_path: None,
         command_suffix: None,
+        structured,
     })
 }
 
@@ -1301,6 +1298,13 @@ where
     let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
     while let Some(source) = current {
         if let Some(found) = source.downcast_ref::<E>() {
+            return Some(found);
+        }
+        if let Some(found) = source
+            .downcast_ref::<BoxedContextError>()
+            .and_then(|context| context.structured.as_ref())
+            .and_then(|error| (error as &dyn std::error::Error).downcast_ref::<E>())
+        {
             return Some(found);
         }
         current = source.source();
