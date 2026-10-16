@@ -248,7 +248,7 @@ pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
 
 /// Parser used for inline command execution without the binary name prefix.
 #[derive(Parser)]
-#[command(name = "osp", no_binary_name = true)]
+#[command(name = "osp", about = "OSP CLI", no_binary_name = true)]
 pub struct InlineCommandCli {
     /// Parsed command payload, if any.
     #[command(subcommand)]
