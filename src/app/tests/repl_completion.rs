@@ -215,7 +215,13 @@ fn repl_help_alias_parsing_and_completion_cover_root_and_scoped_paths_unit() {
 
     let root_values = projected_visible_values(&engine, state.runtime.config.resolved(), "help ");
     assert!(!root_values.contains(&"help".to_string()));
-    assert!(!root_values.iter().any(|value| value.starts_with("--")));
+    assert_eq!(
+        root_values
+            .iter()
+            .filter(|value| value.starts_with("--"))
+            .collect::<Vec<_>>(),
+        vec!["--all"]
+    );
 
     let mut state = make_completion_state();
     state.session.scope.enter("orch");

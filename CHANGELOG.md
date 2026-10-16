@@ -24,6 +24,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   arbitrary plugin stderr, including help output. Preserve structured plugin UI
   text with terminal sanitization and redaction of injected secrets.
 
+- REPL `help --all` emits pipeable rows for every visible command path.
+
 - Ordered DSL filters accept checked relative times such as `now-24h`.
 
 - Add `--csv` and `--tsv` output with ordered headers and compact nested JSON.

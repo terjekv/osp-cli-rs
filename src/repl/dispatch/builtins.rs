@@ -15,6 +15,7 @@ use super::shell::{handle_repl_exit_request, render_repl_help_for_scope};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ReplBuiltin {
     Help,
+    HelpAll,
     Exit,
     Last,
     Pagination(PaginationDirection),
@@ -44,6 +45,40 @@ pub(super) fn execute_repl_builtin(
     sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
     match builtin {
+        ReplBuiltin::HelpAll => {
+            let parsed =
+                crate::repl::input::ReplParsedLine::parse(raw, state.runtime.config.resolved())?;
+            let scanned = crate::cli::invocation::scan_command_tokens(&parsed.dispatch_tokens)?;
+            let invocation = crate::app::resolve_invocation_ui(
+                state.runtime.config.resolved(),
+                &state.runtime.ui,
+                &scanned.invocation,
+            );
+            let prepared = crate::repl::lifecycle::prepare_repl_surface_state(
+                &state.runtime,
+                &state.session,
+                &state.clients,
+            )?;
+            let mut rows = Vec::new();
+            for spec in &prepared.surface.specs {
+                collect_help_paths(spec, "", &mut rows);
+            }
+            let output = crate::app::CommandOutput::output(
+                crate::core::output_model::OutputResult::from_rows(rows),
+                None,
+            );
+            Ok(ReplResult::Print(
+                super::command::render_repl_command_output(
+                    &state.runtime,
+                    &mut state.session,
+                    raw,
+                    &parsed.stages,
+                    output,
+                    &invocation,
+                    sink,
+                )?,
+            ))
+        }
         ReplBuiltin::Help => {
             let invocation = super::base_repl_invocation(&state.runtime);
             Ok(ReplResult::Print(render_repl_help_for_scope(
@@ -66,6 +101,23 @@ pub(super) fn execute_repl_builtin(
         ReplBuiltin::Bang(command) => {
             execute_bang_command(&mut state.session, history, raw, command)
         }
+    }
+}
+
+fn collect_help_paths(
+    spec: &crate::completion::CompletionNode,
+    prefix: &str,
+    rows: &mut Vec<crate::core::row::Row>,
+) {
+    if spec.value_key || spec.value_leaf {
+        return;
+    }
+    let path = format!("{prefix}{}", spec.name);
+    rows.push(
+        crate::row! { "command" => path.clone(), "description" => spec.tooltip.as_deref().unwrap_or("") },
+    );
+    for child in spec.children.values() {
+        collect_help_paths(child, &format!("{path} "), rows);
     }
 }
 

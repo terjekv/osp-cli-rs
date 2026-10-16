@@ -381,6 +381,17 @@ fn classify_repl_line(
     // 2. Parse the line into REPL-local command/stage shape.
     let parsed = parse_repl_dispatch_line(runtime, line)?;
 
+    let scanned = scan_command_tokens(&parsed.dispatch_tokens)?;
+    use clap::Parser;
+    if scanned.tokens.first().is_some_and(|word| word == "help")
+        && crate::cli::ReplHelpCommand::try_parse_from(&scanned.tokens).is_ok_and(|help| help.all)
+    {
+        return Ok(ReplLinePlan::Builtin {
+            raw: line.to_string(),
+            builtin: ReplBuiltin::HelpAll,
+        });
+    }
+
     // 3. Handle REPL-local affordances before normal command dispatch.
     if let Some(plan) = classify_repl_local_plan(runtime, session, &parsed)? {
         return Ok(plan);

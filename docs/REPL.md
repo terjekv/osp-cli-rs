@@ -395,3 +395,8 @@ includes mutations and unclassified integration commands. Existing
 command confirmations still apply. `--ignore-errors` continues after failures;
 a final `N ok, M failed` tally is always printed after execution. Like `source`,
 exit or reload stops the batch, and nested source/each commands are refused.
+
+`help --all` lists every visible command path and description as ordinary rows.
+Use `help --all | uptime`, `help --all | F command ~ task`, `help --all --json`,
+or `help --all | Y` to filter, export, or copy the catalog. Hidden commands
+and positional/value completion entries are excluded.

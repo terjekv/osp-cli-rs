@@ -901,10 +901,18 @@ pub(crate) fn command_help_document(
     )
 }
 
+#[derive(clap::Parser)]
+#[command(name = "help", about = "Show REPL help")]
+pub(crate) struct ReplHelpCommand {
+    /// List all visible command paths.
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
 pub(crate) fn repl_only_commands() -> [clap::Command; 6] {
     use clap::{Arg, ArgAction, Command, ValueHint};
     [
-        Command::new("help").about("Show REPL help"),
+        <ReplHelpCommand as clap::CommandFactory>::command(),
         Command::new("last")
             .about("Replay the last successful result")
             .arg(
