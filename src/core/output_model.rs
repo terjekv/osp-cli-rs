@@ -23,7 +23,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 /// Producer-declared human display changes. Conditions use original row values;
-/// rules never change canonical data or DSL field values.
+/// rules never change canonical data or DSL field values. Field selectors accept
+/// literal top-level keys, dotted paths, or JSON Pointers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
@@ -86,10 +87,12 @@ pub struct OutputMeta {
     /// Stable first-seen column order for row rendering.
     pub key_index: Vec<String>,
     /// Optional curated field paths for human display, in priority order.
+    /// Dotted paths and JSON Pointers both support human field selection.
     pub display_columns: Option<Vec<String>>,
     /// Optional human labels aligned positionally with `display_columns`.
     pub display_column_labels: Option<Vec<String>>,
     /// Producer-declared numeric timestamp paths, measured in Unix seconds.
+    /// Uses the same selectors as `display_columns`.
     pub unix_timestamp_columns: Vec<String>,
     /// Human-only conditional field formatting, evaluated against raw rows.
     pub display_rules: Vec<DisplayRule>,

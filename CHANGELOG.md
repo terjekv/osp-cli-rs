@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Human display paths accept JSON Pointers for literal field segments in
+  columns, formatting rules and timestamp fields. Duplicate display labels
+  retain separate cells with disambiguated headings.
+
 - **Breaking:** Add `FlagCompletions::positionals` for dynamic suggestions keyed
   by zero-based argument slot, including variadic slots. Omitted slots keep static
   suggestions; empty lists suppress them. Struct literals must supply the field

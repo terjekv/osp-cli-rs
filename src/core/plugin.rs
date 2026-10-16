@@ -432,6 +432,7 @@ pub struct ResponseMetaV1 {
     /// Preferred output format for rendering the payload.
     pub format_hint: Option<String>,
     /// Preferred field paths for row or curated record projections.
+    /// Paths accept dotted keys or JSON Pointers for literal field segments.
     pub columns: Option<Vec<String>>,
     /// Preferred alignment hints for displayed columns.
     #[serde(default)]

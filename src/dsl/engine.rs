@@ -350,7 +350,14 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
     if synthesized.is_empty() {
         return;
     }
-    let created = |field: &String| synthesized.contains(field);
+    let created = |field: &String| {
+        synthesized.contains(field)
+            || field
+                .strip_prefix('/')
+                .and_then(|path| path.split('/').next())
+                .map(|key| key.replace("~1", "/").replace("~0", "~"))
+                .is_some_and(|key| synthesized.contains(&key))
+    };
     meta.unix_timestamp_columns.retain(|field| !created(field));
     meta.display_rules.retain(|rule| match rule {
         DisplayRule::SuffixWhenTrue { field, when, .. }

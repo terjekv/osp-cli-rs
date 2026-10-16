@@ -644,17 +644,13 @@ fn display_output(output: &OutputResult) -> OutputResult {
                 }
             }
             *row = if let Some(columns) = &output.meta.display_columns {
-                let labels = output
-                    .meta
-                    .display_column_labels
-                    .as_ref()
-                    .filter(|labels| labels.len() == columns.len());
+                let labels = display_labels(output, columns);
                 columns
                     .iter()
                     .enumerate()
                     .map(|(index, path)| {
                         let value = display_path(&original, path);
-                        let label = labels.and_then(|labels| labels.get(index)).unwrap_or(path);
+                        let label = &labels[index];
                         (label.clone(), value.cloned().unwrap_or(Value::Null))
                     })
                     .collect()
@@ -663,27 +659,55 @@ fn display_output(output: &OutputResult) -> OutputResult {
             };
         }
         if let Some(columns) = &output.meta.display_columns {
-            display.meta.key_index = output
-                .meta
-                .display_column_labels
-                .as_ref()
-                .filter(|labels| labels.len() == columns.len())
-                .cloned()
-                .unwrap_or_else(|| columns.clone());
+            display.meta.key_index = display_labels(output, columns);
         }
     }
     display
 }
 
+fn display_labels(output: &OutputResult, columns: &[String]) -> Vec<String> {
+    let labels = output
+        .meta
+        .display_column_labels
+        .as_deref()
+        .filter(|labels| labels.len() == columns.len())
+        .unwrap_or(columns);
+    let mut used = BTreeSet::new();
+    labels
+        .iter()
+        .zip(columns)
+        .map(|(label, path)| {
+            let mut heading = if labels.iter().filter(|other| *other == label).count() > 1 {
+                format!("{label} ({path})")
+            } else {
+                label.clone()
+            };
+            let base = heading.clone();
+            let mut count = 2;
+            while !used.insert(heading.clone()) {
+                heading = format!("{base} ({count})");
+                count += 1;
+            }
+            heading
+        })
+        .collect()
+}
+
 fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    value
-        .get(path)
-        .or_else(|| path.split('.').try_fold(value, |value, key| value.get(key)))
+    value.get(path).or_else(|| {
+        if path.starts_with('/') {
+            value.pointer(path)
+        } else {
+            path.split('.').try_fold(value, |value, key| value.get(key))
+        }
+    })
 }
 
 fn display_path_mut<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
     if value.get(path).is_some() {
         value.get_mut(path)
+    } else if path.starts_with('/') {
+        value.pointer_mut(path)
     } else {
         path.split('.')
             .try_fold(value, |value, key| value.get_mut(key))
