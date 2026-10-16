@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Add `AccessPolicy::before_dispatch` for product credential acquisition before
+  native parsing, explicit help, metadata preparation, or REPL shell entry.
+  Root help, completion and background refresh remain side-effect free.
+
 - **Breaking:** Add `DisplayRule::HideArrayItemsWhenTrue` for human-only
   filtering of boolean-marked array members. Canonical JSON and DSL data
   retain every member; exhaustive matches on `DisplayRule` need the new arm.

@@ -35,6 +35,18 @@ pub trait AccessPolicy: Send + Sync {
         Ok(())
     }
 
+    /// Runs before external metadata, help, execution, or REPL scope entry.
+    ///
+    /// Native invocations supply the canonical root followed by input tokens,
+    /// before parsing; plugins and scope entry supply the known command path.
+    /// Implementations must not log tokens, which may contain sensitive input.
+    /// This hook handles explicit user invocations only, never root help,
+    /// completion, or background refresh. Products may acquire credentials here
+    /// when their interaction policy permits it. An error cancels dispatch.
+    fn before_dispatch(&self, _path: &[String], _runtime: &mut AppRuntime) -> miette::Result<()> {
+        Ok(())
+    }
+
     /// Runs once before an external execution and any metadata refresh.
     ///
     /// The path is canonical when the cached grammar resolves it. If dynamic

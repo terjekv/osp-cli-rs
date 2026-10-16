@@ -124,7 +124,19 @@ pub(crate) fn normalize_cli_profile(cli: &mut Cli) -> Option<String> {
 
 /// Checks visibility before invoking the product for an execution attempt.
 /// The final runnable check follows any native metadata refresh.
-pub(crate) fn before_external_run(
+pub(crate) fn before_external_dispatch(
+    runtime: &mut crate::app::AppRuntime,
+    path: &CommandPath,
+    kind: &'static str,
+) -> Result<()> {
+    ensure_external_access(runtime, path, ExternalPathAccessRequirement::Visible, kind)?;
+    if let Some(policy) = runtime.access_policy() {
+        policy.before_dispatch(path.as_slice(), runtime)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn before_external_execution(
     runtime: &mut crate::app::AppRuntime,
     path: &CommandPath,
     requirement: ExternalPathAccessRequirement,
@@ -137,6 +149,16 @@ pub(crate) fn before_external_run(
         policy.before_run(path.as_slice(), runtime)?;
     }
     Ok(())
+}
+
+pub(crate) fn before_external_run(
+    runtime: &mut crate::app::AppRuntime,
+    path: &CommandPath,
+    requirement: ExternalPathAccessRequirement,
+    kind: &'static str,
+) -> Result<()> {
+    before_external_dispatch(runtime, path, kind)?;
+    before_external_execution(runtime, path, requirement, kind)
 }
 
 pub(crate) fn ensure_external_access(

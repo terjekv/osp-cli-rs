@@ -24,8 +24,9 @@ use crate::repl::completion;
 use crate::repl::is_repl_shellable_command;
 
 use super::dispatch::{
-    ExternalCommandSource, ExternalPathAccessRequirement, before_external_run,
-    canonical_external_command_name, ensure_external_access, resolve_external_command_source,
+    ExternalCommandSource, ExternalPathAccessRequirement, before_external_dispatch,
+    before_external_execution, before_external_run, canonical_external_command_name,
+    ensure_external_access, resolve_external_command_source,
 };
 use super::sink::{ProgressUiSink, UiSink};
 use super::{
@@ -403,9 +404,13 @@ fn run_native_invocation(
             "elevation prefix is unsupported for native command `{name}`"
         ));
     }
+    let input_path = crate::command_policy::CommandPath::new(
+        std::iter::once(name.to_string()).chain(args.iter().cloned()),
+    );
+    before_external_dispatch(runtime, &input_path, "command")?;
     let parsed = NativeParse::new(command, name, args)?;
     let intent = NativeIntent::from_parse(&parsed);
-    before_external_run(runtime, &parsed.path, intent.requirement, "command")?;
+    before_external_execution(runtime, &parsed.path, intent.requirement, "command")?;
     let parsed = refresh_native_parse(
         command,
         name,
