@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import sys
+
+if sys.argv[1:] == ["--osp-describe"]:
+    print(json.dumps({"about": "Greet people", "output": "json",
+                      "args": [{"name": "who", "multi": True}],
+                      "flags": {"--loud": {"about": "Shout", "flag_only": True}}}))
+    sys.exit(0)
+
+p = argparse.ArgumentParser(prog="osp hello", description="Greet people")
+p.add_argument("who", nargs="*")
+p.add_argument("--loud", action="store_true")
+a = p.parse_args()
+word = "HELLO" if a.loud else "hello"
+json.dump([{"name": w, "greeting": f"{word} {w}"} for w in a.who or ["world"]], sys.stdout)

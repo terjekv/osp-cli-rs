@@ -126,7 +126,7 @@ Notes:
 - Launch-time bootstrap flags like `--theme` and `-u` may still affect startup
   state or session defaults.
 - Invocation flags like `--json`, `--format`, `--render-mode`, `--color`, `--ascii`,
-  `-v/-q`, `-d`, and `--plugin-provider` do not write into config state.
+  `-v/-q` and `-d` do not write into config state.
 - `config get --sources` therefore reflects stored defaults, not one-shot
   invocation overrides.
 
@@ -156,14 +156,14 @@ without custom host loading code:
 
 - Unknown keys are rejected by default.
 - `extensions.*` is the only open namespace for unknown keys.
-- Plugin-owned config can live under `extensions.plugins.*`; the CLI projects
-  `extensions.plugins.env.*` and `extensions.plugins.<plugin-id>.env.*` into
-  plugin subprocess env. Inspect the effective projection with
-  `osp plugins config <plugin-id>`. See `docs/PLUGIN_PROTOCOL.md`.
-- `extensions.plugins.timeout_ms` bounds plugin discovery (`--describe`) and
-  command execution. Default: `10000`.
-- `extensions.plugins.discovery.path` enables discovery of `osp-*` executables
-  from ambient `PATH`. Default: `false`.
+- Plugin environment config uses `extensions.plugins.env.*` and
+  `extensions.plugins.<command>.env.*`. See [PLUGINS.md](PLUGINS.md).
+- `extensions.plugins.timeout_ms` bounds optional `--osp-describe` calls only.
+  Default: `10000`. Ordinary runs have no timeout.
+- `extensions.plugins.disabled` lists disabled command names. PATH discovery
+  is enabled by default; there is no discovery toggle in config.
+- The `extensions.plugins.*` namespace accepts the keys above and environment
+  projection keys. Other extension namespaces remain open.
 - Values are adapted to schema type after merge/interpolation:
   strings, booleans, integers, floats.
 - Enum-like string keys (for example `ui.format`) are validated against

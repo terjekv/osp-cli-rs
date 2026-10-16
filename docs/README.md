@@ -23,10 +23,10 @@ cover customization, plugins, embedding, and development.
 ## Common Jobs
 
 - inspect which plugin-provided commands are available:
-  [COOKBOOK.md](COOKBOOK.md) and [USING_PLUGINS.md](USING_PLUGINS.md)
-- debug a missing command or provider conflict:
+  [COOKBOOK.md](COOKBOOK.md) and [PLUGINS.md](PLUGINS.md)
+- debug a missing or shadowed command:
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md) and
-  [USING_PLUGINS.md](USING_PLUGINS.md)
+  [PLUGINS.md](PLUGINS.md)
 - understand `-v/-vv/-vvv` versus `-d/-dd/-ddd`:
   [FORMATTING.md](FORMATTING.md), [LOGGING.md](LOGGING.md), and
   [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
@@ -80,13 +80,13 @@ UI/rendering or REPL presentation
 - building a site-specific product crate on top of `osp-cli`:
   [EMBEDDING.md](EMBEDDING.md)
 - using plugin-provided commands:
-  [USING_PLUGINS.md](USING_PLUGINS.md)
+  [PLUGINS.md](PLUGINS.md)
 - writing plugins:
-  [WRITING_PLUGINS.md](WRITING_PLUGINS.md)
+  [PLUGINS.md](PLUGINS.md)
 - subprocess protocol:
-  [PLUGIN_PROTOCOL.md](PLUGIN_PROTOCOL.md)
+  [PLUGINS.md](PLUGINS.md)
 - bundled plugin packaging:
-  [PLUGIN_PACKAGING.md](PLUGIN_PACKAGING.md)
+  [PLUGINS.md](PLUGINS.md)
 - auth and command policy boundary:
   [AUTH.md](AUTH.md)
 - site-specific integrations belong in downstream product repositories

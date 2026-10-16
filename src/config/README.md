@@ -6,7 +6,7 @@ explain` and `config set --save` all go through the same code, so they cannot
 disagree.
 
 Builtin declarations reuse the owning output and REPL enum vocabularies and
-the plugin timeout constant. This module does not render output.
+the plugin describe timeout constant. This module does not render output.
 
 ## Layout
 

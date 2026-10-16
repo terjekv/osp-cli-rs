@@ -17,13 +17,13 @@ one feature. `core` is not a place for helpers without a home.
 | `output_model.rs` | `OutputResult`, JSON/row conversion, group context and render hints |
 | `output.rs` | Output format and mode enums shared by flags, config and UI |
 | `command_policy.rs` | Whether a command is visible or allowed in the current context |
-| `plugin.rs` | Plugin protocol DTOs (`DescribeV1`, `ResponseV1`) and validation |
+| `plugin.rs` | Plugin protocol DTOs (`PluginDescribe`, `ResponseV1`) and validation |
 | `runtime.rs` | Runtime hints passed to native and plugin commands |
 | `shell_words.rs`, `fuzzy.rs` | Shell scanning and quoting; the fuzzy matcher used by completion |
 
 ## Common changes
 
-- **Protocol change:** `plugin.rs` together with `docs/PLUGIN_PROTOCOL.md`.
+- **Protocol change:** `plugin.rs` together with `docs/PLUGINS.md`.
   Additive fields with defaults keep old plugins working; anything else needs
   a protocol version bump.
 - **New command metadata (e.g. a flag property):** declare it in clap for

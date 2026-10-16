@@ -7,6 +7,36 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Plugins are drop-in `osp-NAME` executables. Builtins and native
+  commands win name clashes; the first plugin found wins. PATH is searched by
+  default. Root help now lists plugins, and inventory shows shadowed entries.
+- **Breaking:** Replace `--describe` and the multi-command `DescribeV1` wrapper
+  with optional `--osp-describe` returning a single command object without
+  `name`. Include the literal marker in the executable to opt into discovery.
+  Set `"output": "json"` to request automatic rendering. Describe failures are
+  listed but do not block execution. Remove bundled `manifest.toml` files.
+- **Breaking:** Plugin argv no longer includes a leading command name. Read
+  `OSP_COMMAND` instead, using symlinks for multiple names from one executable.
+  Runs inherit stdio and the full environment, have no timeout, and preserve
+  exit codes. `extensions.plugins.timeout_ms` now limits describe only.
+  `--help` and `-h` always use the executable's own parser and terminal output.
+- Plugins may return bare JSON arrays or objects. Explicit format flags and DSL
+  stages capture stdout for the existing renderer; text remains text, while
+  DSL stages require JSON. Captured stdout retains the 64 MiB limit.
+- Fix `ResponseV1` decoding to accept omitted `meta`; messages, context, and
+  render hints remain supported. Plugins also receive effective `OSP_USER`.
+- **Breaking:** Remove `--plugin-provider`, provider selection, and config keys
+  `plugins.<command>.state`, `plugins.<command>.provider`, and
+  `extensions.plugins.discovery.path`. Remove `plugins commands`, `config`,
+  `doctor`, `clear-state`, `select-provider`, and `clear-provider`; use
+  `plugins list`, `config get extensions.plugins`, and `doctor plugins`.
+  Enable/disable now edit `extensions.plugins.disabled = ["name"]` in the
+  active profile with `osp plugins enable|disable NAME`.
+- **Breaking:** Rename `extensions.plugins.<id>.env.*` to
+  `extensions.plugins.<command>.env.*`. Environment normalization collisions
+  now use the later config value, with per-command values after shared values.
+
+
 - **Breaking:** Configure hosts directly with `App` setters. Replace `AppBuilder`
   and sink-bound `AppRunner` calls with `App::new()` and explicit sink arguments.
 

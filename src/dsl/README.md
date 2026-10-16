@@ -41,9 +41,9 @@ and one `cli` row adapter in `value.rs`. It never runs commands or reads config.
 ## Debugging
 
 ```sh
-osp plugins commands | H            # verb list
-osp plugins commands | H F          # one verb's syntax
-osp plugins commands --json | P name about
+osp plugins list | H            # verb list
+osp plugins list | H F          # one verb's syntax
+osp plugins list --json | P name about
 ```
 
 Document producers supply flat sectioned rows before selector validation. The

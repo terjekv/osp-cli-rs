@@ -29,14 +29,14 @@ Convenience aliases:
 Examples:
 
 ```bash
-osp plugins commands --format table
-osp plugins commands --json
+osp plugins list --format table
+osp plugins list --json
 osp help --format auto
 ```
 
 ```text
-plugins commands --format table
-plugins commands --json
+plugins list --format table
+plugins list --json
 help --format auto
 ```
 
@@ -113,17 +113,12 @@ Normal operator flow:
 Examples:
 
 ```bash
-osp plugins commands -v
+osp plugins list -v
 osp config get ui.format -vv
 osp config get ui.format -v -dd
-osp plugins commands -dd
-osp plugins commands --json -q
+osp plugins list -dd
+osp plugins list --json -q
 ```
-
-## Provider Selection
-
-Use `--plugin-provider <plugin-id>` when multiple plugins provide the same
-command and you want to choose the provider for one invocation.
 
 ## Placement Rules
 
@@ -132,8 +127,8 @@ Invocation flags may appear anywhere before `--`.
 These are all valid:
 
 ```bash
-osp plugins commands --json
-osp --json plugins commands
+osp plugins list --json
+osp --json plugins list
 osp plugins --json commands
 ```
 
@@ -155,7 +150,7 @@ osp config set ui.format json --save
 That sets the default. It is different from:
 
 ```bash
-osp plugins commands --json
+osp plugins list --json
 ```
 
 Which only affects that invocation.
@@ -165,13 +160,13 @@ Which only affects that invocation.
 Force plain JSON for shell scripts:
 
 ```bash
-osp --format json --render-mode plain plugins commands
+osp --format json --render-mode plain plugins list
 ```
 
 Keep the normal format but suppress color:
 
 ```bash
-osp --no-color plugins commands
+osp --no-color plugins list
 ```
 
 Render help as a document rather than rows:

@@ -10,9 +10,7 @@ Use this when your product wants:
 - site-specific commands, policy, auth, or integrations
 
 Do not use this guide if you are only writing external plugins. That path is
-covered by [USING_PLUGINS.md](USING_PLUGINS.md),
-[WRITING_PLUGINS.md](WRITING_PLUGINS.md), and
-[PLUGIN_PROTOCOL.md](PLUGIN_PROTOCOL.md).
+covered by [PLUGINS.md](PLUGINS.md).
 
 If you want the shortest copy-and-adapt path, read `Recommended Shape` first
 and then jump straight to `Worked Recipe`.

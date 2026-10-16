@@ -9,7 +9,7 @@ commands when you are scripting, automating, or just need one answer.
 
 Examples that use `inventory ...` below are illustrative provider-backed
 commands. Replace them with a real plugin command from
-`plugins commands`.
+`plugins list`.
 
 ## How a line is processed
 
@@ -52,11 +52,11 @@ If a command works as a one-shot invocation, the same command text should work
 inside the REPL.
 
 ```bash
-osp plugins commands --json -v
+osp plugins list --json -v
 ```
 
 ```text
-plugins commands --json -v
+plugins list --json -v
 ```
 
 That includes:
@@ -64,7 +64,6 @@ That includes:
 - DSL pipes
 - `--format` and format shorthands like `--json`
 - `-v/-q/-d`
-- `--plugin-provider`
 
 Failures use the same renderer as one-shot commands: a concise summary by
 default and a full report at `-v` and above. `-vv` additionally enables trace
@@ -279,7 +278,7 @@ Do a short built-in investigation:
 
 ```text
 plugins list
-plugins commands --format md
+plugins list --format md
 help config
 ```
 

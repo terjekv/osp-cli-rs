@@ -45,8 +45,8 @@ OutputResult / Document
 
 ```sh
 osp theme list
-osp plugins commands --format table --plain     # no colour, ASCII chrome
-osp plugins commands --json                     # the data before ui
+osp plugins list --format table --plain     # no colour, ASCII chrome
+osp plugins list --json                     # the data before ui
 ```
 
 Documents lower to the same UI blocks as ordinary data, including `EntriesBlock`.

@@ -84,7 +84,7 @@ Examples:
 plugins <TAB>
 config set <TAB>
 theme use <TAB>
-plugins commands | <TAB>
+plugins list | <TAB>
 ```
 
 That is the important contract: completion should help you finish real command
@@ -115,7 +115,6 @@ CLI, such as:
 - `--verbose`
 - `--quiet`
 - `--debug`
-- `--plugin-provider`
 
 Parsing also accepts short forms like `-v/-q/-d`, but completion suggestions
 use the long names.
@@ -192,11 +191,10 @@ If your install never exposes shellable roots, you can ignore this section.
 Check the command catalog and configuration first:
 
 1. confirm the command exists in the current catalog:
-   `plugins commands`
+   `plugins list`
 2. confirm the plugin/provider state is healthy:
-   `plugins doctor`
-3. if there is a provider conflict, choose one explicitly with
-   `--plugin-provider`
+   `doctor plugins`
+3. check shadowed or disabled entries in `plugins list`
 4. if the issue is on `config set`, confirm you are using a real config key
 
 Completion problems are often catalog problems, not editor problems.

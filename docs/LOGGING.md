@@ -79,7 +79,7 @@ OSP_TRACE_STARTUP=1 osp
 OSP_TRACE_STARTUP=json osp --defaults-only config show 2>startup.json
 ```
 
-Use this trace to find repeated config passes, plugin discovery and `--describe`
+Use this trace to find repeated config passes, plugin discovery and `--osp-describe`
 subprocesses, or work that runs before the command is known.
 
 ## REPL Behavior
@@ -90,9 +90,9 @@ session baseline; per-line flags add to that baseline for one command. The
 stderr override leaves file logging unchanged.
 
 ```text
-plugins commands -v
-plugins commands -vv
-plugins commands -dd
+plugins list -v
+plugins list -vv
+plugins list -dd
 ```
 
 ## Config Keys
@@ -127,7 +127,7 @@ Plugins should keep data output on `stdout` and diagnostics on `stderr`.
 stays on `stdout` and diagnostics stay on `stderr`.
 
 ```bash
-osp plugins commands --json -d 2>debug.log
+osp plugins list --json -d 2>debug.log
 ```
 
 Configured `debug.level` applies from configuration resolution onward. Use

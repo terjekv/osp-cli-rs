@@ -6,25 +6,25 @@ Unless noted otherwise, every example here uses upstream command surfaces that
 exist in a plain `osp-cli` install.
 
 Examples that use `inventory ...` are illustrative provider-backed command
-shapes. Replace them with a real plugin command from `osp plugins commands`.
+shapes. Replace them with a real plugin command from `osp plugins list`.
 
 ## Inspect Plugin-Provided Commands
 
 ```bash
 osp plugins list
-osp plugins commands
+osp plugins list
 ```
 
 ## Ask For JSON Once
 
 ```bash
-osp plugins commands --json
+osp plugins list --json
 ```
 
 ## Force Plain JSON For Scripts
 
 ```bash
-osp --format json --render-mode plain plugins commands
+osp --format json --render-mode plain plugins list
 ```
 
 ## Explain Why A Config Value Won
@@ -45,7 +45,7 @@ osp config show --sources
 
 ```text
 plugins list
-plugins commands --format md
+plugins list --format md
 help config
 ```
 
@@ -62,28 +62,19 @@ help config
 ## Switch Output Format For One Command
 
 ```bash
-osp plugins commands --format md
-osp plugins commands --value
+osp plugins list --format md
+osp plugins list --value
 ```
 
-## Pick One Provider For One Invocation
-
-Illustrative provider-backed example:
+## Inspect Plugin Search Order
 
 ```bash
-osp inventory host web-01 --plugin-provider inventory-a
+osp plugins list
+osp doctor plugins
 ```
 
-## Debug A Provider Conflict
-
-Illustrative provider-backed example:
-
-```bash
-osp plugins commands
-osp plugins doctor
-osp inventory host web-01 --plugin-provider inventory-a
-osp plugins select-provider inventory inventory-a
-```
+Builtins and native commands win; the first matching executable wins among
+plugins. Remove a shadowing copy or change the search path to choose another.
 
 ## Set Sane Daily Defaults
 
@@ -96,8 +87,8 @@ osp config set repl.simple_prompt true --permanent
 ## Do A First-Pass Plugin Health Check
 
 ```bash
-osp plugins doctor
-osp -d plugins doctor
+osp doctor plugins
+osp -d doctor plugins
 ```
 
 ## Keep Reading

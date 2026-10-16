@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Best-effort Click/Typer -> osp DescribeV1 helper.
+"""Best-effort Click/Typer -> osp command metadata helper.
 
 This inspects Click command objects directly. Typer apps work because they
 compile down to Click commands. The output is a convenience starter, not a
@@ -78,29 +78,23 @@ def convert_command(name: str, command: click.Command) -> dict[str, Any]:
     return node
 
 
-def build_describe(command: click.Command, plugin_id: str, plugin_version: str) -> dict[str, Any]:
-    top_name = (command.name or plugin_id).removeprefix("osp-")
-    return {
-        "protocol_version": 1,
-        "plugin_id": plugin_id,
-        "plugin_version": plugin_version,
-        "min_osp_version": None,
-        "commands": [convert_command(top_name, command)],
-    }
+def build_describe(command: click.Command) -> dict[str, Any]:
+    payload = convert_command("", command)
+    payload.pop("name")
+    payload["output"] = "json"
+    return payload
 
 
 def main() -> int:
-    cli = argparse.ArgumentParser(description="Convert a Click/Typer command into a DescribeV1 skeleton.")
+    cli = argparse.ArgumentParser(description="Convert a Click/Typer command into a optional describe skeleton.")
     cli.add_argument("command_ref", help="Python reference in MODULE:ATTR form")
-    cli.add_argument("--plugin-id", required=True)
-    cli.add_argument("--plugin-version", default="0.1.0")
     args = cli.parse_args()
 
     command = load_attr(args.command_ref)
     if not isinstance(command, click.Command):
         raise SystemExit("target is not a click.Command / Typer app")
 
-    json.dump(build_describe(command, args.plugin_id, args.plugin_version), sys.stdout, indent=2)
+    json.dump(build_describe(command), sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
 

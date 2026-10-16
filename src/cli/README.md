@@ -1,7 +1,7 @@
 # cli
 
 The grammar: what a user may type after `osp`, which flags are one-shot
-(`--format`, `-v`, `--plugin-provider`) and which are config, and the
+(`--format`, `-v`) and which are config, and the
 handlers for builtin commands once a line has parsed. The REPL reuses this
 grammar for each line, without process argv.
 

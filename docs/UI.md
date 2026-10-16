@@ -226,7 +226,7 @@ ui.messages.layout = "minimal"
 Force Markdown for one command without changing config:
 
 ```bash
-osp --format md plugins commands
+osp --format md plugins list
 ```
 
 Force plain JSON for scripting:

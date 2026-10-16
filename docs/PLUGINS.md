@@ -1,0 +1,139 @@
+# Plugins
+
+An executable named `osp-NAME` adds the command `osp NAME`. Python scripts,
+compiled binaries, and shell scripts all work. No registration is required.
+
+```python
+#!/usr/bin/env python3
+import sys
+print("hello", *sys.argv[1:])
+```
+
+Save this as `osp-hello`, make it executable, and put it on PATH or in
+`~/.config/osp/plugins/`. Then `osp hello bob` prints `hello bob`.
+
+## Discovery and management
+
+Directories are searched in this order:
+
+1. Each `--plugin-dir DIR`, in argument order.
+2. Each directory in `OSP_PLUGIN_PATH`.
+3. `~/.config/osp/plugins/` (the configured user config root).
+4. `OSP_BUNDLED_PLUGIN_DIR`, then `plugins/` next to the binary and
+   `../lib/osp/plugins/`.
+5. PATH.
+
+Builtins and native commands win name clashes. Among plugins, the first
+executable found wins. `osp plugins list` shows name, about, source, path,
+and status, including disabled entries and shadowed copies.
+
+```bash
+osp plugins list
+osp plugins list --json
+osp doctor plugins
+osp plugins refresh
+osp plugins disable hello
+osp plugins enable hello
+```
+
+Enable and disable edit `extensions.plugins.disabled = ["hello"]` in the
+active profile. Disabled executables are neither run nor described. Refresh
+drops cached metadata; doctor shows inventory rows whose status is not `ok`.
+A describe error does not prevent execution.
+
+## Arguments, help, and the terminal
+
+`osp hello bob` executes `osp-hello bob`. The command name is supplied as
+`OSP_COMMAND=hello`, not as a leading argument. To share an executable across
+several commands, install one symlink per name and read `OSP_COMMAND`.
+
+Stdin, stdout, stderr, and the environment are inherited. Ordinary runs have
+no timeout and retain the plugin's exit code. Ctrl-C reaches the foreground
+plugin while the host waits. `osp hello --help` and `osp hello -h` always
+run the executable's own help directly, so argparse and Click work normally.
+Host invocation flags are consumed before `--`; place `--` before arguments
+that must reach the plugin unchanged.
+
+## Optional describe metadata
+
+To add help text, REPL completion, authorization metadata, or automatic JSON
+rendering, include the literal text `--osp-describe` in the executable. Only
+executables containing that marker are invoked for metadata. On that call,
+print one JSON object and exit successfully:
+
+```json
+{
+  "about": "Greet people",
+  "output": "json",
+  "args": [{"name": "who", "multi": true}],
+  "flags": {"--loud": {"about": "Shout", "flag_only": true}}
+}
+```
+
+Every field is optional. `args`, `flags`, `subcommands`, and `auth` use the
+`DescribeCommandV1` shapes in `osp_cli::core::plugin`; the top-level name comes
+from the filename. Child commands include their names. Authorization is
+inherited by child commands and checked by the same host policy as natives.
+
+Describe runs have null stdin, captured stdout, and a time limit set by
+`extensions.plugins.timeout_ms` (default 10000 ms). Metadata, marker scan
+results, and errors are cached by executable path, size, and modification
+time. Plain executables are never run speculatively. Listings, root help,
+and REPL completion use the cached metadata.
+
+`scripts/plugin_describe_from_argparse.py MODULE:ATTR` and
+`scripts/plugin_describe_from_click.py MODULE:ATTR` emit starter metadata for
+JSON-producing plugins. An argparse attribute can be a parser factory.
+
+## JSON output and pipes
+
+Stdout is captured when metadata sets `"output": "json"`, an osp format flag
+such as `--json` or `--format table` is supplied, or the command has DSL stages.
+Stdin and stderr remain live. Captured stdout is limited to 64 MiB.
+
+Bare JSON arrays and objects become rows for the normal renderer and DSL:
+
+```bash
+osp hello bob alice
+osp hello alice --json
+osp hello bob alice --loud '|' 'F name=bob'
+```
+
+Captured text is printed as text. A DSL stage requires JSON; otherwise osp
+reports `` `hello` printed text, not JSON; pipes need JSON output ``.
+A nonzero captured run also reports `hello exited with status N`, and osp
+keeps that exit status.
+
+A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data,
+messages, render hints, and context retain their existing semantics. `meta`
+may be omitted. An `ok: false` response is rendered as an error.
+
+## Environment and config
+
+The full inherited environment is retained. The host also supplies:
+
+- `OSP_COMMAND` and `OSP_USER` (the effective identity).
+- `OSP_PROFILE`, `OSP_FORMAT`, `OSP_COLOR`, and `OSP_UNICODE`.
+- `OSP_UI_VERBOSITY`, `OSP_DEBUG_LEVEL`, `OSP_TERMINAL`, and `OSP_TERMINAL_KIND`.
+
+`extensions.plugins.env.NAME` becomes `OSP_PLUGIN_CFG_NAME` for every plugin.
+`extensions.plugins.hello.env.NAME` overrides it for `hello`. Nonalphanumeric
+separators become underscores and names become uppercase. Values within a
+scope follow config-key order; later values win after normalization. Lists
+are serialized as JSON. Secrets are unwrapped only at the process boundary.
+Use `osp config get extensions.plugins` to inspect configuration.
+
+## Complete example
+
+[examples/plugins/osp-hello](../examples/plugins/osp-hello) uses argparse,
+optional metadata, and bare JSON output:
+
+```bash
+install -D -m755 examples/plugins/osp-hello ~/.config/osp/plugins/osp-hello
+osp hello bob alice --loud
+osp hello --help
+```
+
+The same command is available in the REPL. `hello --l<TAB>` completes the
+flag from its metadata. Running plain text plugins keeps their terminal
+behavior; JSON plugins participate in the renderer and DSL.

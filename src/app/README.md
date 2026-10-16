@@ -42,8 +42,8 @@ modules should not import `app`; the one current exception is
 
 - **Wrapper needs a new hook:** prefer a small trait or builder option here
   over the wrapper reaching into internals; `access.rs` is the model.
-- **Command chosen wrongly:** `dispatch.rs`, then `osp plugins doctor` for
-  provider conflicts.
+- **Command chosen wrongly:** `dispatch.rs`, then `osp plugins list` for
+  disabled or shadowed executables.
 
 Help results use `CommandOutput::document`. Builtins supply clap metadata;
 native commands also use clap metadata; plugins retain their text-help boundary. Doctor attaches its presentation document to the same result while retaining
