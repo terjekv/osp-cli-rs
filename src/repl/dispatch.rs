@@ -246,6 +246,14 @@ pub(crate) fn execute_repl_plugin_line(
     {
         resolved = line;
     }
+    let exit_code = execution
+        .as_ref()
+        .map_or_else(crate::app::classify_exit_code, |executed| {
+            executed.exit_code
+        });
+    if exit_code == crate::app::EXIT_CODE_USAGE {
+        accepted = false;
+    }
     if let Err(err) = history
         .with(|store| store.finalize_execution(line, &resolved, accepted && keep_history))
         .map_err(anyhow::Error::msg)

@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- REPL commands ending in a usage error are excluded from saved history and
+  the last accepted command, matching parse-error behavior. Runtime failures
+  remain recallable.
+
 - A leading space keeps a REPL line out of persisted history, including bang
   replays. The editor still allows one temporary recall with Up.
 
