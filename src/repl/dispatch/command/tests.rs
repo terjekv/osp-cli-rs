@@ -132,7 +132,7 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         &mut sink,
     )
     .expect("bare theme help should render");
-    assert!(rendered.contains("Inspect and change output themes"));
+    assert!(rendered.contains("Inspect and apply themes"));
     assert!(rendered.contains("Usage"));
     assert!(!rendered.contains("Try:"));
 

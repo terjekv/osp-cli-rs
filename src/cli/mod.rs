@@ -157,17 +157,17 @@ pub enum Commands {
     #[command(hide = true)]
     /// Show or clear values remembered in this REPL session.
     Context(ContextArgs),
-    /// Inspect and manage discovered plugins.
+    /// Inspect and manage plugin providers.
     Plugins(PluginsArgs),
     /// Run diagnostics checks.
     Doctor(DoctorArgs),
-    /// Inspect and change output themes.
+    /// Inspect and apply themes.
     Theme(ThemeArgs),
-    /// Inspect and mutate CLI configuration.
+    /// Inspect and edit runtime config.
     Config(ConfigArgs),
     /// Create and manage command aliases.
     Alias(AliasArgs),
-    /// Manage persisted REPL history.
+    /// Inspect or prune REPL history.
     History(HistoryArgs),
     /// Generate static shell completion for built-in commands and flags.
     Completions(CompletionsArgs),
@@ -209,6 +209,7 @@ pub struct ContextArgs {
 #[derive(Debug, Subcommand)]
 pub enum ContextCommands {
     /// Remove all remembered values, or only the given kind.
+    #[command(display_order = 10)]
     Clear(ContextClearArgs),
 }
 
@@ -347,14 +348,19 @@ pub struct DoctorArgs {
 #[derive(Debug, Subcommand)]
 pub enum DoctorCommands {
     /// Run all visible diagnostics.
+    #[command(display_order = 10)]
     All,
     /// Show config diagnostics.
+    #[command(display_order = 11)]
     Config,
     /// Show the last REPL failure; combine with -v/-vv/-vvv for more detail.
+    #[command(display_order = 12)]
     Last,
     /// Run plugin diagnostics.
+    #[command(display_order = 13)]
     Plugins,
     /// Show theme diagnostics.
+    #[command(display_order = 14)]
     Theme,
 }
 
@@ -362,24 +368,34 @@ pub enum DoctorCommands {
 #[derive(Debug, Subcommand)]
 pub enum PluginsCommands {
     /// List discovered plugins.
+    #[command(display_order = 10)]
     List,
     /// List commands exported by plugins.
+    #[command(display_order = 11)]
     Commands,
     /// Show plugin-declared configuration metadata.
+    #[command(display_order = 12)]
     Config(PluginConfigArgs),
     /// Force a fresh plugin discovery pass.
+    #[command(display_order = 13)]
     Refresh,
     /// Enable a plugin-backed command.
+    #[command(display_order = 15)]
     Enable(PluginCommandStateArgs),
     /// Disable a plugin-backed command.
+    #[command(display_order = 16)]
     Disable(PluginCommandStateArgs),
     /// Clear persisted state for a command.
+    #[command(display_order = 17)]
     ClearState(PluginCommandClearArgs),
     /// Select the provider implementation used for a command.
+    #[command(display_order = 18)]
     SelectProvider(PluginProviderSelectArgs),
     /// Clear an explicit provider selection for a command.
+    #[command(display_order = 19)]
     ClearProvider(PluginProviderClearArgs),
-    /// Run plugin-specific diagnostics.
+    /// Run plugin diagnostics.
+    #[command(display_order = 14)]
     Doctor,
 }
 
@@ -395,10 +411,13 @@ pub struct ThemeArgs {
 #[derive(Debug, Subcommand)]
 pub enum ThemeCommands {
     /// List available themes.
+    #[command(display_order = 10)]
     List,
-    /// Show details for a specific theme.
+    /// Show a theme definition.
+    #[command(display_order = 11)]
     Show(ThemeShowArgs),
-    /// Persist or apply a selected theme.
+    /// Set active theme.
+    #[command(display_order = 12)]
     Use(ThemeUseArgs),
 }
 
@@ -568,10 +587,13 @@ pub struct AliasArgs {
 #[derive(Debug, Subcommand)]
 pub enum AliasCommands {
     /// List aliases available in the active profile and terminal.
+    #[command(display_order = 10)]
     List(AliasListArgs),
-    /// Add or replace an alias after validating its command template.
+    /// Add or replace an alias.
+    #[command(display_order = 11)]
     Add(AliasAddArgs),
     /// Remove an alias from the selected config scope.
+    #[command(display_order = 12)]
     Remove(AliasRemoveArgs),
 }
 
@@ -639,11 +661,14 @@ pub struct IntroArgs {}
 /// History management commands.
 #[derive(Debug, Subcommand)]
 pub enum HistoryCommands {
-    /// List persisted history entries.
+    /// List recent history.
+    #[command(display_order = 10)]
     List(HistoryListArgs),
-    /// Retain only the newest `keep` entries.
+    /// Keep last N entries.
+    #[command(display_order = 11)]
     Prune(HistoryPruneArgs),
-    /// Remove all persisted history entries.
+    /// Clear history.
+    #[command(display_order = 12)]
     Clear,
 }
 
@@ -682,17 +707,23 @@ pub struct HistoryPruneArgs {
 #[derive(Subcommand)]
 pub enum ConfigCommands {
     /// Show the resolved configuration view.
+    #[command(display_order = 10)]
     Show(ConfigShowArgs),
     /// Read a single resolved config key.
+    #[command(display_order = 11)]
     Get(ConfigGetArgs),
     /// Explain how a config key was resolved.
+    #[command(display_order = 12)]
     Explain(ConfigExplainArgs),
     /// Set a config key in one or more writable stores.
+    #[command(display_order = 13)]
     Set(ConfigSetArgs),
     /// Remove a config key from one or more writable stores.
+    #[command(display_order = 14)]
     Unset(ConfigUnsetArgs),
     #[command(alias = "diagnostics")]
     /// Run config-specific diagnostics.
+    #[command(display_order = 15)]
     Doctor,
 }
 

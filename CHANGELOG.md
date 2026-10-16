@@ -7,6 +7,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- CLI help and REPL completion now share the same short descriptions.
+
 - **Breaking:** Remove `CommandDef`, `ArgDef`, `FlagDef`, `ValueKind`,
   `ValueChoice`, their conversions, and `Document::from_command_def`. Native
   and builtin metadata comes from clap; plugin metadata stays at the wire boundary.

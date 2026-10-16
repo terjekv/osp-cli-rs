@@ -69,16 +69,6 @@ pub(crate) fn run_theme_command(
 
 pub(crate) fn theme_command() -> Command {
     crate::cli::builtin_command("theme")
-        .about("Inspect and apply themes")
-        .mut_subcommand("list", |child| {
-            child.about("List available themes").display_order(10)
-        })
-        .mut_subcommand("show", |child| {
-            child.about("Show a theme definition").display_order(11)
-        })
-        .mut_subcommand("use", |child| {
-            child.about("Set active theme").display_order(12)
-        })
 }
 
 pub(crate) fn augment_theme_completion(spec: &mut CompletionNode, themes: &ThemeCatalog) {

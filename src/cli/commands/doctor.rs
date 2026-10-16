@@ -84,11 +84,7 @@ pub(crate) fn run_doctor_command(
 }
 
 pub(crate) fn doctor_command() -> clap::Command {
-    let mut command = crate::cli::builtin_command("doctor");
-    for (offset, child) in command.get_subcommands_mut().enumerate() {
-        *child = child.clone().display_order(offset + 10);
-    }
-    command
+    crate::cli::builtin_command("doctor")
 }
 
 #[derive(Serialize)]

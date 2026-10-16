@@ -103,8 +103,8 @@ For more information, try '--help'.\n",
             "Usage: osp ldap user",
         ),
         (
-            "Inspect and change output themes\n\nUsage: theme <COMMAND>\n",
-            Some("Inspect and change output themes"),
+            "Inspect and apply themes\n\nUsage: theme <COMMAND>\n",
+            Some("Inspect and apply themes"),
             "Usage: theme <COMMAND>",
         ),
     ];

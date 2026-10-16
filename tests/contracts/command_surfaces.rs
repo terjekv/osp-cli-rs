@@ -129,7 +129,7 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "--help"]);
     assert!(value.contains("OSP CLI"));
     assert!(value.contains("osp [OPTIONS] [COMMAND]"));
-    assert!(value.contains("Inspect and mutate CLI configuration"));
+    assert!(value.contains("Inspect and edit runtime config"));
     assert!(!value.contains("Usage"));
     assert!(!value.contains("Commands"));
 }

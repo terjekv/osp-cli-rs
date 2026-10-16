@@ -531,58 +531,7 @@ fn config_write_suggestions(spec: &mut CompletionNode, config: &crate::config::R
 
 fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> CompletionNode {
     let mut spec = clap_command_spec(&command, help_layout);
-    // Preserve the REPL wording and historical menu order over clap structure.
-    let (tooltip, children): (&str, &[(&str, &str)]) = match command.get_name() {
-        CMD_CONTEXT => (
-            "Show or clear session context",
-            &[("clear", "Remove context entries")],
-        ),
-        CMD_PLUGINS => (
-            "Inspect and manage plugin providers",
-            &[
-                ("list", "List available plugins"),
-                ("commands", "Show plugin command catalog"),
-                ("config", "Show projected plugin config"),
-                ("refresh", "Refresh plugin discovery cache"),
-                ("doctor", "Run plugin diagnostics"),
-                ("enable", "Enable plugin by id"),
-                ("disable", "Disable plugin by id"),
-                ("clear-state", "Clear persisted state for one command"),
-                ("select-provider", "Select provider for one command"),
-                ("clear-provider", "Clear selected provider for one command"),
-            ],
-        ),
-        CMD_CONFIG => (
-            "Inspect and edit runtime config",
-            &[
-                ("show", "Show current config"),
-                ("get", "Get one config key"),
-                ("explain", "Explain one config key"),
-                ("set", "Set config value"),
-                ("unset", "Remove one config key"),
-                ("doctor", "Show config diagnostics"),
-            ],
-        ),
-        _ => (
-            "Create and manage command aliases",
-            &[
-                ("list", "List aliases in the active scope"),
-                ("add", "Add or replace an alias"),
-                ("remove", "Remove an alias"),
-            ],
-        ),
-    };
-    spec.tooltip = Some(tooltip.to_string());
     for child in spec.children.values_mut() {
-        if let Some((index, (_, tooltip))) = children
-            .iter()
-            .enumerate()
-            .find(|(_, (name, _))| *name == child.name)
-        {
-            child.tooltip = Some((*tooltip).to_string());
-            child.sort = Some((index + 10).to_string());
-        }
-
         for arg in &mut child.args {
             arg.name = arg.name.take().map(|name| name.to_ascii_lowercase());
             arg.required = false;

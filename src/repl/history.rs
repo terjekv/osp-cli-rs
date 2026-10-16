@@ -44,16 +44,6 @@ impl HistoryScopeView {
 
 pub(crate) fn history_command() -> Command {
     crate::cli::builtin_command(CMD_HISTORY)
-        .about("Inspect or prune REPL history")
-        .mut_subcommand("list", |child| {
-            child.about("List recent history").display_order(10)
-        })
-        .mut_subcommand("prune", |child| {
-            child.about("Keep last N entries").display_order(11)
-        })
-        .mut_subcommand("clear", |child| {
-            child.about("Clear history").display_order(12)
-        })
 }
 
 pub(crate) fn augment_history_completion(node: &mut crate::completion::CompletionNode) {

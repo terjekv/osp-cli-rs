@@ -216,7 +216,7 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
     assert!(
         session.wait_for_output_since(
             output_start,
-            "Inspect and change output themes",
+            "Inspect and apply themes",
             Duration::from_secs(1),
         ),
         "bare theme help stalled; output:\n{}",
