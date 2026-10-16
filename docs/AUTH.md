@@ -9,6 +9,11 @@ APIs remain authoritative for every operation.
 Install one `App::with_access_policy(policy)` implementation of
 `osp_cli::app::access::AccessPolicy`:
 
+- `configure(config)` refreshes local product state before visibility is read,
+  including root help and REPL rebuilds. The shared `AuthState` attachment
+  path owns its single call site. Root help has no runtime and must not invoke
+  credential-acquiring startup code; visibility has no config argument.
+  Configuration must not acquire credentials or perform network I/O.
 - `visibility(path)` returns `Visibility::Shown` or `Hidden(message)`. Paths use
   canonical command names. Hiding a parent hides its descendants in help,
   completion, REPL overviews and dispatch. An explicit hidden-command invocation
@@ -80,3 +85,20 @@ been removed. Use product visibility for external commands instead.
 The product computes validity and remaining lifetime; doctor does not acquire
 credentials or age a cached snapshot. Human output formats the same facts.
 `auth_strength`, `capability_count` and `enabled_features` are no longer emitted.
+
+## Explicit product actions
+
+`App::with_action_flag(name, help, optional_value, action)` registers an
+exclusive root action, executed after normal configuration and policy startup.
+The callback receives `&mut AppRuntime` and returns a confirmation string;
+the host writes it through its output sink and exits successfully. An optional
+`ActionFlagValue { value_name, config_key }` accepts zero or one argument and places a supplied
+argument in the invocation config layer. Action flags cannot accompany commands
+or other actions. Help and version never execute the callback.
+
+`RuntimeContext::is_repl()` distinguishes actual shell startup from one-shot
+commands using REPL-scoped presentation, such as `intro`.
+
+Intro templates and tips can wrap command-specific prose in
+`{{#visible command path}}...{{/visible}}`. The block uses the same combined
+visibility verdict as help, completion and dispatch. Blocks cannot be nested.

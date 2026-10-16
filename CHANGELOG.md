@@ -30,6 +30,13 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Replace mutable discovered-plugin command vectors with one
   normalized command map.
 
+- Add exclusive product action flags with an optional config argument and
+  sink-rendered confirmation, for flows such as explicit product login.
+- Configure access policies from resolved config before help and runtime
+  visibility; apply product visibility to root help as well.
+- Support visibility blocks in intro templates and tips, and expose actual
+  REPL startup separately from terminal-scoped presentation configuration.
+
 - **Breaking:** Replace provider and placement completion metadata with the
   generic `DynamicCompletion` callback on `CompletionNode`.
   Remove `Planning*`, `OsVersions`, `RequestHints`, `RequestHintSet`,
