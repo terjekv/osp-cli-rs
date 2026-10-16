@@ -35,6 +35,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- `-d` now adds to the configured `debug.level`, saturating at trace level.
+
 - **Breaking:** Inspect `LastFailure::detail` on demand instead of reading a
   pre-rendered detail field.
 

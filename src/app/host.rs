@@ -733,11 +733,7 @@ pub(crate) fn resolve_invocation_ui(
                 invocation.verbose,
                 invocation.quiet,
             ),
-            if invocation.debug > 0 {
-                invocation.debug.min(3)
-            } else {
-                ui.debug_verbosity
-            },
+            ui.debug_verbosity.saturating_add(invocation.debug).min(3),
         )
         .with_error_detail(adjust_error_detail(
             ui.error_detail,
