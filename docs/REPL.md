@@ -381,3 +381,8 @@ A leading `|` replays the saved answer: `| F status=failed` means
 `last | F status=failed` and makes no new request. Separate leading-pipe lines
 each start from the saved answer, not the previous replay. Quoted literal pipes
 remain ordinary command arguments.
+
+Pasting `osp COMMAND …` with a known root command removes only `osp` and
+returns the rest as editable input. Press Enter to execute it. Launcher flags
+such as `osp -u USER …` or `osp --prod …` stay visible; these lines are not
+normalized because their first word after `osp` is not a command root.

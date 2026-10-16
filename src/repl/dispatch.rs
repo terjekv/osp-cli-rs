@@ -181,6 +181,24 @@ pub(crate) fn execute_repl_plugin_line(
     };
     let mut keep_history = false;
     let execution = (|| {
+        if let Some(rest) = line.trim_start().strip_prefix("osp")
+            && rest.starts_with(char::is_whitespace)
+        {
+            let rest = rest.trim_start();
+            let root = rest.split_whitespace().next().unwrap_or("");
+            let catalog = crate::app::authorized_command_catalog_for(
+                &state.runtime.auth, &state.clients,
+                state.clients.native_commands().catalog(),
+            );
+            let surface = super::surface::build_repl_surface(
+                ReplViewContext::from_parts(&state.runtime, &state.session), &catalog,
+            );
+            if surface.root_words.iter().any(|word| word == root) {
+                return Ok(ExecutedReplLine::flat(
+                    ReplResult::ReplaceInput(rest.to_string()), state.runtime.ui.debug_level,
+                ));
+            }
+        }
         if let Some(command @ builtins::BangCommand::Last) = builtins::parse_bang_command(line)? {
             match builtins::execute_bang_command(&mut state.session, history, line, command)? {
                 ReplResult::ReplaceInput(expanded) => {
