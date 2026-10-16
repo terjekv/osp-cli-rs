@@ -325,16 +325,6 @@ impl NativeSessionContext {
         self.store_context_value(kind, value, None);
     }
 
-    /// Stores one context value and opts it into the compact REPL prompt.
-    pub fn set_context_value_with_prompt(
-        &self,
-        kind: impl Into<String>,
-        value: impl Into<String>,
-        prompt_label: impl Into<String>,
-    ) {
-        self.store_context_value(kind, value, Some(prompt_label.into()));
-    }
-
     fn store_context_value(
         &self,
         kind: impl Into<String>,
@@ -403,7 +393,7 @@ impl NativeSessionContext {
         label: impl Into<String>,
         value: impl Into<String>,
     ) {
-        self.set_context_value_with_prompt(key, value, label);
+        self.store_context_value(key, value, Some(label.into()));
     }
 
     /// Removes one prompt-visible context entry.
