@@ -369,3 +369,7 @@ terminal passthrough. At most one BEL is emitted per ten seconds process-wide.
 One-shot, basic/non-TTY and JSON output never emit event or preview bells.
 Disable sound for this session with
 `config set repl.notifications.sound off --session`. Muting never replays audio.
+
+Intro templates and daily tips may use `{{actions}}` to show registered action
+labels with their resolved keys; disabled and unavailable actions are omitted.
+The root help surface uses the same resolved metadata.

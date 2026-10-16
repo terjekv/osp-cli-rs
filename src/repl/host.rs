@@ -32,6 +32,7 @@ pub(crate) struct ReplViewContext<'a> {
     pub(crate) scope: &'a ReplScopeStack,
     pub(crate) native_context: &'a NativeSessionContext,
     pub(crate) history_enabled: bool,
+    pub(crate) actions: &'a [crate::repl::ReplAction],
 }
 
 impl<'a> ReplViewContext<'a> {
@@ -45,6 +46,7 @@ impl<'a> ReplViewContext<'a> {
             scope: &session.scope,
             native_context: &session.native_context,
             history_enabled: session.history_enabled,
+            actions: &[],
         }
     }
 }

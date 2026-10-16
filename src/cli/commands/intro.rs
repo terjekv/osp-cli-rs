@@ -33,6 +33,7 @@ impl<'a> IntroCommandContext<'a> {
             scope: &session.scope,
             native_context: &session.native_context,
             history_enabled: session.history_enabled,
+            actions: &[],
         };
         let catalog = authorized_command_catalog_for(
             &runtime.auth,

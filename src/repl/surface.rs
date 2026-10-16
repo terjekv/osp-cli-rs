@@ -8,6 +8,7 @@
 use crate::completion::{CompletionNode, SuggestionEntry, ValueType};
 use crate::config::{ConfigSchema, SchemaValueType};
 use crate::core::document::HelpLevel;
+use clap::CommandFactory;
 use std::collections::BTreeSet;
 
 use crate::app::help::help_level;
@@ -58,6 +59,9 @@ pub(crate) fn build_repl_surface(
         .map(|command| clap_command_spec(command, help_layout))
         .collect::<Vec<_>>();
     specs.push(plugins_command_spec(catalog, help_layout));
+    if let Some(command) = crate::cli::Cli::command().find_subcommand("notifications") {
+        specs.push(clap_command_spec(command, help_layout));
+    }
 
     specs.push(clap_command_spec(
         &doctor_cmd::doctor_command(),

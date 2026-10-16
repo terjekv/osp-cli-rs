@@ -124,7 +124,11 @@ impl ReplCycle {
                 tracing::info_span!(target: "osp_startup", "REPL completion surface").entered();
             prepare_repl_surface_state(runtime, session, clients)?
         };
-        let view = ReplViewContext::from_parts(runtime, session);
+        let actions = resolved_product_actions(runtime, clients)?;
+        let view = ReplViewContext {
+            actions: &actions,
+            ..ReplViewContext::from_parts(runtime, session)
+        };
         let intro_text = if include_help_text {
             render_repl_intro(view, &prepared.surface)
         } else {
@@ -137,6 +141,35 @@ impl ReplCycle {
             clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
         })
     }
+}
+
+pub(crate) fn resolved_product_actions(
+    runtime: &AppRuntime,
+    clients: &AppClients,
+) -> Result<Vec<crate::repl::ReplAction>> {
+    let mut actions = Vec::new();
+    use std::io::IsTerminal;
+    if runtime.ui.render_settings.format == crate::core::output::OutputFormat::Json
+        || repl_input_mode(runtime.config.resolved()) == crate::repl::ReplInputMode::Basic
+        || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
+    {
+        return Ok(actions);
+    }
+    for entry in clients.native_commands().catalog() {
+        if runtime
+            .auth
+            .external_command_access(&entry.name)
+            .is_visible()
+            && let Some(command) = clients.native_commands().command(&entry.name)
+        {
+            actions.extend(
+                command
+                    .repl_actions(runtime.config.resolved())
+                    .map_err(|e| miette::miette!("{e:#}"))?,
+            );
+        }
+    }
+    Ok(actions)
 }
 
 fn build_repl_cycle_run_config(
@@ -187,6 +220,7 @@ fn build_repl_cycle_run_config(
         runtime.config.resolved(),
     )))
     .build();
+    config.actions = resolved_product_actions(runtime, clients)?;
     if runtime.ui.render_settings.format != crate::core::output::OutputFormat::Json {
         let mut commands = Vec::new();
         for entry in clients.native_commands().catalog() {
@@ -196,11 +230,6 @@ fn build_repl_cycle_run_config(
                 .is_visible()
                 && let Some(command) = clients.native_commands().command(&entry.name)
             {
-                config.actions.extend(
-                    command
-                        .repl_actions(runtime.config.resolved())
-                        .map_err(|e| miette::miette!("{e:#}"))?,
-                );
                 commands.push(command.clone());
             }
         }

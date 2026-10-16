@@ -332,11 +332,20 @@ fn repl_help_command_result_for_scope(
 ) -> Result<CommandOutput> {
     if session.scope.is_root() {
         let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
+        let mut document =
+            presentation::build_repl_help_view(&prepared.surface, invocation.help_level);
+        let actions = lifecycle::resolved_product_actions(runtime, clients)?;
+        for action in actions {
+            if let Some(key) = action.key {
+                document
+                    .blocks
+                    .push(crate::core::document::DocBlock::Paragraph {
+                        text: format!("`F{key}` {}", action.label),
+                    });
+            }
+        }
         return Ok(CommandOutput::output(
-            presentation::repl_document_output(&presentation::build_repl_help_view(
-                &prepared.surface,
-                invocation.help_level,
-            )),
+            presentation::repl_document_output(&document),
             None,
         ));
     }

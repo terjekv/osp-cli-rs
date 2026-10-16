@@ -292,6 +292,18 @@ fn resolve_intro_placeholder(
     key: &str,
 ) -> String {
     match key {
+        "actions" => {
+            return view
+                .actions
+                .iter()
+                .filter_map(|action| {
+                    action
+                        .key
+                        .map(|key| format!("`F{key}` {}", action.label.to_ascii_lowercase()))
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+        }
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),
         "user" | "user.name" => {
