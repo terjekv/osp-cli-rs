@@ -29,9 +29,8 @@ impl CommandScope {
                 .strip_prefix("osp ")
                 .unwrap_or(line.trim())
                 .to_string(),
-            message: message.into(),
-            display_command: self.command(line),
-            suffix: suffix.into(),
+            detail: super::CommandError::new(message)
+                .with_action(format!("Run {}{suffix}", self.command(line))),
         }
     }
 
@@ -82,20 +81,18 @@ impl CommandScope {
 #[derive(Debug)]
 pub struct CommandHint {
     pub(crate) command: String,
-    message: String,
-    display_command: String,
-    suffix: String,
+    detail: super::CommandError,
 }
 
 impl std::fmt::Display for CommandHint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}\nhint: Run {}{}",
-            self.message, self.display_command, self.suffix
-        )
+        f.write_str(&self.detail.render())
     }
 }
 
-impl std::error::Error for CommandHint {}
+impl std::error::Error for CommandHint {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.detail)
+    }
+}
 impl miette::Diagnostic for CommandHint {}

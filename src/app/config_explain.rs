@@ -31,14 +31,15 @@ pub(crate) fn config_explain_result(
 
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
-        let hint_command = push_missing_config_key_messages(&mut messages, config, &args.key);
+        let error = push_missing_config_key_messages(&mut messages, config, &args.key);
+        let hint_command = error.action.as_ref().map(|_| "config list".into());
         return Ok(CommandOutput {
             exit_code: 1,
             messages,
             hint_command,
             body: crate::app::CommandBody::None,
             stderr_text: String::new(),
-            failure_report: None,
+            failure_report: Some(miette::Report::new(error)),
             ..CommandOutput::exit(0)
         });
     }
@@ -457,8 +458,8 @@ pub(crate) fn push_missing_config_key_messages(
     messages: &mut MessageBuffer,
     config: &ResolvedConfig,
     key: &str,
-) -> Option<String> {
-    if let Some((_, entry)) = ConfigSchema::default()
+) -> crate::core::CommandError {
+    let (title, error) = if let Some((_, entry)) = ConfigSchema::default()
         .entries()
         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
     {
@@ -466,24 +467,24 @@ pub(crate) fn push_missing_config_key_messages(
         if let Some(allowed) = entry.allowed_values() {
             message.push_str(&format!(" (allowed: {})", allowed.join(", ")));
         }
-        messages.push_titled(
-            MessageLevel::Error,
+        (
             "Configuration value is not set",
-            message,
-        );
-        return None;
-    }
-    let suggestions = suggest_config_keys(config, key);
-    messages.push_titled(
-        MessageLevel::Error,
-        "Unknown configuration key",
-        format!(
-            "Unknown config key '{key}'.\nhint: Run {} to see the keys.",
-            crate::core::CommandScope::OneShot.command("config list")
-        ),
-    );
-    let _ = suggestions;
-    Some("config list".into())
+            crate::core::CommandError::new(message),
+        )
+    } else {
+        let _ = suggest_config_keys(config, key);
+        (
+            "Unknown configuration key",
+            crate::core::CommandError::new(format!("Unknown config key '{key}'.")).with_action(
+                format!(
+                    "Run {} to see the keys.",
+                    crate::core::CommandScope::OneShot.command("config list")
+                ),
+            ),
+        )
+    };
+    messages.push_titled(MessageLevel::Error, title, error.render());
+    error
 }
 
 pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<String> {

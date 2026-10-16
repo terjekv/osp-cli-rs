@@ -455,6 +455,7 @@ fn run_native_invocation(
                     crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
                     parsed.grammar,
                     std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
+                    None,
                 ));
             }
         }
@@ -710,21 +711,25 @@ fn run_native_command(
         Some(action) => command.execute_repl_action(action, &context),
         None => command.execute(args, &context),
     }
-    .map_err(|err| match err.downcast::<clap::Error>() {
-        Ok(err) => {
-            mark_repl_command_rejected(accepted);
-            super::host::report_clap_error_with_context(
+    .map_err(|err| {
+        let structured = err.downcast_ref::<crate::core::CommandError>().cloned();
+        match err.downcast::<clap::Error>() {
+            Ok(err) => {
+                mark_repl_command_rejected(accepted);
+                super::host::report_clap_error_with_context(
+                    err,
+                    crate::app::host::ErrorContext::NativeExecution,
+                    command.command(),
+                    std::iter::once(command.command().get_name().to_string())
+                        .chain(input.args.iter().cloned()),
+                    structured,
+                )
+            }
+            Err(err) => crate::app::report_anyhow_with_context(
                 err,
                 crate::app::host::ErrorContext::NativeExecution,
-                command.command(),
-                std::iter::once(command.command().get_name().to_string())
-                    .chain(input.args.iter().cloned()),
-            )
+            ),
         }
-        Err(err) => crate::app::report_anyhow_with_context(
-            err,
-            crate::app::host::ErrorContext::NativeExecution,
-        ),
     });
     drop(context);
     if let Some(renderer) = progress_renderer.as_ref() {
@@ -1914,7 +1919,13 @@ mod tests {
         .expect_err("misspelled command should fail with a suggestion");
 
         assert!(err.to_string().contains("Unknown command 'lpad'"));
-        assert!(err.to_string().contains("hint: Did you mean osp ldap?"));
+        assert_eq!(
+            super::super::host::find_error_in_chain::<crate::core::CommandError>(&err)
+                .expect("structured suggestion")
+                .action
+                .as_deref(),
+            Some("Did you mean osp ldap?")
+        );
     }
 
     #[test]
@@ -1945,7 +1956,13 @@ mod tests {
 
         assert!(err.to_string().contains("command ldap user"));
         assert!(err.to_string().contains("requires authentication"));
-        assert!(err.to_string().contains("hint: authenticate"));
+        assert_eq!(
+            super::super::host::find_error_in_chain::<crate::core::CommandError>(&err)
+                .expect("structured recovery")
+                .action
+                .as_deref(),
+            Some("authenticate, then retry")
+        );
     }
 
     #[test]

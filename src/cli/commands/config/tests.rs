@@ -13,7 +13,6 @@ use crate::config::{
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputItems;
 use crate::ui::RenderSettings;
-use crate::ui::messages::MessageBuffer;
 use crate::ui::messages::MessageLevel;
 use crate::ui::theme_catalog::ThemeCatalog;
 use std::path::PathBuf;
@@ -425,7 +424,6 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
 #[test]
 fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_unit() {
     let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
-    let mut messages = MessageBuffer::default();
     let rows = config_get_rows(
         &temp_cli.runtime,
         &temp_cli.session,
@@ -436,7 +434,6 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
                 raw: false,
             },
         },
-        &mut messages,
     )
     .expect("bootstrap-only get should resolve")
     .expect("bootstrap-only key should produce a row");
@@ -450,7 +447,22 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
         rows[0].get("source").and_then(|value| value.as_str()),
         Some("defaults")
     );
-    assert!(messages.is_empty());
+    assert!(
+        run_config_get(
+            &temp_cli.runtime,
+            &temp_cli.session,
+            crate::cli::ConfigGetArgs {
+                key: "profile.default".into(),
+                output: crate::cli::ConfigReadOutputArgs {
+                    sources: true,
+                    raw: false
+                },
+            }
+        )
+        .expect("bootstrap get")
+        .messages
+        .is_empty()
+    );
 
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "ops");

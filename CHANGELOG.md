@@ -47,10 +47,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 
-- **Breaking:** Command errors can carry recovery actions and request IDs as data. Legacy
-  text hints remain accepted during downstream migration through one adapter;
-  `Try:`, `try:` and `tip:` actions now populate JSON `error.details.action`
-  consistently with `hint:`.
+- **Breaking:** Command errors carry recovery actions and request IDs as data.
+  Text prefixes such as `hint:`, `Try:` and `tip:` are no longer parsed into advice.
+  Structured advice survives native clap error handling.
 
 - **Breaking:** Native and inline commands share help/version/missing-subcommand handling.
   Missing subcommands show help successfully, including direct native LDAP
@@ -60,9 +59,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   JSON, output pipelines and non-terminal stderr. Ordinary progress events
   retain their stream behavior.
 
-- Native REPL contexts expose whether prompting is allowed; one-shot
-  invocations never qualify. Confirmation input helpers leave consent policy
-  with the caller.
+- Native contexts expose terminal prompt eligibility independently of command
+  scope. Confirmation input helpers leave consent policy with the caller.
 
 - Redact sensitive names consistently in config, plugin environment values and
   error details, including cookies, authorization and underscore-delimited keys.

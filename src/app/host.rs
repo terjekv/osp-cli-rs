@@ -508,6 +508,7 @@ fn handle_clap_parse_error(
             crate::app::host::ErrorContext::Operation("failed to parse CLI arguments"),
             command.clone(),
             scanned.argv.clone(),
+            None,
         )),
     }
 }
@@ -777,6 +778,54 @@ pub fn classify_exit_code(err: &miette::Report) -> i32 {
     }
 }
 
+/// Resolves recovery advice from error data before rendering either format.
+pub(crate) fn report_error_details(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
+    settings: &RenderSettings,
+) -> crate::core::CommandError {
+    use crate::core::MessageLevel;
+    let known = KnownErrorChain::inspect(err);
+    let detailed = level >= MessageLevel::Info;
+    let structured = find_error_in_chain::<crate::core::CommandError>(err);
+    let mut error = if let Some(error) = structured {
+        error.clone()
+    } else if let Some(clap) = known.clap {
+        crate::core::CommandError::new(
+            if let Some(name) = clap
+                .to_string()
+                .split("unrecognized subcommand '")
+                .nth(1)
+                .and_then(|s| s.split("'").next())
+            {
+                let path = known
+                    .boxed_context
+                    .and_then(|c| c.command_path.as_deref())
+                    .unwrap_or_default();
+                let command = settings
+                    .runtime
+                    .command_scope
+                    .command(&format!("{path} {name}"));
+                format!(
+                    "Unknown command '{}'.",
+                    command.strip_prefix("osp ").unwrap_or(&command)
+                )
+            } else if detailed {
+                clap.to_string()
+            } else {
+                terse_clap_error(clap)
+            },
+        )
+    } else {
+        base_error_message(err, &known)
+    };
+    if !detailed && error.action.is_none() {
+        error.action = known_error_hint(&known, &settings.runtime.command_scope)
+            .filter(|hint| !error.message.contains(hint));
+    }
+    error
+}
+
 /// Renders a concise failure below `Info`, or one detailed report at `Info` and above.
 /// Backtraces are diagnostics emitted separately by the debug axis.
 pub fn render_report_message(
@@ -785,48 +834,9 @@ pub fn render_report_message(
     settings: &RenderSettings,
 ) -> String {
     use crate::core::MessageLevel;
-    let known = KnownErrorChain::inspect(err);
     let detailed = level >= MessageLevel::Info;
-    let structured = find_error_in_chain::<crate::core::CommandError>(err);
-    let mut rendered = if let Some(error) = structured {
-        error.render()
-    } else if let Some(clap) = known.clap {
-        if let Some(name) = clap
-            .to_string()
-            .split("unrecognized subcommand '")
-            .nth(1)
-            .and_then(|s| s.split("'").next())
-        {
-            let path = known
-                .boxed_context
-                .and_then(|c| c.command_path.as_deref())
-                .unwrap_or_default();
-            let command = settings
-                .runtime
-                .command_scope
-                .command(&format!("{path} {name}"));
-            format!(
-                "Unknown command '{}'.",
-                command.strip_prefix("osp ").unwrap_or(&command)
-            )
-        } else if detailed {
-            clap.to_string()
-        } else {
-            terse_clap_error(clap)
-        }
-    } else {
-        base_error_message(err, &known)
-    };
+    let mut rendered = report_error_details(err, level, settings).render();
     if !detailed {
-        if let Some(hint) = known_error_hint(&known, &settings.runtime.command_scope)
-            && crate::core::command_error::legacy_text_hint(&rendered)
-                .action
-                .is_none()
-            && !rendered.contains(&hint)
-        {
-            rendered.push_str("\nhint: ");
-            rendered.push_str(&hint);
-        }
         return rendered;
     }
 
@@ -842,7 +852,11 @@ pub fn render_report_message(
             .downcast_ref::<BoxedContextError>()
             .is_some_and(|context| context.context == ErrorContext::NativeExecution);
         let text = source.to_string();
-        if !metadata
+        let clap_summary = source.is::<clap::Error>()
+            && find_error_in_chain::<crate::core::CommandError>(err)
+                .is_some_and(|error| text.trim().trim_start_matches("error: ") == error.message);
+        if !clap_summary
+            && !metadata
             && !backend
             && !native
             && !text.is_empty()
@@ -867,7 +881,7 @@ pub(crate) fn has_report_detail(
     }
     let summary = render_report_message(err, crate::core::MessageLevel::Success, settings);
     let detail = render_report_message(err, crate::core::MessageLevel::Info, settings);
-    detail.trim() != summary.split("\nTry:").next().unwrap_or(&summary).trim()
+    detail.trim() != summary.trim()
 }
 
 pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
@@ -1046,14 +1060,6 @@ fn terse_clap_error(error: &clap::Error) -> String {
             terse.push_str(argument);
         }
     }
-    for tip in rendered
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("hint:"))
-    {
-        terse.push('\n');
-        terse.push_str(tip);
-    }
     terse
 }
 
@@ -1062,21 +1068,12 @@ fn clap_error_action(
     command_path: Option<&str>,
     scope: &crate::core::CommandScope,
 ) -> String {
-    let rendered = error.to_string();
-    let suggestions = rendered
-        .lines()
-        .find_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("tip: a similar subcommand exists:")
-                .or_else(|| line.strip_prefix("tip: some similar subcommands exist:"))
-        })
-        .into_iter()
-        .flat_map(|value| value.split(','))
-        .map(|value| value.trim().trim_matches(['`', '\'', '"']))
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
+    let suggestions = match error.get(clap::error::ContextKind::SuggestedSubcommand) {
+        Some(clap::error::ContextValue::Strings(suggestions)) => suggestions.as_slice(),
+        _ => &[],
+    };
     let prefix = command_path.filter(|path| !path.is_empty());
-    match (prefix, suggestions.as_slice()) {
+    match (prefix, suggestions) {
         (Some(prefix), [suggestion]) => {
             format!(
                 "Did you mean {}?",
@@ -1098,7 +1095,10 @@ fn clap_error_action(
     }
 }
 
-fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> String {
+fn base_error_message(
+    err: &miette::Report,
+    known: &KnownErrorChain<'_>,
+) -> crate::core::CommandError {
     if let Some(config_err) = known.config {
         if let crate::config::ConfigError::InvalidConfigValue { key, reason } = config_err
             && key == "debug.level"
@@ -1107,41 +1107,41 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
                 .config_file
                 .map(|path| format!(" ({})", path.display()))
                 .unwrap_or_default();
-            return format!(
-                "debug.level {reason}{path}.\nhint: Fix it, or run osp config set debug.level 0."
-            );
+            return crate::core::CommandError::new(format!("debug.level {reason}{path}."))
+                .with_action("Fix it, or run osp config set debug.level 0.");
         }
         if let crate::config::ConfigError::FileRead { path, .. } = config_err
             && !std::path::Path::new(path).exists()
         {
-            return format!("Config file {path} does not exist.");
+            return crate::core::CommandError::new(format!("Config file {path} does not exist."));
         }
         if let crate::config::ConfigError::LayerLoad { path, inner } = config_err {
             let message = inner.to_string();
-            return format!(
-                "{} ({}).\nhint: Fix the config file.",
+            return crate::core::CommandError::new(format!(
+                "{} ({}).",
                 message.lines().next().unwrap_or("Invalid config"),
                 crate::diagnostics::safe_text(path)
-            );
+            ))
+            .with_action("Fix the config file.");
         }
-        return config_err.to_string();
+        return crate::core::CommandError::new(config_err.to_string());
     }
 
     if let Some(clap_err) = known.clap {
-        return clap_err.to_string();
+        return crate::core::CommandError::new(clap_err.to_string());
     }
 
     if let Some(context) = known.boxed_context
         && context.context == ErrorContext::NativeExecution
     {
-        return context.source.to_string();
+        return crate::core::CommandError::new(context.source.to_string());
     }
 
     if let Some(details) =
         find_error_in_chain::<crate::app::command_output::CommandBackendDetails>(err)
         && let Some(source) = std::error::Error::source(details)
     {
-        return source.to_string();
+        return crate::core::CommandError::new(source.to_string());
     }
 
     let outer = err.to_string();
@@ -1155,12 +1155,12 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
         current = source.source();
     }
 
-    match deepest_source {
+    crate::core::CommandError::new(match deepest_source {
         // Context wrappers are still useful for verbose output, but at default
         // message levels users usually need the concrete actionable cause.
         Some(source) if find_error_in_chain::<ReportContextError>(err).is_some() => source,
         _ => outer,
-    }
+    })
 }
 
 pub(crate) fn report_clap_error_with_context<I, T>(
@@ -1168,6 +1168,7 @@ pub(crate) fn report_clap_error_with_context<I, T>(
     context: ErrorContext,
     command: clap::Command,
     args: I,
+    structured: Option<crate::core::CommandError>,
 ) -> miette::Report
 where
     I: IntoIterator<Item = T>,
@@ -1197,7 +1198,7 @@ where
         backtrace: Backtrace::force_capture(),
         command_path: Some(path.join(" ")),
         command_suffix,
-        structured: None,
+        structured,
     })
 }
 

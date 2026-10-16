@@ -57,38 +57,3 @@ impl miette::Diagnostic for CommandError {
             .map(|action| Box::new(action) as Box<dyn std::fmt::Display>)
     }
 }
-
-// Downstream still emits text hints; remove this adapter when those callers migrate.
-pub(crate) fn legacy_text_hint(message: &str) -> CommandError {
-    let mut error = CommandError {
-        message: message.to_string(),
-        action: None,
-        request_id: None,
-    };
-    let mut offset = 0;
-    for (index, raw) in message.split_inclusive('\n').enumerate() {
-        let start = offset;
-        offset += raw.len();
-        if index == 0 {
-            continue;
-        }
-        let line = raw.trim();
-        if let Some(action) = line
-            .strip_prefix("hint:")
-            .or_else(|| line.strip_prefix("Try:"))
-            .or_else(|| line.strip_prefix("try:"))
-            .or_else(|| line.strip_prefix("tip:"))
-        {
-            if error.action.is_none() {
-                error.action = Some(action.trim().to_string());
-                error.message = message[..start]
-                    .strip_suffix('\n')
-                    .unwrap_or(&message[..start])
-                    .to_string();
-            }
-        } else if let Some(id) = line.strip_prefix("request-id:") {
-            error.request_id = Some(id.trim().to_string());
-        }
-    }
-    error
-}

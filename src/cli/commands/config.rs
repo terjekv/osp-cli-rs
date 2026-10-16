@@ -216,20 +216,25 @@ fn run_config_get(
         ));
     }
     let mut messages = MessageBuffer::default();
-    let rows = config_get_rows(runtime, session, &args, &mut messages)?;
+    let rows = config_get_rows(runtime, session, &args)?;
     match rows {
         Some(rows) => Ok(CommandOutput {
             messages,
             ..CommandOutput::output(rows_to_output_result(rows), None)
         }),
-        None => Ok(CommandOutput {
-            exit_code: 1,
-            messages,
-            body: crate::app::CommandBody::None,
-            stderr_text: String::new(),
-            failure_report: None,
-            ..CommandOutput::exit(0)
-        }),
+        None => {
+            let error = push_missing_config_key_messages(
+                &mut messages,
+                runtime.config.resolved(),
+                &args.key,
+            );
+            Ok(CommandOutput {
+                exit_code: 1,
+                messages,
+                failure_report: Some(miette::Report::new(error)),
+                ..CommandOutput::exit(0)
+            })
+        }
     }
 }
 
@@ -237,7 +242,6 @@ fn config_get_rows(
     runtime: &AppRuntime,
     session: &AppSession,
     args: &ConfigGetArgs,
-    messages: &mut MessageBuffer,
 ) -> Result<Option<Vec<Row>>> {
     if let Some(entry) = runtime.config.resolved().get_value_entry(&args.key) {
         let row = config_entry_row(&args.key, entry, args.output.sources, args.output.raw);
@@ -264,7 +268,6 @@ fn config_get_rows(
         }
     }
 
-    push_missing_config_key_messages(messages, runtime.config.resolved(), &args.key);
     Ok(None)
 }
 

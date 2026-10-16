@@ -286,14 +286,18 @@ pub(crate) fn json_failure_error(
     report: Option<&miette::Report>,
     code: &str,
     message: String,
+    settings: &crate::ui::RenderSettings,
 ) -> Value {
     if let Some(backend) =
         report.and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
     {
         serde_json::json!(backend.error)
-    } else if let Some(error) =
-        report.and_then(super::host::find_error_in_chain::<crate::core::CommandError>)
-    {
+    } else {
+        let error = report
+            .map(|report| {
+                super::host::report_error_details(report, MessageLevel::Success, settings)
+            })
+            .unwrap_or_else(|| crate::core::CommandError::new(message));
         let mut details = serde_json::Map::new();
         if let Some(action) = &error.action {
             details.insert("action".into(), serde_json::json!(action));
@@ -307,9 +311,6 @@ pub(crate) fn json_failure_error(
             Value::Object(details)
         };
         serde_json::json!({"code": code, "message": error.message, "details": details})
-    } else {
-        let error = crate::core::command_error::legacy_text_hint(&message);
-        serde_json::json!({"code": code, "message": error.message, "details": error.action.map(|action| serde_json::json!({"action": action}))})
     }
 }
 
@@ -374,7 +375,12 @@ pub(crate) fn run_cli_command(
         } else {
             "command_failed"
         };
-        let error = json_failure_error(result.failure_report.as_ref(), code, message);
+        let error = json_failure_error(
+            result.failure_report.as_ref(),
+            code,
+            message,
+            &ui.render_settings,
+        );
         sink.write_stdout(&render_json_failure(
             error,
             result.exit_code,
@@ -396,7 +402,14 @@ pub(crate) fn run_cli_command(
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
-    if let Some(report) = &result.failure_report {
+    if let Some(report) = &result.failure_report
+        && !result.messages.entries().iter().any(|entry| {
+            entry.level == MessageLevel::Error
+                && entry.text
+                    == super::host::report_error_details(report, ui.verbosity, &ui.render_settings)
+                        .render()
+        })
+    {
         super::sink::write_diagnostics(
             sink,
             &super::render_process_error(report, &ui.render_settings, ui.verbosity, false),

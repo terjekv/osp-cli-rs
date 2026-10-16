@@ -213,7 +213,9 @@ pub(crate) fn check_access(
         ),
     };
     let command = path.as_slice().join(" ");
-    Err(miette!("{kind} {command} {detail}.\nhint: {action}"))
+    Err(miette::Report::new(
+        crate::core::CommandError::new(format!("{kind} {command} {detail}.")).with_action(action),
+    ))
 }
 
 pub(crate) fn resolve_external_command_source(
@@ -234,12 +236,10 @@ pub(crate) fn resolve_external_command_source(
 
     if matching.is_empty() {
         return Err(match closest_external_command(&catalog, command) {
-            Some(suggestion) => {
-                miette!(
-                    "Unknown command '{command}'.\nhint: Did you mean {}?",
-                    scope.command(&suggestion)
-                )
-            }
+            Some(suggestion) => miette::Report::new(
+                crate::core::CommandError::new(format!("Unknown command '{command}'."))
+                    .with_action(format!("Did you mean {}?", scope.command(&suggestion))),
+            ),
             None => miette::Report::new(scope.run_hint(
                 format!("Unknown command '{command}'."),
                 "help",

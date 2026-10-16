@@ -640,20 +640,14 @@ pub(crate) fn render_process_error(
             _ => "command_error",
         };
         return command_output::render_json_failure(
-            command_output::json_failure_error(Some(err), code, message),
+            command_output::json_failure_error(Some(err), code, message, settings),
             exit_code,
             Vec::new(),
             serde_json::Value::Null,
         );
     }
 
-    let legacy;
-    let error = if let Some(error) = host::find_error_in_chain::<crate::core::CommandError>(err) {
-        error
-    } else {
-        legacy = crate::core::command_error::legacy_text_hint(&message);
-        &legacy
-    };
+    let error = host::report_error_details(err, MessageLevel::Success, settings);
     let first = error
         .message
         .lines()

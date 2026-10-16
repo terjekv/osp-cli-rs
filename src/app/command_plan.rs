@@ -49,6 +49,7 @@ pub(crate) fn parse_inline_command(
                 },
                 crate::cli::InlineCommandCli::command(),
                 tokens,
+                None,
             ))
         }
     }
