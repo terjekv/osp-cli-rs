@@ -100,14 +100,11 @@ pub(crate) fn build_dispatch_plan(cli: &mut Cli) -> Result<DispatchPlan> {
     let explicit_profile = normalize_cli_profile(cli);
     let command = cli.command.take();
 
+    if let Some(command) = &command {
+        command.validate_dispatch_surface(false)?;
+    }
     match command {
-        Some(Commands::Context(_)) => {
-            Err(miette!("`context` is available only in the REPL session"))
-        }
         None => Ok(DispatchPlan::repl(explicit_profile)),
-        Some(Commands::Completions(_)) => Err(miette!(
-            "`completions` is available only as a one-shot CLI command"
-        )),
         Some(Commands::External(tokens)) => Ok(DispatchPlan::new(
             RunAction::External(tokens),
             explicit_profile,

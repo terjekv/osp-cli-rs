@@ -182,6 +182,21 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+impl Commands {
+    // Completion scripts run before host dispatch; session commands need REPL state.
+    pub(crate) fn validate_dispatch_surface(&self, is_repl: bool) -> miette::Result<()> {
+        match self {
+            Self::Context(_) if !is_repl => Err(miette::miette!(
+                "`context` is available only in the REPL session"
+            )),
+            Self::Completions(_) => Err(miette::miette!(
+                "`completions` is available only as a one-shot CLI command"
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
 /// Inspect or clear values remembered in the current REPL session.
 #[derive(Debug, Args)]
 pub struct ContextArgs {

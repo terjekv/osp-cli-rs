@@ -100,6 +100,7 @@ impl<'a> BuiltinExecutor<'a> {
         surface: BuiltinSurface<'_>,
         command: Commands,
     ) -> Result<Option<CliCommandResult>> {
+        command.validate_dispatch_surface(matches!(surface, BuiltinSurface::Repl { .. }))?;
         match command {
             Commands::Plugins(args) => {
                 ensure_builtin_access(self.runtime, self.session, CMD_PLUGINS)?;
@@ -159,18 +160,11 @@ impl<'a> BuiltinExecutor<'a> {
                 ensure_builtin_access(self.runtime, self.session, CMD_HISTORY)?;
                 self.run_history_command(surface, args).map(Some)
             }
-            Commands::Context(args) => match surface {
-                BuiltinSurface::Repl { .. } => {
-                    ensure_builtin_access(self.runtime, self.session, CMD_CONTEXT)?;
-                    context_cmd::run_context_command(self.session, args).map(Some)
-                }
-                BuiltinSurface::Cli(_) | BuiltinSurface::Inline(_) => {
-                    Err(miette!("`context` is available only in the REPL session"))
-                }
-            },
-            Commands::Completions(_) => Err(miette!(
-                "`completions` is available only as a one-shot CLI command"
-            )),
+            Commands::Context(args) => {
+                ensure_builtin_access(self.runtime, self.session, CMD_CONTEXT)?;
+                context_cmd::run_context_command(self.session, args).map(Some)
+            }
+            Commands::Completions(_) => unreachable!("validated dispatch surface"),
             Commands::Intro(args) => self.run_intro_command(surface, args).map(Some),
             Commands::Repl(args) => self.run_repl_debug_command(surface, args).map(Some),
             Commands::External(_) => Ok(None),
