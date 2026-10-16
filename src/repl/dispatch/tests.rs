@@ -326,23 +326,25 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
 
 #[test]
 fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
-    let history = SharedHistory::new(
-        HistoryConfig::builder()
-            .with_max_entries(20)
-            .with_enabled(true)
-            .with_dedupe(true)
-            .with_profile_scoped(false)
-            .with_shell_context(Default::default())
-            .build(),
-    );
+    let history = SharedHistory::new(HistoryConfig {
+        max_entries: 20,
+        enabled: true,
+        dedupe: true,
+        profile_scoped: false,
+        shell_context: Default::default(),
+        ..HistoryConfig::default()
+    });
     history
-        .save_command_line("ldap user alice")
+        .with(|store| store.save_command_line("ldap user alice"))
+        .expect("history lock should be available")
         .expect("first command saves");
     history
-        .save_command_line("ldap netgroup ops")
+        .with(|store| store.save_command_line("ldap netgroup ops"))
+        .expect("history lock should be available")
         .expect("second command saves");
     history
-        .save_command_line("config show")
+        .with(|store| store.save_command_line("config show"))
+        .expect("history lock should be available")
         .expect("third command saves");
 
     let mut session = AppSession::default();
@@ -401,7 +403,8 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let history = test_history();
     history
-        .save_command_line("config show")
+        .with(|store| store.save_command_line("config show"))
+        .expect("history lock should be available")
         .expect("history command saves");
 
     let bare = execute_repl_plugin_line(
@@ -437,10 +440,12 @@ fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let history = test_history();
     history
-        .save_command_line("config show")
+        .with(|store| store.save_command_line("config show"))
+        .expect("history lock should be available")
         .expect("root history command saves");
     history
-        .save_command_line("ldap user alice")
+        .with(|store| store.save_command_line("ldap user alice"))
+        .expect("history lock should be available")
         .expect("scoped history command saves");
     state.session.scope.enter("ldap");
 
@@ -511,15 +516,14 @@ fn empty_plugins() -> crate::plugin::PluginManager {
 }
 
 fn test_history() -> SharedHistory {
-    SharedHistory::new(
-        HistoryConfig::builder()
-            .with_max_entries(8)
-            .with_enabled(true)
-            .with_dedupe(true)
-            .with_profile_scoped(false)
-            .with_shell_context(Default::default())
-            .build(),
-    )
+    SharedHistory::new(HistoryConfig {
+        max_entries: 8,
+        enabled: true,
+        dedupe: true,
+        profile_scoped: false,
+        shell_context: Default::default(),
+        ..HistoryConfig::default()
+    })
 }
 
 #[test]

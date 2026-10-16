@@ -28,68 +28,6 @@ const DEFAULT_HISTORY_LIST_LIMIT: usize = 20;
 const HISTORY_TIMESTAMP_EXAMPLES: &str = "expected YYYY-MM-DD, YYYY-MM-DD HH:MM[:SS], or RFC3339-like input such as 2026-08-11T10:00:00Z or 2026-08-11T12:00:00+02:00";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ReplHistoryPolicy {
-    max_entries: usize,
-    enabled: bool,
-    path: PathBuf,
-    dedupe: bool,
-    profile_scoped: bool,
-    exclude_patterns: Vec<String>,
-}
-
-impl ReplHistoryPolicy {
-    fn from_config(config: &ResolvedConfig) -> Self {
-        let max_entries = config_usize(
-            config,
-            "repl.history.max_entries",
-            DEFAULT_REPL_HISTORY_MAX_ENTRIES as usize,
-        );
-        let enabled = config.get_bool("repl.history.enabled").unwrap_or(true) && max_entries > 0;
-        let path = config
-            .get_string("repl.history.path")
-            .map(PathBuf::from)
-            .unwrap_or_else(default_repl_history_path);
-        let dedupe = config.get_bool("repl.history.dedupe").unwrap_or(true);
-        let profile_scoped = config
-            .get_bool("repl.history.profile_scoped")
-            .unwrap_or(true);
-
-        Self {
-            max_entries,
-            enabled,
-            path,
-            dedupe,
-            profile_scoped,
-            exclude_patterns: repl_history_exclude_patterns(config),
-        }
-    }
-
-    fn history_config(&self, runtime: &AppRuntime, session: &AppSession) -> HistoryConfig {
-        session.sync_history_shell_context();
-        let history_shell = session.history_shell.clone();
-
-        HistoryConfig {
-            path: Some(self.path.clone()),
-            max_entries: self.max_entries,
-            enabled: self.enabled && session.history_enabled,
-            dedupe: self.dedupe,
-            profile_scoped: self.profile_scoped,
-            exclude_patterns: self.exclude_patterns.clone(),
-            profile: Some(runtime.config.resolved().active_profile().to_string()),
-            terminal: Some(
-                runtime
-                    .context
-                    .terminal_kind()
-                    .as_config_terminal()
-                    .to_string(),
-            ),
-            shell_context: history_shell,
-        }
-        .normalized()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct HistoryScopeView {
     prefix: Option<String>,
     label: String,
@@ -138,11 +76,46 @@ pub(crate) fn history_command_def(sort_key: impl Into<String>) -> CommandDef {
 }
 
 pub(crate) fn build_history_config(runtime: &AppRuntime, session: &AppSession) -> HistoryConfig {
-    ReplHistoryPolicy::from_config(runtime.config.resolved()).history_config(runtime, session)
+    let config = runtime.config.resolved();
+    session.sync_history_shell_context();
+    HistoryConfig {
+        path: Some(
+            config
+                .get_string("repl.history.path")
+                .map(PathBuf::from)
+                .unwrap_or_else(default_repl_history_path),
+        ),
+        max_entries: config_usize(
+            config,
+            "repl.history.max_entries",
+            DEFAULT_REPL_HISTORY_MAX_ENTRIES as usize,
+        ),
+        enabled: repl_history_enabled(config) && session.history_enabled,
+        dedupe: config.get_bool("repl.history.dedupe").unwrap_or(true),
+        profile_scoped: config
+            .get_bool("repl.history.profile_scoped")
+            .unwrap_or(true),
+        exclude_patterns: repl_history_exclude_patterns(config),
+        profile: Some(config.active_profile().to_string()),
+        terminal: Some(
+            runtime
+                .context
+                .terminal_kind()
+                .as_config_terminal()
+                .to_string(),
+        ),
+        shell_context: session.history_shell.clone(),
+    }
+    .normalized()
 }
 
 pub(crate) fn repl_history_enabled(config: &ResolvedConfig) -> bool {
-    ReplHistoryPolicy::from_config(config).enabled
+    config.get_bool("repl.history.enabled").unwrap_or(true)
+        && config_usize(
+            config,
+            "repl.history.max_entries",
+            DEFAULT_REPL_HISTORY_MAX_ENTRIES as usize,
+        ) > 0
 }
 
 pub(crate) fn run_history_repl_command(
@@ -150,7 +123,10 @@ pub(crate) fn run_history_repl_command(
     args: HistoryArgs,
     history: &SharedHistory,
 ) -> Result<ReplCommandOutput> {
-    if !history.enabled() {
+    if !history
+        .with(|store| store.history_enabled())
+        .unwrap_or(false)
+    {
         return Ok(ReplCommandOutput::Text(
             "History is disabled.\n".to_string(),
         ));
@@ -165,7 +141,9 @@ pub(crate) fn run_history_repl_command(
                 return Err(miette!("--since must not be later than --until"));
             }
             let mut entries = filter_history_entries(
-                history.list_entries_for(scope.prefix.as_deref()),
+                history
+                    .with(|store| store.list_entries_for(scope.prefix.as_deref()))
+                    .unwrap_or_default(),
                 since,
                 until,
             );
@@ -192,7 +170,9 @@ pub(crate) fn run_history_repl_command(
         }
         HistoryCommands::Prune(HistoryPruneArgs { keep }) => {
             let removed = history
-                .prune_for(keep, scope.prefix.as_deref())
+                .with(|store| store.prune_for(keep, scope.prefix.as_deref()))
+                .map_err(anyhow::Error::msg)
+                .and_then(|result| result)
                 .map_err(|err| {
                     crate::app::report_anyhow_with_context(err, "failed to prune REPL history")
                 })?;
@@ -207,9 +187,13 @@ pub(crate) fn run_history_repl_command(
             }))
         }
         HistoryCommands::Clear => {
-            let removed = history.clear_for(scope.prefix.as_deref()).map_err(|err| {
-                crate::app::report_anyhow_with_context(err, "failed to clear REPL history")
-            })?;
+            let removed = history
+                .with(|store| store.clear_for(scope.prefix.as_deref()))
+                .map_err(anyhow::Error::msg)
+                .and_then(|result| result)
+                .map_err(|err| {
+                    crate::app::report_anyhow_with_context(err, "failed to clear REPL history")
+                })?;
             Ok(ReplCommandOutput::Text(if removed == 0 {
                 format!("{} is already empty.\n", scope.label)
             } else {
@@ -306,8 +290,8 @@ fn default_repl_history_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        HistoryScopeView, ReplHistoryPolicy, build_history_config, history_command_def,
-        repl_history_enabled, repl_history_exclude_patterns, run_history_repl_command,
+        HistoryScopeView, build_history_config, history_command_def, repl_history_enabled,
+        repl_history_exclude_patterns, run_history_repl_command,
     };
     use crate::app::ReplCommandOutput;
     use crate::app::{
@@ -414,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn repl_history_policy_reads_effective_defaults_and_overrides_unit() {
+    fn build_history_config_reads_effective_defaults_and_overrides_unit() {
         let config = config_with_entries(&[
             ("profile.default", "default"),
             ("repl.history.max_entries", "42"),
@@ -425,11 +409,15 @@ mod tests {
             ("repl.history.exclude", "help"),
         ]);
 
-        let policy = ReplHistoryPolicy::from_config(&config);
+        let state = app_state(config);
+        let policy = build_history_config(&state.runtime, &state.session);
 
         assert_eq!(policy.max_entries, 42);
         assert!(policy.enabled);
-        assert_eq!(policy.path, PathBuf::from("/tmp/custom-history.jsonl"));
+        assert_eq!(
+            policy.path,
+            Some(PathBuf::from("/tmp/custom-history.jsonl"))
+        );
         assert!(!policy.dedupe);
         assert!(!policy.profile_scoped);
         assert!(policy.exclude_patterns.contains(&"help".to_string()));
@@ -486,7 +474,8 @@ mod tests {
     fn run_history_repl_command_lists_visible_rows_unit() {
         let history = shared_history(true);
         history
-            .save_command_line("config show")
+            .with(|store| store.save_command_line("config show"))
+            .expect("history lock should be available")
             .expect("history seed should save");
         let mut session = AppSession::default();
 
@@ -555,14 +544,13 @@ mod tests {
                 .join("\n"),
         )
         .expect("history fixture should write");
-        let history = SharedHistory::new(
-            HistoryConfig::builder()
-                .with_path(Some(path))
-                .with_max_entries(32)
-                .with_dedupe(false)
-                .with_profile_scoped(false)
-                .build(),
-        );
+        let history = SharedHistory::new(HistoryConfig {
+            path: Some(path),
+            max_entries: 32,
+            dedupe: false,
+            profile_scoped: false,
+            ..HistoryConfig::default()
+        });
         let mut session = AppSession::default();
         session.scope.enter("ldap");
 
@@ -641,13 +629,16 @@ mod tests {
     fn run_history_repl_command_prunes_and_clears_with_scope_unit() {
         let history = shared_history(true);
         history
-            .save_command_line("ldap user alice")
+            .with(|store| store.save_command_line("ldap user alice"))
+            .expect("history lock should be available")
             .expect("history seed should save");
         history
-            .save_command_line("ldap user bob")
+            .with(|store| store.save_command_line("ldap user bob"))
+            .expect("history lock should be available")
             .expect("history seed should save");
         history
-            .save_command_line("mreg host a")
+            .with(|store| store.save_command_line("mreg host a"))
+            .expect("history lock should be available")
             .expect("history seed should save");
         let mut session = AppSession::default();
         session.scope.enter("ldap");
@@ -667,10 +658,18 @@ mod tests {
             other => panic!("unexpected prune output: {other:?}"),
         }
 
-        let remaining = history.list_entries_for(Some("ldap"));
+        let remaining = history
+            .with(|store| store.list_entries_for(Some("ldap")))
+            .unwrap_or_default();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].command, "user bob");
-        assert_eq!(history.list_entries_for(Some("mreg")).len(), 1);
+        assert_eq!(
+            history
+                .with(|store| store.list_entries_for(Some("mreg")))
+                .unwrap_or_default()
+                .len(),
+            1
+        );
 
         let clear = run_history_repl_command(
             &mut session,
@@ -684,8 +683,19 @@ mod tests {
             ReplCommandOutput::Text(text) => assert_eq!(text, "Cleared ldap shell history.\n"),
             other => panic!("unexpected clear output: {other:?}"),
         }
-        assert!(history.list_entries_for(Some("ldap")).is_empty());
-        assert_eq!(history.list_entries_for(Some("mreg")).len(), 1);
+        assert!(
+            history
+                .with(|store| store.list_entries_for(Some("ldap")))
+                .unwrap_or_default()
+                .is_empty()
+        );
+        assert_eq!(
+            history
+                .with(|store| store.list_entries_for(Some("mreg")))
+                .unwrap_or_default()
+                .len(),
+            1
+        );
     }
 
     fn config_with_entries(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {

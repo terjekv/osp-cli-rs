@@ -64,12 +64,14 @@ fn completion_tree_with_root_commands() -> CompletionTree {
     }
 }
 
-fn history_config() -> super::HistoryConfigBuilder {
-    HistoryConfig::builder()
-        .with_enabled(true)
-        .with_max_entries(32)
-        .with_dedupe(false)
-        .with_profile_scoped(false)
+fn history_config() -> HistoryConfig {
+    HistoryConfig {
+        enabled: true,
+        max_entries: 32,
+        dedupe: false,
+        profile_scoped: false,
+        ..HistoryConfig::default()
+    }
 }
 
 fn test_appearance() -> super::ReplAppearance {
@@ -83,13 +85,12 @@ fn test_appearance() -> super::ReplAppearance {
 }
 
 fn disabled_history() -> SharedHistory {
-    SharedHistory::new(
-        history_config()
-            .with_enabled(false)
-            .with_max_entries(0)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    )
+    SharedHistory::new(HistoryConfig {
+        enabled: false,
+        max_entries: 0,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    })
 }
 
 // History expansion and submission contracts.
@@ -100,15 +101,24 @@ fn history_expansion_variants_resolve_recent_relative_and_prefix_queries_unit() 
 
     let history = test_history(&["ldap user oistes", "ldap netgroup ucore"]);
     assert_eq!(
-        history.expand(&BangCommand::Last, None, false),
+        history
+            .with(|store| store.expand(&BangCommand::Last, None, false))
+            .ok()
+            .flatten(),
         Some("ldap netgroup ucore".to_string())
     );
     assert_eq!(
-        history.expand(&BangCommand::Relative(1), None, false),
+        history
+            .with(|store| store.expand(&BangCommand::Relative(1), None, false))
+            .ok()
+            .flatten(),
         Some("ldap netgroup ucore".to_string())
     );
     assert_eq!(
-        history.expand(&BangCommand::Prefix("ldap user".to_string()), None, false),
+        history
+            .with(|store| store.expand(&BangCommand::Prefix("ldap user".to_string()), None, false))
+            .ok()
+            .flatten(),
         Some("ldap user oistes".to_string())
     );
 }
@@ -646,7 +656,7 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
         Some(BasicInputReason::CursorProbeUnsupported),
         None,
     ] {
-        let history = SharedHistory::new(history_config().build());
+        let history = SharedHistory::new(history_config());
         let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
         let mut execute =
             |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
@@ -678,10 +688,21 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
                 assert_eq!(config.prompt.left(), "left");
                 assert!(config.completion_tree.root.children.contains_key("config"));
                 assert_eq!(config.appearance.history_menu_rows, 5);
-                assert_eq!(interactive_history.enabled(), history.enabled());
                 assert_eq!(
-                    interactive_history.recent_commands(),
-                    history.recent_commands()
+                    interactive_history
+                        .with(|store| store.history_enabled())
+                        .unwrap_or(false),
+                    history
+                        .with(|store| store.history_enabled())
+                        .unwrap_or(false)
+                );
+                assert_eq!(
+                    interactive_history
+                        .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+                        .unwrap_or_default(),
+                    history
+                        .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+                        .unwrap_or_default()
                 );
                 Ok(ReplRunResult::Exit(7))
             },
@@ -1017,16 +1038,16 @@ fn remove_env_var_for_test(key: &str) {
 }
 
 fn test_history(commands: &[&str]) -> SharedHistory {
-    let history = SharedHistory::new(
-        history_config()
-            .with_max_entries(32)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let history = SharedHistory::new(HistoryConfig {
+        max_entries: 32,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     for command in commands {
         history
-            .save_command_line(command)
+            .with(|store| store.save_command_line(command))
+            .expect("history lock should be available")
             .expect("history save should succeed");
     }
 

@@ -66,10 +66,12 @@ impl Completer for ReplCompleter {
             line.len()
         );
         if pos == line.len()
-            && let Some(expanded) = self
-                .history
-                .as_ref()
-                .and_then(|history| history.expand_last_command(line))
+            && let Some(expanded) = self.history.as_ref().and_then(|history| {
+                history
+                    .with(|store| store.expand_last_command(line))
+                    .ok()
+                    .flatten()
+            })
         {
             return vec![Suggestion {
                 value: expanded,
@@ -190,7 +192,13 @@ impl Completer for ReplHistoryCompleter {
         let mut substring = Vec::new();
         let mut recent = Vec::new();
 
-        for entry in self.history.list_entries().into_iter().rev() {
+        for entry in self
+            .history
+            .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default()
+            .into_iter()
+            .rev()
+        {
             if !seen.insert(entry.command.clone()) {
                 continue;
             }

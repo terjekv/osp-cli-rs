@@ -326,7 +326,10 @@ pub(super) fn execute_bang_command(
     if matches!(&command, BangCommand::Prefix(prefix) if prefix.is_empty()) {
         return Ok(ReplLineResult::Continue(render_bang_help()));
     }
-    let expanded = history.expand(&command, scope.as_deref(), elevated);
+    let expanded = history
+        .with(|store| store.expand(&command, scope.as_deref(), elevated))
+        .ok()
+        .flatten();
 
     let Some(expanded) = expanded else {
         return Ok(ReplLineResult::Continue(format!(
@@ -456,15 +459,14 @@ mod tests {
     }
 
     fn history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_max_entries(20)
-                .with_enabled(true)
-                .with_dedupe(true)
-                .with_profile_scoped(false)
-                .with_shell_context(Default::default())
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            max_entries: 20,
+            enabled: true,
+            dedupe: true,
+            profile_scoped: false,
+            shell_context: Default::default(),
+            ..HistoryConfig::default()
+        })
     }
 
     struct PageCommand;

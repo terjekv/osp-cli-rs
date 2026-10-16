@@ -42,7 +42,7 @@
 //!
 //! let config = ReplRunConfig::builder(
 //!     ReplPrompt::simple("osp> "),
-//!     HistoryConfig::builder().build(),
+//!     HistoryConfig::default(),
 //! )
 //! .build();
 //!
@@ -89,10 +89,9 @@
 //!   [`crate::repl::CompletionDebug`] and
 //!   [`crate::repl::debug_completion`] stay available without becoming the
 //!   default path for ordinary embedders
-//! - host-style REPL configuration flows through concrete builders and
-//!   factories such as [`crate::repl::ReplRunConfig::builder`],
-//!   [`crate::repl::ReplAppearance::builder`], and
-//!   [`crate::repl::HistoryConfig::builder`]
+//! - host-style REPL configuration uses [`crate::repl::HistoryConfig`] and
+//!   builders such as [`crate::repl::ReplRunConfig::builder`] and
+//!   [`crate::repl::ReplAppearance::builder`]
 //! - guided REPL configuration follows the crate-wide naming rule:
 //!   `new(...)` for exact constructors, `builder(...)` for staged
 //!   configuration, `with_*` setters, and `build()` as the terminal step
@@ -119,10 +118,10 @@ pub(crate) use dispatch::apply_repl_shell_prefix;
 pub(crate) use engine::ReplCompleter;
 // Primary host-facing entry points.
 pub use engine::{
-    HistoryConfig, HistoryConfigBuilder, HistoryEntry, HistoryShellContext, LineProjection,
-    LineProjector, PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder, ReplInputMode,
-    ReplLineResult, ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunConfigBuilder, ReplRunResult,
-    ReplTabMode, SharedHistory, color_from_style_spec, default_pipe_verbs, run_repl,
+    HistoryConfig, HistoryEntry, HistoryShellContext, LineProjection, LineProjector,
+    PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder, ReplInputMode, ReplLineResult,
+    ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunConfigBuilder, ReplRunResult, ReplTabMode,
+    SharedHistory, color_from_style_spec, default_pipe_verbs, run_repl,
 };
 pub use notices::post_notice;
 // Debug surfaces for REPL completion, highlight, and history inspection.

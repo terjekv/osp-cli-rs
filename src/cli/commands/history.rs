@@ -60,7 +60,8 @@ mod tests {
             .normalized(),
         );
         history
-            .save_command_line("config show")
+            .with(|store| store.save_command_line("config show"))
+            .expect("history lock should be available")
             .expect("history seed should save");
 
         let mut session = AppSession::default();

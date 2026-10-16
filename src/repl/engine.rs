@@ -32,9 +32,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use super::highlight::{HighlightDebugSpan, debug_highlight};
-pub use super::history_store::{
-    HistoryConfig, HistoryConfigBuilder, HistoryEntry, HistoryShellContext, SharedHistory,
-};
+pub use super::history_store::{HistoryConfig, HistoryEntry, HistoryShellContext, SharedHistory};
 use crate::completion::CompletionTree;
 use anyhow::Result;
 

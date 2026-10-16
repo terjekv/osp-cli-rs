@@ -215,7 +215,7 @@ impl ReplRunConfig {
     ///
     /// let config = ReplRunConfig::builder(
     ///     ReplPrompt::simple("osp> "),
-    ///     HistoryConfig::builder().build(),
+    ///     HistoryConfig::default(),
     /// )
     /// .with_input_mode(ReplInputMode::Basic)
     /// .build();
@@ -482,13 +482,10 @@ mod tests {
             .with_history_menu_rows(8)
             .with_command_highlight_style(Some("green".to_string()))
             .build();
-        let config = ReplRunConfig::builder(
-            ReplPrompt::simple("osp> "),
-            HistoryConfig::builder().build(),
-        )
-        .with_appearance(appearance.clone())
-        .with_input_mode(ReplInputMode::Basic)
-        .build();
+        let config = ReplRunConfig::builder(ReplPrompt::simple("osp> "), HistoryConfig::default())
+            .with_appearance(appearance.clone())
+            .with_input_mode(ReplInputMode::Basic)
+            .build();
 
         assert_eq!(config.prompt.left, "osp> ");
         assert_eq!(config.input_mode, ReplInputMode::Basic);

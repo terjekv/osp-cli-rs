@@ -235,7 +235,7 @@
 //! - "I need runtime/session state" → [`app::AppStateBuilder::from_resolved_config`]
 //!   with [`app::LaunchContext`] and session overrides
 //! - "I want to embed the interactive editor loop directly" →
-//!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig::builder`]
+//!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig`]
 //! - "I need semantic payload generation for help/completion surfaces" →
 //!   [`core::document::Document`] and [`completion::CompletionTreeBuilder`]
 //!

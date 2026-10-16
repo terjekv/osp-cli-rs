@@ -192,7 +192,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     )
     .expect("seed command should succeed");
     history
-        .save_command_line("cache first")
+        .with(|store| store.save_command_line("cache first"))
+        .expect("history lock should be available")
         .expect("history seed should save");
     let expanded = repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -249,7 +250,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     )
     .expect("first seed command should succeed");
     history
-        .save_command_line("cache alpha")
+        .with(|store| store.save_command_line("cache alpha"))
+        .expect("history lock should be available")
         .expect("history seed should save");
     repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -260,7 +262,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     )
     .expect("second seed command should succeed");
     history
-        .save_command_line("cache beta")
+        .with(|store| store.save_command_line("cache beta"))
+        .expect("history lock should be available")
         .expect("history seed should save");
     let expanded = repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -284,13 +287,15 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
     let history = make_test_history(&mut state);
 
     history
-        .save_command_line("config show")
+        .with(|store| store.save_command_line("config show"))
+        .expect("history lock should be available")
         .expect("root history seed should save");
 
     state.session.scope.enter("orch");
     state.sync_history_shell_context();
     history
-        .save_command_line("status")
+        .with(|store| store.save_command_line("status"))
+        .expect("history lock should be available")
         .expect("scoped history seed should save");
 
     let scoped_hit = repl_dispatch::execute_repl_plugin_line(

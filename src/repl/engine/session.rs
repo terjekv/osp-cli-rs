@@ -173,7 +173,10 @@ where
         let pending = crate::ui::prompt::take_pending_line();
         let signal = if let Some((typed, true)) = pending {
             println!("{}{}{typed}", prompt.left(), prompt.indicator());
-            submission.history_store.stage_command_line(&typed)?;
+            submission
+                .history_store
+                .with(|store| store.stage_command_line(&typed))
+                .map_err(anyhow::Error::msg)??;
             Signal::Success(typed)
         } else {
             if let Some((typed, _)) = pending {
@@ -220,7 +223,10 @@ where
             return Ok(ReplRunResult::Exit(0));
         }
 
-        submission.history_store.stage_command_line(&line)?;
+        submission
+            .history_store
+            .with(|store| store.stage_command_line(&line))
+            .map_err(anyhow::Error::msg)??;
         match apply_basic_submission(evaluate_repl_submission(&line, submission)?) {
             BasicSubmissionAction::Continue => continue,
             BasicSubmissionAction::Return(result) => return Ok(result),
@@ -412,12 +418,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn disabled_history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_enabled(false)
-                .with_max_entries(0)
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            enabled: false,
+            max_entries: 0,
+            ..HistoryConfig::default()
+        })
     }
 
     fn test_appearance() -> ReplAppearance {

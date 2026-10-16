@@ -12,8 +12,7 @@
 //!
 //! Public API shape:
 //!
-//! - [`HistoryConfig::builder`] is the guided construction path and produces a
-//!   normalized config snapshot on `build()`
+//! - [`HistoryConfig`] configures persistence and visibility
 //! - [`SharedHistory`] is the public facade; the raw `reedline` store stays
 //!   crate-private
 
@@ -99,28 +98,6 @@ impl Default for HistoryConfig {
 }
 
 impl HistoryConfig {
-    /// Starts guided construction for REPL history configuration.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::path::PathBuf;
-    ///
-    /// use osp_cli::repl::HistoryConfig;
-    ///
-    /// let config = HistoryConfig::builder()
-    ///     .with_path(Some(PathBuf::from("/tmp/osp-history.jsonl")))
-    ///     .with_max_entries(250)
-    ///     .with_profile(Some(" Dev ".to_string()))
-    ///     .build();
-    ///
-    /// assert_eq!(config.max_entries, 250);
-    /// assert_eq!(config.profile.as_deref(), Some("dev"));
-    /// ```
-    pub fn builder() -> HistoryConfigBuilder {
-        HistoryConfigBuilder::new()
-    }
-
     /// Normalizes configured identifiers and exclusion patterns.
     pub fn normalized(mut self) -> Self {
         self.exclude_patterns =
@@ -132,103 +109,6 @@ impl HistoryConfig {
 
     fn persist_enabled(&self) -> bool {
         self.enabled && self.path.is_some() && self.max_entries > 0
-    }
-}
-
-/// Builder for [`HistoryConfig`].
-#[derive(Debug, Clone, Default)]
-#[must_use]
-pub struct HistoryConfigBuilder {
-    config: HistoryConfig,
-}
-
-impl HistoryConfigBuilder {
-    /// Starts a builder with normal REPL-history defaults.
-    pub fn new() -> Self {
-        Self {
-            config: HistoryConfig::default(),
-        }
-    }
-
-    /// Replaces the optional persistence path.
-    ///
-    /// If omitted, history persistence stays in-memory only.
-    pub fn with_path(mut self, path: Option<PathBuf>) -> Self {
-        self.config.path = path;
-        self
-    }
-
-    /// Replaces the retained-entry limit.
-    ///
-    /// If omitted, the builder keeps the default retained-entry limit.
-    pub fn with_max_entries(mut self, max_entries: usize) -> Self {
-        self.config.max_entries = max_entries;
-        self
-    }
-
-    /// Enables or disables history capture.
-    ///
-    /// If omitted, history capture stays enabled.
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.config.enabled = enabled;
-        self
-    }
-
-    /// Enables or disables duplicate collapsing.
-    ///
-    /// If omitted, duplicate collapsing stays enabled.
-    pub fn with_dedupe(mut self, dedupe: bool) -> Self {
-        self.config.dedupe = dedupe;
-        self
-    }
-
-    /// Enables or disables profile scoping.
-    ///
-    /// If omitted, history remains profile-scoped.
-    pub fn with_profile_scoped(mut self, profile_scoped: bool) -> Self {
-        self.config.profile_scoped = profile_scoped;
-        self
-    }
-
-    /// Replaces the excluded command patterns.
-    ///
-    /// If omitted, no exclusion patterns are applied.
-    pub fn with_exclude_patterns<I, S>(mut self, exclude_patterns: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.config.exclude_patterns = exclude_patterns.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Replaces the active profile used for scoping.
-    ///
-    /// If omitted, history entries are not tagged with a profile identifier.
-    pub fn with_profile(mut self, profile: Option<String>) -> Self {
-        self.config.profile = profile;
-        self
-    }
-
-    /// Replaces the active terminal label recorded on entries.
-    ///
-    /// If omitted, saved entries carry no terminal label.
-    pub fn with_terminal(mut self, terminal: Option<String>) -> Self {
-        self.config.terminal = terminal;
-        self
-    }
-
-    /// Replaces the shared shell context used for scoped history views.
-    ///
-    /// If omitted, the builder keeps [`HistoryShellContext::default`].
-    pub fn with_shell_context(mut self, shell_context: HistoryShellContext) -> Self {
-        self.config.shell_context = shell_context;
-        self
-    }
-
-    /// Builds a normalized history configuration.
-    pub fn build(self) -> HistoryConfig {
-        self.config.normalized()
     }
 }
 
@@ -307,8 +187,7 @@ pub struct HistoryEntry {
 
 /// Thread-safe facade over the REPL history store.
 ///
-/// Listing helpers return entries in oldest-to-newest order. Mutating helpers
-/// such as prune and clear only touch entries visible in the chosen scope.
+/// Clones share the same store and live shell context.
 #[derive(Clone)]
 pub struct SharedHistory {
     inner: Arc<Mutex<OspHistoryStore>>,
@@ -325,194 +204,19 @@ impl SharedHistory {
         }
     }
 
-    /// Returns whether history capture is enabled for the current config.
-    pub fn enabled(&self) -> bool {
-        self.inner
-            .lock()
-            .map(|store| store.history_enabled())
-            .unwrap_or(false)
-    }
-
-    /// Returns visible commands in oldest-to-newest order using the active
-    /// shell scope.
-    pub fn recent_commands(&self) -> Vec<String> {
-        self.inner
-            .lock()
-            .map(|store| store.recent_commands())
-            .unwrap_or_default()
-    }
-
-    /// Returns visible commands in oldest-to-newest order for the provided
-    /// shell prefix.
-    ///
-    /// Matching profile scope and exclusion patterns still apply. When a shell
-    /// prefix is provided, the returned commands have that prefix stripped.
-    pub fn recent_commands_for(&self, shell_prefix: Option<&str>) -> Vec<String> {
-        self.inner
-            .lock()
-            .map(|store| store.recent_commands_for(shell_prefix))
-            .unwrap_or_default()
-    }
-
-    /// Returns visible history entries in oldest-to-newest order using the
-    /// active shell scope.
-    pub fn list_entries(&self) -> Vec<HistoryEntry> {
-        self.inner
-            .lock()
-            .map(|store| store.list_entries())
-            .unwrap_or_default()
-    }
-
-    /// Returns visible history entries in oldest-to-newest order for the
-    /// provided shell prefix.
-    pub fn list_entries_for(&self, shell_prefix: Option<&str>) -> Vec<HistoryEntry> {
-        self.inner
-            .lock()
-            .map(|store| store.list_entries_for(shell_prefix))
-            .unwrap_or_default()
-    }
-
-    /// Removes the oldest visible entries, keeping at most `keep` entries in
-    /// the active scope.
-    ///
-    /// Returns the number of removed entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history lock is poisoned or when persisting
-    /// the updated history file fails.
-    pub fn prune(&self, keep: usize) -> Result<usize> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        guard.prune(keep)
-    }
-
-    /// Removes the oldest visible entries for a specific shell scope, keeping
-    /// at most `keep`.
-    ///
-    /// Returns the number of removed entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history lock is poisoned or when persisting
-    /// the updated history file fails.
-    pub fn prune_for(&self, keep: usize, shell_prefix: Option<&str>) -> Result<usize> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        guard.prune_for(keep, shell_prefix)
-    }
-
-    /// Clears all entries visible in the current scope.
-    ///
-    /// Returns the number of removed entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history lock is poisoned or when persisting
-    /// the updated history file fails.
-    pub fn clear_scoped(&self) -> Result<usize> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        guard.clear_scoped()
-    }
-
-    /// Clears all entries visible to the provided shell prefix.
-    ///
-    /// Returns the number of removed entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history lock is poisoned or when persisting
-    /// the updated history file fails.
-    pub fn clear_for(&self, shell_prefix: Option<&str>) -> Result<usize> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        guard.clear_for(shell_prefix)
-    }
-
-    /// Remember the last submitted command independently of persisted history.
-    pub(crate) fn remember_command(&self, command_line: &str) {
-        if !command_line.trim().is_empty()
-            && let Ok(mut store) = self.inner.lock()
-        {
-            store.last_command = Some(command_line.trim().to_string());
-        }
-    }
-
-    /// The same expansion is used by Tab completion and Enter dispatch.
-    pub(crate) fn expand_last_command(&self, raw: &str) -> Option<String> {
-        let (elevated, bang) = split_bang_request(raw)?;
-        if bang != "!!" {
-            return None;
-        }
-        self.expand(&BangCommand::Last, None, elevated)
-    }
-
-    pub(crate) fn expand(
+    /// Runs one operation while holding the history lock, reporting poisoning.
+    pub(crate) fn with<R>(
         &self,
-        command: &BangCommand,
-        scope: Option<&str>,
-        elevated: bool,
-    ) -> Option<String> {
-        self.inner.lock().ok()?.expand(command, scope, elevated)
-    }
-
-    /// Commit the editor's pending record, or save an accepted basic-mode replay.
-    ///
-    /// A sourced child must leave an unrelated pending parent record alone.
-    pub(crate) fn finalize_execution(
-        &self,
-        input: &str,
-        resolved: &str,
-        accepted: bool,
-    ) -> Result<()> {
-        let mut guard = self
-            .inner
+        f: impl FnOnce(&mut OspHistoryStore) -> R,
+    ) -> std::result::Result<R, &'static str> {
+        self.inner
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        if guard.pending_record.is_none() && input != resolved && accepted {
-            History::save(&mut *guard, HistoryItem::from_command_line(resolved))?;
-        }
-        guard.finalize_pending(resolved, accepted)
-    }
-
-    /// Saves one command line through the underlying `reedline::History`
-    /// implementation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the history lock is poisoned or when the
-    /// underlying history backend rejects or fails to persist the item.
-    pub fn save_command_line(&self, command_line: &str) -> Result<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        let item = HistoryItem::from_command_line(command_line);
-        History::save(&mut *guard, item).map(|_| ())?;
-        guard.finalize_pending(command_line, true)?;
-        Ok(())
-    }
-
-    pub(crate) fn stage_command_line(&self, command_line: &str) -> Result<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-        History::save(&mut *guard, HistoryItem::from_command_line(command_line)).map(|_| ())?;
-        Ok(())
+            .map(|mut store| f(&mut store))
+            .map_err(|_| "history lock poisoned")
     }
 }
 
-/// `reedline::History` implementation backed by newline-delimited JSON records.
+/// History backend storing newline-delimited JSON records.
 ///
 /// The store keeps insertion order, applies visibility rules when presenting
 /// commands back to callers, and writes the full persisted record stream back
@@ -556,12 +260,6 @@ impl OspHistoryStore {
         self.config.enabled && self.config.max_entries > 0
     }
 
-    /// Returns visible commands in oldest-to-newest order using the active
-    /// shell scope.
-    pub fn recent_commands(&self) -> Vec<String> {
-        self.recent_commands_for(self.shell_prefix().as_deref())
-    }
-
     /// Returns visible commands in oldest-to-newest order for the provided
     /// shell prefix.
     ///
@@ -571,12 +269,6 @@ impl OspHistoryStore {
             .into_iter()
             .map(|record_index| self.records[record_index].command_line.clone())
             .collect()
-    }
-
-    /// Returns visible history entries in oldest-to-newest order using the
-    /// active shell scope.
-    pub fn list_entries(&self) -> Vec<HistoryEntry> {
-        self.list_entries_for(self.shell_prefix().as_deref())
     }
 
     /// Returns visible history entries in oldest-to-newest order for the
@@ -598,15 +290,6 @@ impl OspHistoryStore {
                 ),
             })
             .collect()
-    }
-
-    /// Removes the oldest visible entries, keeping at most `keep` in the active
-    /// scope.
-    ///
-    /// Returns the number of removed entries.
-    pub fn prune(&mut self, keep: usize) -> Result<usize> {
-        let shell_prefix = self.shell_prefix();
-        self.prune_for(keep, shell_prefix.as_deref())
     }
 
     /// Removes the oldest visible entries for a specific shell scope, keeping
@@ -683,15 +366,6 @@ impl OspHistoryStore {
         Ok(to_remove.len())
     }
 
-    /// Clears all entries visible in the current scope.
-    ///
-    /// This is equivalent to `prune(0)`.
-    ///
-    /// Returns the number of removed entries.
-    pub fn clear_scoped(&mut self) -> Result<usize> {
-        self.prune(0)
-    }
-
     /// Clears all entries visible to the provided shell prefix.
     ///
     /// This is equivalent to `prune_for(0, shell_prefix)`.
@@ -748,6 +422,56 @@ impl OspHistoryStore {
         )
     }
 
+    /// Remember the last submitted command independently of persisted history.
+    pub(crate) fn remember_command(&mut self, command_line: &str) {
+        if !command_line.trim().is_empty() {
+            self.last_command = Some(command_line.trim().to_string());
+        }
+    }
+
+    /// The same expansion is used by Tab completion and Enter dispatch.
+    pub(crate) fn expand_last_command(&self, raw: &str) -> Option<String> {
+        let (elevated, bang) = split_bang_request(raw)?;
+        if bang != "!!" {
+            return None;
+        }
+        self.expand(&BangCommand::Last, None, elevated)
+    }
+
+    /// Commit the editor's pending record, or save an accepted basic-mode replay.
+    ///
+    /// A sourced child must leave an unrelated pending parent record alone.
+    pub(crate) fn finalize_execution(
+        &mut self,
+        input: &str,
+        resolved: &str,
+        accepted: bool,
+    ) -> Result<()> {
+        if self.pending_record.is_none() && input != resolved && accepted {
+            self.save(HistoryItem::from_command_line(resolved))?;
+        }
+        self.finalize_pending(resolved, accepted)
+    }
+
+    /// Saves and finalizes one accepted command line.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when saving or persisting the item fails.
+    #[cfg(test)]
+    pub(crate) fn save_command_line(&mut self, command_line: &str) -> Result<()> {
+        let item = HistoryItem::from_command_line(command_line);
+        self.save(item).map(|_| ())?;
+        self.finalize_pending(command_line, true)?;
+        Ok(())
+    }
+
+    pub(crate) fn stage_command_line(&mut self, command_line: &str) -> Result<()> {
+        self.save(HistoryItem::from_command_line(command_line))
+            .map(|_| ())?;
+        Ok(())
+    }
+
     fn profile_allows(&self, record: &HistoryRecord) -> bool {
         if !self.config.profile_scoped {
             return true;
@@ -759,7 +483,7 @@ impl OspHistoryStore {
         }
     }
 
-    fn shell_prefix(&self) -> Option<String> {
+    pub(crate) fn shell_prefix(&self) -> Option<String> {
         self.config.shell_context.prefix()
     }
 
@@ -1034,8 +758,8 @@ impl OspHistoryStore {
     }
 }
 
-impl History for OspHistoryStore {
-    fn save(&mut self, h: HistoryItem) -> ReedlineResult<HistoryItem> {
+impl OspHistoryStore {
+    pub(crate) fn save(&mut self, h: HistoryItem) -> ReedlineResult<HistoryItem> {
         self.pending_record = None;
         if !self.config.enabled || self.config.max_entries == 0 {
             return Ok(h);
@@ -1082,7 +806,7 @@ impl History for OspHistoryStore {
         })
     }
 
-    fn load(&self, id: HistoryItemId) -> ReedlineResult<HistoryItem> {
+    pub(crate) fn load(&self, id: HistoryItemId) -> ReedlineResult<HistoryItem> {
         let idx = id.0 as usize;
         let shell_prefix = self.shell_prefix();
         let record = self
@@ -1092,11 +816,11 @@ impl History for OspHistoryStore {
         Ok(self.history_item_from_record(record, shell_prefix.as_deref()))
     }
 
-    fn count(&self, query: SearchQuery) -> ReedlineResult<i64> {
+    pub(crate) fn count(&self, query: SearchQuery) -> ReedlineResult<i64> {
         Ok(self.search(query)?.len() as i64)
     }
 
-    fn search(&self, query: SearchQuery) -> ReedlineResult<Vec<HistoryItem>> {
+    pub(crate) fn search(&self, query: SearchQuery) -> ReedlineResult<Vec<HistoryItem>> {
         let (min_id, max_id) = {
             let start = query.start_id.map(|value| value.0);
             let end = query.end_id.map(|value| value.0);
@@ -1180,7 +904,7 @@ impl History for OspHistoryStore {
         Ok(results)
     }
 
-    fn update(
+    pub(crate) fn update(
         &mut self,
         _id: HistoryItemId,
         _updater: &dyn Fn(HistoryItem) -> HistoryItem,
@@ -1193,7 +917,7 @@ impl History for OspHistoryStore {
         ))
     }
 
-    fn clear(&mut self) -> ReedlineResult<()> {
+    pub(crate) fn clear(&mut self) -> ReedlineResult<()> {
         if let Some(path) = self.config.path.as_ref() {
             let _transaction_lock = crate::config::lock_file_transaction(path)
                 .map_err(|err| ReedlineError(ReedlineErrorVariants::IOError(err)))?;
@@ -1208,7 +932,7 @@ impl History for OspHistoryStore {
         Ok(())
     }
 
-    fn delete(&mut self, _h: HistoryItemId) -> ReedlineResult<()> {
+    pub(crate) fn delete(&mut self, _h: HistoryItemId) -> ReedlineResult<()> {
         Err(ReedlineError(
             ReedlineErrorVariants::HistoryFeatureUnsupported {
                 history: "OspHistoryStore",
@@ -1217,7 +941,7 @@ impl History for OspHistoryStore {
         ))
     }
 
-    fn sync(&mut self) -> std::io::Result<()> {
+    pub(crate) fn sync(&mut self) -> std::io::Result<()> {
         if let Some(pending) = self.pending_record.take() {
             let restore = pending.clone();
             if let Err(err) = self.commit_pending(pending) {
@@ -1241,42 +965,30 @@ impl History for OspHistoryStore {
         Ok(())
     }
 
-    fn session(&self) -> Option<HistorySessionId> {
+    pub(crate) fn session(&self) -> Option<HistorySessionId> {
         None
     }
 }
 
 impl History for SharedHistory {
     fn save(&mut self, h: HistoryItem) -> ReedlineResult<HistoryItem> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::save(&mut *guard, h)
+        self.with(|store| store.save(h))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn load(&self, id: HistoryItemId) -> ReedlineResult<HistoryItem> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::load(&*guard, id)
+        self.with(|store| store.load(id))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn count(&self, query: SearchQuery) -> ReedlineResult<i64> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::count(&*guard, query)
+        self.with(|store| store.count(query))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn search(&self, query: SearchQuery) -> ReedlineResult<Vec<HistoryItem>> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::search(&*guard, query)
+        self.with(|store| store.search(query))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn update(
@@ -1284,40 +996,27 @@ impl History for SharedHistory {
         id: HistoryItemId,
         updater: &dyn Fn(HistoryItem) -> HistoryItem,
     ) -> ReedlineResult<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::update(&mut *guard, id, updater)
+        self.with(|store| store.update(id, updater))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn clear(&mut self) -> ReedlineResult<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::clear(&mut *guard)
+        self.with(OspHistoryStore::clear)
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn delete(&mut self, h: HistoryItemId) -> ReedlineResult<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| OspHistoryStore::reedline_error("history lock poisoned"))?;
-        History::delete(&mut *guard, h)
+        self.with(|store| store.delete(h))
+            .map_err(OspHistoryStore::reedline_error)?
     }
 
     fn sync(&mut self) -> std::io::Result<()> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| std::io::Error::other("history lock poisoned"))?;
-        History::sync(&mut *guard)
+        self.with(OspHistoryStore::sync)
+            .map_err(std::io::Error::other)?
     }
 
     fn session(&self) -> Option<HistorySessionId> {
-        let guard = self.inner.lock().ok()?;
-        History::session(&*guard)
+        self.with(|store| store.session()).ok().flatten()
     }
 }
 

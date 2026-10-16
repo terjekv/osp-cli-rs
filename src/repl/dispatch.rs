@@ -247,11 +247,15 @@ fn execute_repl_plugin_line_with_acceptance(
             runtime, session, clients, history, &resolved, sink, accepted,
         )
     })();
-    if let Err(err) = history.finalize_execution(line, &resolved, *accepted && keep_history) {
+    if let Err(err) = history
+        .with(|store| store.finalize_execution(line, &resolved, *accepted && keep_history))
+        .map_err(anyhow::Error::msg)
+        .and_then(|result| result)
+    {
         sink.write_stderr(&format!("failed to update REPL history: {err}\n"));
     }
     if *accepted && !is_repl_bang_request(&resolved) {
-        history.remember_command(&resolved);
+        let _ = history.with(|store| store.remember_command(&resolved));
     }
     session.finish_repl_line();
     match execution {

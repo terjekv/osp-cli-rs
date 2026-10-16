@@ -100,7 +100,12 @@ pub(crate) fn history_picker_items(history: &SharedHistory) -> Vec<HistoryPicker
     let mut seen = BTreeSet::new();
     let mut entries = Vec::new();
 
-    for entry in history.list_entries().into_iter().rev() {
+    for entry in history
+        .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+    {
         // Keep the newest copy of each unique command so an empty query acts
         // like "recent history", not "all repeats of the last thing I ran".
         if seen.insert(entry.command.clone()) {
@@ -304,12 +309,11 @@ mod tests {
     use reedline::Menu;
 
     fn empty_history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_enabled(false)
-                .with_max_entries(0)
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            enabled: false,
+            max_entries: 0,
+            ..HistoryConfig::default()
+        })
     }
 
     #[test]
