@@ -301,9 +301,7 @@ fn describe_plugin_and_provider_error_paths_cover_missing_nonzero_invalid_and_ex
         plugin_version: None,
         executable: root.join("osp-missing-run"),
         source: PluginSource::Explicit,
-        commands: vec!["missing".to_string()],
-        describe_commands: Vec::new(),
-        command_specs: Vec::new(),
+        commands: DiscoveredPlugin::seed_commands(["missing".to_string()]),
         issue: None,
         default_enabled: true,
     };

@@ -42,7 +42,7 @@ use crate::core::plugin::{
 };
 use crate::core::runtime::RuntimeHints;
 use anyhow::{Result, anyhow};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -107,17 +107,7 @@ pub struct DiscoveredPlugin {
     pub executable: PathBuf,
     /// Discovery source used to locate the executable.
     pub source: PluginSource,
-    /// Seeded top-level command names from manifest or describe metadata.
-    ///
-    /// Internal selection and catalog code should prefer the canonical command
-    /// helpers on this type so `commands`, `command_specs`, and
-    /// `describe_commands` cannot drift independently.
-    pub commands: Vec<String>,
-    /// Raw describe-command payloads returned by the plugin.
-    pub describe_commands: Vec<DescribeCommandV1>,
-    /// Normalized completion specs derived from describe metadata or manifest
-    /// seed data.
-    pub command_specs: Vec<CommandSpec>,
+    pub(crate) commands: BTreeMap<String, PluginCommand>,
     /// Discovery or validation issue associated with this plugin.
     pub issue: Option<String>,
     /// Whether commands from this plugin default to enabled when no explicit
@@ -125,84 +115,74 @@ pub struct DiscoveredPlugin {
     pub default_enabled: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct CanonicalPluginCommand<'a> {
-    name: &'a str,
-    spec: Option<&'a CommandSpec>,
-    describe: Option<&'a DescribeCommandV1>,
+/// Normalized metadata for a command, including manifest-only seeds.
+#[derive(Debug, Clone)]
+pub(crate) struct PluginCommand {
+    order: usize,
+    completion: CommandSpec,
+    describe: Option<DescribeCommandV1>,
 }
 
-impl<'a> CanonicalPluginCommand<'a> {
-    pub(crate) fn name(self) -> &'a str {
-        self.name
+impl PluginCommand {
+    pub(crate) fn completion(&self) -> CommandSpec {
+        self.completion.clone()
     }
 
-    pub(crate) fn completion(self) -> CommandSpec {
-        self.spec
-            .cloned()
-            .or_else(|| self.describe.map(to_command_spec))
-            .unwrap_or_else(|| CommandSpec::new(self.name))
-    }
-
-    pub(crate) fn auth(self) -> Option<DescribeCommandAuthV1> {
-        self.describe.and_then(|command| command.auth.clone())
-    }
-
-    pub(crate) fn describe(self) -> Option<&'a DescribeCommandV1> {
+    pub(crate) fn auth(&self) -> Option<DescribeCommandAuthV1> {
         self.describe
+            .as_ref()
+            .and_then(|command| command.auth.clone())
+    }
+
+    pub(crate) fn describe(&self) -> Option<&DescribeCommandV1> {
+        self.describe.as_ref()
     }
 }
 
 impl DiscoveredPlugin {
-    pub(crate) fn canonical_command_names(&self) -> Vec<&str> {
-        let mut seen = BTreeSet::new();
-        let mut out = Vec::new();
-
-        for spec in &self.command_specs {
-            if seen.insert(spec.name.as_str()) {
-                out.push(spec.name.as_str());
-            }
+    pub(crate) fn seed_commands(
+        names: impl IntoIterator<Item = String>,
+    ) -> BTreeMap<String, PluginCommand> {
+        let mut commands = BTreeMap::new();
+        for (order, name) in names.into_iter().enumerate() {
+            commands
+                .entry(name.clone())
+                .or_insert_with(|| PluginCommand {
+                    order,
+                    completion: CommandSpec::new(name),
+                    describe: None,
+                });
         }
-        for command in &self.describe_commands {
-            if seen.insert(command.name.as_str()) {
-                out.push(command.name.as_str());
-            }
-        }
-        for command in &self.commands {
-            if seen.insert(command.as_str()) {
-                out.push(command.as_str());
-            }
-        }
-
-        out
+        commands
     }
 
-    pub(crate) fn canonical_command(
-        &self,
-        command_name: &str,
-    ) -> Option<CanonicalPluginCommand<'_>> {
-        let spec = self
-            .command_specs
-            .iter()
-            .find(|spec| spec.name == command_name);
-        let describe = self
-            .describe_commands
-            .iter()
-            .find(|command| command.name == command_name);
-        let raw_name = self
-            .commands
-            .iter()
-            .find(|command| command.as_str() == command_name);
-        let name = spec
-            .map(|spec| spec.name.as_str())
-            .or_else(|| describe.map(|command| command.name.as_str()))
-            .or_else(|| raw_name.map(String::as_str))?;
+    pub(crate) fn described_commands(
+        commands: impl IntoIterator<Item = DescribeCommandV1>,
+    ) -> BTreeMap<String, PluginCommand> {
+        let mut normalized = BTreeMap::new();
+        for (order, describe) in commands.into_iter().enumerate() {
+            normalized
+                .entry(describe.name.clone())
+                .or_insert_with(|| PluginCommand {
+                    order,
+                    completion: to_command_spec(&describe),
+                    describe: Some(describe),
+                });
+        }
+        normalized
+    }
 
-        Some(CanonicalPluginCommand {
-            name,
-            spec,
-            describe,
-        })
+    pub(crate) fn canonical_command_names(&self) -> Vec<&str> {
+        let mut commands = self.commands.iter().collect::<Vec<_>>();
+        commands.sort_by_key(|(_, command)| command.order);
+        commands
+            .into_iter()
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
+    pub(crate) fn canonical_command(&self, command_name: &str) -> Option<&PluginCommand> {
+        self.commands.get(command_name)
     }
 }
 

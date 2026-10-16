@@ -15,6 +15,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove `NativeSessionContext::set_context_value_with_prompt`;
   use `set_prompt_value(key, label, value)` instead.
 
+- **Breaking:** Replace mutable discovered-plugin command vectors with one
+  normalized command map.
+
 - **Breaking:** Replace provider and placement completion metadata with the
   generic `DynamicCompletion` callback on `CommandSpec` and `CompletionNode`.
   Remove `Planning*`, `OsVersions`, `RequestHints`, `RequestHintSet`,

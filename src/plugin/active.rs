@@ -149,7 +149,6 @@ impl<'a> ActivePluginView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completion::CommandSpec;
     use crate::plugin::state::{PluginCommandPreferences, PluginCommandState};
     use crate::plugin::{DiscoveredPlugin, PluginSource};
     use std::path::PathBuf;
@@ -160,9 +159,7 @@ mod tests {
             plugin_version: Some("0.1.0".to_string()),
             executable: PathBuf::from(format!("/tmp/osp-{plugin_id}")),
             source: PluginSource::Explicit,
-            commands: vec![command.to_string()],
-            describe_commands: Vec::new(),
-            command_specs: vec![CommandSpec::new(command)],
+            commands: DiscoveredPlugin::seed_commands([command.to_string()]),
             issue: None,
             default_enabled: true,
         }

@@ -51,7 +51,7 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                 };
                 let completion = command.completion();
                 out.push(CommandCatalogEntry {
-                    name: command.name().to_string(),
+                    name: resolved.command().to_string(),
                     about: completion.tooltip.clone().unwrap_or_default(),
                     auth: command.auth(),
                     subcommands: direct_subcommand_names(&completion),
@@ -234,7 +234,6 @@ fn collect_command_auth_with_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completion::CommandSpec;
     use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1};
     use crate::plugin::active::ActivePluginView;
     use crate::plugin::state::PluginCommandPreferences;
@@ -247,9 +246,7 @@ mod tests {
             plugin_version: Some("0.1.0".to_string()),
             executable: PathBuf::from(format!("/tmp/osp-{plugin_id}")),
             source: PluginSource::Explicit,
-            commands: vec![command.to_string()],
-            describe_commands: Vec::new(),
-            command_specs: vec![CommandSpec::new(command)],
+            commands: DiscoveredPlugin::seed_commands([command.to_string()]),
             issue: None,
             default_enabled: true,
         }
@@ -295,8 +292,7 @@ mod tests {
             plugin_version: Some("0.1.0".to_string()),
             executable: PathBuf::from("/tmp/osp-alpha"),
             source: PluginSource::Explicit,
-            commands: Vec::new(),
-            describe_commands: vec![DescribeCommandV1 {
+            commands: DiscoveredPlugin::described_commands([DescribeCommandV1 {
                 name: "ldap".to_string(),
                 about: "lookup users".to_string(),
                 args: Vec::new(),
@@ -308,8 +304,7 @@ mod tests {
                     feature_flags: Vec::new(),
                     ..DescribeCommandAuthV1::default()
                 }),
-            }],
-            command_specs: Vec::new(),
+            }]),
             issue: None,
             default_enabled: true,
         };

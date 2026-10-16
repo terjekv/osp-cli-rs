@@ -6,9 +6,7 @@
 //! catalog without having to know about manifests, cache files, or path-only
 //! policy details.
 
-use super::conversion::to_command_spec;
 use super::manager::{DiscoveredPlugin, PluginManager, PluginSource};
-use crate::completion::CommandSpec;
 use crate::config::{default_cache_root_dir, default_config_root_dir};
 use crate::core::plugin::{DescribeV1, canonical_plugin_id};
 use anyhow::{Context, Result, anyhow};
@@ -727,12 +725,7 @@ fn seeded_discovered_plugin(
         plugin_version: manifest_entry.as_ref().map(|entry| entry.version.clone()),
         executable,
         source,
-        describe_commands: Vec::new(),
-        command_specs: commands
-            .iter()
-            .map(|name| CommandSpec::new(name.clone()))
-            .collect(),
-        commands,
+        commands: DiscoveredPlugin::seed_commands(commands),
         issue: None,
         default_enabled: manifest_entry
             .as_ref()
@@ -795,17 +788,7 @@ fn apply_describe_metadata(
 
     plugin.plugin_id = describe.plugin_id.clone();
     plugin.plugin_version = Some(describe.plugin_version.clone());
-    plugin.commands = describe
-        .commands
-        .iter()
-        .map(|cmd| cmd.name.clone())
-        .collect::<Vec<String>>();
-    plugin.describe_commands = describe.commands.clone();
-    plugin.command_specs = describe
-        .commands
-        .iter()
-        .map(to_command_spec)
-        .collect::<Vec<CommandSpec>>();
+    plugin.commands = DiscoveredPlugin::described_commands(describe.commands.clone());
 
     if let Some(issue) = min_osp_version_issue(describe) {
         super::state::merge_issue(&mut plugin.issue, issue);
