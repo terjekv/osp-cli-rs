@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- A leading space keeps a REPL line out of persisted history, including bang
+  replays. The editor still allows one temporary recall with Up.
+
 - Ctrl-R history search uses `history> `: Enter runs the selected command,
   Tab puts it in the editor, and Escape restores the draft.
 

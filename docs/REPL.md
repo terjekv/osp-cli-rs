@@ -185,6 +185,7 @@ The REPL provides:
   execution; `sudo !!` repeats it with elevation. Tab expands these into the
   editor without running; Enter expands and runs them. Unknown commands and
   invalid syntax are excluded from saved history.
+- A leading space keeps a line off disk while allowing one temporary Up recall.
 - saved-history expansion such as `!123`, `!-2`, and `!prefix`
 - paged results: `next` and `prev`, or Shift+→ / Shift+← (also PageDown /
   PageUp) on an empty line; with text on the line, Shift+arrows move the cursor

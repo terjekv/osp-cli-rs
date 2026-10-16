@@ -44,8 +44,8 @@ pub(crate) fn evaluate_repl_submission<F>(
 where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
-    let raw = raw.trim();
-    if raw.is_empty() {
+    let raw = raw.trim_end();
+    if raw.trim().is_empty() {
         return ReplResult::Continue;
     }
     match (ctx.execute)(crate::repl::ReplEvent::Line(raw), ctx.history_store) {
@@ -161,6 +161,7 @@ pub(super) fn build_interactive_editor(
     editor
         .with_external_printer(printer)
         .with_history(Box::new(history_store))
+        .with_history_exclusion_prefix(Some(" ".to_string()))
 }
 
 pub(super) fn drive_interactive_editor<F, R, B>(

@@ -426,6 +426,9 @@ impl OspHistoryStore {
         resolved: &str,
         accepted: bool,
     ) -> Result<()> {
+        if input.starts_with(' ') {
+            return Ok(());
+        }
         let keep = accepted && !self.is_command_excluded(resolved);
         if input != resolved {
             let original = apply_shell_prefix(input, self.shell_prefix().as_deref());
@@ -680,7 +683,7 @@ impl OspHistoryStore {
 impl OspHistoryStore {
     pub(crate) fn save(&mut self, h: HistoryItem) -> ReedlineResult<HistoryItem> {
         self.pending_record = None;
-        if !self.config.enabled || self.config.max_entries == 0 {
+        if !self.config.enabled || self.config.max_entries == 0 || h.command_line.starts_with(' ') {
             return Ok(h);
         }
 
