@@ -111,7 +111,9 @@ impl NativeCommand for NativeProbeCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["active_profile".to_string(), "theme".to_string()]),
                 column_labels: Vec::new(),
@@ -139,19 +141,19 @@ fn native_session_context_shares_selection_and_redacts_private_state() {
     let session = osp_cli::NativeSessionContext::default();
     let next_command = session.clone();
     session.set_value("selected_target", "private-resource-ref");
-    session.set_prompt_value("selection", "Target", "public-label");
+    session.set_context_value("host", "public-label");
     assert_eq!(
         next_command.value("selected_target").as_deref(),
         Some("private-resource-ref")
     );
     let entries = next_command.prompt_entries();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].label, "Target");
+    assert_eq!(entries[0].label, "host");
     assert_eq!(entries[0].value, "public-label");
     let diagnostic = format!("{next_command:?}");
     assert!(diagnostic.contains("[redacted]"));
     assert!(!diagnostic.contains("private-resource-ref"));
-    next_command.remove_prompt_value("selection");
+    next_command.clear_context(Some("host"));
     assert!(session.prompt_entries().is_empty());
     assert_eq!(
         session.value("selected_target").as_deref(),
@@ -224,7 +226,7 @@ fn native_command_sets_session_context_with_source_and_time() {
     assert_eq!(entries[0].value, "foo.uio.no");
     assert_eq!(entries[0].command, "remember-host");
     assert!(chrono::DateTime::parse_from_rfc3339(&entries[0].when).is_ok());
-    assert!(entries[0].prompt_label.is_none());
+    assert_eq!(context.prompt_entries()[0].label, "host");
 }
 
 struct SiteStatusCommand;
@@ -250,6 +252,8 @@ impl NativeCommand for CuratedOrchRowsCommand {
                         "created_at": 1700000000,
                     }))
                     .with_meta(ResponseMetaV1 {
+ context_not_found: false,
+                context: Default::default(),
                         presentation_lines: vec![
                             format!("{state}: db01.uio.no"),
                             "└─ Resource preparation with a description long enough to wrap on a narrow terminal".into(),
@@ -296,7 +300,9 @@ impl NativeCommand for CuratedOrchRowsCommand {
             ],
             context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),
@@ -360,7 +366,9 @@ impl NativeCommand for SiteStatusCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["enabled".to_string(), "banner".to_string()]),
                 column_labels: Vec::new(),

@@ -279,3 +279,6 @@ mod normalize;
 
 #[cfg(test)]
 mod tests;
+
+/// Declared entity selection shared by commands and plugins.
+pub mod context;

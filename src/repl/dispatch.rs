@@ -234,6 +234,18 @@ pub(crate) fn execute_repl_plugin_line(
             parse_finished,
         )
     })();
+    if let Some(expanded) = state
+        .session
+        .native_context
+        .values
+        .write()
+        .ok()
+        .and_then(|mut values| values.remove("context.executed"))
+        && let Ok(expansion) = serde_json::from_str::<crate::context::HistoryExpansion>(&expanded)
+        && let Some(line) = expansion.apply(&resolved, state.runtime.config.resolved())
+    {
+        resolved = line;
+    }
     if let Err(err) = history
         .with(|store| store.finalize_execution(line, &resolved, accepted && keep_history))
         .map_err(anyhow::Error::msg)

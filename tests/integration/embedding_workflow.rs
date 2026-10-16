@@ -205,6 +205,7 @@ impl NativeCommand for ApprovalWorkflow {
             "task_id": "task-42", "state": "assessed"
         }))
         .with_meta(ResponseMetaV1 {
+            context: Default::default(),
             presentation_lines: vec!["Task assessed".into()],
             progress_replace: true,
             ..ResponseMetaV1::default()
@@ -218,6 +219,7 @@ impl NativeCommand for ApprovalWorkflow {
         context.emit_progress(progress)?;
         context.present(
             NativeProgressEvent::new(json!({"notice": notice})).with_meta(ResponseMetaV1 {
+                context: Default::default(),
                 presentation_lines: vec![notice.into()],
                 ..ResponseMetaV1::default()
             }),

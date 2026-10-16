@@ -623,10 +623,25 @@ pub(crate) fn build_repl_prompt_right_renderer(
             },
         );
         if status.is_empty() {
-            base
+            if left_width + crate::ui::display_width(&base) + 3 > resolved.width.unwrap_or(80)
+                && !native_context.context_entries().is_empty()
+            {
+                format!("+{} ctx", native_context.context_entries().len())
+            } else {
+                base
+            }
         } else {
-            let context = render_repl_prompt_context(&resolved, &native_context);
+            let mut context = render_repl_prompt_context(&resolved, &native_context);
             let incognito = render_repl_prompt_incognito(&resolved, history_enabled);
+            if left_width
+                + crate::ui::display_width(&context)
+                + crate::ui::display_width(&incognito)
+                + crate::ui::display_width(&status)
+                + 5
+                > resolved.width.unwrap_or(80)
+            {
+                context = format!("+{} ctx", native_context.context_entries().len());
+            }
             let mut parts = [context, incognito, status]
                 .into_iter()
                 .filter(|s| !s.is_empty())
@@ -706,7 +721,7 @@ fn render_repl_prompt_context(
     }
     let rendered = entries
         .iter()
-        .map(|entry| format!("{}:{}", entry.label, entry.value))
+        .map(|entry| NativeSessionContext::render_context_token(&entry.label, &entry.value))
         .collect::<Vec<_>>()
         .join(" ");
     apply_style_with_theme_overrides(

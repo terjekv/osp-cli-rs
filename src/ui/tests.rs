@@ -453,6 +453,7 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
@@ -491,6 +492,7 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
@@ -806,6 +808,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         ]),
         document: None,
         meta: OutputMeta {
+            context: Default::default(),
             key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),

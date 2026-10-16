@@ -25,6 +25,12 @@ pub trait AccessPolicy: Send + Sync {
     /// Implementations must not acquire credentials or perform network I/O.
     fn configure(&self, _config: &crate::config::ResolvedConfig) {}
 
+    /// Returns the product's effective identity for session context isolation.
+    /// Called with the current configuration; it must not acquire credentials.
+    fn effective_identity(&self, _config: &crate::config::ResolvedConfig) -> String {
+        String::new()
+    }
+
     /// Whether the canonical command path is offered to the current identity.
     fn visibility(&self, _path: &[String]) -> Visibility {
         Visibility::Shown

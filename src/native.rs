@@ -273,7 +273,7 @@ pub trait NativeProgressSink {
     }
 }
 
-/// Compatibility view of one prompt-visible session value.
+/// Compact prompt view of one visible entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePromptContextEntry {
     /// Short label rendered in compact prompt surfaces.
@@ -283,9 +283,19 @@ pub struct NativePromptContextEntry {
 }
 
 /// One operator-visible value remembered for the current REPL session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NativeSessionContextEntry {
-    /// Subject kind, such as `host`, `user`, or `group`.
+    /// Owning integration.
+    pub service: String,
+    /// Profile at selection.
+    pub profile: String,
+    /// Effective identity at selection.
+    pub identity: String,
+    /// Service endpoint binding.
+    pub origin: String,
+    /// Last command that consumed this entry.
+    pub used_by: String,
+    /// Subject kind from the shared entity vocabulary.
     pub kind: String,
     /// Latest value stored for this kind.
     pub value: String,
@@ -293,8 +303,28 @@ pub struct NativeSessionContextEntry {
     pub command: String,
     /// UTC timestamp in RFC 3339 format when the value was last set.
     pub when: String,
-    /// Optional short label that opts this entry into the REPL prompt.
-    pub prompt_label: Option<String>,
+}
+
+impl NativeSessionContextEntry {
+    pub(crate) fn key(&self) -> ContextKey {
+        if crate::context::shared(&self.kind) {
+            (
+                self.kind.clone(),
+                String::new(),
+                self.profile.clone(),
+                self.identity.clone(),
+                String::new(),
+            )
+        } else {
+            (
+                self.kind.clone(),
+                self.service.clone(),
+                self.profile.clone(),
+                self.identity.clone(),
+                self.origin.clone(),
+            )
+        }
+    }
 }
 
 /// Trusted REPL commands for moving between pages produced by a native
@@ -322,19 +352,22 @@ struct PaginationState {
     carried: Option<Vec<Vec<String>>>,
 }
 
+type ContextKey = (String, String, String, String, String);
+
 /// Session-scoped context shared between native commands, plugins, and the REPL host.
 ///
-/// This is deliberately in-memory only. Native commands can retain small
-/// private workflow values between commands and publish operator-visible
-/// values that the `context` builtin can inspect. The same visible entries may
-/// opt into the prompt without writing session state to disk.
+/// Private workflow caches stay in memory. Declared entity selections are
+/// visible in the prompt and `context`, scoped to service, identity and profile.
+/// Services may opt specific kinds into REPL-only persistence.
 #[derive(Clone, Default)]
 pub struct NativeSessionContext {
-    values: Arc<RwLock<BTreeMap<String, String>>>,
-    context_entries: Arc<RwLock<BTreeMap<String, NativeSessionContextEntry>>>,
+    pub(crate) values: Arc<RwLock<BTreeMap<String, String>>>,
+    pub(crate) context_entries: Arc<RwLock<BTreeMap<ContextKey, NativeSessionContextEntry>>>,
+    pub(crate) binding: Arc<RwLock<crate::context::ContextBinding>>,
+    pub(crate) service: String,
     pagination: Arc<RwLock<PaginationState>>,
     completion_refresh_requested: Arc<AtomicBool>,
-    command_path: Option<Arc<str>>,
+    pub(crate) command_path: Option<Arc<str>>,
 }
 
 impl fmt::Debug for NativeSessionContext {
@@ -374,60 +407,121 @@ impl NativeSessionContext {
     /// responses use the same store after the host receives their context
     /// updates.
     pub fn set_context_value(&self, kind: impl Into<String>, value: impl Into<String>) {
-        self.store_context_value(kind, value, None);
-    }
-
-    fn store_context_value(
-        &self,
-        kind: impl Into<String>,
-        value: impl Into<String>,
-        prompt_label: Option<String>,
-    ) {
         let kind = context_kind(&kind.into());
         let value = value.into();
         if value.trim().is_empty() {
             self.clear_context(Some(&kind));
             return;
         }
-        let command = self.command_path.as_deref().unwrap_or("native").to_string();
+        if !crate::context::valid_value(&value) {
+            return;
+        }
+        let command = self
+            .command_path
+            .as_deref()
+            .unwrap_or("context set")
+            .to_string();
+        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
+        let profile = binding.profile.clone();
+        let identity = binding.identity.clone();
+        let origin = binding
+            .origins
+            .get(&self.service)
+            .cloned()
+            .unwrap_or_default();
+        let service = self.service.clone();
         let when = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         if let Ok(mut entries) = self.context_entries.write() {
-            let entry = entries
-                .entry(kind.clone())
-                .or_insert_with(|| NativeSessionContextEntry {
-                    kind,
-                    value: String::new(),
-                    command: command.clone(),
-                    when: when.clone(),
-                    prompt_label: None,
-                });
-            entry.value = value;
-            entry.command = command;
-            entry.when = when;
-            if prompt_label.is_some() {
-                entry.prompt_label = prompt_label;
-            }
+            let entry = NativeSessionContextEntry {
+                kind: kind.clone(),
+                value,
+                command,
+                when,
+                service,
+                profile,
+                identity,
+                origin,
+                used_by: String::new(),
+            };
+            entries.insert(entry.key(), entry);
         }
     }
 
-    /// Returns all operator-visible context values in stable kind order.
+    /// Restores an entry with its original scope and provenance during migration.
+    pub fn restore_context_entry(&self, entry: NativeSessionContextEntry) {
+        if !crate::context::valid_value(&entry.value) {
+            return;
+        }
+        if let Ok(mut entries) = self.context_entries.write() {
+            entries.entry(entry.key()).or_insert(entry);
+        }
+    }
+
+    /// Returns context visible to the current profile and identity.
     pub fn context_entries(&self) -> Vec<NativeSessionContextEntry> {
+        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
         self.context_entries
             .read()
-            .map(|entries| entries.values().cloned().collect())
+            .map(|entries| {
+                entries
+                    .values()
+                    .filter(|entry| {
+                        entry.profile == binding.profile
+                            && entry.identity == binding.identity
+                            && (entry.service.is_empty()
+                                || binding
+                                    .origins
+                                    .get(&entry.service)
+                                    .is_none_or(|origin| origin == &entry.origin))
+                    })
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    /// Clears all context values, or only the named kind.
+    /// Clears visible selections in this service, or all services when unbound.
+    /// The host saves persisted kinds after the command.
     pub fn clear_context(&self, kind: Option<&str>) {
+        let visible: Vec<_> = self
+            .context_entries()
+            .into_iter()
+            .filter(|entry| {
+                self.service.is_empty()
+                    || crate::context::shared(&entry.kind)
+                    || entry.service == self.service
+            })
+            .collect();
         if let Ok(mut entries) = self.context_entries.write() {
-            match kind.map(context_kind) {
-                Some(kind) if !kind.is_empty() => {
-                    entries.remove(&kind);
-                }
-                Some(_) => {}
-                None => entries.clear(),
-            }
+            entries.retain(|_, entry| {
+                !visible.contains(entry) || kind.is_some_and(|k| k != entry.kind)
+            });
+        }
+    }
+
+    /// Returns a visible entity in this service's scope.
+    pub fn context_value(&self, kind: &str) -> Option<String> {
+        self.context_entries()
+            .into_iter()
+            .find(|entry| {
+                entry.kind == kind
+                    && (crate::context::shared(kind) || entry.service == self.service)
+            })
+            .map(|entry| entry.value)
+    }
+
+    /// Binds a command to its owning service without copying its selections.
+    pub fn for_service(&self, service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            ..self.clone()
+        }
+    }
+
+    /// Clears entries belonging to a logged-out service.
+    pub fn clear_service_context(&self) {
+        if let Ok(mut entries) = self.context_entries.write() {
+            entries.retain(|_, entry| entry.service != self.service);
         }
     }
 
@@ -438,46 +532,30 @@ impl NativeSessionContext {
         }
     }
 
-    /// Sets one prompt-visible context entry.
-    pub fn set_prompt_value(
-        &self,
-        key: impl Into<String>,
-        label: impl Into<String>,
-        value: impl Into<String>,
-    ) {
-        self.store_context_value(key, value, Some(label.into()));
-    }
-
-    /// Removes one prompt-visible context entry.
-    pub fn remove_prompt_value(&self, key: &str) {
-        if let Ok(mut entries) = self.context_entries.write()
-            && entries
-                .get(key)
-                .is_some_and(|entry| entry.prompt_label.is_some())
-        {
-            entries.remove(key);
-        }
-    }
-
-    /// Returns all prompt-visible context entries in stable key order.
+    /// Returns prompt entries using the same labels as the tutorial renderer.
     pub fn prompt_entries(&self) -> Vec<NativePromptContextEntry> {
-        self.context_entries
-            .read()
-            .map(|entries| {
-                entries
-                    .values()
-                    .filter_map(|entry| {
-                        entry
-                            .prompt_label
-                            .as_ref()
-                            .map(|label| NativePromptContextEntry {
-                                label: label.clone(),
-                                value: entry.value.clone(),
-                            })
-                    })
-                    .collect()
+        let entries = self.context_entries();
+        entries
+            .iter()
+            .map(|entry| NativePromptContextEntry {
+                label: if entries
+                    .iter()
+                    .filter(|other| other.kind == entry.kind)
+                    .count()
+                    > 1
+                {
+                    format!("{}/{}", entry.service, entry.kind)
+                } else {
+                    entry.kind.clone()
+                },
+                value: entry.value.clone(),
             })
-            .unwrap_or_default()
+            .collect()
+    }
+
+    /// Renders one compact prompt token, also suitable for instructional text.
+    pub fn render_context_token(kind: &str, value: &str) -> String {
+        format!("{kind}:{value}")
     }
 
     pub(crate) fn for_editor_action(&self) -> Self {
@@ -653,6 +731,26 @@ pub trait NativeCommand: Send + Sync {
     /// that credential.
     fn supports_invocation_elevation(&self) -> bool {
         false
+    }
+
+    /// Endpoint binding used to hide selections after a service switch.
+    fn context_origin(&self, _config: &ResolvedConfig) -> String {
+        String::new()
+    }
+
+    /// Service-local kinds available before dynamic command metadata is loaded.
+    fn context_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Imports an older service-owned selection file into the shared store.
+    fn migrate_context(&self, _session: &NativeSessionContext) -> Result<()> {
+        Ok(())
+    }
+
+    /// Kinds persisted by this service, loaded before the first REPL prompt.
+    fn persisted_context_kinds(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// Builds the plugin-protocol style description for this command.

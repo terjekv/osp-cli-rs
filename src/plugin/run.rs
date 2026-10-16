@@ -21,6 +21,9 @@ pub(crate) fn run(
     capture: bool,
 ) -> Result<RunOutput> {
     let mut command = Command::new(&plugin.path);
+    for kind in crate::context::KINDS {
+        command.env_remove(format!("OSP_CTX_{}", kind.to_ascii_uppercase()));
+    }
     command
         .args(args)
         .stdin(Stdio::inherit())

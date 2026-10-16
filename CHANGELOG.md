@@ -53,6 +53,19 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - REPL lines beginning with `|` pipe the saved answer without another request.
 
+- **Breaking:** Entity selections use one service/profile/identity-scoped store.
+  All entries appear in `context` and the prompt; `context set KIND VALUE` pins
+  a value and `context clear [KIND]` also clears its persisted copy. Remove
+  `set_prompt_value`, `remove_prompt_value`, and separate prompt labels.
+- Commands declare consumed arguments and singleton result fields through
+  `ContextContract` on clap commands, including derive and generated grammars.
+  Reads fill omitted arguments with an info message and JSON context metadata;
+  writes use only explicit values or echoed `.` expansion. Filled arguments
+  are retained in REPL history. Opt-in persisted kinds load before the prompt
+  and never supply one-shot arguments.
+- Plugin descriptions declare `produces` and `consumes`. Declared selections
+  are passed as `OSP_CTX_<KIND>` environment variables in the REPL.
+
 - **Breaking:** Plugins are drop-in `osp-NAME` executables. Builtins and native
   commands win name clashes; the first plugin found wins. PATH is searched by
   default. Root help now lists plugins, and inventory shows shadowed entries.

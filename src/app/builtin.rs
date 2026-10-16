@@ -136,7 +136,7 @@ impl<'a> BuiltinExecutor<'a> {
             }
             Commands::History(args) => self.run_history_command(surface, args).map(Some),
             Commands::Context(args) => {
-                context_cmd::run_context_command(self.session, args).map(Some)
+                context_cmd::run_context_command(self.session, self.runtime, args).map(Some)
             }
             Commands::Completions(_) => unreachable!("validated dispatch surface"),
             Commands::Intro(args) => self.run_intro_command(surface, args).map(Some),

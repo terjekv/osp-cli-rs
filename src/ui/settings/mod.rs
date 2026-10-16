@@ -942,6 +942,7 @@ mod tests {
             }]),
             document: None,
             meta: OutputMeta {
+                context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),

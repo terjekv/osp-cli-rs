@@ -445,10 +445,22 @@ impl OspHistoryStore {
         resolved: &str,
         accepted: bool,
     ) -> Result<()> {
-        if self.pending_record.is_none() && input != resolved && accepted {
-            self.save(HistoryItem::from_command_line(resolved))?;
+        let keep = accepted && !self.is_command_excluded(resolved);
+        if input != resolved {
+            let original = apply_shell_prefix(input, self.shell_prefix().as_deref());
+            let expanded = apply_shell_prefix(resolved, self.shell_prefix().as_deref());
+            if let Some(pending) = self
+                .pending_record
+                .as_mut()
+                .filter(|pending| pending.record.command_line == original)
+            {
+                pending.record.command_line = expanded;
+                self.records[pending.index] = pending.record.clone();
+            } else if self.pending_record.is_none() && keep {
+                self.save(HistoryItem::from_command_line(resolved))?;
+            }
         }
-        self.finalize_pending(resolved, accepted)
+        self.finalize_pending(resolved, keep)
     }
 
     /// Saves and finalizes one accepted command line.

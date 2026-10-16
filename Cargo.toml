@@ -33,7 +33,7 @@ path = "src/bin/osp.rs"
 [dependencies]
 chrono = "0.4"
 anyhow = "1.0"
-clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
+clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage", "unstable-ext", "string"] }
 clap_complete = "4.5"
 directories = "6.0.0"
 keyring = { version = "=4.1.4", default-features = false, features = ["v1"] }

@@ -41,13 +41,13 @@ impl CommandScope {
     /// use osp_cli::core::CommandScope;
     /// let orch = CommandScope::ReplShell {
     ///     root: "orch".into(),
-    ///     root_words: ["context".to_string()].into(),
+    ///     root_words: ["help".to_string()].into(),
     /// };
     /// assert_eq!(CommandScope::OneShot.command("orch task wait 42"), "osp orch task wait 42");
     /// assert_eq!(CommandScope::ReplRoot.command("orch task wait 42"), "orch task wait 42");
     /// assert_eq!(orch.command("orch task wait 42"), "task wait 42");
     /// assert_eq!(orch.command("sudo orch task approve 42"), "sudo task approve 42");
-    /// assert_eq!(orch.command("orch context nrec:local"), "orch context nrec:local");
+    /// assert_eq!(orch.command("orch help task"), "orch help task");
     /// assert_eq!(orch.command("config set ui.format json"), "config set ui.format json");
     /// assert_eq!(orch.command("osp orch task wait 42"), "task wait 42");
     /// ```

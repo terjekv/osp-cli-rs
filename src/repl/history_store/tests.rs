@@ -270,7 +270,10 @@ fn shared_history_supports_save_load_prune_clear_and_sync() {
     });
 
     history
-        .with(|store| store.save_command_line("config show"))
+        .with(|store| {
+            store.stage_command_line("ldap user")?;
+            store.finalize_execution("ldap user", "ldap user alice", true)
+        })
         .expect("history lock should be available")
         .expect("save should succeed");
     history
@@ -294,7 +297,7 @@ fn shared_history_supports_save_load_prune_clear_and_sync() {
             .load(HistoryItemId::new(0))
             .expect("load should succeed")
             .command_line,
-        "config show"
+        "ldap user alice"
     );
 
     assert_eq!(
@@ -500,7 +503,7 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
         .expect("history lock should be available")
         .expect("an unrelated finalization leaves the pending record alone");
     history
-        .with(|store| store.finalize_execution("user typo", "user typo", false))
+        .with(|store| store.finalize_execution("user typo", "user typo-expanded", false))
         .expect("history lock should be available")
         .expect("a rejected command should be dropped");
     let visible = history

@@ -157,7 +157,7 @@ impl Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     #[command(hide = true)]
-    /// Show or clear values remembered in this REPL session.
+    /// Inspect, set or clear entities remembered in this REPL session.
     Context(ContextArgs),
     /// Inspect and manage plugins.
     Plugins(PluginsArgs),
@@ -216,7 +216,7 @@ impl Commands {
     }
 }
 
-/// Inspect or clear values remembered in the current REPL session.
+/// Inspect, set or clear entities remembered in the current REPL session.
 #[derive(Debug, Args)]
 pub struct ContextArgs {
     /// Context operation to run.
@@ -230,13 +230,24 @@ pub enum ContextCommands {
     /// Remove all remembered values, or only the given kind.
     #[command(display_order = 10)]
     Clear(ContextClearArgs),
+    /// Remember a value for an entity kind.
+    Set(ContextSetArgs),
 }
 
 /// Selects context values to clear.
 #[derive(Debug, Args)]
 pub struct ContextClearArgs {
-    /// Subject kind to remove, such as `host` or `user`.
+    /// Entity kind to remove, such as `account` or `host`.
     pub kind: Option<String>,
+}
+
+/// A named entity to remember.
+#[derive(Debug, Args)]
+pub struct ContextSetArgs {
+    /// Shared entity kind.
+    pub kind: String,
+    /// Entity name or identifier.
+    pub value: String,
 }
 
 /// Arguments for static shell-completion generation.

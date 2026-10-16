@@ -34,6 +34,7 @@ pub(crate) fn plugin_data_to_output_result(
         items: OutputItems::Rows(rows),
         document,
         meta: OutputMeta {
+            context: meta.map(|m| m.context.clone()).unwrap_or_default(),
             key_index,
             display_columns: meta.and_then(|meta| meta.columns.clone()),
             display_column_labels: meta.and_then(|meta| {
@@ -93,7 +94,9 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2 }]),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["name".to_string(), "count".to_string()]),
                 column_align: vec![ColumnAlignmentV1::Left, ColumnAlignmentV1::Right],
@@ -122,7 +125,9 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2, "status": "ok", "notes": "ready" }]),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),
@@ -208,6 +213,8 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: true,
@@ -237,6 +244,8 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec!["name".to_string(), "provider".to_string()]),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
@@ -274,6 +283,8 @@ mod tests {
                 }]
             }),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec![
                     "name".to_string(),
                     "provider.name".to_string(),
@@ -323,6 +334,8 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec![
                     "task_id".to_string(),
                     "action".to_string(),
@@ -376,6 +389,8 @@ mod tests {
                 "page": {"next_cursor": "cursor-2"}
             }),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
             }),
@@ -430,6 +445,7 @@ mod tests {
             ]),
             document: None,
             meta: OutputMeta {
+                context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "user".to_string()],
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),

@@ -105,7 +105,8 @@ reports `` `hello` printed text, not JSON; pipes need JSON output ``.
 A nonzero captured run reports `error: Plugin hello crashed (exit status N).`
 and keeps that exit status.
 
-A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data, render hints and context retain their existing semantics. Message text
+A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data and
+render hints retain their existing semantics. Message text
 is shown at its declared level, with terminal controls stripped, newlines
 flattened and a 512-character limit. Known secrets supplied through the plugin
 environment are redacted. `meta`
@@ -151,3 +152,23 @@ views. Host flags before `--` belong to osp; plugin-owned flags go after it.
 Structured messages preserve their text, levels and ordering. Failure summaries
 include the plugin's reason. Terminal controls are stripped and messages are
 bounded to one line of 512 characters; known environment secrets are redacted.
+
+## Entity context
+
+Descriptions may declare `"consumes": [{"kind": "account"}]` to receive the
+current shared account as `OSP_CTX_ACCOUNT` inside the REPL. No context variables
+are supplied to one-shot commands. A consumed positional may additionally name
+`argument` and `fill: "read"`; writes use `fill: "explicit"` and require a typed
+value or `.`. `fill: "narrow"` is reserved for scope flags that can only narrow
+an explicitly named object's operation. Explicit arguments always win.
+
+Declare `"produces": {"account": ["/username"]}` for a canonical field in a
+successful singleton response. Alternative pointers must agree on one canonical
+value; pointers through arrays require a single element. Lists select nothing.
+Declared kinds in a
+response's `context` map can acknowledge creation even when later follow-up
+fails. The host owns selection, scope, prompt rendering, announcements and
+clearing. A producer sets `meta.context_not_found: true` when the selected entity
+is absent; the host clears only context used to fill a read. Native commands
+attach the same `ContextContract` with clap `add`,
+also available in `#[command(add = ...)]` derive attributes.

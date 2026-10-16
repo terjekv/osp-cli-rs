@@ -828,7 +828,9 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         messages: Vec::new(),
         context: None,
         meta: ResponseMetaV1 {
+            context_not_found: false,
             detail_columns: Vec::new(),
+            context: Default::default(),
             format_hint: Some("table".to_string()),
             columns: Some(vec!["uid".to_string()]),
             column_align: Vec::new(),

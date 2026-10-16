@@ -57,6 +57,9 @@ pub const PLUGIN_PROTOCOL_V1: u32 = 1;
 /// Optional reply to `--osp-describe`; the executable filename supplies the name.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PluginDescribe {
+    /// Entity production and consumption declarations.
+    #[serde(flatten)]
+    pub context: crate::context::ContextContract,
     /// Short help text.
     #[serde(default)]
     pub about: String,
@@ -79,6 +82,7 @@ pub struct PluginDescribe {
 impl PluginDescribe {
     pub(crate) fn command(self, name: &str) -> DescribeCommandV1 {
         let mut command = DescribeCommandV1 {
+            context: self.context,
             name: name.into(),
             about: self.about,
             auth: self.auth,
@@ -98,6 +102,9 @@ impl PluginDescribe {
 /// semantic command tree the host uses for help, completion, and policy lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DescribeCommandV1 {
+    /// Entity production and consumption declarations.
+    #[serde(flatten)]
+    pub context: crate::context::ContextContract,
     /// Command name exposed by the plugin.
     pub name: String,
     /// Short help text for the command.
@@ -448,6 +455,12 @@ pub struct ResponseErrorV1 {
 /// over the host's renderer.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResponseMetaV1 {
+    /// The entity targeted by this response was not found; clear filled read context.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub context_not_found: bool,
+    /// Remembered values filled for this execution.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub context: BTreeMap<String, String>,
     /// Preferred output format for rendering the payload.
     pub format_hint: Option<String>,
     /// Preferred field paths for row or curated record projections.
@@ -848,7 +861,31 @@ impl DescribeCommandV1 {
     /// assert_eq!(command.subcommands[0].name, "user");
     /// ```
     pub fn from_clap(command: clap::Command) -> Self {
+        let mut context = command
+            .get::<crate::context::ContextContract>()
+            .cloned()
+            .unwrap_or_default();
+        for consume in &mut context.consumes {
+            if let Some(argument) = command
+                .get_positionals()
+                .find(|arg| arg.get_id().as_str() == consume.argument)
+            {
+                consume.argument = clap_meta::arg_name(argument);
+            }
+            for conflict in &mut consume.conflicts {
+                if let Some(argument) = command
+                    .get_arguments()
+                    .find(|arg| arg.get_id().as_str() == conflict)
+                {
+                    *conflict = argument
+                        .get_long()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| clap_meta::arg_name(argument));
+                }
+            }
+        }
         Self {
+            context,
             name: command.get_name().to_string(),
             about: clap_meta::plain(command.get_about()).unwrap_or_default(),
             auth: None,
@@ -910,6 +947,22 @@ fn clap_suggestions(arg: &clap::Arg) -> Vec<DescribeSuggestionV1> {
 }
 
 pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
+    for consume in &command.context.consumes {
+        if !crate::context::KINDS.contains(&consume.kind.as_str()) {
+            return Err(format!("unknown context kind: {}", consume.kind));
+        }
+        if matches!(
+            consume.argument.trim_start_matches('-'),
+            "password" | "token" | "otp" | "auth" | "user" | "profile" | "url"
+        ) {
+            return Err("context cannot supply credentials, identity, profile or URLs".into());
+        }
+    }
+    for kind in command.context.produces.keys() {
+        if !crate::context::KINDS.contains(&kind.as_str()) {
+            return Err(format!("unknown context kind: {kind}"));
+        }
+    }
     if canonical_plugin_command_name(&command.name)? != command.name {
         return Err("command name must not have leading or trailing whitespace".to_string());
     }
@@ -1022,6 +1075,7 @@ mod tests {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
             },
@@ -1082,6 +1136,7 @@ mod tests {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 columns: Some(vec!["provider.name".to_string()]),
                 column_labels: vec!["PROVIDER".to_string()],
                 row_path: Some("items".to_string()),
@@ -1093,6 +1148,7 @@ mod tests {
         let mismatched = ResponseV1 {
             context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 column_labels: vec!["PROVIDER".to_string(), "STATE".to_string()],
                 ..response.meta.clone()
             },

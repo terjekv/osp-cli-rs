@@ -485,8 +485,12 @@ fn repl_prompt_variants_render_scope_indicator_and_prompt_right_unit() {
 fn repl_prompt_right_renders_native_session_context_unit() {
     let resolved = rich_prompt_right_settings();
     let native_context = crate::native::NativeSessionContext::default();
-    native_context.set_prompt_value("siteadmin.netgroup", "ng", "uio-drift");
-    native_context.set_prompt_value("siteadmin.contact", "contact", "drift-team");
+    native_context
+        .for_service("siteadmin")
+        .set_context_value("netgroup", "uio-drift");
+    native_context
+        .for_service("siteadmin")
+        .set_context_value("contact", "drift-team");
 
     let rendered = render_repl_prompt_right_for_test_with_context(
         &resolved,
@@ -496,7 +500,7 @@ fn repl_prompt_right_renders_native_session_context_unit() {
     );
     let plain = output_support::strip_ansi(&rendered);
     assert!(plain.contains("contact:drift-team"));
-    assert!(plain.contains("ng:uio-drift"));
+    assert!(plain.contains("netgroup:uio-drift"));
 }
 
 #[test]

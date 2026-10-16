@@ -427,13 +427,29 @@ fn run_native_invocation(
             return Ok(CommandOutput::document(document));
         }
         if let Err(error) = parsed.matches {
+            state.session.native_context.activate(&state.runtime);
+            let selected_context = if state.runtime.context.terminal_kind() == TerminalKind::Repl {
+                state
+                    .session
+                    .native_context
+                    .for_service(command.command().get_name())
+            } else {
+                NativeSessionContext::default()
+            };
+            let resolved =
+                crate::context::resolve(command.command(), &parsed.args, &selected_context)
+                    .map_err(|e| miette!("{e:#}"))?;
+            let resolves_missing = resolved.args != parsed.args;
             let mut selected = &parsed.grammar;
             for segment in parsed.path.as_slice().iter().skip(1) {
                 if let Some(child) = selected.find_subcommand(segment) {
                     selected = child;
                 }
             }
-            if selected.has_subcommands() || parsed.args.len() + 1 == parsed.path.as_slice().len() {
+            if !resolves_missing
+                && (selected.has_subcommands()
+                    || parsed.args.len() + 1 == parsed.path.as_slice().len())
+            {
                 return Err(super::host::report_clap_error_with_context(
                     error,
                     crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
@@ -609,6 +625,55 @@ fn run_native_command(
     if input.action.is_none() {
         session.native_context.clear_pagination();
     }
+    let repl = runtime.context.terminal_kind() == TerminalKind::Repl;
+    session.native_context.activate(runtime);
+    let service = command.command().get_name().to_string();
+    session.native_context.register_context(
+        &service,
+        command.context_origin(runtime.config.resolved()),
+        command.persisted_context_kinds(),
+        &command.command(),
+        command.context_kinds(),
+    );
+    let selected_context = session.native_context.for_service(&service).for_command(
+        std::iter::once(service.clone())
+            .chain(input.args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    let empty_context = NativeSessionContext::default();
+    let resolution = if input.action.is_none() {
+        Some(
+            crate::context::resolve(
+                command.command(),
+                input.args,
+                if repl {
+                    &selected_context
+                } else {
+                    &empty_context
+                },
+            )
+            .map_err(|e| miette!("{e:#}"))?,
+        )
+    } else {
+        None
+    };
+    let args = resolution
+        .as_ref()
+        .map(|r| r.args.as_slice())
+        .unwrap_or(input.args);
+    if let Some(resolution) = &resolution
+        && let Some(line) = resolution
+            .record_history(&session.native_context, &service, input.args)
+            .map_err(|e| miette!("{e:#}"))?
+    {
+        let elevation = if input.elevation.is_elevated() {
+            "sudo "
+        } else {
+            ""
+        };
+        eprintln!("→ {elevation}{line}");
+    }
     let progress_renderer = input.progress_sink.map(|sink| NativeProgressRenderer {
         config: runtime.config.resolved(),
         ui: &input.invocation.ui,
@@ -648,6 +713,7 @@ fn run_native_command(
         } else {
             session.native_context.clone()
         }
+        .for_service(&service)
         .for_command(input.command_path.as_str()),
     );
     context.repl_feedback = session.repl_feedback.clone();
@@ -658,7 +724,7 @@ fn run_native_command(
 
     let execution = match input.action {
         Some(action) => command.execute_repl_action(action, &context),
-        None => command.execute(input.args, &context),
+        None => command.execute(args, &context),
     }
     .map_err(|err| match err.downcast::<clap::Error>() {
         Ok(err) => {
@@ -681,6 +747,21 @@ fn run_native_command(
         renderer.clear();
     }
 
+    let execution = execution.and_then(|mut outcome| {
+        if repl && let Some(resolution) = &resolution {
+            match &mut outcome {
+                NativeCommandOutcome::Response(response)
+                | NativeCommandOutcome::ResponseWithExit { response, .. } => {
+                    resolution.finish(response, &selected_context);
+                }
+                _ => {}
+            }
+            selected_context
+                .save_context()
+                .map_err(|e| miette!("{e:#}"))?;
+        }
+        Ok(outcome)
+    });
     let mut output = match execution {
         Ok(outcome) => match outcome {
             NativeCommandOutcome::Help(text) => {
@@ -1010,7 +1091,46 @@ fn run_external_plugin_command(
             .is_some_and(|d| d.output.as_deref() == Some("json"))
             || !parsed.stages.is_empty()
             || invocation.ui.render_settings.format_explicit);
-    let context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
+    let mut context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
+    let selected_context = state
+        .session
+        .native_context
+        .for_service(command)
+        .for_command(path.as_slice().join(" "));
+    let resolution = if state.runtime.context.terminal_kind() == TerminalKind::Repl && !help {
+        state.session.native_context.activate(&state.runtime);
+        Some(
+            crate::context::resolve(
+                crate::context::plugin_grammar(&plugin.command()),
+                args,
+                &selected_context,
+            )
+            .map_err(|e| miette!("{e:#}"))?,
+        )
+    } else {
+        None
+    };
+    if let Some(resolution) = &resolution {
+        for consume in &resolution.contract.consumes {
+            if let Some(value) = selected_context.context_value(&consume.kind) {
+                context.shared_env.push((
+                    format!("OSP_CTX_{}", consume.kind.to_ascii_uppercase()),
+                    value,
+                ));
+            }
+        }
+    }
+    if let Some(resolution) = &resolution
+        && let Some(line) = resolution
+            .record_history(&state.session.native_context, command, args)
+            .map_err(|e| miette!("{e:#}"))?
+    {
+        eprintln!("→ {line}");
+    }
+    let args = resolution
+        .as_ref()
+        .map(|r| r.args.as_slice())
+        .unwrap_or(args);
     tracing::info!(target: "osp::diagnostic", "debug: Dispatch selected; handler=plugin:{}.", plugin.name);
     let diagnostics = crate::diagnostics::DiagnosticSink::default();
     let started = std::time::Instant::now();
@@ -1019,38 +1139,54 @@ fn run_external_plugin_command(
     let bytes = raw.stdout.as_ref().map(Vec::len);
     let mut result = if let Some(bytes) = raw.stdout {
         match serde_json::from_slice::<serde_json::Value>(&bytes) {
-            Ok(value) if value.get("protocol_version").is_some() => {
-                let mut response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
-                    .map_err(|_| {
-                    miette::Report::new(
-                        invocation
-                            .ui
-                            .render_settings
-                            .runtime
-                            .command_scope
-                            .run_hint("Invalid plugin response metadata.", "doctor plugins", "."),
-                    )
-                })?;
-                response.validate_v1().map_err(|_| {
-                    miette::Report::new(
-                        invocation
-                            .ui
-                            .render_settings
-                            .runtime
-                            .command_scope
-                            .run_hint("Invalid plugin response metadata.", "doctor plugins", "."),
-                    )
-                })?;
-                if response.ok
-                    && let Some(entries) = response.context.as_ref()
-                {
-                    let context = state
-                        .session
-                        .native_context
-                        .for_command(path.as_slice().join(" "));
-                    for (kind, value) in entries {
-                        context.set_context_value(kind.clone(), value.clone());
+            Ok(value) => {
+                let mut response = if value.get("protocol_version").is_some() {
+                    let response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
+                        .map_err(|_| {
+                        miette::Report::new(
+                            invocation
+                                .ui
+                                .render_settings
+                                .runtime
+                                .command_scope
+                                .run_hint(
+                                    "Invalid plugin response metadata.",
+                                    "doctor plugins",
+                                    ".",
+                                ),
+                        )
+                    })?;
+                    response.validate_v1().map_err(|_| {
+                        miette::Report::new(
+                            invocation
+                                .ui
+                                .render_settings
+                                .runtime
+                                .command_scope
+                                .run_hint(
+                                    "Invalid plugin response metadata.",
+                                    "doctor plugins",
+                                    ".",
+                                ),
+                        )
+                    })?;
+                    response
+                } else {
+                    crate::core::plugin::ResponseV1 {
+                        protocol_version: 1,
+                        ok: true,
+                        data: value,
+                        error: None,
+                        messages: Vec::new(),
+                        context: None,
+                        meta: Default::default(),
                     }
+                };
+                if let Some(resolution) = &resolution {
+                    resolution.finish(&mut response, &selected_context);
+                    selected_context
+                        .save_context()
+                        .map_err(|e| miette!("{e:#}"))?;
                 }
                 let plugin_text = |raw: &str| {
                     let mut text = raw.to_owned();
@@ -1132,12 +1268,6 @@ fn run_external_plugin_command(
                 result.stderr_text = plugin_text(&result.stderr_text);
                 result
             }
-            Ok(value) => CommandOutput::output(
-                crate::core::output_model::OutputResult::from_rows(
-                    crate::core::output_model::rows_from_value(value),
-                ),
-                None,
-            ),
             Err(_) if !parsed.stages.is_empty() => {
                 return Err(miette!(
                     "`{command}` printed text, not JSON; pipes need JSON output"
@@ -1261,7 +1391,9 @@ mod tests {
                         }],
                         context: None,
                         meta: ResponseMetaV1 {
+                            context_not_found: false,
                             detail_columns: Vec::new(),
+                            context: Default::default(),
                             format_hint: Some("json".to_string()),
                             columns: None,
                             column_align: Vec::new(),
@@ -1287,6 +1419,8 @@ mod tests {
                         messages: Vec::new(),
                         context: None,
                         meta: ResponseMetaV1 {
+                            context_not_found: false,
+                            context: Default::default(),
                             format_hint: Some("json".to_string()),
                             unix_timestamp_columns: Vec::new(),
                             display_rules: Vec::new(),
@@ -1325,6 +1459,8 @@ mod tests {
                     "message": "creating virtual machine",
                 }))
                 .with_meta(ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
@@ -1340,6 +1476,8 @@ mod tests {
                 messages: Vec::new(),
                 context: None,
                 meta: ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
@@ -1379,7 +1517,9 @@ mod tests {
                 messages: Vec::new(),
                 context: None,
                 meta: ResponseMetaV1 {
+                    context_not_found: false,
                     detail_columns: Vec::new(),
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     columns: None,
                     column_align: Vec::new(),
@@ -1561,7 +1701,9 @@ mod tests {
             }],
             context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
                 detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: None,
                 column_align: Vec::new(),

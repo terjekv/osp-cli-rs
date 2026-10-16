@@ -802,18 +802,24 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
-    if let Some(document) = &output.document
+    let data = if let Some(document) = &output.document
         && (output.meta.document_rows || matches!(document, OutputDocument::Json(_)))
     {
-        return document.json_value();
-    }
-    match &output.items {
-        OutputItems::Rows(rows) => {
-            Value::Array(rows.iter().cloned().map(Value::Object).collect::<Vec<_>>())
+        document.json_value()
+    } else {
+        match &output.items {
+            OutputItems::Rows(rows) => {
+                Value::Array(rows.iter().cloned().map(Value::Object).collect())
+            }
+            OutputItems::Groups(groups) => {
+                Value::Array(groups.iter().map(json_group_value).collect())
+            }
         }
-        OutputItems::Groups(groups) => {
-            Value::Array(groups.iter().map(json_group_value).collect::<Vec<_>>())
-        }
+    };
+    if output.meta.context.is_empty() {
+        data
+    } else {
+        serde_json::json!({"data": data, "meta": {"context": output.meta.context}})
     }
 }
 

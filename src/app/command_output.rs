@@ -576,12 +576,18 @@ pub(crate) fn emit_messages_for_ui(
             MessageLevel::Trace => "detail",
             MessageLevel::Evidence => "evidence",
         };
+        let (prefix, text) = if entry.level == MessageLevel::Info {
+            entry
+                .text
+                .strip_prefix("hint: ")
+                .map(|hint| ("hint", hint))
+                .unwrap_or((prefix, entry.text.as_str()))
+        } else {
+            (prefix, entry.text.as_str())
+        };
         super::sink::write_diagnostics(
             sink,
-            &format!(
-                "{prefix}: {}\n",
-                crate::ui::sanitize_human_text(&entry.text)
-            ),
+            &format!("{prefix}: {}\n", crate::ui::sanitize_human_text(text)),
             &ui.render_settings,
         );
     }
@@ -663,12 +669,14 @@ pub(crate) fn apply_output_stages(
         // This is the central fan-in for staged structured output. Keep all
         // callers on the canonical DSL entrypoint so semantic/output policy
         // stays consistent across CLI, REPL, and plugin flows.
+        let context = output.meta.context.clone();
         output = apply_output_pipeline(output, stages).map_err(|err| {
             crate::app::report_anyhow_with_context(
                 err,
                 crate::app::host::ErrorContext::Operation("failed to apply DSL output pipeline"),
             )
         })?;
+        output.meta.context = context;
         output.meta.display_limit = None;
         // Once a DSL pipeline runs, producer-side format hints stop being an
         // out-of-band override. Any surviving recommendation now lives on the

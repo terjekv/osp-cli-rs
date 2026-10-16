@@ -106,21 +106,29 @@ The REPL is useful because it keeps a few things alive across commands:
 - session-scoped config overrides
 - session context published by native commands and plugins
 
-Use `context` to inspect the latest value for each subject kind. Rows include
-the kind, value, command path, and update time (stored in UTC, shown in local
-time). `context clear` removes all entries; `context clear host` removes only
-the `host` entry. The command accepts normal output flags and DSL pipes, for
-example `context --json` or `context | F kind == 'host'`.
+Use `context` to inspect current entities: kind, value, service,
+identity/profile scope, selecting command, age and last consuming command.
+`context set account alice` pins a value. `context clear` removes visible
+entries, including persisted copies; `context clear host` removes only hosts.
+Normal output flags and DSL pipes work, for example `context --json` or
+`context | F kind == 'host'`.
 
-Context exists only in the REPL process, so `osp context` is not useful as a
-one-shot command and is restricted to the REPL. Entries survive config-driven
-REPL rebuilds for the life of that session.
+Read arguments declared by commands may be omitted; the host announces the
+remembered value and stores the expanded command in history. Writes require an
+explicit value or `.`; expansion is echoed before execution. Prompt tokens use
+`kind:value`, qualified by service only when kinds clash.
+
+Changing profile, effective identity or service endpoint hides foreign values;
+switching back restores them. Logout removes the service's values. Most kinds
+live only for the REPL process. Services may opt a kind into persistence: those
+entries load before the first prompt and are ignored by one-shot commands.
+`context` itself is REPL-only.
 
 ## Shell Scope
 
 Suggested commands match the current prompt. Inside `orch`, both `task …` and
 `orch task …` work unless a host command or alias shadows the relative first
-word: use `orch context …` to distinguish it from the host's `context` command.
+word: use `orch help task` to distinguish it from the host's `help` command.
 Suggestions for another root keep their root form; leave the current shell
 before running them. JSON follow-ups in the REPL use the same form, while
 one-shot output uses `osp …`.

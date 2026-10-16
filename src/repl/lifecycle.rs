@@ -194,6 +194,29 @@ fn build_repl_cycle_run_config(
     clients: &AppClients,
     prepared: PreparedReplSurfaceState,
 ) -> Result<ReplRunConfig> {
+    session.native_context.activate(runtime);
+    for entry in clients.native_commands().catalog() {
+        if let Some(command) = clients.native_commands().command(&entry.name) {
+            session.native_context.register_context(
+                &entry.name,
+                command.context_origin(runtime.config.resolved()),
+                command.persisted_context_kinds(),
+                &command.command(),
+                command.context_kinds(),
+            );
+        }
+    }
+    session
+        .native_context
+        .load_context()
+        .map_err(|e| miette::miette!("{e:#}"))?;
+    for entry in clients.native_commands().catalog() {
+        if let Some(command) = clients.native_commands().command(&entry.name) {
+            command
+                .migrate_context(&session.native_context)
+                .map_err(|e| miette::miette!("{e:#}"))?;
+        }
+    }
     let view = ReplViewContext::from_parts(runtime, session);
 
     let product_status =
