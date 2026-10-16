@@ -1,4 +1,4 @@
-use osp_cli::core::output_model::{OutputDocument, OutputItems, OutputResult};
+use osp_cli::core::{OutputDocument, OutputItems, OutputResult};
 use osp_cli::dsl::apply_output_pipeline;
 use osp_cli::row;
 use serde_json::json;

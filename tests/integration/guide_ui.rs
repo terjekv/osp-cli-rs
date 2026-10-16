@@ -1,10 +1,10 @@
-use osp_cli::core::document::{DocBlock, Document};
-use osp_cli::core::output::OutputFormat;
+use osp_cli::core::OutputFormat;
+use osp_cli::core::{DocBlock, Document};
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
 use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
-fn run_guide_pipeline(view: Document, pipeline: &str) -> osp_cli::core::output_model::OutputResult {
+fn run_guide_pipeline(view: Document, pipeline: &str) -> osp_cli::core::OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     apply_output_pipeline(view.to_output_result(), &parsed.stages).expect("pipeline should succeed")
 }
@@ -316,9 +316,9 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     }
 
     let mut styled = RenderSettings::test_plain(OutputFormat::Auto);
-    styled.mode = osp_cli::core::output::RenderMode::Rich;
-    styled.color = osp_cli::core::output::ColorMode::Always;
-    styled.unicode = osp_cli::core::output::UnicodeMode::Always;
+    styled.mode = osp_cli::core::RenderMode::Rich;
+    styled.color = osp_cli::core::ColorMode::Always;
+    styled.unicode = osp_cli::core::UnicodeMode::Always;
     styled.width = Some(60);
     let rich = render(&output, &osp_cli::ui::RenderRequest::new(&styled));
     assert!(

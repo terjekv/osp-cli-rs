@@ -8,22 +8,22 @@
 //! High-level flow:
 //!
 //! - parse runtime-oriented environment hints into
-//!   [`crate::core::runtime::RuntimeHints`]
+//!   [`crate::core::RuntimeHints`]
 //! - normalize those values into enums and bounded scalar settings
 //! - export the same normalized hints back into environment pairs when needed
 //!
 //! Contract:
 //!
 //! - environment parsing rules for runtime hints live here
-//! - callers should consume [`crate::core::runtime::RuntimeHints`] instead of
+//! - callers should consume [`crate::core::RuntimeHints`] instead of
 //!   reparsing raw env vars
 //!
 //! Public API shape:
 //!
-//! - [`crate::core::runtime::RuntimeHints::new`] is the exact constructor for
+//! - [`crate::core::RuntimeHints::new`] is the exact constructor for
 //!   already-resolved runtime settings
-//! - [`crate::core::runtime::RuntimeHints::from_env`] and
-//!   [`crate::core::runtime::RuntimeHints::from_env_iter`] are the probing and
+//! - [`crate::core::RuntimeHints::from_env`] and
+//!   [`crate::core::RuntimeHints::from_env_iter`] are the probing and
 //!   adaptation factories
 //! - optional metadata such as profile and terminal identity uses `with_*`
 //!   refinements instead of raw ad hoc assembly
@@ -33,21 +33,21 @@ use std::collections::HashMap;
 use crate::core::output::{ColorMode, OutputFormat, UnicodeMode};
 
 /// Environment variable carrying the UI verbosity hint.
-pub const ENV_OSP_UI_VERBOSITY: &str = "OSP_UI_VERBOSITY";
+pub(crate) const ENV_OSP_UI_VERBOSITY: &str = "OSP_UI_VERBOSITY";
 /// Environment variable carrying the debug level hint.
-pub const ENV_OSP_DEBUG_LEVEL: &str = "OSP_DEBUG_LEVEL";
+pub(crate) const ENV_OSP_DEBUG_LEVEL: &str = "OSP_DEBUG_LEVEL";
 /// Environment variable carrying the preferred output format.
-pub const ENV_OSP_FORMAT: &str = "OSP_FORMAT";
+pub(crate) const ENV_OSP_FORMAT: &str = "OSP_FORMAT";
 /// Environment variable carrying the color-mode hint.
-pub const ENV_OSP_COLOR: &str = "OSP_COLOR";
+pub(crate) const ENV_OSP_COLOR: &str = "OSP_COLOR";
 /// Environment variable carrying the Unicode-mode hint.
-pub const ENV_OSP_UNICODE: &str = "OSP_UNICODE";
+pub(crate) const ENV_OSP_UNICODE: &str = "OSP_UNICODE";
 /// Environment variable carrying the active profile name.
-pub const ENV_OSP_PROFILE: &str = "OSP_PROFILE";
+pub(crate) const ENV_OSP_PROFILE: &str = "OSP_PROFILE";
 /// Environment variable carrying the active terminal identifier.
-pub const ENV_OSP_TERMINAL: &str = "OSP_TERMINAL";
+pub(crate) const ENV_OSP_TERMINAL: &str = "OSP_TERMINAL";
 /// Environment variable carrying the terminal kind hint.
-pub const ENV_OSP_TERMINAL_KIND: &str = "OSP_TERMINAL_KIND";
+pub(crate) const ENV_OSP_TERMINAL_KIND: &str = "OSP_TERMINAL_KIND";
 
 /// UI message verbosity derived from runtime hints and environment.
 #[derive(
@@ -163,7 +163,7 @@ impl RuntimeTerminalKind {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::runtime::RuntimeTerminalKind;
+    /// use osp_cli::core::RuntimeTerminalKind;
     ///
     /// assert_eq!(RuntimeTerminalKind::parse("cli"), Some(RuntimeTerminalKind::Cli));
     /// assert_eq!(RuntimeTerminalKind::parse("REPL"), Some(RuntimeTerminalKind::Repl));
@@ -225,9 +225,9 @@ impl RuntimeHints {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
+    /// use osp_cli::core::{ColorMode, OutputFormat, UnicodeMode};
     /// use osp_cli::core::MessageLevel;
-    /// use osp_cli::core::runtime::RuntimeHints;
+    /// use osp_cli::core::RuntimeHints;
     ///
     /// let hints = RuntimeHints::new(
     ///     MessageLevel::Info,
@@ -306,21 +306,17 @@ impl RuntimeHints {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
+    /// use osp_cli::core::{ColorMode, OutputFormat, UnicodeMode};
     /// use osp_cli::core::MessageLevel;
-    /// use osp_cli::core::runtime::{
-    ///     ENV_OSP_COLOR, ENV_OSP_DEBUG_LEVEL, ENV_OSP_FORMAT, ENV_OSP_PROFILE,
-    ///     ENV_OSP_TERMINAL_KIND, ENV_OSP_UI_VERBOSITY, RuntimeHints,
-    ///     RuntimeTerminalKind,
-    /// };
+    /// use osp_cli::core::{RuntimeHints, RuntimeTerminalKind};
     ///
     /// let hints = RuntimeHints::from_env_iter([
-    ///     (ENV_OSP_UI_VERBOSITY, "trace"),
-    ///     (ENV_OSP_DEBUG_LEVEL, "7"),
-    ///     (ENV_OSP_FORMAT, "json"),
-    ///     (ENV_OSP_COLOR, "never"),
-    ///     (ENV_OSP_PROFILE, "uio"),
-    ///     (ENV_OSP_TERMINAL_KIND, "repl"),
+    ///     ("OSP_UI_VERBOSITY", "trace"),
+    ///     ("OSP_DEBUG_LEVEL", "7"),
+    ///     ("OSP_FORMAT", "json"),
+    ///     ("OSP_COLOR", "never"),
+    ///     ("OSP_PROFILE", "uio"),
+    ///     ("OSP_TERMINAL_KIND", "repl"),
     /// ]);
     ///
     /// assert_eq!(hints.ui_verbosity, MessageLevel::Trace);
@@ -402,9 +398,9 @@ impl RuntimeHints {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
+    /// use osp_cli::core::{ColorMode, OutputFormat, UnicodeMode};
     /// use osp_cli::core::MessageLevel;
-    /// use osp_cli::core::runtime::{RuntimeHints, RuntimeTerminalKind};
+    /// use osp_cli::core::{RuntimeHints, RuntimeTerminalKind};
     ///
     /// let hints = RuntimeHints::new(
     ///     MessageLevel::Info,

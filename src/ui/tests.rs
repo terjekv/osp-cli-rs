@@ -941,3 +941,5 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
             .all(|line| unicode_width::UnicodeWidthStr::width(line) <= 40)
     );
 }
+
+mod integration;

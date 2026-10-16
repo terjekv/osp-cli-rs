@@ -42,7 +42,7 @@ impl RowBuilder {
 /// ```
 macro_rules! row {
     ($($key:expr => $value:expr),* $(,)?) => {{
-        let mut row = $crate::core::row::Row::new();
+        let mut row = $crate::core::Row::new();
         $(row.insert(($key).into(), ($value).into());)*
         row
     }};

@@ -40,7 +40,7 @@
 //! - if you already have one raw stage like `"F uid=alice"` and need to inspect
 //!   its verb/spec shape, use [`crate::dsl::parse_stage`]
 //! - if your command already produced `Vec<Row>`, use [`crate::dsl::apply_pipeline`]
-//! - if you already have an [`crate::core::output_model::OutputResult`] and want
+//! - if you already have an [`crate::core::OutputResult`] and want
 //!   to retain applicable group or render metadata, use
 //!   [`crate::dsl::apply_output_pipeline`]
 //!

@@ -1,9 +1,9 @@
-use osp_cli::core::output::OutputFormat;
+use osp_cli::core::OutputFormat;
 use osp_cli::dsl::{apply_pipeline, parse_pipeline};
 use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
-fn user_rows() -> Vec<osp_cli::core::row::Row> {
+fn user_rows() -> Vec<osp_cli::core::Row> {
     vec![
         json!({
             "uid": "oistes",
@@ -16,7 +16,7 @@ fn user_rows() -> Vec<osp_cli::core::row::Row> {
     ]
 }
 
-fn netgroup_rows() -> Vec<osp_cli::core::row::Row> {
+fn netgroup_rows() -> Vec<osp_cli::core::Row> {
     vec![
         json!({
             "cn": "ucore",

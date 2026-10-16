@@ -1,6 +1,6 @@
 use crate::assert_snapshot_text;
-use osp_cli::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use osp_cli::core::output_model::OutputResult;
+use osp_cli::core::OutputResult;
+use osp_cli::core::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use osp_cli::dsl::apply_pipeline;
 use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;

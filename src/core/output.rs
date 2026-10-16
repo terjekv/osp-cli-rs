@@ -54,7 +54,7 @@ impl OutputFormat {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// assert_eq!(OutputFormat::Markdown.as_str(), "md");
     /// assert_eq!(OutputFormat::Json.as_str(), "json");
@@ -79,7 +79,7 @@ impl OutputFormat {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
     /// assert_eq!(OutputFormat::parse(" markdown "), Some(OutputFormat::Markdown));
@@ -122,7 +122,7 @@ impl RenderMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::RenderMode;
+    /// use osp_cli::core::RenderMode;
     ///
     /// assert_eq!(RenderMode::Rich.as_str(), "rich");
     /// ```
@@ -139,7 +139,7 @@ impl RenderMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::RenderMode;
+    /// use osp_cli::core::RenderMode;
     ///
     /// assert_eq!(RenderMode::parse("RICH"), Some(RenderMode::Rich));
     /// assert_eq!(RenderMode::parse(" plain "), Some(RenderMode::Plain));
@@ -175,7 +175,7 @@ impl ColorMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::ColorMode;
+    /// use osp_cli::core::ColorMode;
     ///
     /// assert_eq!(ColorMode::Always.as_str(), "always");
     /// ```
@@ -192,7 +192,7 @@ impl ColorMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::ColorMode;
+    /// use osp_cli::core::ColorMode;
     ///
     /// assert_eq!(ColorMode::parse("never"), Some(ColorMode::Never));
     /// assert_eq!(ColorMode::parse(" AUTO "), Some(ColorMode::Auto));
@@ -228,7 +228,7 @@ impl UnicodeMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::UnicodeMode;
+    /// use osp_cli::core::UnicodeMode;
     ///
     /// assert_eq!(UnicodeMode::Never.as_str(), "never");
     /// ```
@@ -245,7 +245,7 @@ impl UnicodeMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::UnicodeMode;
+    /// use osp_cli::core::UnicodeMode;
     ///
     /// assert_eq!(UnicodeMode::parse("always"), Some(UnicodeMode::Always));
     /// assert_eq!(UnicodeMode::parse(" Auto "), Some(UnicodeMode::Auto));

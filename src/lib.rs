@@ -41,11 +41,11 @@
 //! Rendering existing rows without bootstrapping the full host:
 //!
 //! ```
-//! use osp_cli::core::output::OutputFormat;
+//! use osp_cli::core::OutputFormat;
 //! use osp_cli::row;
 //! use osp_cli::ui::{RenderSettings, render};
 //!
-//! let output = osp_cli::core::output_model::OutputResult::from_rows(vec![
+//! let output = osp_cli::core::OutputResult::from_rows(vec![
 //!     row! { "uid" => "alice", "mail" => "alice@example.com" },
 //! ]);
 //! let settings = RenderSettings::test_plain(OutputFormat::Json);
@@ -197,7 +197,7 @@
 //!
 //! Public API shape:
 //!
-//! - semantic payload modules such as [`core::document`] and most of [`completion`]
+//! - semantic payloads such as [`core::Document`] and most of [`completion`]
 //!   stay intentionally cheap to compose and inspect
 //! - host machinery such as [`app::App`] and runtime
 //!   state is guided through constructors/builders/accessors rather than
@@ -238,7 +238,7 @@
 //! - "I want to embed the interactive editor loop directly" →
 //!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig`]
 //! - "I need semantic payload generation for help/completion surfaces" →
-//!   [`core::document::Document`] and [`completion::CompletionTreeBuilder`]
+//!   [`core::Document`] and [`completion::CompletionTreeBuilder`]
 //!
 //! The root crate module tree is the only supported code path. Older mirrored
 //! layouts have been removed so rustdoc and the source tree describe the same

@@ -179,7 +179,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
     miri_smoke = ConfidenceCheck(
         name="miri-smoke",
         description="Focused interpreter check for Miri-safe fuzzy and render contracts.",
-        command=cargo_miri_test_command("--test", "miri"),
+        command=cargo_miri_test_command("--lib", "--test", "miri", "miri_"),
         env={"MIRIFLAGS": "-Zmiri-disable-isolation"},
     )
     miri_config = ConfidenceCheck(

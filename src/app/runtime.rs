@@ -312,7 +312,7 @@ impl UiState {
     /// use osp_cli::app::UiState;
     /// use osp_cli::ui::RenderSettings;
     /// use osp_cli::core::MessageLevel;
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// let ui = UiState::new(
     ///     RenderSettings::test_plain(OutputFormat::Json),

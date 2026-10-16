@@ -1,6 +1,6 @@
-use osp_cli::core::document::Document;
-use osp_cli::core::output_model::{OutputItems, OutputResult};
-use osp_cli::core::row::Row;
+use osp_cli::core::Document;
+use osp_cli::core::Row;
+use osp_cli::core::{OutputItems, OutputResult};
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
 use serde_json::Value;
 
@@ -57,7 +57,7 @@ fn help_like_record() -> Value {
 fn run_document_pipeline(view: Value, pipeline: &str) -> OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     let output = OutputResult::from_rows(Vec::new())
-        .with_document(osp_cli::core::output_model::OutputDocument::Json(view));
+        .with_document(osp_cli::core::OutputDocument::Json(view));
     apply_output_pipeline(output, &parsed.stages).expect("pipeline should succeed")
 }
 

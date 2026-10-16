@@ -19,7 +19,7 @@
 //! - embedders may inspect runtime/session state, but the preferred
 //!   construction path still flows through a small number of builders and
 //!   constructors here such as [`crate::app::AppStateBuilder`]
-//! - lower-level semantic payloads live in modules like [`crate::core::document`] and
+//! - lower-level semantic payloads live in modules like `crate::core::document` and
 //!   [`crate::completion`]; this module assembles the host
 //!
 //! Use this module when you want:
@@ -32,7 +32,7 @@
 //!
 //! - rendering rows/documents: [`crate::ui`]
 //! - pure completion trees or guide payloads: [`crate::completion`] or
-//!   [`crate::core::document`]
+//!   `crate::core::document`
 //!
 //! Broad-strokes host flow:
 //!

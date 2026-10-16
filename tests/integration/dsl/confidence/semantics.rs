@@ -3,8 +3,8 @@ use serde_json::json;
 
 #[test]
 fn presentation_recommendations_do_not_change_pipeline_semantics() {
-    use osp_cli::core::output::OutputFormat;
-    use osp_cli::core::output_model::{OutputDocument, RenderRecommendation};
+    use osp_cli::core::OutputFormat;
+    use osp_cli::core::{OutputDocument, RenderRecommendation};
 
     let rows = vec![osp_cli::row! {
         "members" => json!([{"role": "primary"}, {"role": "secondary"}])
@@ -211,7 +211,7 @@ fn help_like_payload_keeps_render_recommendation_through_non_structural_stages()
         let output = run_guide_pipeline(help_like_guide(), pipeline);
         assert_eq!(
             output.meta.render_recommendation,
-            Some(osp_cli::core::output_model::RenderRecommendation::Document),
+            Some(osp_cli::core::RenderRecommendation::Document),
             "pipeline={pipeline}"
         );
     }

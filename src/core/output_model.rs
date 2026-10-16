@@ -5,8 +5,8 @@
 //!
 //! High-level flow:
 //!
-//! - commands produce [`crate::core::output_model::OutputResult`]
-//! - the DSL transforms its [`crate::core::output_model::OutputItems`] and
+//! - commands produce [`crate::core::OutputResult`]
+//! - the DSL transforms its [`crate::core::OutputItems`] and
 //!   optional semantic document
 //! - the UI later lowers the result into rendered documents and terminal text
 //!
@@ -196,7 +196,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let output = OutputResult::from_rows(vec![
@@ -245,7 +245,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]);
@@ -264,7 +264,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let rows = OutputResult::from_rows(vec![row! { "uid" => "alice" }])
@@ -316,7 +316,7 @@ pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::compute_key_index;
 /// use osp_cli::row;
 ///
@@ -327,7 +327,7 @@ pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
 ///
 /// assert_eq!(compute_key_index(&rows), vec!["uid", "mail", "cn"]);
 /// ```
-pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
+pub(crate) fn compute_key_index(rows: &[Row]) -> Vec<String> {
     let mut key_index = Vec::new();
     let mut seen = HashSet::new();
 
@@ -346,7 +346,7 @@ pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::{OutputItems, output_items_to_value};
 /// use osp_cli::row;
 ///
@@ -354,7 +354,8 @@ pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
 ///
 /// assert_eq!(value["uid"], "alice");
 /// ```
-pub fn output_items_to_value(items: &OutputItems) -> Value {
+#[cfg(test)]
+pub(crate) fn output_items_to_value(items: &OutputItems) -> Value {
     match items {
         OutputItems::Rows(rows) => match rows.as_slice() {
             [row] => Value::Object(row.clone()),
@@ -397,7 +398,7 @@ pub fn output_items_to_value(items: &OutputItems) -> Value {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::{OutputItems, output_items_from_value};
 /// use serde_json::json;
 ///
@@ -408,7 +409,8 @@ pub fn output_items_to_value(items: &OutputItems) -> Value {
 ///     OutputItems::Rows(vec![json!({"uid": "alice"}).as_object().cloned().unwrap()])
 /// );
 /// ```
-pub fn output_items_from_value(value: Value) -> OutputItems {
+#[cfg(test)]
+pub(crate) fn output_items_from_value(value: Value) -> OutputItems {
     if let Value::Array(items) = &value
         && !items.is_empty()
         && let Some(groups) = groups_from_values(items)
@@ -422,7 +424,7 @@ pub fn output_items_from_value(value: Value) -> OutputItems {
 ///
 /// Arrays expand into one row per item. Objects become single rows directly.
 /// Scalars become a single row under the canonical `value` column.
-pub fn rows_from_value(value: Value) -> Vec<Row> {
+pub(crate) fn rows_from_value(value: Value) -> Vec<Row> {
     match value {
         Value::Array(values) => values.into_iter().map(row_from_value).collect(),
         other => vec![row_from_value(other)],
@@ -442,10 +444,12 @@ fn row_with_value(value: Value) -> Row {
     row
 }
 
+#[cfg(test)]
 fn groups_from_values(values: &[Value]) -> Option<Vec<Group>> {
     values.iter().map(group_from_value).collect()
 }
 
+#[cfg(test)]
 fn group_from_value(value: &Value) -> Option<Group> {
     let Value::Object(map) = value else {
         return None;
@@ -474,6 +478,43 @@ fn group_from_value(value: &Value) -> Option<Group> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::core::output_model::compute_key_index;
+        use crate::row;
+
+        let rows = vec![
+            row! { "uid" => "alice", "mail" => "a@example.com" },
+            row! { "uid" => "bob", "cn" => "Bob" },
+        ];
+
+        assert_eq!(compute_key_index(&rows), vec!["uid", "mail", "cn"]);
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::core::output_model::{OutputItems, output_items_to_value};
+        use crate::row;
+
+        let value = output_items_to_value(&OutputItems::Rows(vec![row! { "uid" => "alice" }]));
+
+        assert_eq!(value["uid"], "alice");
+    }
+
+    #[test]
+    fn internal_example_3() {
+        use crate::core::output_model::{OutputItems, output_items_from_value};
+        use serde_json::json;
+
+        let items = output_items_from_value(json!({"uid": "alice"}));
+
+        assert_eq!(
+            items,
+            OutputItems::Rows(vec![json!({"uid": "alice"}).as_object().cloned().unwrap()])
+        );
+    }
+
     use super::{
         Group, OutputDocument, OutputItems, OutputMeta, OutputResult, output_items_from_value,
         output_items_to_rows, output_items_to_value,

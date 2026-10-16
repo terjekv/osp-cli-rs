@@ -7,7 +7,7 @@
 //! In practice it owns two small but important bridges:
 //!
 //! - row literals and builders for terse command-side construction
-//! - conversion between raw/plugin row data and [`crate::core::output_model::OutputResult`]
+//! - conversion between raw/plugin row data and [`crate::core::OutputResult`]
 //!
 //! Keep these rules centralized. If commands start hand-rolling scalar/object
 //! normalization or grouped-row flattening in several places, the rendered

@@ -264,17 +264,15 @@ fn fuzzy_quick_filters_rows_without_reordering_matches() {
 // grouped boundary instead of materializing generic top-level rows.
 #[test]
 fn grouped_output_pipeline_preserves_headers_and_group_shape() {
-    let grouped = osp_cli::core::output_model::OutputResult {
-        items: osp_cli::core::output_model::OutputItems::Groups(vec![
-            osp_cli::core::output_model::Group {
-                groups: json!({"team": "ops"}).as_object().cloned().expect("object"),
-                aggregates: json!({"count": 2}).as_object().cloned().expect("object"),
-                rows: vec![
-                    row(json!({"uid": "alice", "roles": ["eng", "ops"]})),
-                    row(json!({"uid": "bob", "roles": ["ops"]})),
-                ],
-            },
-        ]),
+    let grouped = osp_cli::core::OutputResult {
+        items: osp_cli::core::OutputItems::Groups(vec![osp_cli::core::Group {
+            groups: json!({"team": "ops"}).as_object().cloned().expect("object"),
+            aggregates: json!({"count": 2}).as_object().cloned().expect("object"),
+            rows: vec![
+                row(json!({"uid": "alice", "roles": ["eng", "ops"]})),
+                row(json!({"uid": "bob", "roles": ["ops"]})),
+            ],
+        }]),
         document: None,
         meta: Default::default(),
     };
@@ -283,7 +281,7 @@ fn grouped_output_pipeline_preserves_headers_and_group_shape() {
         .expect("projection should not rewrite grouped members into flat output");
     assert!(matches!(
         passthrough.items,
-        osp_cli::core::output_model::OutputItems::Groups(_)
+        osp_cli::core::OutputItems::Groups(_)
     ));
     assert_eq!(passthrough.meta.key_index, vec!["team", "count"]);
     assert!(passthrough.meta.grouped);
@@ -295,7 +293,7 @@ fn grouped_output_pipeline_preserves_headers_and_group_shape() {
 
     let values = osp_cli::dsl::apply_output_pipeline(grouped.clone(), &["VALUE uid".to_string()])
         .expect("value extraction should preserve grouped output");
-    let osp_cli::core::output_model::OutputItems::Groups(value_groups) = values.items else {
+    let osp_cli::core::OutputItems::Groups(value_groups) = values.items else {
         panic!("expected grouped output");
     };
     assert_eq!(
@@ -311,6 +309,6 @@ fn grouped_output_pipeline_preserves_headers_and_group_shape() {
         .expect("unroll should preserve grouped output");
     assert!(matches!(
         unrolled.items,
-        osp_cli::core::output_model::OutputItems::Groups(_)
+        osp_cli::core::OutputItems::Groups(_)
     ));
 }

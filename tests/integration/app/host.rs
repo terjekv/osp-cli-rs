@@ -4,8 +4,8 @@ use clap::Command;
 use osp_cli::App;
 use osp_cli::app::{BufferedUiSink, StdIoUiSink, UiSink};
 use osp_cli::config::ConfigLayer;
+use osp_cli::core::DisplayRule;
 use osp_cli::core::MessageLevel;
-use osp_cli::core::output_model::DisplayRule;
 use osp_cli::core::plugin::{PLUGIN_PROTOCOL_V1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use osp_cli::{
     NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,

@@ -1,10 +1,10 @@
-use osp_cli::core::document::{DocBlock, Document, DocumentEntry};
-use osp_cli::core::output::OutputFormat;
-use osp_cli::core::output_model::{
+use crate::core::OutputFormat;
+use crate::core::output_model::{
     OutputDocument, OutputMeta, OutputResult, output_items_from_value,
 };
-use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render};
+use crate::core::{DocBlock, Document, DocumentEntry};
+use crate::dsl::{apply_output_pipeline, parse_pipeline};
+use crate::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render};
 use serde_json::{Value, json};
 
 fn export_settings(format: OutputFormat) -> RenderSettings {
@@ -55,13 +55,13 @@ fn service_record_exports_preserve_nested_typed_data() {
 
     let json_export = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
     );
     assert_eq!(serde_json::from_str::<Value>(&json_export).unwrap(), record);
 
     let mreg = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
     );
     for expected in [
         "uid:",
@@ -98,7 +98,7 @@ fn service_record_exports_preserve_nested_typed_data() {
 
     let markdown = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
     );
     for expected in [
         "- uid: alice",
@@ -156,7 +156,7 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
     ]);
     let exported = render(
         &grouped,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
     );
     let restored_value: Value = serde_json::from_str(&exported).unwrap();
     assert_eq!(restored_value, canonical);
@@ -173,7 +173,7 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
     assert_eq!(
         serde_json::from_str::<Value>(&render(
             &restored,
-            &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json))
+            &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Json))
         ),)
         .unwrap(),
         canonical
@@ -181,7 +181,7 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
 
     let markdown = render(
         &restored,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
     );
     for expected in [
         "- region: eu|west",
@@ -203,7 +203,7 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
     }
     let mreg = render(
         &restored,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
     );
     for expected in [
         "region:",
@@ -323,7 +323,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
     let output = guide.to_output_result();
     let exported = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
     );
     assert_eq!(
         serde_json::from_str::<Value>(&exported).unwrap(),
@@ -352,7 +352,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
     );
     let flag_markdown = render(
         &flags,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
     );
     for flag in ["--dry-run", "--profile", "--json"] {
         assert!(flag_markdown.contains(flag), "{flag_markdown}");
@@ -360,7 +360,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
 
     let terminal = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Auto)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Auto)),
     );
     let visible_words = terminal.split_whitespace().collect::<Vec<_>>().join(" ");
     for expected in [
@@ -387,7 +387,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
     }
     let markdown = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
     );
     for expected in [
         "Operations",
@@ -413,7 +413,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
     }
     let mreg = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+        &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
     );
     for expected in [
         "Operations",

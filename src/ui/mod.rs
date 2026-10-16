@@ -171,8 +171,8 @@ impl<'a> RenderRequest<'a> {
 /// Renders canonical data, optionally using its unstaged semantic document.
 ///
 /// ```
-/// use osp_cli::{row, core::output_model::OutputResult};
-/// use osp_cli::core::output::OutputFormat;
+/// use osp_cli::{row, core::OutputResult};
+/// use osp_cli::core::OutputFormat;
 /// use osp_cli::ui::{render, RenderRequest, RenderSettings};
 ///
 /// let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]);

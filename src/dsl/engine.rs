@@ -65,7 +65,7 @@ pub fn apply_pipeline(rows: Vec<Row>, stages: &[String]) -> Result<OutputResult>
 /// # Examples
 ///
 /// ```
-/// use osp_cli::core::output_model::OutputResult;
+/// use osp_cli::core::OutputResult;
 /// use osp_cli::dsl::apply_output_pipeline;
 /// use osp_cli::row;
 ///
