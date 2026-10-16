@@ -10,11 +10,10 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use super::doc::{Block, SectionTitleChrome};
-use super::settings::TableBorderOverride;
 use super::{
-    HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings, StructuredDocumentRenderOptions,
-    plan_output, render_document, render_document_with_layout, render_output,
-    render_output_for_copy, render_structured_output_with_document_options, resolve_settings,
+    HelpLayout, RenderProfile, RenderSettings, StructuredDocumentRenderOptions, plan_output,
+    render_document, render_document_with_layout, render_output, render_output_for_copy,
+    render_structured_output_with_document_options, resolve_settings,
 };
 
 #[test]
@@ -656,15 +655,14 @@ fn ui2_structured_document_output_uses_presentation_metadata_unit() {
     let document = Document::from_help_text("Commands:\n  list  List history entries\n");
     let mut output = document.to_output_result();
     output.meta.document_entry_gap = Some(4);
-    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
-    settings.help_chrome.entry_indent = Some(4);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let rendered = super::render_structured_output_with_source_document(
         &output,
         Some(&document),
         &settings,
         HelpLayout::Full,
     );
-    assert!(rendered.contains("\n    list    List history entries\n"));
+    assert!(rendered.contains("\n  list    List history entries\n"));
 }
 
 #[test]
@@ -772,46 +770,6 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 
     assert_eq!(markdown_section.body_indent, 0);
     assert!(!markdown_section.trailing_newline);
-}
-
-#[test]
-fn ui2_help_chrome_settings_override_indent_gap_and_spacing_unit() {
-    let guide = Document {
-        blocks: vec![
-            DocBlock::section(
-                "Commands",
-                vec![DocBlock::Entries {
-                    entries: vec![DocumentEntry {
-                        name: "show".to_string(),
-                        description: "Display current value".to_string(),
-                    }],
-                }],
-            ),
-            DocBlock::section(
-                "Options",
-                vec![DocBlock::Entries {
-                    entries: vec![DocumentEntry {
-                        name: "-h, --help".to_string(),
-                        description: "Print help".to_string(),
-                    }],
-                }],
-            ),
-        ],
-    };
-    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
-    settings.help_chrome = HelpChromeSettings {
-        table_chrome: TableBorderOverride::None,
-        entry_indent: Some(4),
-        entry_gap: Some(3),
-        section_spacing: Some(0),
-    };
-
-    let rendered = render_document_with_layout(&guide, &settings, HelpLayout::Compact);
-
-    assert_eq!(
-        rendered,
-        "Commands:\n    show   Display current value\nOptions:\n    -h, --help   Print help\n"
-    );
 }
 
 #[test]

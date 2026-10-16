@@ -17,7 +17,6 @@ fn export_settings(format: OutputFormat) -> RenderSettings {
         .with_width(100)
         .with_width_max(100)
         .with_margin(2)
-        .with_indent_size(2)
         .with_table_overflow(TableOverflow::None)
         .with_table_border(TableBorderStyle::None)
         .with_runtime(

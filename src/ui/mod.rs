@@ -75,10 +75,9 @@ pub(crate) use plan::plan_output;
 pub use settings::RenderBackend;
 #[allow(unused_imports)]
 pub use settings::{
-    HelpChromeSettings, HelpLayout, PresentationEffect, RenderProfile, RenderRuntime,
-    RenderRuntimeBuilder, RenderSettings, RenderSettingsBuilder, ResolvedHelpChromeSettings,
-    ResolvedRenderSettings, TableBorderOverride, TableBorderStyle, TableOverflow, UiPresentation,
-    help_layout_from_config, resolve_settings,
+    HelpLayout, PresentationEffect, RenderProfile, RenderRuntime, RenderRuntimeBuilder,
+    RenderSettings, RenderSettingsBuilder, ResolvedRenderSettings, TableBorderOverride,
+    TableBorderStyle, TableOverflow, UiPresentation, help_layout_from_config, resolve_settings,
 };
 pub(crate) use settings::{build_presentation_defaults_layer, explain_presentation_effect};
 pub use style::{StyleOverrides, StyleToken, ThemeStyler};
@@ -213,7 +212,7 @@ pub(crate) fn render_structured_output_with_document_options(
         *title = format!("{prefix} · {title}");
     }
     let mut doc = if plan.format == OutputFormat::Markdown {
-        lower::lower_document(&document, plan.format, plan.settings.indent_size)
+        lower::lower_document(&document, plan.format)
     } else {
         lower::lower_document_help_layout(
             &document,
@@ -306,7 +305,7 @@ pub fn render_document(document: &Document, settings: &RenderSettings) -> String
     }
 
     let resolved = resolve_settings(settings, RenderProfile::Normal);
-    let mut doc = lower::lower_document(document, format, settings.indent_size);
+    let mut doc = lower::lower_document(document, format);
     lower::sanitize_doc(&mut doc);
     emit::emit_doc(&doc, format, &resolved)
 }

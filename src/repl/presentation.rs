@@ -588,33 +588,19 @@ pub(crate) fn build_repl_prompt_right_renderer(
     timing: DebugTimingState,
 ) -> crate::repl::PromptRightRenderer {
     let resolved = view.ui.render_settings.resolve_render_settings();
-    let prompt_right_template = view
-        .config
-        .get_string("repl.prompt_right")
-        .map(str::to_string);
     let history_enabled = history::repl_history_enabled(view.config) && view.history_enabled;
     let native_context = view.native_context.clone();
-    Arc::new(move || {
-        render_repl_prompt_right(
-            &resolved,
-            prompt_right_template.as_deref(),
-            history_enabled,
-            &timing,
-            &native_context,
-        )
-    })
+    Arc::new(move || render_repl_prompt_right(&resolved, history_enabled, &timing, &native_context))
 }
 
 #[cfg(test)]
 pub(crate) fn render_repl_prompt_right_for_test(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
 ) -> String {
     render_repl_prompt_right_for_test_with_context(
         resolved,
-        prompt_right_template,
         history_enabled,
         timing,
         &NativeSessionContext::default(),
@@ -624,23 +610,15 @@ pub(crate) fn render_repl_prompt_right_for_test(
 #[cfg(test)]
 pub(crate) fn render_repl_prompt_right_for_test_with_context(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
     native_context: &NativeSessionContext,
 ) -> String {
-    render_repl_prompt_right(
-        resolved,
-        prompt_right_template,
-        history_enabled,
-        timing,
-        native_context,
-    )
+    render_repl_prompt_right(resolved, history_enabled, timing, native_context)
 }
 
 fn render_repl_prompt_right(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
     native_context: &NativeSessionContext,
@@ -650,15 +628,6 @@ fn render_repl_prompt_right(
         incognito: render_repl_prompt_incognito(resolved, history_enabled),
         timing: render_repl_prompt_timing(resolved, timing),
     };
-
-    if let Some(template) = prompt_right_template {
-        return render_repl_prompt_right_template(
-            &decode_repl_prompt_template(template),
-            &state.context,
-            &state.incognito,
-            &state.timing,
-        );
-    }
 
     let mut parts = Vec::new();
     if !state.context.is_empty() {
@@ -726,18 +695,6 @@ fn render_repl_prompt_timing(
         .map(|badge| format_timing_badge(badge.summary, badge.level, resolved))
         .filter(|rendered| !rendered.is_empty())
         .unwrap_or_default()
-}
-
-fn render_repl_prompt_right_template(
-    template: &str,
-    context: &str,
-    incognito: &str,
-    timing: &str,
-) -> String {
-    let mut out = template.replace("{context}", context);
-    out = out.replace("{incognito}", incognito);
-    out = out.replace("{timing}", timing);
-    out
 }
 
 fn build_shell_indicator(view: ReplViewContext<'_>) -> String {

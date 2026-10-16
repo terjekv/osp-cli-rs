@@ -227,7 +227,7 @@ ui.format = "json"
 
 [terminal.repl]
 profile.default = "tsd"
-ui.prompt.secrets = true
+repl.history.enabled = true
 
 [terminal.repl.profile.tsd]
 ui.format = "table"
@@ -450,3 +450,13 @@ plain writes go to profile `uio`; the last command remains temporary. Successful
 temporary writes show a concrete `--permanent` command with the resolved scope.
 `config set --dry-run --explain` retains the proposed value and destination and
 adds a `current` explanation of the key before the write.
+
+## Fixed presentation settings in v2
+
+Help tables use no border. Help entries retain their default indentation,
+entry gaps, and section spacing. Nested output uses two-space indentation and
+lists expand after five items. The REPL right prompt shows session context,
+incognito state, and timing when applicable.
+
+The removed keys are listed in `CHANGELOG.md` under Unreleased. Remove them
+from configuration files; they are now rejected as unknown keys.

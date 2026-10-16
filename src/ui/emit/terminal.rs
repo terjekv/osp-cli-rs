@@ -174,7 +174,7 @@ fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>, inline_marku
 }
 
 fn emit_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> String {
-    if block.auto_grid && block.items.len() > settings.medium_list_max {
+    if block.auto_grid && block.items.len() > 5 {
         return emit_grid_list(block, settings);
     }
 
@@ -562,7 +562,7 @@ fn emit_plain_row_lines(
         effective_indent,
         " ".repeat(display_key_width.saturating_add(1 + value_spacing.len()))
     );
-    let child_indent = format!("{effective_indent}{}", " ".repeat(settings.indent_size));
+    let child_indent = format!("{effective_indent}{}", " ".repeat(2));
 
     match &row.value {
         KeyValueValue::Empty => vec![label],
@@ -610,7 +610,7 @@ fn emit_plain_array_lines(
         [only] => {
             vec![format!("{inline_prefix}{}", styler.paint_value(only))]
         }
-        values if values.len() > settings.medium_list_max => {
+        values if values.len() > 5 => {
             let mut lines = vec![label.to_string()];
             lines.extend(render_terminal_scalar_grid(
                 values,
@@ -669,7 +669,7 @@ fn emit_plain_array_item_lines(
             )]
         }
         KeyValueValue::Object(rows) => {
-            let nested_indent = format!("{child_indent}{}", " ".repeat(settings.indent_size));
+            let nested_indent = format!("{child_indent}{}", " ".repeat(2));
             let mut lines = vec![format!("{child_indent}{marker}{colon}")];
             if !rows.is_empty() {
                 lines.push(emit_plain_rows(rows, &nested_indent, settings, styler));
@@ -677,14 +677,14 @@ fn emit_plain_array_item_lines(
             lines
         }
         KeyValueValue::Array(items) => {
-            let nested_indent = format!("{child_indent}{}", " ".repeat(settings.indent_size));
+            let nested_indent = format!("{child_indent}{}", " ".repeat(2));
             let mut lines = vec![format!("{child_indent}{marker}{colon}")];
             lines.extend(emit_plain_array_lines(
                 items,
                 &format!("{nested_indent}{}", styler.paint("items", StyleToken::Key)),
                 &format!("{nested_indent}{}", styler.paint("items", StyleToken::Key)),
                 &nested_indent,
-                &format!("{nested_indent}{}", " ".repeat(settings.indent_size)),
+                &format!("{nested_indent}{}", " ".repeat(2)),
                 settings,
                 styler,
             ));

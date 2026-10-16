@@ -85,13 +85,13 @@ mod schema_value_contracts {
 
         assert_eq!(
             schema
-                .parse_input_value("ui.prompt.secrets", "true")
+                .parse_input_value("repl.history.enabled", "true")
                 .expect("bool should parse"),
             ConfigValue::Bool(true)
         );
         assert_eq!(
             schema
-                .parse_input_value("session.cache.max_results", "42")
+                .parse_input_value("repl.history.menu_rows", "42")
                 .expect("integer should parse"),
             ConfigValue::Integer(42)
         );
@@ -124,7 +124,7 @@ mod schema_value_contracts {
         ));
 
         let type_err = schema
-            .parse_input_value("ui.prompt.secrets", "wat")
+            .parse_input_value("repl.history.enabled", "wat")
             .expect_err("invalid bool should fail");
         assert!(matches!(
             type_err,
@@ -132,7 +132,7 @@ mod schema_value_contracts {
                 key,
                 expected: SchemaValueType::Bool,
                 ..
-            } if key == "ui.prompt.secrets"
+            } if key == "repl.history.enabled"
         ));
 
         let read_only = schema
@@ -149,12 +149,9 @@ mod schema_value_contracts {
     fn schema_rejects_non_positive_operational_integer_input() {
         for key in [
             "ui.width",
-            "ui.indent",
-            "ui.medium_list_max",
             "extensions.plugins.timeout_ms",
             "repl.history.max_entries",
             "repl.history.menu_rows",
-            "session.cache.max_results",
         ] {
             let error = ConfigSchema::default()
                 .parse_input_value(key, "0")

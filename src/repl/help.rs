@@ -114,17 +114,12 @@ fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::Rend
         // The supplied width has already been capped by its original settings.
         width_max: 0,
         margin: resolved.margin,
-        indent_size: resolved.indent_size,
-        medium_list_max: resolved.medium_list_max,
+
         table_overflow: crate::ui::TableOverflow::Clip,
-        table_border: match resolved.help_table_border {
-            crate::ui::TableBorderStyle::None => crate::ui::TableBorderStyle::None,
-            crate::ui::TableBorderStyle::Square => crate::ui::TableBorderStyle::Square,
-            crate::ui::TableBorderStyle::Round => crate::ui::TableBorderStyle::Round,
-        },
+        table_border: crate::ui::TableBorderStyle::None,
         nested_table_border: crate::ui::TableBorderOverride::Inherit,
         style_overrides: crate::ui::style::StyleOverrides::default(),
-        help_chrome: crate::ui::HelpChromeSettings::default(),
+
         chrome_frame: crate::ui::section_chrome::SectionFrameStyle::Top,
         ruled_section_policy: crate::ui::section_chrome::RuledSectionPolicy::Shared,
         runtime: crate::ui::RenderRuntime {
@@ -166,20 +161,15 @@ mod tests {
             unicode: false,
             width: Some(24),
             margin: 0,
-            indent_size: 2,
-            medium_list_max: 5,
+
             table_overflow: TableOverflow::Clip,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderStyle::None,
-            help_table_border: TableBorderStyle::None,
+
             theme_name: crate::ui::theme::DEFAULT_THEME_NAME.to_string(),
             theme: crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME),
             style_overrides: StyleOverrides::default(),
-            help_chrome: crate::ui::ResolvedHelpChromeSettings {
-                entry_indent: 2,
-                entry_gap: None,
-                section_spacing: 1,
-            },
+
             chrome_frame: frame,
         }
     }

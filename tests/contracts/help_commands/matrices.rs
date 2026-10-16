@@ -202,7 +202,7 @@ fn message_color_unicode_presentation_matrix_contract() {
             "missing warning body for {presentation}/{color}/{unicode}: {warning_plain:?}"
         );
         assert!(
-            warning_plain.contains("set value for ui.prompt.secrets"),
+            warning_plain.contains("set value for extensions.site.secrets"),
             "missing success body for {presentation}/{color}/{unicode}: {warning_plain:?}"
         );
 

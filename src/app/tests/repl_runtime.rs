@@ -103,7 +103,6 @@ fn repl_flag_prefixed_help_records_prompt_timing_badge_unit() {
 
     let prompt_right = crate::repl::render_repl_prompt_right_for_test(
         &state.runtime.ui.render_settings.resolve_render_settings(),
-        None,
         true,
         &state.session.prompt_timing,
     );

@@ -5,6 +5,6 @@ expression: sanitized
 - Unknown configuration key --------------------------------------------
   config key not found: ui.m
 - Warning --------------------------------------------------------------
-  did you mean: ui.margin, ui.medium_list_max, ui.message.verbosity,
-  ui.messages.layout, ui.mode
+  did you mean: ui.margin, ui.message.verbosity, ui.messages.layout,
+  ui.mode
 ------------------------------------------------------------------------

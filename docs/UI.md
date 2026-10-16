@@ -234,3 +234,11 @@ Force plain JSON for scripting:
 ```bash
 osp --format json --render-mode plain plugins list
 ```
+
+## Fixed layout defaults
+
+Help tables have no border, help entries use two-space indentation, and help
+sections retain their default spacing. Nested output uses two-space indentation;
+lists expand after five items. These layout details are fixed rather than
+configurable. The right REPL prompt combines session context, incognito state,
+and timing when applicable.

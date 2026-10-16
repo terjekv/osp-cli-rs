@@ -19,6 +19,14 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   `CommandLineParser::{analyze,compute_stub_quote}`,
   `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
 
+- **Breaking:** Remove the unused config keys `session.cache.max_results`,
+  `ui.prompt`, `ui.prompt.secrets`, and `base.dir`. Configurations containing
+  these keys now fail as unknown keys.
+- **Breaking:** Remove `ui.help.table_chrome`, `ui.help.entry_indent`,
+  `ui.help.entry_gap`, `ui.help.section_spacing`, `ui.medium_list_max`,
+  `ui.indent`, and `repl.prompt_right`. Their former default behavior is fixed;
+  configurations containing these keys now fail as unknown keys.
+
 - Declare builtin config schema, defaults, documentation, and bootstrap rules
   together.
 

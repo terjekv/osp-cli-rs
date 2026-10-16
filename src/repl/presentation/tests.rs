@@ -449,7 +449,7 @@ fn repl_prompt_variants_render_scope_indicator_and_prompt_right_unit() {
 
     let resolved = rich_prompt_right_settings();
     let incognito =
-        render_repl_prompt_right_for_test(&resolved, None, false, &DebugTimingState::default());
+        render_repl_prompt_right_for_test(&resolved, false, &DebugTimingState::default());
     assert!(incognito.contains("(⌐■_■)"));
 
     let timing = DebugTimingState::default();
@@ -463,7 +463,7 @@ fn repl_prompt_variants_render_scope_indicator_and_prompt_right_unit() {
         },
     });
 
-    let rendered = render_repl_prompt_right_for_test(&resolved, None, false, &timing);
+    let rendered = render_repl_prompt_right_for_test(&resolved, false, &timing);
     assert!(rendered.contains("(⌐■_■)"));
     assert!(rendered.contains("120"));
 }
@@ -477,7 +477,6 @@ fn repl_prompt_right_renders_native_session_context_unit() {
 
     let rendered = render_repl_prompt_right_for_test_with_context(
         &resolved,
-        None,
         true,
         &DebugTimingState::default(),
         &native_context,
@@ -485,15 +484,6 @@ fn repl_prompt_right_renders_native_session_context_unit() {
     let plain = output_support::strip_ansi(&rendered);
     assert!(plain.contains("contact:drift-team"));
     assert!(plain.contains("ng:uio-drift"));
-
-    let templated = render_repl_prompt_right_for_test_with_context(
-        &resolved,
-        Some("{context}"),
-        true,
-        &DebugTimingState::default(),
-        &native_context,
-    );
-    assert_eq!(output_support::strip_ansi(&templated), plain);
 }
 
 #[test]
@@ -675,48 +665,17 @@ fn repl_prompt_renders_custom_template_with_prompt_style() {
 }
 
 #[test]
-fn repl_prompt_templates_decode_escaped_newlines_and_user_rhs_overrides_unit() {
-    let mut state = make_state(&[
-        ("repl.prompt", "{user}\\n{profile}> "),
-        ("repl.prompt_right", "{incognito}\\n{timing}"),
-    ]);
+fn repl_prompt_templates_decode_escaped_newlines_unit() {
+    let mut state = make_state(&[("repl.prompt", "{user}\\n{profile}> ")]);
     state.runtime.ui.render_settings.unicode = crate::core::output::UnicodeMode::Always;
 
     let prompt = build_repl_prompt(repl_view(&state)).left;
     assert!(prompt.contains("anonymous\ndefault> "));
-
-    let timing = DebugTimingState::default();
-    timing.set(DebugTimingBadge {
-        level: 1,
-        summary: TimingSummary {
-            total: Duration::from_millis(120),
-            parse: None,
-            execute: None,
-            render: None,
-        },
-    });
-    let prompt_right = render_repl_prompt_right_for_test(
-        &rich_prompt_right_settings(),
-        Some("{incognito}\\n{timing}"),
-        false,
-        &timing,
-    );
-    let prompt_right_plain = output_support::strip_ansi(&prompt_right);
-    assert!(prompt_right_plain.contains("(⌐■_■)\n"));
-    assert!(prompt_right_plain.contains("120"));
-
-    let replaced = render_repl_prompt_right_for_test(
-        &rich_prompt_right_settings(),
-        Some("rhs"),
-        false,
-        &timing,
-    );
-    assert_eq!(replaced, "rhs");
 }
 
 #[test]
 fn session_history_opt_out_enables_incognito_prompt_indicator_unit() {
-    let mut state = make_state(&[("repl.prompt_right", "{incognito}")]);
+    let mut state = make_state(&[]);
     state.runtime.ui.render_settings.unicode = crate::core::output::UnicodeMode::Always;
     state.session.history_enabled = false;
 

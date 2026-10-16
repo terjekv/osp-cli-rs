@@ -190,7 +190,7 @@ fn warning_success_output(
             "config",
             "set",
             "--config",
-            "ui.prompt.secrets",
+            "extensions.site.secrets",
             "true",
         ],
     )

@@ -156,11 +156,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from(0)),
             },
             BuiltinKey {
-                key: "ui.indent",
-                schema: SchemaEntry::positive_integer().with_doc("Indent width for nested output"),
-                default: Some(ConfigValue::from(2)),
-            },
-            BuiltinKey {
                 key: "ui.help.level",
                 schema: SchemaEntry::string()
                     .with_allowed_values(["inherit", "none", "tiny", "normal", "verbose"])
@@ -233,38 +228,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("none")),
             },
             BuiltinKey {
-                key: "ui.help.table_chrome",
-                schema: SchemaEntry::string()
-                    .with_allowed_values(
-                        crate::ui::TableBorderOverride::ALL
-                            .iter()
-                            .map(|value| value.as_str()),
-                    )
-                    .with_doc("Help table chrome style or inherit"),
-                default: Some(ConfigValue::from("none")),
-            },
-            BuiltinKey {
-                key: "ui.help.entry_indent",
-                schema: SchemaEntry::string().with_doc("Help entry indent override or inherit"),
-                default: Some(ConfigValue::from("inherit")),
-            },
-            BuiltinKey {
-                key: "ui.help.entry_gap",
-                schema: SchemaEntry::string().with_doc("Help entry gap override or inherit"),
-                default: Some(ConfigValue::from("inherit")),
-            },
-            BuiltinKey {
-                key: "ui.help.section_spacing",
-                schema: SchemaEntry::string().with_doc("Help section spacing override or inherit"),
-                default: Some(ConfigValue::from("inherit")),
-            },
-            BuiltinKey {
-                key: "ui.medium_list_max",
-                schema: SchemaEntry::positive_integer()
-                    .with_doc("Maximum items rendered as a medium list"),
-                default: Some(ConfigValue::from(5)),
-            },
-            BuiltinKey {
                 key: "ui.message.verbosity",
                 schema: SchemaEntry::string()
                     .with_allowed_values(
@@ -274,16 +237,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                     )
                     .with_doc("Default message verbosity level"),
                 default: Some(ConfigValue::from("success")),
-            },
-            BuiltinKey {
-                key: "ui.prompt",
-                schema: SchemaEntry::string().with_doc("Prompt template used by the UI"),
-                default: None,
-            },
-            BuiltinKey {
-                key: "ui.prompt.secrets",
-                schema: SchemaEntry::boolean().with_doc("Whether prompts may reveal secret values"),
-                default: None,
             },
             BuiltinKey {
                 key: "extensions.plugins.timeout_ms",
@@ -302,12 +255,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
             BuiltinKey {
                 key: "repl.prompt",
                 schema: SchemaEntry::string().with_doc("Prompt template used by the REPL"),
-                default: None,
-            },
-            BuiltinKey {
-                key: "repl.prompt_right",
-                schema: SchemaEntry::string()
-                    .with_doc("Right-hand prompt template used by the REPL"),
                 default: None,
             },
             BuiltinKey {
@@ -425,11 +372,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: None,
             },
             BuiltinKey {
-                key: "session.cache.max_results",
-                schema: SchemaEntry::positive_integer().with_doc("Maximum cached session results"),
-                default: Some(ConfigValue::from(64)),
-            },
-            BuiltinKey {
                 key: "auth.visible.builtins",
                 schema: SchemaEntry::string().with_doc("Visible builtin auth command allow-list"),
                 default: None,
@@ -460,12 +402,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                     .with_allowed_values(LOG_LEVEL_NAMES)
                     .with_doc("Minimum log level written to the log file"),
                 default: Some(ConfigValue::from("warn")),
-            },
-            BuiltinKey {
-                key: "base.dir",
-                schema: SchemaEntry::string()
-                    .with_doc("Base directory available for interpolation and tooling"),
-                default: None,
             },
         ]
     })

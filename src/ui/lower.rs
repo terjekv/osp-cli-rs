@@ -21,7 +21,7 @@ use super::doc::{
     ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::RenderPlan;
-use super::settings::{HelpLayout, ResolvedHelpChromeSettings};
+use super::settings::HelpLayout;
 use super::text::{display_width, sanitize_human_text};
 use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
@@ -75,13 +75,9 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
             .filter(|doc| doc.kind == OutputDocumentKind::Document)
         {
             Some(document) => serde_json::from_value::<Document>(document.value.clone())
-                .map(|document| lower_document(&document, plan.format, plan.settings.indent_size))
+                .map(|document| lower_document(&document, plan.format))
                 .unwrap_or_default(),
-            None => lower_document_rows(
-                output.as_rows().unwrap_or_default(),
-                plan.format,
-                plan.settings.indent_size,
-            ),
+            None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
         };
         sanitize_doc(&mut doc);
         return doc;
@@ -177,21 +173,18 @@ fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
     }
 }
 
-pub(crate) fn lower_document(document: &Document, format: OutputFormat, indent_size: usize) -> Doc {
+pub(crate) fn lower_document(document: &Document, format: OutputFormat) -> Doc {
     Doc {
         blocks: lower_document_blocks(
             &document.blocks,
-            DocumentLayout::Direct {
-                format,
-                indent_size,
-            },
+            DocumentLayout::Direct { format },
             false,
             false,
         ),
     }
 }
 
-fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -> Doc {
+fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
     let mut blocks = Vec::new();
     let mut start = 0;
     while start < rows.len() {
@@ -227,7 +220,7 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -
                 } else {
                     body.push(Block::Entries(EntriesBlock {
                         inline_markup: true,
-                        default_indent: " ".repeat(indent_size),
+                        default_indent: " ".repeat(2),
                         default_gap: None,
                         rows: vec![entry],
                     }));
@@ -272,7 +265,6 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat, indent_size: usize) -
 enum DocumentLayout<'a> {
     Direct {
         format: OutputFormat,
-        indent_size: usize,
     },
     Help {
         plan: &'a RenderPlan,
@@ -287,10 +279,7 @@ fn lower_document_blocks(
     long_help: bool,
 ) -> Vec<Block> {
     let (format, indent_size, help) = match layout {
-        DocumentLayout::Direct {
-            format,
-            indent_size,
-        } => (format, indent_size, None),
+        DocumentLayout::Direct { format } => (format, 2, None),
         DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, 0, Some((plan, layout))),
     };
     let mut lowered = Vec::new();
@@ -346,13 +335,7 @@ fn lower_document_blocks(
                 inline_markup: true,
             })],
             DocBlock::Entries { entries } => {
-                let (entry_indent, entry_gap) = help.map_or((indent_size, None), |(plan, _)| {
-                    (
-                        plan.settings.help_chrome.entry_indent,
-                        plan.settings.help_chrome.entry_gap,
-                    )
-                });
-                let mut block = entries_block_with_defaults(entries, entry_indent, entry_gap);
+                let mut block = entries_block_with_defaults(entries, 2, None);
                 if let Some((plan, _)) = help {
                     block.inline_markup =
                         !long_help || !entries.iter().all(|entry| entry.name.starts_with('-'));
@@ -392,15 +375,15 @@ fn lower_document_blocks(
                 auto_grid: false,
             })],
             DocBlock::Data { value } => match help {
-                Some((plan, _)) => help_layout_blocks_from_value(value, &plan.settings.help_chrome),
+                Some(_) => help_layout_blocks_from_value(value),
                 None => lower_value_blocks(value),
             },
         };
-        if let Some((plan, _)) = help {
+        if help.is_some() {
             let section_break = matches!(block, DocBlock::Section { .. })
                 || matches!(lowered.last(), Some(Block::Section(_)));
             if section_break {
-                push_blank_lines(&mut lowered, plan.settings.help_chrome.section_spacing);
+                push_blank_lines(&mut lowered, 1);
             } else if !lowered.is_empty() && !matches!(block, DocBlock::Paragraph { .. }) {
                 lowered.push(Block::Blank);
             }
@@ -957,10 +940,7 @@ fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::
     })
 }
 
-fn help_layout_blocks_from_value(
-    value: &Value,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Vec<Block> {
+fn help_layout_blocks_from_value(value: &Value) -> Vec<Block> {
     match value {
         Value::Object(map) if should_render_as_key_value_group(map) => {
             vec![Block::KeyValue(key_value_from_document_data_map(map))]
@@ -974,9 +954,7 @@ fn help_layout_blocks_from_value(
                 .collect::<Option<Vec<_>>>()
             {
                 vec![Block::Entries(entries_block_with_defaults(
-                    &entries,
-                    help_chrome.entry_indent,
-                    help_chrome.entry_gap,
+                    &entries, 2, None,
                 ))]
             } else if items.iter().all(is_scalar_like) {
                 vec![Block::List(ListBlock {

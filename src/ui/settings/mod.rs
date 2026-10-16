@@ -109,18 +109,6 @@ impl UiPresentation {
     }
 }
 
-/// Optional chrome overrides for guide/help rendering.
-///
-/// These knobs intentionally stay narrow so operators can tune help density
-/// without having to understand the entire theme system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct HelpChromeSettings {
-    pub table_chrome: TableBorderOverride,
-    pub entry_indent: Option<usize>,
-    pub entry_gap: Option<usize>,
-    pub section_spacing: Option<usize>,
-}
-
 /// Border style override for one family of tables (help tables, nested tables).
 ///
 /// `Inherit` follows `ui.table.border`; the other variants force a specific
@@ -257,14 +245,11 @@ pub struct RenderSettings {
     /// Maximum width for rendered output; zero leaves the measured width uncapped.
     pub width_max: usize,
     pub margin: usize,
-    pub indent_size: usize,
-    pub medium_list_max: usize,
     pub table_overflow: TableOverflow,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
     pub style_overrides: style::StyleOverrides,
-    pub help_chrome: HelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
     pub ruled_section_policy: RuledSectionPolicy,
     pub runtime: RenderRuntime,
@@ -283,13 +268,10 @@ impl Default for RenderSettings {
             width: None,
             width_max: usize::try_from(DEFAULT_UI_WIDTH_MAX).unwrap_or(0),
             margin: 0,
-            indent_size: 2,
-            medium_list_max: 5,
             table_overflow: TableOverflow::Ellipsis,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
-            help_chrome: HelpChromeSettings::default(),
             chrome_frame: SectionFrameStyle::Top,
             ruled_section_policy: RuledSectionPolicy::Shared,
             runtime: RenderRuntime::default(),
@@ -526,18 +508,6 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.margin = value as usize;
     }
 
-    if let Some(value) = config_int(config, "ui.indent")
-        && value > 0
-    {
-        settings.indent_size = value as usize;
-    }
-
-    if let Some(value) = config_int(config, "ui.medium_list_max")
-        && value > 0
-    {
-        settings.medium_list_max = value as usize;
-    }
-
     if let Some(value) = config.get_string("ui.table.overflow")
         && let Some(parsed) = TableOverflow::parse(value)
     {
@@ -555,16 +525,6 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
     {
         settings.nested_table_border = parsed;
     }
-
-    if let Some(value) = config.get_string("ui.help.table_chrome")
-        && let Some(parsed) = TableBorderOverride::parse(value)
-    {
-        settings.help_chrome.table_chrome = parsed;
-    }
-
-    settings.help_chrome.entry_indent = config_usize_override(config, "ui.help.entry_indent");
-    settings.help_chrome.entry_gap = config_usize_override(config, "ui.help.entry_gap");
-    settings.help_chrome.section_spacing = config_usize_override(config, "ui.help.section_spacing");
 }
 
 fn config_int(config: &ResolvedConfig, key: &str) -> Option<i64> {
@@ -658,11 +618,6 @@ impl RenderSettingsBuilder {
         self
     }
 
-    pub fn with_indent_size(mut self, indent_size: usize) -> Self {
-        self.settings.indent_size = indent_size;
-        self
-    }
-
     pub fn with_table_overflow(mut self, table_overflow: TableOverflow) -> Self {
         self.settings.table_overflow = table_overflow;
         self
@@ -694,13 +649,6 @@ pub enum RenderProfile {
     CopySafe,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolvedHelpChromeSettings {
-    pub entry_indent: usize,
-    pub entry_gap: Option<usize>,
-    pub section_spacing: usize,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRenderSettings {
     pub backend: RenderBackend,
@@ -708,16 +656,12 @@ pub struct ResolvedRenderSettings {
     pub unicode: bool,
     pub width: Option<usize>,
     pub margin: usize,
-    pub indent_size: usize,
-    pub medium_list_max: usize,
     pub table_overflow: TableOverflow,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
-    pub help_table_border: TableBorderStyle,
     pub theme_name: String,
     pub theme: ThemeDefinition,
     pub style_overrides: style::StyleOverrides,
-    pub help_chrome: ResolvedHelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
 }
 
@@ -788,11 +732,6 @@ impl RenderSettings {
             .clone()
             .unwrap_or_else(|| theme::resolve_theme(&self.theme_name));
         let theme_name = theme::normalize_theme_name(&theme.id);
-        let help_chrome = ResolvedHelpChromeSettings {
-            entry_indent: self.help_chrome.entry_indent.unwrap_or(2),
-            entry_gap: self.help_chrome.entry_gap,
-            section_spacing: self.help_chrome.section_spacing.unwrap_or(1),
-        };
 
         ResolvedRenderSettings {
             backend,
@@ -800,16 +739,12 @@ impl RenderSettings {
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
             width: self.resolve_width(),
             margin: self.margin,
-            indent_size: self.indent_size.max(1),
-            medium_list_max: self.medium_list_max.max(1),
             table_overflow: self.table_overflow,
             table_border: self.table_border,
             nested_table_border: self.nested_table_border.resolve(self.table_border),
-            help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
             theme_name,
             theme,
             style_overrides: self.style_overrides.clone(),
-            help_chrome,
             chrome_frame: self.chrome_frame,
         }
     }
@@ -876,10 +811,10 @@ pub fn resolve_settings(
 #[cfg(test)]
 mod tests {
     use super::{
-        HelpChromeSettings, HelpLayout, RenderBackend, RenderProfile, RenderRuntime,
-        RenderSettingsBuilder, TableBorderOverride, TableBorderStyle, TableOverflow,
-        UiPresentation, apply_render_config_overrides, config_int, config_usize_override,
-        explain_presentation_effect, help_layout_from_config,
+        HelpLayout, RenderBackend, RenderProfile, RenderRuntime, RenderSettingsBuilder,
+        TableBorderOverride, TableBorderStyle, TableOverflow, UiPresentation,
+        apply_render_config_overrides, config_int, explain_presentation_effect,
+        help_layout_from_config,
     };
     use crate::config::{
         ConfigLayer, ConfigResolver, ConfigSource, ConfigValue, LoadedLayers, ResolveOptions,
@@ -1030,23 +965,6 @@ mod tests {
 
         assert_eq!(settings.chrome_frame, SectionFrameStyle::Square);
         assert_eq!(settings.table_border, TableBorderStyle::None);
-
-        let config = resolved_config_with_presentation(&[
-            ("ui.help.entry_indent", "4"),
-            ("ui.help.entry_gap", "3"),
-            ("ui.help.section_spacing", "inherit"),
-        ]);
-        let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
-
-        apply_render_config_overrides(&mut settings, &config);
-
-        assert_eq!(
-            config_usize_override(&config, "ui.help.entry_indent"),
-            Some(4)
-        );
-        assert_eq!(settings.help_chrome.entry_indent, Some(4));
-        assert_eq!(settings.help_chrome.entry_gap, Some(3));
-        assert_eq!(settings.help_chrome.section_spacing, None);
     }
 
     #[test]
@@ -1055,7 +973,6 @@ mod tests {
         assert_eq!(defaults.format, OutputFormat::Auto);
         assert_eq!(defaults.theme_name, super::DEFAULT_THEME_NAME);
         assert_eq!(defaults.table_border, TableBorderStyle::Square);
-        assert_eq!(defaults.help_chrome, HelpChromeSettings::default());
 
         let plain_settings = RenderSettingsBuilder::default()
             .with_runtime(

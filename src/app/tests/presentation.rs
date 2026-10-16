@@ -6,7 +6,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
     let settings = RenderSettings::test_plain(OutputFormat::Table);
     let resolved = settings.resolve_render_settings();
     let plain_timing = crate::app::DebugTimingState::default();
-    let plain = repl::render_repl_prompt_right_for_test(&resolved, None, false, &plain_timing);
+    let plain = repl::render_repl_prompt_right_for_test(&resolved, false, &plain_timing);
     assert!(plain.contains("incognito"));
 
     let breakdown_timing = crate::app::DebugTimingState::default();
@@ -19,8 +19,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
             render: Some(std::time::Duration::from_millis(17)),
         },
     });
-    let breakdown =
-        repl::render_repl_prompt_right_for_test(&resolved, None, true, &breakdown_timing);
+    let breakdown = repl::render_repl_prompt_right_for_test(&resolved, true, &breakdown_timing);
     assert!(breakdown.contains("321.0ms"));
     assert!(breakdown.contains("p4.0ms"));
     assert!(breakdown.contains("e300.0ms"));
@@ -29,8 +28,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
     let mut session = crate::app::AppSession::default();
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(42));
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(99));
-    let seeded =
-        repl::render_repl_prompt_right_for_test(&resolved, None, true, &session.prompt_timing);
+    let seeded = repl::render_repl_prompt_right_for_test(&resolved, true, &session.prompt_timing);
     assert!(seeded.contains("42ms"));
     assert!(!seeded.contains("99ms"));
 }

@@ -342,8 +342,8 @@ fn config_explain_reports_interpolation_trace_contract() {
         r#"
 [default]
 profile.default = "uio"
-base.dir = "/etc/osp"
-ui.prompt = "${profile.active}:${extensions.uio.ldap.url}:${base.dir}"
+extensions.site.base_dir = "/etc/osp"
+repl.prompt = "${profile.active}:${extensions.uio.ldap.url}:${extensions.site.base_dir}"
 extensions.site.retry_ratio = 1.5
 extensions.site.enabled = true
 extensions.site.request_url = "https://api.example/${profile.active}?ratio=${extensions.site.retry_ratio}&enabled=${extensions.site.enabled}&credential=${extensions.site.token}"
@@ -365,7 +365,7 @@ extensions.site.connection = "https://operator:credential@api.example/${profile.
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
-        .args(["--json", "config", "explain", "ui.prompt"])
+        .args(["--json", "config", "explain", "repl.prompt"])
         .assert()
         .success()
         .get_output()
@@ -374,7 +374,7 @@ extensions.site.connection = "https://operator:credential@api.example/${profile.
     let payload = parse_json_stdout(&output.stdout);
     assert_eq!(
         payload["interpolation"]["template"],
-        "${profile.active}:${extensions.uio.ldap.url}:${base.dir}"
+        "${profile.active}:${extensions.uio.ldap.url}:${extensions.site.base_dir}"
     );
     let steps = payload["interpolation"]["steps"]
         .as_array()

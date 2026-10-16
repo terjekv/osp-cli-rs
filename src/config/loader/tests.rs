@@ -171,7 +171,7 @@ fn pipeline_builder_covers_schema_collected_env_and_optional_layer_paths_unit() 
         }))
         .with_session(StaticLayerLoader::new({
             let mut layer = ConfigLayer::default();
-            layer.insert("session.cache.max_results", 32_i64, Scope::global());
+            layer.insert("repl.history.menu_rows", 32_i64, Scope::global());
             layer
         }))
         .load_layers()
