@@ -249,7 +249,12 @@ impl NativeCommand for CuratedOrchRowsCommand {
     ) -> Result<NativeCommandOutcome> {
         for state in ["running", "completed"] {
             context.emit_progress(
-                NativeProgressEvent::new(json!({"state": state, "name": "db01.uio.no"}))
+                NativeProgressEvent::new(json!({
+                        "state": {"name": state},
+                        "name": "db01.uio.no",
+                        "provider": {"name": "vmware"},
+                        "created_at": 1700000000,
+                    }))
                     .with_meta(ResponseMetaV1 {
                         presentation_lines: vec![
                             format!("{state}: db01.uio.no"),
