@@ -39,7 +39,7 @@ use super::timing::TimingSummary;
 
 #[derive(Debug, Clone, Copy, Default)]
 /// Timing badge rendered in the prompt for the most recent command.
-pub struct DebugTimingBadge {
+pub(crate) struct DebugTimingBadge {
     /// Prompt detail level used when rendering the badge.
     pub level: u8,
     pub(crate) summary: TimingSummary,
@@ -48,7 +48,7 @@ pub struct DebugTimingBadge {
 /// Shared prompt-timing storage that dispatch code can update and prompt
 /// rendering can read.
 #[derive(Clone, Default, Debug)]
-pub struct DebugTimingState {
+pub(crate) struct DebugTimingState {
     inner: Arc<RwLock<Option<DebugTimingBadge>>>,
 }
 
@@ -75,7 +75,7 @@ impl DebugTimingState {
 
 /// One entered command scope inside the interactive REPL shell stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReplScopeFrame {
+pub(crate) struct ReplScopeFrame {
     command: String,
 }
 
@@ -84,7 +84,7 @@ impl ReplScopeFrame {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeFrame;
     ///
     /// let frame = ReplScopeFrame::new("theme");
@@ -109,7 +109,7 @@ impl ReplScopeFrame {
 /// Shells are root commands, so there is at most one: entering another shell
 /// switches to it rather than nesting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReplScopeStack {
+pub(crate) struct ReplScopeStack {
     frame: Option<ReplScopeFrame>,
 }
 
@@ -148,7 +148,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -166,7 +166,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -186,7 +186,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -208,7 +208,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -228,7 +228,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -253,7 +253,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -274,8 +274,9 @@ impl ReplScopeStack {
 #[non_exhaustive]
 #[must_use]
 #[derive(Clone)]
-pub struct AppSession {
+pub(crate) struct AppSession {
     /// Prompt prefix shown before any scope label.
+    #[cfg(test)]
     pub prompt_prefix: String,
     /// Whether history capture is enabled for this session.
     pub history_enabled: bool,
@@ -300,7 +301,7 @@ pub struct AppSession {
 
 /// The last failed REPL command and its original diagnostic evidence.
 #[derive(Debug, Clone)]
-pub struct LastFailure {
+pub(crate) struct LastFailure {
     /// Command label identifying the failure without retaining its arguments.
     pub command_line: String,
     /// Short failure summary suitable for prompts or status output.
@@ -311,6 +312,7 @@ pub struct LastFailure {
 
 #[derive(Debug, Clone)]
 enum FailureEvidence {
+    #[cfg(test)]
     Text(String),
     Report {
         report: std::sync::Arc<miette::Report>,
@@ -321,6 +323,7 @@ enum FailureEvidence {
 
 impl LastFailure {
     /// Records supplied summary and detail text without duplicating the detail ladder.
+    #[cfg(test)]
     pub fn new(command_line: String, summary: String, detail: String) -> Self {
         Self {
             command_line,
@@ -377,6 +380,7 @@ impl LastFailure {
     /// Renders diagnostic detail with the terminal settings captured at failure time.
     pub fn detail(&self, level: crate::core::MessageLevel) -> String {
         match &self.evidence {
+            #[cfg(test)]
             FailureEvidence::Text(detail) => detail.clone(),
             FailureEvidence::Report {
                 report, settings, ..
@@ -386,6 +390,7 @@ impl LastFailure {
     /// Renders the backtrace captured when the failure was recorded, if available.
     pub fn backtrace(&self) -> Option<String> {
         match &self.evidence {
+            #[cfg(test)]
             FailureEvidence::Text(_) => None,
             FailureEvidence::Report {
                 report,
@@ -415,18 +420,21 @@ pub(crate) enum ReplExitTransition {
 
 impl AppSession {
     /// Replaces the prompt prefix shown ahead of any scope label.
+    #[cfg(test)]
     pub fn with_prompt_prefix(mut self, prompt_prefix: impl Into<String>) -> Self {
         self.prompt_prefix = prompt_prefix.into();
         self
     }
 
     /// Enables or disables history capture for this session.
+    #[cfg(test)]
     pub fn with_history_enabled(mut self, history_enabled: bool) -> Self {
         self.history_enabled = history_enabled;
         self
     }
 
     /// Replaces the shell-scoped history context shared with the history store.
+    #[cfg(test)]
     pub fn with_history_shell(mut self, history_shell: HistoryShellContext) -> Self {
         self.history_shell = history_shell;
         self
@@ -487,6 +495,7 @@ impl AppSession {
     }
 
     /// Records details about the latest failed command.
+    #[cfg(test)]
     pub fn record_failure(
         &mut self,
         command_line: &str,
@@ -576,6 +585,7 @@ impl AppSession {
 impl Default for AppSession {
     fn default() -> Self {
         Self {
+            #[cfg(test)]
             prompt_prefix: "osp".to_string(),
             history_enabled: true,
             history_shell: HistoryShellContext::default(),
@@ -594,7 +604,7 @@ impl Default for AppSession {
 /// Aggregate application state shared between runtime and session logic.
 #[non_exhaustive]
 #[must_use]
-pub struct AppState {
+pub(crate) struct AppState {
     /// Runtime-scoped services and resolved config state.
     pub runtime: AppRuntime,
     /// Session-scoped REPL state and prompt metadata.
@@ -603,6 +613,7 @@ pub struct AppState {
     pub clients: AppClients,
 }
 
+#[cfg(test)]
 impl AppState {
     /// Builds a full application-state snapshot by deriving UI state from the
     /// resolved config and runtime context.
@@ -677,7 +688,7 @@ impl AppState {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::app::{AppSession, AppStateBuilder, RuntimeContext, TerminalKind};
 /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 ///
@@ -701,7 +712,7 @@ impl AppState {
 /// # Ok::<(), miette::Report>(())
 /// ```
 #[must_use]
-pub struct AppStateBuilder {
+pub(crate) struct AppStateBuilder {
     pub(crate) context: RuntimeContext,
     pub(crate) config: crate::config::ResolvedConfig,
     pub(crate) ui: UiState,
@@ -713,6 +724,7 @@ pub struct AppStateBuilder {
     pub(crate) definition: std::sync::Arc<super::AppDefinition>,
 }
 
+#[cfg(test)]
 impl AppStateBuilder {
     /// Starts building an application-state snapshot from the resolved config
     /// and UI state the caller wants to expose.
@@ -822,6 +834,120 @@ impl AppStateBuilder {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn host_state_example_1() {
+        use crate::app::ReplScopeFrame;
+
+        let frame = ReplScopeFrame::new("theme");
+        assert_eq!(frame.command(), "theme");
+    }
+
+    #[test]
+    fn host_state_example_2() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.display_label(), None);
+
+        scope.enter("orch");
+        scope.enter("nh");
+        assert_eq!(scope.display_label(), Some("nh".to_string()));
+    }
+
+    #[test]
+    fn host_state_example_3() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+        scope.enter("orch");
+
+        assert_eq!(scope.history_prefix(), "orch ");
+    }
+
+    #[test]
+    fn host_state_example_4() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.history_scope_prefix(), None);
+
+        scope.enter("theme");
+        assert_eq!(scope.history_scope_prefix(), Some("theme ".to_string()));
+    }
+
+    #[test]
+    fn host_state_example_5() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.history_scope_label(), "root history");
+
+        scope.enter("theme");
+        scope.enter("orch");
+        assert_eq!(scope.history_scope_label(), "orch shell history");
+    }
+
+    #[test]
+    fn host_state_example_6() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+
+        assert_eq!(
+            scope.prefixed_tokens(&["show".to_string(), "dracula".to_string()]),
+            vec![
+                "theme".to_string(),
+                "show".to_string(),
+                "dracula".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn host_state_example_7() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+
+        assert_eq!(
+            scope.help_tokens(),
+            vec!["theme".to_string(), "--help".to_string()]
+        );
+    }
+
+    #[test]
+    fn host_state_example_8() {
+        (|| {
+            use crate::app::{AppSession, AppStateBuilder, RuntimeContext, TerminalKind};
+            use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+            let mut defaults = ConfigLayer::default();
+            defaults.set("profile.default", "default");
+            defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
+            defaults.set("theme.path", Vec::<String>::new());
+
+            let mut resolver = ConfigResolver::default();
+            resolver.set_defaults(defaults);
+            let config = resolver
+                .resolve(ResolveOptions::new().with_terminal("repl"))
+                .unwrap();
+
+            let state = AppStateBuilder::from_resolved_config(
+                RuntimeContext::new(None, TerminalKind::Repl, None),
+                config,
+            )?
+            .with_session(AppSession::default().with_prompt_prefix("demo"))
+            .build();
+
+            assert_eq!(state.prompt_prefix(), "demo");
+            Ok::<(), miette::Report>(())
+        })()
+        .unwrap();
+    }
 
     #[test]
     fn internal_example_1() {

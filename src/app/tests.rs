@@ -493,3 +493,15 @@ mod launch;
 #[cfg(unix)]
 #[path = "../../tests/support/plugin.rs"]
 mod plugin_support;
+
+#[test]
+fn sink_internal_example_1() {
+    use crate::app::{BufferedUiSink, run_process_with_sink};
+
+    let mut sink = BufferedUiSink::default();
+    let exit = run_process_with_sink(["osp", "--help"], &mut sink);
+
+    assert_eq!(exit, 0);
+    assert!(!sink.stdout.is_empty());
+    assert!(sink.stderr.is_empty());
+}

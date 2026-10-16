@@ -233,8 +233,8 @@
 //! - "I need plugin discovery and catalog/policy integration" →
 //!   `plugin::PluginManager` on the host side, or [`core::plugin`] when
 //!   implementing the wire protocol itself
-//! - "I need runtime/session state" → [`app::AppStateBuilder::from_resolved_config`]
-//!   with [`app::LaunchContext`] and session overrides
+//! - "I need the configured host" → [`App::new`]
+//!   and apply launch settings through its `with_*` methods
 //! - "I want to embed the interactive editor loop directly" →
 //!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig`]
 //! - "I need semantic payload generation for help/completion surfaces" →

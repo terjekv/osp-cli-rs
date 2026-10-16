@@ -69,7 +69,7 @@ pub(crate) fn visible_native_commands<'a>(
 /// This lets config selection and runtime behavior distinguish between
 /// one-shot CLI execution and the long-lived REPL host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalKind {
+pub(crate) enum TerminalKind {
     /// One-shot command execution.
     Cli,
     /// Interactive REPL execution.
@@ -81,7 +81,7 @@ impl TerminalKind {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::TerminalKind;
     ///
     /// assert_eq!(TerminalKind::Cli.as_config_terminal(), "cli");
@@ -100,7 +100,7 @@ impl TerminalKind {
 /// This keeps the profile override and terminal identity together so later
 /// runtime rebuilds can resolve config against the same host context.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeContext {
+pub(crate) struct RuntimeContext {
     profile_override: Option<String>,
     terminal_kind: TerminalKind,
     pub(crate) repl_start: bool,
@@ -114,7 +114,7 @@ impl RuntimeContext {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{RuntimeContext, TerminalKind};
     ///
     /// let ctx = RuntimeContext::new(
@@ -180,8 +180,9 @@ impl RuntimeContext {
 ///
 /// The revision gives caches and rebuild logic a cheap way to notice when the
 /// effective config actually changed.
-pub struct ConfigState {
+pub(crate) struct ConfigState {
     resolved: ResolvedConfig,
+    #[cfg(test)]
     revision: u64,
 }
 
@@ -190,7 +191,7 @@ impl ConfigState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ConfigState;
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
@@ -210,6 +211,7 @@ impl ConfigState {
     pub fn new(resolved: ResolvedConfig) -> Self {
         Self {
             resolved,
+            #[cfg(test)]
             revision: 1,
         }
     }
@@ -220,11 +222,13 @@ impl ConfigState {
     }
 
     /// Returns the current configuration revision.
+    #[cfg(test)]
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
     /// Replaces the resolved configuration and bumps the revision when it changes.
+    #[cfg(test)]
     pub fn replace_resolved(&mut self, next: ResolvedConfig) -> bool {
         if self.resolved == next {
             return false;
@@ -236,6 +240,7 @@ impl ConfigState {
     }
 
     /// Applies a configuration transform atomically against the current snapshot.
+    #[cfg(test)]
     pub fn transaction<F, E>(&mut self, mutator: F) -> Result<bool, E>
     where
         F: FnOnce(&ResolvedConfig) -> Result<ResolvedConfig, E>,
@@ -254,7 +259,7 @@ impl ConfigState {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use]
-pub struct UiState {
+pub(crate) struct UiState {
     /// Render settings derived from the current config snapshot.
     pub render_settings: RenderSettings,
     /// Default message verbosity derived from the current runtime config.
@@ -268,7 +273,7 @@ impl UiState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{RuntimeContext, TerminalKind, UiState};
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
@@ -290,6 +295,7 @@ impl UiState {
     /// assert_eq!(ui.verbosity.as_str(), "info");
     /// assert_eq!(ui.render_settings.runtime.terminal.as_deref(), Some("xterm-256color"));
     /// ```
+    #[cfg(test)]
     pub fn from_resolved_config(
         context: &RuntimeContext,
         config: &ResolvedConfig,
@@ -308,7 +314,7 @@ impl UiState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::UiState;
     /// use osp_cli::ui::RenderSettings;
     /// use osp_cli::core::MessageLevel;
@@ -341,7 +347,7 @@ impl UiState {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use]
-pub struct LaunchContext {
+pub(crate) struct LaunchContext {
     /// Explicit plugin directories requested by the caller at launch time.
     pub plugin_dirs: Vec<PathBuf>,
     /// Optional config-root override for runtime config discovery.
@@ -372,6 +378,7 @@ impl LaunchContext {
     }
 
     /// Appends one explicit plugin directory.
+    #[cfg(test)]
     pub fn with_plugin_dir(mut self, plugin_dir: impl Into<PathBuf>) -> Self {
         self.plugin_dirs.push(plugin_dir.into());
         self
@@ -384,12 +391,14 @@ impl LaunchContext {
     }
 
     /// Sets the config root override.
+    #[cfg(test)]
     pub fn with_config_root(mut self, config_root: Option<PathBuf>) -> Self {
         self.config_root = config_root;
         self
     }
 
     /// Sets the cache root override.
+    #[cfg(test)]
     pub fn with_cache_root(mut self, cache_root: Option<PathBuf>) -> Self {
         self.cache_root = cache_root;
         self
@@ -424,7 +433,7 @@ impl Default for LaunchContext {
 /// machinery without breaking callers.
 #[non_exhaustive]
 #[must_use]
-pub struct AppClients {
+pub(crate) struct AppClients {
     /// Plugin manager used for discovery, dispatch, and provider metadata.
     plugins: PluginManager,
     /// In-process registry of native commands.
@@ -477,6 +486,21 @@ pub struct AppRuntime {
 }
 
 impl AppRuntime {
+    /// Returns the active resolved configuration.
+    pub fn config(&self) -> &ResolvedConfig {
+        self.config.resolved()
+    }
+
+    /// Returns whether this runtime hosts the interactive REPL.
+    pub fn is_repl(&self) -> bool {
+        self.context.is_repl()
+    }
+
+    /// Returns the active command execution scope.
+    pub fn command_scope(&self) -> &crate::core::CommandScope {
+        &self.ui.render_settings.runtime.command_scope
+    }
+
     /// Creates the runtime snapshot shared across CLI and REPL execution.
     pub(crate) fn new(
         context: RuntimeContext,
@@ -498,22 +522,25 @@ impl AppRuntime {
     }
 
     /// Returns the runtime context used for config selection and rebuilds.
-    pub fn context(&self) -> &RuntimeContext {
+    #[cfg(test)]
+    pub(crate) fn context(&self) -> &RuntimeContext {
         &self.context
     }
 
     /// Returns the authoritative resolved-config state.
-    pub fn config_state(&self) -> &ConfigState {
+    #[cfg(test)]
+    pub(crate) fn config_state(&self) -> &ConfigState {
         &self.config
     }
 
     /// Returns the UI state derived from the current config snapshot.
-    pub fn ui(&self) -> &UiState {
+    #[cfg(test)]
+    pub(crate) fn ui(&self) -> &UiState {
         &self.ui
     }
 
     /// Returns the command-visibility/auth state.
-    pub fn auth(&self) -> &AuthState {
+    pub(crate) fn auth(&self) -> &AuthState {
         &self.auth
     }
 
@@ -535,7 +562,8 @@ impl AppRuntime {
     }
 
     /// Returns the launch-time provenance used to assemble the runtime.
-    pub fn launch(&self) -> &LaunchContext {
+    #[cfg(test)]
+    pub(crate) fn launch(&self) -> &LaunchContext {
         &self.launch
     }
 
@@ -559,7 +587,7 @@ impl AppRuntime {
 
 /// Declared external authentication and the shared product access hook.
 #[derive(Default)]
-pub struct AuthState {
+pub(crate) struct AuthState {
     access_policy: Option<Arc<dyn AccessPolicy>>,
     command_auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,
 }
@@ -739,6 +767,95 @@ impl AuthState {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn host_state_example_1() {
+        use crate::app::TerminalKind;
+
+        assert_eq!(TerminalKind::Cli.as_config_terminal(), "cli");
+        assert_eq!(TerminalKind::Repl.as_config_terminal(), "repl");
+    }
+
+    #[test]
+    fn host_state_example_2() {
+        use crate::app::{RuntimeContext, TerminalKind};
+
+        let ctx = RuntimeContext::new(
+            Some("  Work  ".to_string()),
+            TerminalKind::Repl,
+            Some("xterm-256color".to_string()),
+        );
+
+        assert_eq!(ctx.profile_override(), Some("work"));
+        assert_eq!(ctx.terminal_kind(), TerminalKind::Repl);
+        assert_eq!(ctx.terminal_env(), Some("xterm-256color"));
+    }
+
+    #[test]
+    fn host_state_example_3() {
+        use crate::app::ConfigState;
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("theme.path", Vec::<String>::new());
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
+
+        let mut state = ConfigState::new(resolved.clone());
+        assert_eq!(state.revision(), 1);
+        assert!(!state.replace_resolved(resolved));
+        assert_eq!(state.revision(), 1);
+    }
+
+    #[test]
+    fn host_state_example_4() {
+        use crate::app::{RuntimeContext, TerminalKind, UiState};
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("theme.path", Vec::<String>::new());
+        defaults.set("ui.verbosity", "info");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(ResolveOptions::new().with_terminal("cli"))
+            .unwrap();
+
+        let ui = UiState::from_resolved_config(
+            &RuntimeContext::new(None, TerminalKind::Cli, Some("xterm-256color".to_string())),
+            &config,
+        )
+        .unwrap();
+
+        assert_eq!(ui.verbosity.as_str(), "info");
+        assert_eq!(
+            ui.render_settings.runtime.terminal.as_deref(),
+            Some("xterm-256color")
+        );
+    }
+
+    #[test]
+    fn host_state_example_5() {
+        use crate::app::UiState;
+        use crate::core::MessageLevel;
+        use crate::core::OutputFormat;
+        use crate::ui::RenderSettings;
+
+        let ui = UiState::new(
+            RenderSettings::test_plain(OutputFormat::Json),
+            MessageLevel::Success,
+            2,
+        );
+
+        assert_eq!(ui.verbosity, MessageLevel::Success);
+        assert_eq!(ui.debug_level, 2);
+    }
+
     use super::ConfigState;
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
     fn resolved_with(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {

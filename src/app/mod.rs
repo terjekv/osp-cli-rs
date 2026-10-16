@@ -18,7 +18,7 @@
 //! - most callers should start with [`App`]
 //! - embedders may inspect runtime/session state, but the preferred
 //!   construction path still flows through a small number of builders and
-//!   constructors here such as [`crate::app::AppStateBuilder`]
+//!   constructors here such as [`crate::App::new`]
 //! - lower-level semantic payloads live in modules like `crate::core::document` and
 //!   [`crate::completion`]; this module assembles the host
 //!
@@ -105,13 +105,15 @@ pub(crate) use config_explain::{
 pub(crate) use facts::*;
 pub use host::run_from;
 pub(crate) use host::*;
-pub use runtime::{
-    AppClients, AppRuntime, AuthState, ConfigState, LaunchContext, RuntimeContext, TerminalKind,
-    UiState,
+pub use runtime::AppRuntime;
+pub(crate) use runtime::{
+    AppClients, AuthState, ConfigState, LaunchContext, RuntimeContext, TerminalKind, UiState,
 };
-pub use session::{
-    AppSession, AppState, AppStateBuilder, DebugTimingBadge, DebugTimingState, LastFailure,
-    ReplScopeFrame, ReplScopeStack,
+#[cfg(test)]
+pub(crate) use session::DebugTimingBadge;
+pub(crate) use session::{
+    AppSession, AppState, AppStateBuilder, DebugTimingState, LastFailure, ReplScopeFrame,
+    ReplScopeStack,
 };
 pub use sink::{BufferedUiSink, StdIoUiSink, StderrSpinner, UiSink};
 
@@ -607,7 +609,7 @@ where
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::app::{BufferedUiSink, run_process_with_sink};
 ///
 /// let mut sink = BufferedUiSink::default();
@@ -617,7 +619,8 @@ where
 /// assert!(!sink.stdout.is_empty());
 /// assert!(sink.stderr.is_empty());
 /// ```
-pub fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
+#[cfg(test)]
+pub(crate) fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,

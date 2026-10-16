@@ -97,7 +97,7 @@ pub(crate) struct ContextBinding {
 }
 impl NativeSessionContext {
     pub(crate) fn activate(&self, runtime: &crate::app::AppRuntime) {
-        let config = runtime.config_state().resolved();
+        let config = runtime.config();
         let identity = runtime
             .access_policy()
             .map(|product| product.effective_identity(config))

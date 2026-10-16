@@ -61,6 +61,7 @@ pub(crate) enum HostBuildRequest<'a> {
         definition: std::sync::Arc<super::AppDefinition>,
     },
     Rebuild(&'a super::AppState),
+    #[cfg(test)]
     State(Box<super::AppStateBuilder>),
     Presentation {
         context: &'a RuntimeContext,
@@ -126,6 +127,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
                 themes,
             ))));
         }
+        #[cfg(test)]
         HostBuildRequest::State(builder) => *builder,
         HostBuildRequest::Startup {
             cli,

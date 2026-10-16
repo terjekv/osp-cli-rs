@@ -73,6 +73,7 @@ impl InvocationElevation {
 /// This keeps the command surface small and stable: commands receive the
 /// resolved config snapshot and runtime hints they need to behave like the host
 /// would, without exposing the whole app runtime for ad hoc coupling.
+#[non_exhaustive]
 pub struct NativeCommandContext<'a> {
     /// Current resolved config snapshot for this execution.
     pub config: &'a ResolvedConfig,
