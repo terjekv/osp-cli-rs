@@ -41,17 +41,19 @@ Use:
 
 Behavior:
 
-- `-d`: high-level debug information
+- `-d`: command dispatch, service requests, plugin stderr and the final outcome
 - `-dd`: more detailed debug output
 - `-ddd`: the most detailed terminal debug stream
 
-Debug logs are written to `stderr`, not `stdout`.
+Debug logs are written to `stderr`, not `stdout`. Operator trace lines contain
+the time, level, target, message and event fields. At `-dd` and above they also
+include span context.
 
 ## Timing Hints
 
 At debug levels, `osp` shows timing information:
 
-- CLI: timing footer on `stderr`
+- CLI: `finished` log event on `stderr`, after any error, with exit code and elapsed time
 - REPL: right-hand prompt badge with the last command timing
 
 Color bands:
@@ -105,7 +107,7 @@ Useful config keys:
 - `debug.level`
 - `log.file.enabled`
 - `log.file.path`
-- `log.file.level`
+- `log.file.level` (default `info`, independent of `-d`)
 
 Use `config explain <key>` to see where an effective value comes from.
 

@@ -483,10 +483,17 @@ impl App {
                 tracing::info_span!(target: "osp_startup", "process argv collection").entered();
             args.into_iter().map(Into::into).collect::<Vec<OsString>>()
         };
+        let started = std::time::Instant::now();
+        let mut timing = host::TimingSummary::default();
         let pipe = args.iter().position(|arg| arg == "|").unwrap_or(args.len());
         let mut scan = crate::cli::invocation::scan_cli_argv(&args[..pipe]);
-        let result =
-            host::run_scanned_with_sink_and_app(&args[pipe..], &mut scan, sink, &self.definition);
+        let result = host::run_scanned_with_sink_and_app(
+            &args[pipe..],
+            &mut scan,
+            sink,
+            &self.definition,
+            &mut timing,
+        );
         let code = match result {
             Ok(code) => code,
             Err(err) => {
@@ -526,6 +533,10 @@ impl App {
                 classify_exit_code(&err)
             }
         };
+        tracing::info!(target: "osp", exit_code = code,
+            elapsed_ms = started.elapsed().as_millis(),
+            startup_ms = timing.parse.unwrap_or_default().as_millis(),
+            command_ms = timing.execute.unwrap_or_default().as_millis(), "finished");
         crate::startup_trace::finish();
         code
     }

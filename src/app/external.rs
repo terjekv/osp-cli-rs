@@ -538,6 +538,8 @@ fn run_native_command(
     guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CommandOutput> {
+    tracing::info!(target: "osp", command = %input.command_path,
+        args = ?input.args, handler = "native", "running command");
     session.native_context.clear_pagination();
     let progress_renderer = input.progress_sink.map(|sink| NativeProgressRenderer {
         config: runtime.config.resolved(),
@@ -898,7 +900,7 @@ fn run_external_plugin_command(
         ensure_external_access(runtime_state, &path, access_requirement, "plugin command")?;
         let runtime = ExternalCommandRuntime::from_parts(runtime_state, clients);
 
-        tracing::debug!(
+        tracing::info!(
             command = %path.as_slice().join(" "),
             "dispatching external command"
         );

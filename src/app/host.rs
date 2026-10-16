@@ -40,7 +40,7 @@ use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
 #[cfg(test)]
 pub(crate) use super::repl_lifecycle::rebuild_repl_state;
-pub(crate) use super::timing::{TimingSummary, format_timing_badge, right_align_timing_line};
+pub(crate) use super::timing::{TimingSummary, format_timing_badge};
 pub(crate) use crate::plugin::config::{
     PluginConfigEntry, PluginConfigScope, plugin_config_entries,
 };
@@ -277,7 +277,13 @@ where
     };
     let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
     let mut scan = scan_cli_argv(&argv[..pipe]);
-    run_scanned_with_sink_and_app(&argv[pipe..], &mut scan, sink, app)
+    run_scanned_with_sink_and_app(
+        &argv[pipe..],
+        &mut scan,
+        sink,
+        app,
+        &mut TimingSummary::default(),
+    )
 }
 
 pub(crate) fn run_scanned_with_sink_and_app(
@@ -285,6 +291,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
     scanned: &mut ScannedCliArgs,
     sink: &mut dyn UiSink,
     app: &super::AppDefinition,
+    timing: &mut TimingSummary,
 ) -> Result<i32> {
     {
         let _phase =
@@ -369,9 +376,9 @@ pub(crate) fn run_scanned_with_sink_and_app(
         Ok(mut cli) => {
             if let Some(Commands::External(tokens)) = cli.command.as_mut() {
                 tokens.extend(suffix);
-                run(cli, scanned.invocation.clone(), &[], sink, app)
+                run(cli, scanned.invocation.clone(), &[], sink, app, timing)
             } else {
-                run(cli, scanned.invocation.clone(), &stages, sink, app)
+                run(cli, scanned.invocation.clone(), &stages, sink, app, timing)
             }
         }
         Err(err) => handle_clap_parse_error(scanned, &help_command, err, &stages, sink, app),
@@ -490,6 +497,7 @@ fn run(
     stages: &[String],
     sink: &mut dyn UiSink,
     app: &super::AppDefinition,
+    timing: &mut TimingSummary,
 ) -> Result<i32> {
     let run_started = Instant::now();
     let PreparedHostRun {
@@ -562,31 +570,15 @@ fn run(
         }
     };
 
-    if !is_repl && invocation_ui.ui.debug_verbosity > 0 {
+    if !is_repl {
         let total = run_started.elapsed();
         let startup = action_started.saturating_duration_since(run_started);
-        let command = total.saturating_sub(startup);
-        let footer = right_align_timing_line(
-            TimingSummary {
-                total,
-                parse: if invocation_ui.ui.debug_verbosity >= 3 {
-                    Some(startup)
-                } else {
-                    None
-                },
-                execute: if invocation_ui.ui.debug_verbosity >= 3 {
-                    Some(command)
-                } else {
-                    None
-                },
-                render: None,
-            },
-            invocation_ui.ui.debug_verbosity,
-            &invocation_ui.ui.render_settings.resolve_render_settings(),
-        );
-        if !footer.is_empty() {
-            sink.write_stderr(&footer);
-        }
+        *timing = TimingSummary {
+            total,
+            parse: Some(startup),
+            execute: Some(total.saturating_sub(startup)),
+            render: None,
+        };
     }
 
     result.map_err(|err| report_with_invocation(err, ErrorDisplaySettings::from(&invocation_ui.ui)))

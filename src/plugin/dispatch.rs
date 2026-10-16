@@ -144,7 +144,12 @@ impl ExecutedPluginCommand {
             });
         }
 
-        for line in self.raw.stderr.lines().filter(|line| !line.trim().is_empty()) {
+        for line in self
+            .raw
+            .stderr
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+        {
             tracing::info!(target: "osp::plugin", plugin = %self.provider.plugin_id, "{line}");
         }
 
@@ -435,7 +440,7 @@ pub(super) fn run_provider(
         },
     })?;
 
-    tracing::debug!(
+    tracing::info!(
         plugin_id = %provider.plugin_id,
         executable = %provider.executable.display(),
         command = %selected_command,

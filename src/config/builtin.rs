@@ -391,7 +391,7 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 schema: SchemaEntry::string()
                     .with_allowed_values(LOG_LEVEL_NAMES)
                     .with_doc("Minimum log level written to the log file"),
-                default: Some(ConfigValue::from("warn")),
+                default: Some(ConfigValue::from("info")),
             },
         ]
     })

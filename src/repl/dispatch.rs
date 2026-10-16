@@ -229,6 +229,16 @@ pub(crate) fn execute_repl_plugin_line(
     session.finish_repl_line();
     match execution {
         Ok(executed) => {
+            let debug = match executed.timing {
+                ReplTimingPlan::Flat { debug_verbosity }
+                | ReplTimingPlan::ParseOnly { debug_verbosity }
+                | ReplTimingPlan::Invocation {
+                    debug_verbosity, ..
+                } => debug_verbosity,
+            };
+            let _logging = crate::app::logging::override_stderr_level(debug);
+            tracing::info!(target: "osp", exit_code = executed.exit_code,
+                elapsed_ms = started.elapsed().as_millis(), "finished");
             record_repl_timing(session, started, executed.timing);
             Ok(executed)
         }

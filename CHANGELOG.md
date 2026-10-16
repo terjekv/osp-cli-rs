@@ -12,6 +12,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   suggestions; empty lists suppress them. Struct literals must supply the field
   or use `..FlagCompletions::default()`.
 
+- Keep `-d` operator lines compact; include span context at `-dd` and above.
+
 - **Breaking:** Native command factories leave clap grammars unbuilt so invocation help can
   set usage names before clap caches them.
 
@@ -34,6 +36,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   command contexts now carry the reader scope for follow-up commands.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
+
+- `-d` now records command dispatch and outcomes. CLI timing moves from the
+  footer to the final log event; the REPL timing badge stays. Enabled file
+  logs now default to `info` instead of `warn`.
 
 - `-d` now shows plugin stderr on successful execution.
 

@@ -229,7 +229,7 @@ pub(crate) fn build_logging_config(
         let level = config
             .get_string("log.file.level")
             .and_then(parse_level_filter)
-            .or_else(|| parse_level_filter("warn"))
+            .or_else(|| parse_level_filter("info"))
             .unwrap_or(tracing_subscriber::filter::LevelFilter::WARN);
         let path = config
             .get_string("log.file.path")

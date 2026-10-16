@@ -16,18 +16,19 @@
 //! - [`DeveloperLoggingConfig::new`] creates the exact runtime baseline and
 //!   `with_*` setters refine optional outputs
 
+use std::cell::Cell;
 #[cfg(test)]
 use std::ffi::OsString;
-use std::cell::Cell;
 use std::fs::OpenOptions;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::fmt;
+use tracing_subscriber::fmt::time::FormatTime;
+use tracing_subscriber::fmt::{self, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry;
 use tracing_subscriber::reload;
@@ -126,6 +127,38 @@ pub fn parse_level_filter(value: &str) -> Option<LevelFilter> {
     }
 }
 
+// Operator events stay compact; internal diagnostics retain the active spans.
+struct StderrFormat(Arc<AtomicU8>);
+
+impl<S, N> fmt::FormatEvent<S, N> for StderrFormat
+where
+    S: tracing::Subscriber + for<'a> registry::LookupSpan<'a>,
+    N: for<'a> fmt::FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        context: &fmt::FmtContext<'_, S, N>,
+        mut writer: fmt::format::Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let level = STDERR_OVERRIDE
+            .get()
+            .unwrap_or_else(|| self.0.load(Ordering::Relaxed));
+        if level >= 2 {
+            return fmt::format().compact().format_event(context, writer, event);
+        }
+        fmt::time::SystemTime.format_time(&mut writer)?;
+        write!(
+            writer,
+            " {:>5} {}: ",
+            event.metadata().level(),
+            event.metadata().target()
+        )?;
+        context.format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
 struct LoggingState {
     stderr_level: Arc<AtomicU8>,
     file_handle: Box<dyn ReloadFilterHandle>,
@@ -160,14 +193,17 @@ impl LoggingState {
         let stderr_level = Arc::new(AtomicU8::new(config.debug_count));
         let level = stderr_level.clone();
         let stderr_filter = tracing_subscriber::filter::filter_fn(move |metadata| {
-            let current = STDERR_OVERRIDE.get().unwrap_or_else(|| level.load(Ordering::Relaxed));
+            let current = STDERR_OVERRIDE
+                .get()
+                .unwrap_or_else(|| level.load(Ordering::Relaxed));
             metadata.level() <= &map_debug_count(current)
-        }).with_max_level_hint(tracing::Level::TRACE);
+        })
+        .with_max_level_hint(tracing::Level::TRACE);
         let stderr_layer = fmt::layer()
             .with_writer(std::io::stderr)
             .with_target(true)
             .with_ansi(use_ansi)
-            .compact()
+            .event_format(StderrFormat(stderr_level.clone()))
             .with_filter(stderr_filter);
         let (file_filter, file_handle) = reload::Layer::new(file_level);
         let file_writer_for_layer = file_writer.clone();
@@ -198,7 +234,8 @@ impl LoggingState {
     }
 
     fn apply(&self, config: &DeveloperLoggingConfig) {
-        self.stderr_level.store(config.debug_count, Ordering::Relaxed);
+        self.stderr_level
+            .store(config.debug_count, Ordering::Relaxed);
 
         let file_level = match self.file_writer.configure(config.file.as_ref()) {
             Ok(level) => level,

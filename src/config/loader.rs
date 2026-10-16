@@ -153,11 +153,9 @@ impl TomlFileLoader {
 
 impl ConfigLoader for TomlFileLoader {
     fn load(&self) -> Result<ConfigLayer, ConfigError> {
-        tracing::debug!(
-            path = %self.path.display(),
-            missing_ok = self.missing_ok,
-            "loading TOML config layer"
-        );
+        if self.path.exists() {
+            tracing::info!(path = %self.path.display(), "loading TOML config layer");
+        }
         if !self.path.exists() {
             if self.missing_ok {
                 tracing::debug!(path = %self.path.display(), "optional TOML config file missing");
