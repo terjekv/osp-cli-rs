@@ -3,8 +3,10 @@
 
 This is intentionally narrow. It is not a generic task runner and it should
 not grow test selection logic. Its job is to strip ambient host/runtime state
-that leaks into osp test execution while leaving toolchain/build variables
-alone.
+that leaks into osp test execution while preserving toolchain settings.
+An explicit CARGO_TARGET_DIR is a shared root: each checkout directory name
+gets its own child directory so the paired osp binaries cannot overwrite
+one another.
 """
 
 from __future__ import annotations
@@ -95,6 +97,10 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="osp-cli-hermetic-home-") as home:
         env = hermetic_env(Path(home))
+        if target_dir := env.get("CARGO_TARGET_DIR"):
+            # Cargo-provided binary paths collide when packages share a target root.
+            cwd = args.cwd.resolve()
+            env["CARGO_TARGET_DIR"] = str(cwd / target_dir / cwd.name)
         completed = subprocess.run(command, cwd=args.cwd, env=env)
         return completed.returncode
 
