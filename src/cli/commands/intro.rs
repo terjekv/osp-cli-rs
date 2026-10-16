@@ -34,16 +34,12 @@ impl<'a> IntroCommandContext<'a> {
             native_context: &session.native_context,
             history_enabled: session.history_enabled,
         };
-        let surface = authorized_command_catalog_for(&runtime.auth, clients)
-            .ok()
-            .map(|catalog| crate::repl::surface::build_repl_surface(view, &catalog))
-            .unwrap_or_else(|| crate::repl::surface::ReplSurface {
-                root_words: Vec::new(),
-                intro_commands: Vec::new(),
-                specs: Vec::new(),
-                aliases: Vec::new(),
-                overview_entries: Vec::new(),
-            });
+        let catalog = authorized_command_catalog_for(
+            &runtime.auth,
+            clients,
+            clients.native_commands().catalog(),
+        );
+        let surface = crate::repl::surface::build_repl_surface(view, &catalog);
 
         Self { view, surface }
     }

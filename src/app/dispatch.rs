@@ -311,7 +311,8 @@ fn invocation_command_catalog(
     clients: &AppClients,
     command: &str,
 ) -> Result<Vec<CommandCatalogEntry>> {
-    let mut catalog = super::authorized_command_catalog_for(auth, clients)?;
+    let mut catalog =
+        super::authorized_command_catalog_for(auth, clients, clients.native_commands().catalog());
     if matching_external_command_entries(&catalog, command).is_empty()
         && auth.is_external_command_visible(command)
         && let Some(dispatch_catalog) = clients.plugins().command_catalog_for_dispatch()

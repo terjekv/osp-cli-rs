@@ -645,39 +645,18 @@ fn prepare_host_run(
 pub(crate) fn authorized_command_catalog_for(
     auth: &AuthState,
     clients: &AppClients,
-) -> Result<Vec<CommandCatalogEntry>> {
+    native_catalog: Vec<NativeCommandCatalogEntry>,
+) -> Vec<CommandCatalogEntry> {
     let mut all = clients.plugins().command_catalog();
     all.extend(
-        clients
-            .native_commands()
-            .catalog()
+        native_catalog
             .into_iter()
             .map(native_catalog_entry_to_command_catalog_entry),
     );
     all.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(all
-        .into_iter()
+    all.into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
-        .collect())
-}
-
-pub(crate) fn authorized_completion_command_catalog_for(
-    auth: &AuthState,
-    clients: &AppClients,
-) -> Result<Vec<CommandCatalogEntry>> {
-    let mut all = clients.plugins().command_catalog();
-    all.extend(
-        clients
-            .native_commands()
-            .completion_catalog()
-            .into_iter()
-            .map(native_catalog_entry_to_command_catalog_entry),
-    );
-    all.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(all
-        .into_iter()
-        .filter(|entry| auth.is_external_command_visible(&entry.name))
-        .collect())
+        .collect()
 }
 
 pub(crate) fn resolve_invocation_ui(

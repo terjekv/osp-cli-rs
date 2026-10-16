@@ -500,8 +500,11 @@ fn native_commands_project_into_auth_catalog_unit() {
         &[("auth.visible.plugins", "ldap")],
         test_native_registry(),
     );
-    let catalog = super::authorized_command_catalog_for(&state.runtime.auth, &state.clients)
-        .expect("catalog should render");
+    let catalog = super::authorized_command_catalog_for(
+        &state.runtime.auth,
+        &state.clients,
+        state.clients.native_commands().catalog(),
+    );
     assert!(catalog.iter().any(|entry| entry.name == "ldap"));
     assert!(
         state

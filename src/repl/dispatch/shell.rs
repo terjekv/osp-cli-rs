@@ -224,7 +224,11 @@ pub(super) fn enter_repl_shell(
     sink: &mut dyn UiSink,
 ) -> Result<String> {
     ensure_external_command_access(runtime, session, command)?;
-    let catalog = app::authorized_command_catalog_for(&runtime.auth, clients)?;
+    let catalog = app::authorized_command_catalog_for(
+        &runtime.auth,
+        clients,
+        clients.native_commands().catalog(),
+    );
     resolve_external_command_source(
         &runtime.auth,
         clients,

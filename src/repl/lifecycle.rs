@@ -167,7 +167,11 @@ pub(super) fn prepare_repl_surface_state(
     session: &AppSession,
     clients: &AppClients,
 ) -> Result<PreparedReplSurfaceState> {
-    let catalog = app::authorized_completion_command_catalog_for(&runtime.auth, clients)?;
+    let catalog = app::authorized_command_catalog_for(
+        &runtime.auth,
+        clients,
+        clients.native_commands().completion_catalog(),
+    );
     let view = ReplViewContext::from_parts(runtime, session);
     let surface = surface::build_repl_surface(view, &catalog);
     let completion_tree = completion::build_repl_completion_tree(view, &surface)?;
