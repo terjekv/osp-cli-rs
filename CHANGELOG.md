@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Inspect `LastFailure::detail` on demand instead of reading a
+  pre-rendered detail field.
+
 - **Breaking:** Render messages with `MessageRequest` and section dividers with
   `SectionDividerRequest` through their single rendering entry points.
 - **Breaking:** Use `core::MessageLevel` for runtime verbosity and plugin response

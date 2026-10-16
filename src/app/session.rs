@@ -292,31 +292,76 @@ pub struct AppSession {
     pub(crate) last_success: Option<LastSuccess>,
     /// Summary of the most recent failed REPL command.
     pub last_failure: Option<LastFailure>,
-    pub(crate) last_failure_diagnostics: Option<LastFailureDiagnostics>,
     /// Session-scoped config overrides layered above persisted config.
     pub config_overrides: ConfigLayer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-/// Summary of the last failed REPL command.
+/// The last failed REPL command and its original diagnostic evidence.
+#[derive(Debug, Clone)]
 pub struct LastFailure {
     /// Command line that produced the failure.
     pub command_line: String,
     /// Short failure summary suitable for prompts or status output.
     pub summary: String,
-    /// Longer failure detail for follow-up inspection.
-    pub detail: String,
+    evidence: FailureEvidence,
 }
 
-/// Pre-rendered diagnostic ladder retained for `doctor last`.
-///
-/// Reports can borrow short-lived dispatch state, so the session stores safe
-/// rendered evidence rather than retaining error objects across REPL commands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LastFailureDiagnostics {
-    pub(crate) normal: String,
-    pub(crate) debug: String,
-    pub(crate) forensic: String,
+#[derive(Debug, Clone)]
+enum FailureEvidence {
+    Text(String),
+    Report {
+        report: std::sync::Arc<miette::Report>,
+        settings: Box<crate::ui::RenderSettings>,
+        backtrace: Option<std::sync::Arc<std::backtrace::Backtrace>>,
+    },
+}
+
+impl LastFailure {
+    /// Records supplied summary and detail text without duplicating the detail ladder.
+    pub fn new(command_line: String, summary: String, detail: String) -> Self {
+        Self {
+            command_line,
+            summary,
+            evidence: FailureEvidence::Text(detail),
+        }
+    }
+
+    pub(crate) fn from_report(
+        command_line: String,
+        report: std::sync::Arc<miette::Report>,
+        settings: crate::ui::RenderSettings,
+    ) -> Self {
+        let summary =
+            super::host::render_report_message(&report, super::ErrorDetail::Terse, &settings);
+        let backtrace =
+            super::host::capture_missing_report_backtrace(&report).map(std::sync::Arc::new);
+        Self {
+            command_line,
+            summary,
+            evidence: FailureEvidence::Report {
+                report,
+                settings: Box::new(settings),
+                backtrace,
+            },
+        }
+    }
+
+    /// Renders diagnostic detail with the terminal settings captured at failure time.
+    pub fn detail(&self, level: super::ErrorDetail) -> String {
+        match &self.evidence {
+            FailureEvidence::Text(detail) => detail.clone(),
+            FailureEvidence::Report {
+                report,
+                settings,
+                backtrace,
+            } => super::host::render_saved_report_message(
+                report,
+                level,
+                settings,
+                backtrace.as_deref(),
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -429,35 +474,21 @@ impl AppSession {
         }
         let summary = summary.into();
         let detail = detail.into();
-        self.last_failure = Some(LastFailure {
-            command_line,
-            summary,
-            detail: detail.clone(),
-        });
-        self.last_failure_diagnostics = Some(LastFailureDiagnostics {
-            normal: detail.clone(),
-            debug: detail.clone(),
-            forensic: detail,
-        });
+        self.last_failure = Some(LastFailure::new(command_line, summary, detail));
     }
 
-    /// Records a failure with distinct evidence for each verbosity level.
-    pub(crate) fn record_failure_diagnostics(
+    /// Retains the original report so follow-up diagnostics render on demand.
+    pub(crate) fn record_failure_report(
         &mut self,
         command_line: &str,
-        summary: String,
-        diagnostics: LastFailureDiagnostics,
+        report: std::sync::Arc<miette::Report>,
+        settings: crate::ui::RenderSettings,
     ) {
         let command_line = command_line.trim().to_string();
         if command_line.is_empty() {
             return;
         }
-        self.last_failure = Some(LastFailure {
-            command_line,
-            summary,
-            detail: diagnostics.normal.clone(),
-        });
-        self.last_failure_diagnostics = Some(diagnostics);
+        self.last_failure = Some(LastFailure::from_report(command_line, report, settings));
     }
 
     /// Returns the last successful REPL output contract, if available.
@@ -529,7 +560,6 @@ impl Default for AppSession {
             scope: ReplScopeStack::default(),
             last_success: None,
             last_failure: None,
-            last_failure_diagnostics: None,
             config_overrides: ConfigLayer::default(),
         }
     }

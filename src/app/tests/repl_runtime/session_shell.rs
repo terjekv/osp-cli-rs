@@ -84,9 +84,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         .expect("last failure should be recorded");
     assert_eq!(last.command_line, "missing");
     assert!(!last.summary.trim().is_empty());
-    assert!(last.detail.contains("unknown command `missing`"));
-
-    assert!(state.session.last_failure_diagnostics.is_some());
+    assert!(last.detail(crate::app::ErrorDetail::Normal).contains("unknown command `missing`"));
 
     state.runtime.ui.render_settings.format = OutputFormat::Json;
     let rendered = doctor_cmd::run_doctor_command(
@@ -114,7 +112,6 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
             auth: &state.runtime.auth,
             themes: &state.runtime.themes,
             last_failure: state.session.last_failure.as_ref(),
-            last_failure_diagnostics: state.session.last_failure_diagnostics.as_ref(),
         },
         crate::cli::DoctorArgs {
             command: Some(crate::cli::DoctorCommands::Last),
@@ -143,7 +140,7 @@ fn rebuild_repl_state_preserves_last_failure_unit() {
 
         assert_eq!(last.command_line, "ldap user nope");
         assert_eq!(last.summary, "boom");
-        assert_eq!(last.detail, "boom detail");
+        assert_eq!(last.detail(crate::app::ErrorDetail::Normal), "boom detail");
     });
 }
 

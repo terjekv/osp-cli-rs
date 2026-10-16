@@ -25,7 +25,6 @@ use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, miette};
 use std::time::Instant;
 
-use crate::app::session::LastFailureDiagnostics;
 use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{ErrorDetail, ResolvedInvocation, render_report_message, resolve_invocation_ui};
@@ -233,6 +232,7 @@ pub(crate) fn execute_repl_plugin_line(
             Ok(executed)
         }
         Err(err) => {
+            let err = std::sync::Arc::new(err);
             let fallback = crate::app::host::ErrorDisplaySettings::from(&runtime.ui);
             let ui = crate::app::host::error_display_settings(&err).unwrap_or(&fallback);
             if runtime.ui.debug_verbosity > 0 {
@@ -250,17 +250,15 @@ pub(crate) fn execute_repl_plugin_line(
             if !is_repl_bang_request(&resolved)
                 && !is_doctor_request(&resolved, runtime.config.resolved())
             {
-                let diagnostics = LastFailureDiagnostics {
-                    normal: render_report_message(&err, ErrorDetail::Normal, &plain_settings),
-                    debug: render_report_message(&err, ErrorDetail::Debug, &plain_settings),
-                    forensic: render_report_message(&err, ErrorDetail::Forensic, &plain_settings),
-                };
-                doctor_command = if diagnostics.normal.trim() != summary.trim() {
-                    Some("doctor last -v")
-                } else {
-                    None
-                };
-                session.record_failure_diagnostics(&resolved, summary.clone(), diagnostics);
+                doctor_command =
+                    if render_report_message(&err, ErrorDetail::Normal, &plain_settings).trim()
+                        != summary.trim()
+                    {
+                        Some("doctor last -v")
+                    } else {
+                        None
+                    };
+                session.record_failure_report(&resolved, err.clone(), plain_settings);
             }
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&crate::app::render_process_error(

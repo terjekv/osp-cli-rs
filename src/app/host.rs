@@ -779,7 +779,7 @@ pub fn render_report_message(
     settings: &RenderSettings,
 ) -> String {
     if detail >= ErrorDetail::Forensic {
-        return render_forensic_report_message(err, settings);
+        return render_forensic_report_message(err, settings, None);
     }
     if detail >= ErrorDetail::Debug {
         return render_debug_report_message(err, settings);
@@ -828,13 +828,40 @@ pub fn render_report_message(
     message
 }
 
-fn render_forensic_report_message(err: &miette::Report, settings: &RenderSettings) -> String {
+pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
+    find_error_in_chain::<BoxedContextError>(err)
+        .is_none()
+        .then(Backtrace::force_capture)
+}
+
+pub(crate) fn render_saved_report_message(
+    err: &miette::Report,
+    detail: ErrorDetail,
+    settings: &RenderSettings,
+    backtrace: Option<&Backtrace>,
+) -> String {
+    if detail >= ErrorDetail::Forensic {
+        render_forensic_report_message(err, settings, backtrace)
+    } else {
+        render_report_message(err, detail, settings)
+    }
+}
+
+fn render_forensic_report_message(
+    err: &miette::Report,
+    settings: &RenderSettings,
+    fallback: Option<&Backtrace>,
+) -> String {
     let mut rendered = render_debug_report_message(err, settings);
 
     let backtrace = find_error_in_chain::<BoxedContextError>(err)
         .map(|error| error.backtrace.to_string())
         .filter(|trace| !trace.trim().is_empty())
-        .unwrap_or_else(|| Backtrace::force_capture().to_string());
+        .unwrap_or_else(|| {
+            fallback
+                .map(ToString::to_string)
+                .unwrap_or_else(|| Backtrace::force_capture().to_string())
+        });
     rendered.push_str("\n\n");
     rendered.push_str(&format_backtrace(&backtrace, settings));
 

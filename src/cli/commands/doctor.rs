@@ -7,7 +7,6 @@
 use miette::Result;
 
 use crate::app::CommandOutput;
-use crate::app::session::LastFailureDiagnostics;
 use crate::app::{
     AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
 };
@@ -32,7 +31,6 @@ pub(crate) struct DoctorCommandContext<'a> {
     pub(crate) auth: &'a AuthState,
     pub(crate) themes: &'a ThemeCatalog,
     pub(crate) last_failure: Option<&'a LastFailure>,
-    pub(crate) last_failure_diagnostics: Option<&'a LastFailureDiagnostics>,
 }
 
 impl<'a> DoctorCommandContext<'a> {
@@ -49,7 +47,6 @@ impl<'a> DoctorCommandContext<'a> {
             auth: &runtime.auth,
             themes: &runtime.themes,
             last_failure: session.last_failure.as_ref(),
-            last_failure_diagnostics: session.last_failure_diagnostics.as_ref(),
         }
     }
 }
@@ -73,7 +70,6 @@ pub(crate) fn run_doctor_command(
         DoctorCommands::Last => Ok(render_last_failure_document(
             context.ui,
             context.last_failure,
-            context.last_failure_diagnostics,
         )),
         DoctorCommands::Theme => Ok(CommandOutput::output(
             rows_to_output_result(theme_doctor_rows(context.themes)),
@@ -252,7 +248,6 @@ fn theme_doctor_rows(themes: &ThemeCatalog) -> Vec<Row> {
 fn render_last_failure_document(
     ui: &UiState,
     last_failure: Option<&LastFailure>,
-    diagnostics: Option<&LastFailureDiagnostics>,
 ) -> crate::app::CommandOutput {
     let Some(last) = last_failure else {
         if matches!(ui.render_settings.format, OutputFormat::Json) {
@@ -272,7 +267,7 @@ fn render_last_failure_document(
             "command": last.command_line,
             "summary": summary,
             "action": action,
-            "detail": last.detail,
+            "detail": last.detail(ErrorDetail::Normal),
         });
         return CommandOutput::json(payload);
     }
@@ -284,15 +279,9 @@ fn render_last_failure_document(
     if let Some(action) = action {
         out.push_str(&format!("  Action:  {action}\n"));
     }
-    let detail = match ui.error_detail {
-        ErrorDetail::Terse => None,
-        ErrorDetail::Normal => diagnostics.map(|detail| detail.normal.as_str()),
-        ErrorDetail::Debug => diagnostics.map(|detail| detail.debug.as_str()),
-        ErrorDetail::Forensic => diagnostics.map(|detail| detail.forensic.as_str()),
-    }
-    .unwrap_or(&last.detail);
+    let detail = last.detail(ui.error_detail);
     if ui.error_detail != ErrorDetail::Terse
-        && normalized_failure_detail(detail) != normalized_failure_detail(&last.summary)
+        && normalized_failure_detail(&detail) != normalized_failure_detail(&last.summary)
     {
         out.push('\n');
         out.push_str("Detail:\n");
@@ -302,8 +291,7 @@ fn render_last_failure_document(
             out.push('\n');
         }
     }
-    if let Some(command) = next_failure_detail_command(ui.error_detail, &last.summary, diagnostics)
-    {
+    if let Some(command) = next_failure_detail_command(ui.error_detail, last) {
         out.push('\n');
         out.push_str(&format!("More: run `{command}` for more detail.\n"));
     }
@@ -321,27 +309,22 @@ fn normalized_failure_detail(detail: &str) -> &str {
     split_failure_action(detail).0.trim()
 }
 
-fn next_failure_detail_command(
-    current: ErrorDetail,
-    summary: &str,
-    diagnostics: Option<&LastFailureDiagnostics>,
-) -> Option<&'static str> {
-    let diagnostics = diagnostics?;
-    let differs = |left: &str, right: &str| {
-        normalized_failure_detail(left) != normalized_failure_detail(right)
-    };
-
-    match current {
-        ErrorDetail::Terse if differs(summary, &diagnostics.normal) => Some("doctor last -v"),
-        _ => None,
+fn next_failure_detail_command(current: ErrorDetail, last: &LastFailure) -> Option<&'static str> {
+    if current == ErrorDetail::Terse
+        && normalized_failure_detail(&last.summary)
+            != normalized_failure_detail(&last.detail(ErrorDetail::Normal))
+    {
+        Some("doctor last -v")
+    } else {
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        DoctorCommandContext, LastFailureDiagnostics, doctor_command, render_last_failure_document,
-        run_doctor_command, theme_doctor_rows,
+        DoctorCommandContext, doctor_command, render_last_failure_document, run_doctor_command,
+        theme_doctor_rows,
     };
     use crate::app::{AuthState, ErrorDetail, LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
@@ -414,34 +397,30 @@ mod tests {
             auth,
             themes,
             last_failure: None,
-            last_failure_diagnostics: None,
         }
     }
 
     #[test]
     fn doctor_last_rendering_covers_empty_text_debug_and_json_modes_unit() {
-        let empty = render_last_failure_document(&ui_state(OutputFormat::Table, 0), None, None);
+        let empty = render_last_failure_document(&ui_state(OutputFormat::Table, 0), None);
         let crate::app::CommandBody::Text(empty_text) = empty.body else {
             panic!("expected text output");
         };
         assert!(empty_text.contains("No recorded REPL failure"));
 
-        let failure = LastFailure {
-            command_line: "ldap user nope".to_string(),
-            summary: "request failed. Try: authenticate again".to_string(),
-            detail: "request failed\nmissing capability: ldap.user.read".to_string(),
-        };
-        let diagnostics = LastFailureDiagnostics {
-            normal: "missing capability: ldap.user.read".to_string(),
-            debug: "policy gate: ldap user\nmissing capability: ldap.user.read".to_string(),
-            forensic: "policy gate: ldap user\nmissing capability: ldap.user.read\ncause chain"
-                .to_string(),
-        };
+        let mut failure = LastFailure::from_report(
+            "ldap user nope".to_string(),
+            std::sync::Arc::new(
+                miette::miette!("missing capability: ldap.user.read")
+                    .wrap_err("policy gate: ldap user"),
+            ),
+            crate::ui::RenderSettings::test_plain(OutputFormat::Table),
+        );
+        failure.summary = "request failed. Try: authenticate again".to_string();
 
         let verbose = render_last_failure_document(
             &ui_state(OutputFormat::Table, 1).with_error_detail(ErrorDetail::Normal),
             Some(&failure),
-            Some(&diagnostics),
         );
         let crate::app::CommandBody::Text(verbose_text) = verbose.body else {
             panic!("expected text output");
@@ -451,11 +430,8 @@ mod tests {
         assert!(verbose_text.contains("Detail:"));
         assert!(verbose_text.contains("missing capability: ldap.user.read"));
 
-        let compact = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 0),
-            Some(&failure),
-            Some(&diagnostics),
-        );
+        let compact =
+            render_last_failure_document(&ui_state(OutputFormat::Table, 0), Some(&failure));
         let crate::app::CommandBody::Text(compact_text) = compact.body else {
             panic!("expected text output");
         };
@@ -467,34 +443,29 @@ mod tests {
         let debug = render_last_failure_document(
             &ui_state(OutputFormat::Table, 2).with_error_detail(ErrorDetail::Debug),
             Some(&failure),
-            Some(&diagnostics),
         );
         let crate::app::CommandBody::Text(debug_text) = debug.body else {
             panic!("expected text output");
         };
         assert!(debug_text.contains("policy gate: ldap user"));
-        assert!(!debug_text.contains("cause chain"));
+        assert!(!debug_text.contains("Stack backtrace"));
 
         let forensic = render_last_failure_document(
             &ui_state(OutputFormat::Table, 3).with_error_detail(ErrorDetail::Forensic),
             Some(&failure),
-            Some(&diagnostics),
         );
         let crate::app::CommandBody::Text(forensic_text) = forensic.body else {
             panic!("expected text output");
         };
-        assert!(forensic_text.contains("cause chain"));
+        assert!(forensic_text.contains("Stack backtrace"));
 
-        let json_failure = LastFailure {
-            command_line: "plugins refresh".to_string(),
-            summary: "plugin failed".to_string(),
-            detail: "plugin failed".to_string(),
-        };
-        let json_result = render_last_failure_document(
-            &ui_state(OutputFormat::Json, 0),
-            Some(&json_failure),
-            None,
+        let json_failure = LastFailure::new(
+            "plugins refresh".to_string(),
+            "plugin failed".to_string(),
+            "plugin failed".to_string(),
         );
+        let json_result =
+            render_last_failure_document(&ui_state(OutputFormat::Json, 0), Some(&json_failure));
         let crate::app::CommandBody::Json(json) = json_result.body else {
             panic!("expected json output");
         };
