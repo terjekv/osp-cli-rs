@@ -7,6 +7,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** `NativeCommand::repl_status` returns `ReplStatus` with semantic
+  emphasis. Product text still strips terminal controls; error and warning
+  emphasis uses the active theme and honours colour suppression.
+
+
 - Alt+Enter inserts the most recent structured Run hint into the REPL input;
   Enter still decides execution. Configure `repl.bindings.hint.insert` with
   `Alt+Enter`, F2..F12 or `none`. Native commands can retain command hints and

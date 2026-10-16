@@ -324,7 +324,7 @@ not wait for network work or block the prompt.
 
 ### Product status
 
-Native commands may supply `repl_status()` as cached plain text in a separate
+Native commands may supply `repl_status()` as cached status text in a separate
 right-prompt slot. Rendering never performs network I/O. The host sanitizes
 control sequences and line breaks; Reedline measures terminal cells and omits
 the right prompt when it collides with input. Context and incognito remain;
@@ -408,3 +408,7 @@ formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
 Hints without a command do not replace the remembered command. Native commands
 produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
 retains recovery commands in errors. No terminal text is scraped.
+
+Product `repl_status` hooks return `ReplStatus` text and a message level.
+The host strips terminal controls before applying the active theme's error
+or warning colour. `NO_COLOR`, `--no-color` and plain rendering suppress colour.

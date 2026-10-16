@@ -131,7 +131,7 @@ pub use engine::{
 };
 pub use menu_core::MenuDebug;
 pub use notices::{ReplSession, post_notice};
-pub use product::{ReplAction, ReplActionKey, ReplEvent, ReplFeedback};
+pub use product::{ReplAction, ReplActionKey, ReplEvent, ReplFeedback, ReplStatus};
 // Debug surfaces for REPL completion, highlight, and history inspection.
 pub use engine::{
     CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,

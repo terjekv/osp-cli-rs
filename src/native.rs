@@ -682,7 +682,7 @@ pub trait NativeCommand: Send + Sync {
     ///
     /// Called during editor paints: never perform I/O or wait for a worker here.
     /// The host sanitizes text and omits it in basic and JSON sessions.
-    fn repl_status(&self) -> Option<String> {
+    fn repl_status(&self) -> Option<crate::repl::ReplStatus> {
         None
     }
 

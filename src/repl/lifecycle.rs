@@ -213,11 +213,8 @@ fn build_repl_cycle_run_config(
                 .filter_map(|entry| clients.native_commands().command(&entry.name).cloned())
                 .collect::<Vec<_>>();
             Some(std::sync::Arc::new(move || {
-                commands
-                    .iter()
-                    .find_map(|command| command.repl_status())
-                    .unwrap_or_default()
-            }) as crate::repl::PromptRightRenderer)
+                commands.iter().find_map(|command| command.repl_status())
+            }) as super::product::ReplStatusRenderer)
         };
     let mut config = ReplRunConfig::builder(
         build_repl_prompt(view),

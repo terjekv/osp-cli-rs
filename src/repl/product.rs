@@ -129,3 +129,14 @@ impl ReplFeedback {
         )
     }
 }
+
+/// Product status text with semantic emphasis; terminal control sequences are stripped.
+#[derive(Debug, Clone)]
+pub struct ReplStatus {
+    /// Human status text, sanitized by the host before rendering.
+    pub text: String,
+    /// Error and warning use the active theme; other levels use ordinary text.
+    pub level: crate::core::MessageLevel,
+}
+
+pub(crate) type ReplStatusRenderer = std::sync::Arc<dyn Fn() -> Option<ReplStatus> + Send + Sync>;

@@ -590,7 +590,7 @@ pub(crate) fn build_repl_prompt(view: ReplViewContext<'_>) -> ReplPrompt {
 pub(crate) fn build_repl_prompt_right_renderer(
     view: ReplViewContext<'_>,
     timing: DebugTimingState,
-    product: Option<crate::repl::PromptRightRenderer>,
+    product: Option<super::product::ReplStatusRenderer>,
 ) -> crate::repl::PromptRightRenderer {
     let resolved = view.ui.render_settings.resolve_render_settings();
     let history_enabled = history::repl_history_enabled(view.config) && view.history_enabled;
@@ -598,8 +598,30 @@ pub(crate) fn build_repl_prompt_right_renderer(
     let left_width = crate::ui::display_width(&build_repl_prompt(view).left);
     Arc::new(move || {
         let base = render_repl_prompt_right(&resolved, history_enabled, &timing, &native_context);
-        let status = product.as_ref().map(|render| render()).unwrap_or_default();
-        let status = crate::ui::sanitize_human_text(&status).replace('\n', " ");
+        let status = product.as_ref().and_then(|render| render());
+        let emphasis = status.as_ref().map(|status| status.level);
+        let text = status
+            .as_ref()
+            .map(|status| status.text.as_str())
+            .unwrap_or_default();
+        let status = crate::ui::sanitize_human_text(text).replace('\n', " ");
+        let token = match emphasis {
+            Some(MessageLevel::Error) => Some(StyleToken::Error),
+            Some(MessageLevel::Warning) => Some(StyleToken::Warning),
+            _ => None,
+        };
+        let status = token.map_or_else(
+            || status.clone(),
+            |token| {
+                apply_style_with_theme_overrides(
+                    &status,
+                    token,
+                    resolved.color,
+                    &resolved.theme,
+                    &resolved.style_overrides,
+                )
+            },
+        );
         if status.is_empty() {
             base
         } else {
