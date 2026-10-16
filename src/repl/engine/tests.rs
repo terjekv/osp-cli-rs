@@ -898,7 +898,7 @@ fn history_picker_options_use_configured_rows_query_and_skin_unit() {
 
     assert_eq!(options.height, "8");
     assert_eq!(options.query.as_deref(), Some("doctor mreg"));
-    assert_eq!(options.prompt, "(reverse-i-search)> ");
+    assert_eq!(options.prompt, "history> ");
     assert!(options.no_info);
     assert_eq!(
         options.color.as_deref(),

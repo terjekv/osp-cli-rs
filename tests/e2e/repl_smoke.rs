@@ -106,11 +106,7 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
             let start = session.output_len();
             session.write_bytes(b"\x12");
             assert!(
-                session.wait_for_plain_output_since(
-                    start,
-                    "(reverse-i-search)>",
-                    Duration::from_secs(3)
-                ),
+                session.wait_for_plain_output_since(start, "history>", Duration::from_secs(3)),
                 "history picker should display the current query; output:\n{}",
                 session.output_snapshot(8000),
             );
@@ -121,6 +117,10 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
             );
             let start = session.output_len();
             session.write_bytes(if command.is_empty() { b"\r" } else { b"\x03" });
+            if command.is_empty() {
+                assert_theme_result(&session, start, expected_id, expected_name);
+                continue;
+            }
             assert!(
                 session.wait_for_editor_since(start, Duration::from_secs(3)),
                 "editor should resume after the history picker; output:\n{}",

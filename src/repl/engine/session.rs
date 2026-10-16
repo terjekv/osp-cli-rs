@@ -5,7 +5,7 @@ use super::editor::{
     mark_cursor_position_unsupported,
 };
 use super::hint::ReplHinter;
-use super::overlay::{build_completion_menu, launch_history_picker};
+use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
 use super::{
     COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_PAGE_NEXT,
     HOST_COMMAND_PAGE_PREVIOUS, SharedHistory,
@@ -366,7 +366,7 @@ where
         Signal::Success(line) if line == HOST_COMMAND_HISTORY_PICKER => {
             // `Ctrl-R` leaves reedline through a private host command so we
             // can temporarily hand terminal ownership to skim. Once skim
-            // returns, restore the chosen command into the live editor buffer.
+            // returns, submit the selected command or restore it for editing.
             let current_line = editor.current_buffer_contents().to_string();
             let selected = match launch_history_picker(history_store, appearance, &current_line) {
                 Ok(selected) => selected,
@@ -375,8 +375,28 @@ where
                     return Ok(None);
                 }
             };
-            if let Some(command) = selected {
-                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(command)]);
+            match selected {
+                Some(HistorySelection::Run(command)) => {
+                    eprintln!("{command}");
+                    history_store
+                        .with(|store| store.stage_command_line(&command))
+                        .map_err(anyhow::Error::msg)??;
+                    editor.run_edit_commands(&[EditCommand::Clear]);
+                    return handle_interactive_signal(
+                        Signal::Success(command),
+                        editor,
+                        history_store,
+                        appearance,
+                        submission,
+                    );
+                }
+                Some(HistorySelection::Edit(command)) => {
+                    editor.run_edit_commands(&[
+                        EditCommand::Clear,
+                        EditCommand::InsertString(command),
+                    ]);
+                }
+                None => {}
             }
             Ok(None)
         }

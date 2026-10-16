@@ -49,11 +49,16 @@ impl SkimItem for HistoryPickerItem {
     }
 }
 
+pub(crate) enum HistorySelection {
+    Run(String),
+    Edit(String),
+}
+
 pub(crate) fn launch_history_picker(
     history: &SharedHistory,
     appearance: &ReplAppearance,
     current_line: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<HistorySelection>> {
     let items = history_picker_items(history);
     if items.is_empty() {
         return Ok(None);
@@ -88,11 +93,19 @@ pub(crate) fn launch_history_picker(
         // Prefer the explicit selection, but fall back to skim's current row
         // so a plain Enter accepts the active history item even if nothing was
         // toggled.
+        let edit = skim::binds::parse_key("tab").ok() == Some(output.final_key);
         Ok(output
             .selected_items
             .first()
             .map(|item| item.output().into_owned())
-            .or_else(|| output.current.map(|item| item.output().into_owned())))
+            .or_else(|| output.current.map(|item| item.output().into_owned()))
+            .map(|command| {
+                if edit {
+                    HistorySelection::Edit(command)
+                } else {
+                    HistorySelection::Run(command)
+                }
+            }))
     }
 }
 
@@ -151,7 +164,7 @@ pub(crate) fn build_history_picker_options(
             .saturating_add(1)
             .to_string(),
         query: Some(initial_query.to_string()),
-        prompt: "(reverse-i-search)> ".to_string(),
+        prompt: "history> ".to_string(),
         no_info: true,
         color: build_history_picker_color(appearance),
     })
@@ -172,7 +185,10 @@ fn build_skim_options(options: HistoryPickerOptions) -> Result<skim::SkimOptions
         .scheme(MatchScheme::History)
         // `Ctrl-R` inside the picker should stay within skim's history mode,
         // not recursively re-enter the REPL host command path.
-        .bind(vec!["ctrl-r:toggle-sort".to_string()]);
+        .bind(vec![
+            "tab:accept".to_string(),
+            "ctrl-r:toggle-sort".to_string(),
+        ]);
 
     if let Some(color) = options.color {
         builder.color(color);

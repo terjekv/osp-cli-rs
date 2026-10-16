@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Ctrl-R history search uses `history> `: Enter runs the selected command,
+  Tab puts it in the editor, and Escape restores the draft.
+
 - **Breaking:** Remove `repl.history.profile_scoped` and history record metadata.
   Identity/profile isolation comes from `repl.history.path`; use a path without
   `${profile.active}` to share history across profiles. Old records still load
