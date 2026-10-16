@@ -84,117 +84,97 @@ pub(crate) fn render_config_explain_text(
     config: &ResolvedConfig,
     show_secrets: bool,
 ) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("key: {}\n", explain.key));
-    out.push_str(&format!(
-        "phase: {}\n",
-        if is_bootstrap_only_key(&explain.key) {
-            "bootstrap"
-        } else {
-            "runtime"
-        }
-    ));
-    if let Some(doc) = config_key_doc(&explain.key) {
+    let facts = config_explain_json(explain, config, show_secrets);
+    let text = |value: &serde_json::Value| value.as_str().unwrap_or("").to_string();
+    let optional =
+        |value: &serde_json::Value, fallback: &str| value.as_str().unwrap_or(fallback).to_string();
+    let mut out = format!(
+        "key: {}\nphase: {}\n",
+        text(&facts["key"]),
+        text(&facts["phase"])
+    );
+    if let Some(doc) = facts["description"].as_str() {
         out.push_str(&format!("description: {doc}\n"));
     }
     out.push('\n');
-
-    if let Some(final_entry) = &explain.final_entry {
-        let value_display = display_value(&explain.key, &final_entry.value, show_secrets);
-        out.push_str(&format!(
-            "value: {} ({})\n\n",
-            value_display,
-            config_value_type(&final_entry.value)
-        ));
-        out.push_str("winner:\n");
-        out.push_str(&format!("  source: {}\n", final_entry.source));
-        out.push_str(&format!("  scope: {}\n", format_scope(&final_entry.scope)));
-        out.push_str(&format!(
-            "  origin: {}\n\n",
-            final_entry.origin.as_deref().unwrap_or("-")
-        ));
-    } else {
+    if facts["source"].is_null() {
         out.push_str("value: not set\n\n");
+    } else {
+        out.push_str(&format!(
+            "value: {} ({})\n\nwinner:\n  source: {}\n  scope: {}\n  origin: {}\n\n",
+            display_json_value(&facts["value"]),
+            text(&facts["value_type"]),
+            text(&facts["source"]),
+            text(&facts["scope"]),
+            optional(&facts["origin"], "-")
+        ));
     }
-
-    if let Some(effect) = explain_presentation_effect(config, &explain.key) {
-        out.push_str("presentation:\n");
-        out.push_str(&format!("  preset: {}\n", effect.preset.as_config_value()));
-        out.push_str(&format!("  preset_source: {}\n", effect.preset_source));
-        out.push_str(&format!(
-            "  preset_scope: {}\n",
-            format_scope(&effect.preset_scope)
-        ));
-        out.push_str(&format!(
-            "  preset_origin: {}\n",
-            effect.preset_origin.as_deref().unwrap_or("-")
-        ));
-        out.push_str(&format!(
-            "  seeded_value: {} ({})\n",
-            display_value(&explain.key, &effect.seeded_value, show_secrets),
-            config_value_type(&effect.seeded_value)
-        ));
-        out.push_str(
-            "  note: key kept its builtin default, so ui.presentation seeds the resolved UI value\n\n",
-        );
+    if let Some(effect) = facts.get("presentation") {
+        out.push_str(&format!("presentation:\n  preset: {}\n  preset_source: {}\n  preset_scope: {}\n  preset_origin: {}\n  seeded_value: {} ({})\n  note: {}\n\n",
+            text(&effect["preset"]), text(&effect["preset_source"]), text(&effect["preset_scope"]),
+            optional(&effect["preset_origin"], "-"), display_json_value(&effect["seeded_value"]),
+            text(&effect["seeded_value_type"]), text(&effect["note"])));
     }
-
-    out.push_str("context:\n");
-    out.push_str(&format!("  active_profile: {}\n", explain.active_profile));
-    // Runtime and bootstrap explains both resolve through the same active
-    // profile decision, so the source is always part of the contract now.
     out.push_str(&format!(
-        "  active_profile_source: {}\n",
-        explain.active_profile_source.as_str()
+        "context:\n  active_profile: {}\n  active_profile_source: {}\n  terminal: {}\n\n",
+        text(&facts["active_profile"]),
+        text(&facts["active_profile_source"]),
+        optional(&facts["terminal"], "none")
     ));
-    out.push_str(&format!(
-        "  terminal: {}\n\n",
-        explain.terminal.as_deref().unwrap_or("none")
-    ));
-
-    if let Some(policy) = bootstrap_scope_policy(&explain.key) {
+    if let Some(policy) = facts["bootstrap_scope_policy"].as_str() {
         out.push_str(&format!("bootstrap_scope_policy: {policy}\n\n"));
     }
-
-    let precedence = precedence_chain(explain);
-    if !precedence.is_empty() {
+    if let Some(candidates) = facts["candidates"]
+        .as_array()
+        .filter(|candidates| !candidates.is_empty())
+    {
         out.push_str("candidates (in priority order):\n");
-        for (is_winner, source, scope, origin, value) in precedence {
-            let marker = if is_winner { "  ✅" } else { "   " };
+        for candidate in candidates {
+            let marker = if candidate["winner"] == true {
+                "  ✅"
+            } else {
+                "   "
+            };
             out.push_str(&format!(
-                "{marker} {source} ({scope}) = {}",
-                display_value(&explain.key, &value, show_secrets),
+                "{marker} {} ({}) = {}",
+                text(&candidate["source"]),
+                text(&candidate["scope"]),
+                display_json_value(&candidate["value"])
             ));
-            if let Some(origin_hint) = origin {
-                out.push_str(&format!(" [{origin_hint}]"));
+            if let Some(origin) = candidate["origin"].as_str() {
+                out.push_str(&format!(" [{origin}]"));
             }
             out.push('\n');
         }
         out.push('\n');
     }
-
-    if let Some(interpolation) = &explain.interpolation {
-        out.push_str("interpolation:\n");
+    if let Some(interpolation) = facts.get("interpolation") {
         out.push_str(&format!(
-            "  template: {}\n",
-            display_value(&explain.key, &interpolation.template, show_secrets)
+            "interpolation:\n  template: {}\n",
+            display_json_value(&interpolation["template"])
         ));
-        for step in &interpolation.steps {
+        for step in interpolation["steps"].as_array().into_iter().flatten() {
             out.push_str(&format!(
                 "  ${{{}}} raw={} final={} (from {}, {})\n",
-                step.placeholder,
-                display_value(&step.placeholder, &step.raw_value, show_secrets),
-                display_value(&step.placeholder, &step.value, show_secrets),
-                step.source,
-                format_scope(&step.scope),
+                text(&step["placeholder"]),
+                display_json_value(&step["raw_value"]),
+                display_json_value(&step["value"]),
+                text(&step["source"]),
+                text(&step["scope"])
             ));
         }
         if !show_secrets && contains_sensitive_values(explain) {
             out.push_str("  note: some values are redacted; pass --show-secrets to display them\n");
         }
     }
-
     out
+}
+
+fn display_json_value(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
 }
 
 pub(crate) fn config_explain_json(
@@ -425,28 +405,6 @@ fn redact_value_json(key: &str, value: &ConfigValue, show_secrets: bool) -> serd
     }
 
     "[REDACTED]".into()
-}
-
-fn display_value(key: &str, value: &ConfigValue, show_secrets: bool) -> String {
-    if value.is_secret() {
-        return if show_secrets {
-            match value.reveal() {
-                ConfigValue::String(v) => v.clone(),
-                _ => config_value_to_json_exposed(value).to_string(),
-            }
-        } else {
-            "[REDACTED]".to_string()
-        };
-    }
-
-    if show_secrets || !is_sensitive_key(key) {
-        return match value.reveal() {
-            ConfigValue::String(v) => v.clone(),
-            _ => config_value_to_json_exposed(value).to_string(),
-        };
-    }
-
-    "[REDACTED]".to_string()
 }
 
 pub(crate) fn is_sensitive_key(key: &str) -> bool {

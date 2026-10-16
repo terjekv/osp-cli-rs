@@ -19,6 +19,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   `CommandLineParser::{analyze,compute_stub_quote}`,
   `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
 
+- Build config explain facts once and format text from the same redacted data
+  emitted as JSON, preserving both output contracts.
+
 - **Breaking:** Remove render settings/runtime builders. Construct render
   settings and runtime facts directly.
 
