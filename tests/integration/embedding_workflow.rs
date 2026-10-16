@@ -289,10 +289,7 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
     );
     assert!(terminal.0.stdout.contains("waiting_approval"));
 
-    for (is_approved, expected_status, notice) in [
-        (false, 3, "Approval required"),
-        (true, 0, "Approval received"),
-    ] {
+    for (is_approved, expected_status) in [(false, 3), (true, 0)] {
         approved.store(is_approved, Ordering::SeqCst);
         let mut sink = BufferedUiSink::default();
         assert_eq!(
@@ -340,7 +337,7 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         );
         assert_eq!(
             sink.stderr[messages.byte_offset()..].trim_start_matches('\n'),
-            format!("task-42\nassessed\n{notice}\n")
+            "task-42\nassessed\n"
         );
     }
 }

@@ -687,6 +687,7 @@ fn run_native_command(
                 .resolve_render_settings()
                 .unicode,
         )),
+        can_present: std::cell::Cell::new(false),
         pending: RefCell::new(None),
         last_draw: std::cell::Cell::new(None),
     });
@@ -720,6 +721,7 @@ fn run_native_command(
     context.output_pipeline = !input.stages.is_empty();
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
+        renderer.can_present.set(context.can_present());
     }
 
     let execution = match input.action {
@@ -813,6 +815,7 @@ struct NativeProgressRenderer<'config, 'sink> {
     ui: &'config UiState,
     stages: &'config [String],
     sink: RefCell<ProgressUiSink<'sink>>,
+    can_present: std::cell::Cell<bool>,
     pending: RefCell<Option<NativeProgressEvent>>,
     last_draw: std::cell::Cell<Option<std::time::Instant>>,
 }
@@ -836,6 +839,10 @@ impl NativeProgressRenderer<'_, '_> {
 }
 
 impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
+    fn stderr_is_terminal(&self) -> bool {
+        self.sink.borrow().stderr_is_terminal()
+    }
+
     fn emit_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
         self.flush()?;
         self.draw(event, self.stages)?;
@@ -848,10 +855,7 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
     }
 
     fn emit(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
-        let tree = event.meta.progress_replace
-            && self.stages.is_empty()
-            && self.sink.borrow().stderr_is_terminal()
-            && self.ui.render_settings.format != crate::core::output::OutputFormat::Json;
+        let tree = event.meta.progress_replace && self.can_present.get();
         if !tree {
             return self.draw(event, self.stages);
         }

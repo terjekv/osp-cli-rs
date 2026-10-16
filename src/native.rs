@@ -154,6 +154,11 @@ impl<'a> NativeCommandContext<'a> {
             && std::io::stderr().is_terminal()
     }
 
+    /// Whether live or preliminary documents can be presented on stderr.
+    pub fn can_present(&self) -> bool {
+        self.human_output() && self.progress.is_some_and(|sink| sink.stderr_is_terminal())
+    }
+
     fn human_output(&self) -> bool {
         !self.output_pipeline
             && self.runtime_hints.format != crate::core::output::OutputFormat::Json
@@ -199,8 +204,11 @@ impl<'a> NativeCommandContext<'a> {
 
     /// Display a notice or confirmation through the host renderer, outside stream filters.
     ///
-    /// Without a progress sink, this is a no-op.
+    /// This is a no-op unless [`Self::can_present`] permits terminal frames.
     pub fn present(&self, document: NativeProgressEvent) -> Result<()> {
+        if !self.can_present() {
+            return Ok(());
+        }
         match self.progress {
             Some(progress) => progress.present(document),
             None => Ok(()),
@@ -208,7 +216,11 @@ impl<'a> NativeCommandContext<'a> {
     }
 
     /// Draws a preliminary document and reports whether the host can replace it.
+    /// Returns false without emitting when [`Self::can_present`] is false.
     pub fn emit_progress_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        if !self.can_present() {
+            return Ok(false);
+        }
         match self.progress {
             Some(sink) => sink.emit_measured(event),
             None => Ok(false),
@@ -218,6 +230,8 @@ impl<'a> NativeCommandContext<'a> {
     /// Submits one structured transient progress document to the host.
     ///
     /// The host may coalesce terminal replacement updates before displaying them.
+    /// Events remain available to stream consumers even without a terminal;
+    /// use [`Self::present`] or [`Self::emit_progress_measured`] for frames.
     /// A context created outside the host has no sink, in which case emission
     /// is a no-op. Native commands should still return the stable final
     /// document through [`NativeCommandOutcome`].
@@ -268,6 +282,12 @@ impl NativeProgressEvent {
 
 /// Host boundary that renders transient native-command progress.
 pub trait NativeProgressSink {
+    /// Whether the presentation destination is a terminal. Hosts with captured
+    /// output should report their sink's capability instead of process stderr.
+    fn stderr_is_terminal(&self) -> bool {
+        std::io::stderr().is_terminal()
+    }
+
     /// Renders or records one progress document before command execution resumes.
     fn emit(&self, event: NativeProgressEvent) -> Result<()>;
 
