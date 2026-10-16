@@ -34,6 +34,7 @@ impl NativeCommand for CredentialProbe {
         &self,
         args: &[String],
         _config: &ResolvedConfig,
+        _command_scope: &osp_cli::core::CommandScope,
     ) -> Result<bool> {
         assert!(args == ["get"] || args == ["--help"]);
         Ok(!self.0.swap(true, Ordering::SeqCst))

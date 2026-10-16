@@ -349,11 +349,12 @@ fn refresh_native_parse(
     config: &crate::config::ResolvedConfig,
     parsed: NativeParse,
     intent: &NativeIntent,
+    scope: &crate::core::CommandScope,
 ) -> Result<NativeParse> {
     if !intent.refresh_metadata {
         return Ok(parsed);
     }
-    let refreshed = command.prepare_invocation_metadata(args, config);
+    let refreshed = command.prepare_invocation_metadata(args, config, scope);
     if intent.requirement == ExternalPathAccessRequirement::Visible {
         match refreshed {
             Ok(true) => match NativeParse::new(command, name, args) {
@@ -408,6 +409,7 @@ fn run_native_invocation(
         runtime.config.resolved(),
         parsed,
         &intent,
+        &invocation.ui.render_settings.runtime.command_scope,
     )?;
     runtime.auth.refresh_native_auth(&command.describe());
     ensure_external_access(runtime, &parsed.path, intent.requirement, "command")?;

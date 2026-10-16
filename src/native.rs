@@ -534,7 +534,11 @@ pub trait NativeCommand: Send + Sync {
     /// The registered command name must remain stable across configurations.
     fn configure(&self, _config: &ResolvedConfig) {}
 
-    /// Returns the clap command definition for this command.
+    /// Returns the unbuilt clap command definition for this command.
+    ///
+    /// The host sets its invocation-specific binary name before clap caches usage
+    /// names. Build a separate copy when projecting implicit positional indices
+    /// into custom descriptions or completion metadata.
     fn command(&self) -> Command;
 
     /// Converts supplied arguments to the canonical command grammar.
@@ -563,7 +567,7 @@ pub trait NativeCommand: Send + Sync {
     /// remains available offline and without acquiring credentials. Arguments
     /// are the original supplied arguments, without the registered command name
     /// or DSL pipeline. Remote discovery is permitted, but this must not execute
-    /// the requested action.
+    /// the requested action. Use the supplied command scope for recovery hints.
     /// Return `true` only when the grammar changed: the host then normalizes,
     /// describes, and strictly parses the invocation once more, and authorizes
     /// its full path against refreshed native declarations and product visibility
@@ -572,6 +576,7 @@ pub trait NativeCommand: Send + Sync {
         &self,
         _args: &[String],
         _config: &ResolvedConfig,
+        _command_scope: &crate::core::CommandScope,
     ) -> Result<bool> {
         Ok(false)
     }

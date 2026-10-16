@@ -7,6 +7,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Native command factories leave clap grammars unbuilt so invocation help can
+  set usage names before clap caches them.
+
+- **Breaking:** Native metadata preparation receives `CommandScope` so recovery
+  hints from runtime catalog discovery match the current prompt.
+
 - Write follow-up commands and error hints for the current prompt: terminal
   suggestions include `osp`, REPL suggestions omit it, and integration shells
   use relative commands unless a host command or alias would shadow them.
