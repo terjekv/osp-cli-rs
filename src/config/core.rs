@@ -1650,8 +1650,8 @@ pub fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), Co
     builtin_config_schema().validate_bootstrap_value(key, value)
 }
 
-/// Returns whether a config key is conventionally sensitive.
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
+/// Returns whether a config, environment or error-detail name is sensitive.
+pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase();
     normalized.contains("password")
         || normalized.contains("token")
@@ -1664,6 +1664,9 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
         || normalized.contains("client_secret")
         || normalized.contains("bearer")
         || normalized.contains("jwt")
+        || normalized.contains("cookie")
+        || normalized.contains("authorization")
+        || normalized.split('_').any(|part| part == "key")
         || normalized.ends_with(".key")
 }
 

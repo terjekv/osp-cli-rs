@@ -41,6 +41,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 
+- Redact sensitive names consistently in config, plugin environment values and
+  error details, including cookies, authorization and underscore-delimited keys.
+
 - `DisplayRule::Hyperlink` marks HTTP(S) URL fields for terminal hyperlinks.
   The renderer alone emits OSC 8 in rich TTY output; plain output, exports,
   pipelines and `last` replay retain the plain URL. Product text remains sanitized.

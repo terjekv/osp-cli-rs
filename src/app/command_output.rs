@@ -236,10 +236,7 @@ fn render_detail_fields(path: &str, value: &Value, out: &mut String) {
     match value {
         Value::Object(fields) => {
             for (key, value) in fields {
-                if !["password", "token", "secret", "cookie", "authorization"]
-                    .iter()
-                    .any(|secret| key.to_ascii_lowercase().contains(secret))
-                {
+                if !crate::config::is_sensitive_key(key) {
                     render_detail_fields(&format!("{path}.{key}"), value, out);
                 }
             }

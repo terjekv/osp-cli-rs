@@ -5,6 +5,7 @@
 //! explanation data into human/JSON output, plus the fuzzy key-recovery hints
 //! shown when a requested key does not exist.
 
+use crate::config::is_sensitive_key;
 use crate::config::{
     BootstrapScopeRule, ConfigExplain, ConfigSchema, ConfigValue, ResolvedConfig,
     bootstrap_key_spec, is_bootstrap_only_key,
@@ -407,10 +408,6 @@ fn redact_value_json(key: &str, value: &ConfigValue, show_secrets: bool) -> serd
     }
 
     "[REDACTED]".into()
-}
-
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
-    crate::config::is_sensitive_key(key)
 }
 
 pub(crate) fn format_scope(scope: &crate::config::Scope) -> String {

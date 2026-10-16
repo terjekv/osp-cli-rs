@@ -91,6 +91,7 @@ pub(crate) mod sink;
 mod tests;
 pub(crate) mod timing;
 
+pub(crate) use crate::config::is_sensitive_key;
 pub use access::{AccessPolicy, Visibility};
 pub(crate) use assembly::rebuild_repl_in_place;
 pub(crate) use bootstrap::*;
@@ -98,7 +99,7 @@ pub(crate) use builtin::*;
 pub(crate) use command_output::*;
 pub(crate) use config_explain::{
     config_explain_json, config_explain_result, config_value_to_json_for_key,
-    explain_runtime_config, format_scope, is_sensitive_key, push_missing_config_key_messages,
+    explain_runtime_config, format_scope, push_missing_config_key_messages,
     render_config_explain_text,
 };
 pub(crate) use facts::*;
