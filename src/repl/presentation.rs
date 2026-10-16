@@ -5,11 +5,11 @@
 //! a few small presentation-mode policies. It should shape REPL presentation,
 //! not command execution.
 
+use crate::app::DEFAULT_REPL_PROMPT;
 use crate::app::DebugTimingState;
 use crate::app::format_timing_badge;
 use crate::app::help::help_level;
 use crate::app::is_sensitive_key;
-use crate::app::{CMD_HELP, DEFAULT_REPL_PROMPT};
 use crate::config::ConfigValue;
 use crate::config::DEFAULT_REPL_HISTORY_MENU_ROWS;
 use crate::config::ResolvedConfig;
@@ -362,11 +362,7 @@ fn resolve_intro_placeholder(
                 .join(", ");
         }
         "help_hint" => {
-            return if view.auth.is_builtin_visible(CMD_HELP) {
-                "See help for more.".to_string()
-            } else {
-                "Use completion to explore commands.".to_string()
-            };
+            return "See help for more.".to_string();
         }
         _ => {}
     }

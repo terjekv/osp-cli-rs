@@ -29,16 +29,49 @@ owner with native integrations instead of copying tokens into the host.
 Native dispatch invokes the execution hook before refreshing invocation metadata.
 Help and completion never acquire credentials.
 
-## Declared command policy
+## Declared authentication
 
-`CommandPolicyRegistry` evaluates command metadata with a `CommandPolicyContext`.
-Products may still supply builtin policies and static context for profile,
-capability, feature, strength and freshness requirements. Live authenticated and
-credential facts from `AccessPolicy` replace those two fields during external
-access checks. Product visibility is combined with declared visibility.
+Plugins and native commands use `DescribeCommandAuthV1` directly. Unannotated
+children inherit their nearest parent's requirements; an explicit child auth
+object replaces that inheritance.
+
+Supported visibility modes are `public`, `authenticated` (visible but requiring
+an authenticated session to run) and `hidden`. A `run_session.credentials`
+requirement can require a named credential to be `present` or `valid`:
+
+```json
+{
+  "name": "apply",
+  "auth": {
+    "visibility": "public",
+    "run_session": {
+      "credentials": [{"state": "valid", "service": "product"}]
+    }
+  }
+}
+```
+
+Product visibility and declared authentication both apply. Help only requires
+visibility; execution additionally requires runnable access. Provider selection
+and plugin enable/disable behavior remain independent of authentication.
+
+Protocol-v1 DTOs still accept legacy `capability_gated`, `required_capabilities`,
+`feature_flags`, `visible_session`, `auth_strength` and `fresh` credential
+requirements. The host ignores these fields; `capability_gated` behaves as
+`public`. There is no builtin policy hook, profile gate or policy override DSL.
+Configuration allowlists `auth.visible.builtins` and `auth.visible.plugins` have
+been removed. Use product visibility for external commands instead.
 
 ## Session diagnostics
 
-Doctor reads current credentials from `session_facts()` without acquisition.
-Credential records contain `service`, `valid` and `ttl_seconds`; existing session
-summary fields remain available. Backend APIs remain authoritative.
+`osp --json doctor` reads `session[0]` from the current hook. It retains `status`,
+`authenticated`, `profile` and `credentials`. Each credential record contains
+`service`, `valid` and `ttl_seconds` (or `null` when unknown):
+
+```json
+[{"service": "product", "valid": true, "ttl_seconds": 1800}]
+```
+
+The product computes validity and remaining lifetime; doctor does not acquire
+credentials or age a cached snapshot. Human output formats the same facts.
+`auth_strength`, `capability_count` and `enabled_features` are no longer emitted.

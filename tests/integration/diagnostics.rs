@@ -4,9 +4,6 @@ use osp_cli::config::{
     ConfigLayer, ConfigSchema, LoaderPipeline, ResolveOptions, SchemaEntry, StaticLayerLoader,
     TomlFileLoader,
 };
-use osp_cli::core::command_policy::{
-    CommandPath, CommandPolicy, CommandPolicyContext, CommandPolicyRegistry, VisibilityMode,
-};
 use serde_json::json;
 
 struct ProductSessionBootstrap;
@@ -33,23 +30,9 @@ impl AccessPolicy for ProductSessionBootstrap {
             .with_file(TomlFileLoader::new(path.into()).required())
             .load_layers()
             .map_err(miette::Report::new)?;
-        let session =
-            osp_cli::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
-                .resolve(ResolveOptions::new())
-                .map_err(miette::Report::new)?;
-        runtime.set_policy_context(
-            CommandPolicyContext::default()
-                .authenticated(
-                    session
-                        .get_bool("extensions.site.session.authenticated")
-                        .expect("session schema should validate authentication state"),
-                )
-                .with_capabilities(
-                    session
-                        .get_string_list("extensions.site.session.capabilities")
-                        .expect("session schema should validate capabilities"),
-                ),
-        );
+        osp_cli::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
+            .resolve(ResolveOptions::new())
+            .map_err(miette::Report::new)?;
         Ok(())
     }
 }
@@ -72,15 +55,8 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         session_path.to_string_lossy().to_string(),
     );
     product_defaults.set("extensions.site.service.enabled", true);
-    let mut policy = CommandPolicyRegistry::new();
-    policy.register(
-        CommandPolicy::new(CommandPath::new(["config"]))
-            .visibility(VisibilityMode::CapabilityGated)
-            .require_capability("site.config.read"),
-    );
     let app = osp_cli::App::new()
         .with_product_defaults(product_defaults)
-        .with_builtin_policy(policy)
         .with_access_policy(ProductSessionBootstrap);
 
     let read_args = [

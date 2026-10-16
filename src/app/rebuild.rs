@@ -15,7 +15,6 @@ use miette::{Result, WrapErr};
 use std::sync::Arc;
 
 use crate::config::ConfigLayer;
-use crate::core::command_policy::{CommandPolicyContext, CommandPolicyRegistry};
 use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
 use crate::plugin::state::PluginCommandPreferences;
@@ -32,8 +31,6 @@ pub(crate) struct ReplStateRebuilder {
     context: RuntimeContext,
     launch: LaunchContext,
     product_defaults: ConfigLayer,
-    policy_context: CommandPolicyContext,
-    builtin_policy: CommandPolicyRegistry,
     access_policy: Option<Arc<dyn AccessPolicy>>,
     render_settings: RenderSettings,
     native_commands: NativeCommandRegistry,
@@ -53,8 +50,6 @@ impl ReplStateRebuilder {
             context: runtime.context.clone(),
             launch: runtime.launch.clone(),
             product_defaults: runtime.product_defaults().clone(),
-            policy_context: runtime.auth.policy_context().clone(),
-            builtin_policy: runtime.auth.builtin_policy().clone(),
             access_policy: runtime.access_policy(),
             render_settings: runtime.ui.render_settings.clone(),
             native_commands: clients.native_commands().clone(),
@@ -108,10 +103,6 @@ impl ReplStateRebuilder {
                 .with_native_commands(self.native_commands)
                 .build();
         next.runtime.set_product_defaults(self.product_defaults);
-        next.runtime.set_policy_context(self.policy_context);
-        next.runtime
-            .auth
-            .replace_builtin_policy(self.builtin_policy);
         next.runtime.set_access_policy(self.access_policy);
         next.session.restore_rebuild_state(self.preserved_session);
         Ok((next.runtime, next.session, next.clients))

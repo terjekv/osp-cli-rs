@@ -375,11 +375,11 @@ fn plugins_commands_surface_session_requirements_contract() {
     let row = first_json_row(&payload, "plugins commands session auth view");
     assert_eq!(row["name"], "secure");
     assert_eq!(row["auth_visibility"], "authenticated");
-    assert_eq!(row["auth_hint"], "auth; run: token: osp fresh(600s)");
+    assert_eq!(row["auth_hint"], "auth; run: token: osp valid");
     assert_eq!(
         row["run_session"],
         serde_json::json!({
-            "credentials": [{"state":"fresh","service":"osp","min_ttl_seconds":600}]
+            "credentials": [{"state":"valid","service":"osp"}]
         })
     );
 }

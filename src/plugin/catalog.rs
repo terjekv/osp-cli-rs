@@ -11,8 +11,9 @@ use super::conversion::direct_subcommand_names;
 use super::manager::{CommandCatalogEntry, CommandConflict, DoctorReport, PluginSummary};
 use super::selection::{ProviderResolution, ProviderSelectionMode, plugin_enabled, plugin_label};
 use crate::completion::CommandSpec;
-use crate::core::command_policy::{CommandPath, CommandPolicyRegistry};
+use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1};
+use std::collections::BTreeMap;
 
 pub(crate) fn list_plugins(view: &ActivePluginView<'_>) -> Vec<PluginSummary> {
     view.discovered()
@@ -92,8 +93,10 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
     out
 }
 
-pub(crate) fn build_command_policy_registry(view: &ActivePluginView<'_>) -> CommandPolicyRegistry {
-    let mut registry = CommandPolicyRegistry::new();
+pub(crate) fn build_command_auth(
+    view: &ActivePluginView<'_>,
+) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
+    let mut registry = BTreeMap::new();
 
     for resolved in view.resolved_active_commands() {
         let ProviderResolution::Selected(selection) = resolved.resolution() else {
@@ -105,7 +108,7 @@ pub(crate) fn build_command_policy_registry(view: &ActivePluginView<'_>) -> Comm
             .canonical_command(resolved.command())
             .and_then(|command| command.describe())
         {
-            register_describe_command_policies(&mut registry, command, &[]);
+            collect_command_auth(&mut registry, command, &[]);
         }
     }
 
@@ -202,16 +205,16 @@ pub(crate) fn build_doctor_report(view: &ActivePluginView<'_>) -> DoctorReport {
     DoctorReport { plugins, conflicts }
 }
 
-pub(crate) fn register_describe_command_policies(
-    registry: &mut CommandPolicyRegistry,
+pub(crate) fn collect_command_auth(
+    registry: &mut BTreeMap<CommandPath, DescribeCommandAuthV1>,
     command: &DescribeCommandV1,
     prefix: &[String],
 ) {
-    register_describe_command_policies_with_parent(registry, command, prefix, None);
+    collect_command_auth_with_parent(registry, command, prefix, None);
 }
 
-fn register_describe_command_policies_with_parent(
-    registry: &mut CommandPolicyRegistry,
+fn collect_command_auth_with_parent(
+    registry: &mut BTreeMap<CommandPath, DescribeCommandAuthV1>,
     command: &DescribeCommandV1,
     prefix: &[String],
     parent_auth: Option<&DescribeCommandAuthV1>,
@@ -221,10 +224,10 @@ fn register_describe_command_policies_with_parent(
     let path = CommandPath::new(segments.clone());
     let auth = command.auth.as_ref().or(parent_auth);
     if let Some(auth) = auth {
-        registry.register(DescribeCommandV1::command_policy_for_auth(path, auth));
+        registry.insert(path, auth.clone());
     }
     for subcommand in &command.subcommands {
-        register_describe_command_policies_with_parent(registry, subcommand, &segments, auth);
+        collect_command_auth_with_parent(registry, subcommand, &segments, auth);
     }
 }
 

@@ -47,13 +47,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::command_def::{
-    ArgDef, CommandDef, CommandPolicyDef, FlagDef, ValueChoice, ValueKind,
-};
-use crate::core::command_policy::{
-    AuthStrength, CommandPath, CommandPolicy, CredentialRequirement, SessionRequirements,
-    VisibilityMode,
-};
+use crate::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
+use crate::core::command_policy::CommandPath;
 
 /// Current plugin wire protocol version understood by this crate.
 pub const PLUGIN_PROTOCOL_V1: u32 = 1;
@@ -104,18 +99,18 @@ pub struct DescribeCommandV1 {
 }
 
 /// Authorization metadata attached to a described command.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DescribeCommandAuthV1 {
     /// Visibility level for the command.
     #[serde(default)]
     pub visibility: Option<DescribeVisibilityModeV1>,
-    /// Capabilities required to run the command.
+    /// Legacy capabilities, accepted for wire compatibility and ignored.
     #[serde(default)]
     pub required_capabilities: Vec<String>,
-    /// Feature flags that must be enabled for the command.
+    /// Legacy feature flags, accepted for wire compatibility and ignored.
     #[serde(default)]
     pub feature_flags: Vec<String>,
-    /// Session-state requirements that gate command visibility.
+    /// Legacy visibility requirements, accepted and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_session: Option<DescribeSessionRequirementsV1>,
     /// Session-state requirements that gate command execution.
@@ -133,29 +128,6 @@ pub enum DescribeAuthStrengthV1 {
     Strong,
 }
 
-impl DescribeAuthStrengthV1 {
-    fn as_auth_strength(self) -> AuthStrength {
-        match self {
-            Self::Basic => AuthStrength::Basic,
-            Self::Strong => AuthStrength::Strong,
-        }
-    }
-
-    fn from_auth_strength(value: AuthStrength) -> Self {
-        match value {
-            AuthStrength::Basic => Self::Basic,
-            AuthStrength::Strong => Self::Strong,
-        }
-    }
-
-    fn as_label(self) -> &'static str {
-        match self {
-            Self::Basic => "basic",
-            Self::Strong => "strong",
-        }
-    }
-}
-
 /// Wire-format credential requirement used by plugin metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
@@ -170,8 +142,7 @@ pub enum DescribeCredentialRequirementV1 {
         /// Credential or token namespace, such as `osp` or `mreg`.
         service: String,
     },
-    /// Require that the named credential exists, is valid, and has at least
-    /// the specified remaining lifetime.
+    /// Legacy freshness requirement, accepted and ignored.
     Fresh {
         /// Credential or token namespace, such as `osp` or `mreg`.
         service: String,
@@ -181,35 +152,6 @@ pub enum DescribeCredentialRequirementV1 {
 }
 
 impl DescribeCredentialRequirementV1 {
-    fn as_command_requirement(&self) -> CredentialRequirement {
-        match self {
-            Self::Present { service } => CredentialRequirement::present(service.clone()),
-            Self::Valid { service } => CredentialRequirement::valid(service.clone()),
-            Self::Fresh {
-                service,
-                min_ttl_seconds,
-            } => CredentialRequirement::fresh(service.clone(), *min_ttl_seconds),
-        }
-    }
-
-    fn from_command_requirement(requirement: &CredentialRequirement) -> Self {
-        match requirement {
-            CredentialRequirement::Present { service } => Self::Present {
-                service: service.clone(),
-            },
-            CredentialRequirement::Valid { service } => Self::Valid {
-                service: service.clone(),
-            },
-            CredentialRequirement::Fresh {
-                service,
-                min_ttl_seconds,
-            } => Self::Fresh {
-                service: service.clone(),
-                min_ttl_seconds: *min_ttl_seconds,
-            },
-        }
-    }
-
     fn hint(&self) -> String {
         match self {
             Self::Present { service } => format!("token: {service}"),
@@ -233,7 +175,7 @@ impl DescribeCredentialRequirementV1 {
 /// Wire-format session requirements attached to a command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DescribeSessionRequirementsV1 {
-    /// Minimum auth strength required, when any.
+    /// Legacy auth strength, accepted and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_strength: Option<DescribeAuthStrengthV1>,
     /// Credential or token requirements that must be satisfied.
@@ -242,48 +184,17 @@ pub struct DescribeSessionRequirementsV1 {
 }
 
 impl DescribeSessionRequirementsV1 {
-    fn is_empty(&self) -> bool {
-        self.auth_strength.is_none() && self.credentials.is_empty()
-    }
-
     fn hint(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if let Some(auth_strength) = self.auth_strength {
-            parts.push(format!("auth: {}", auth_strength.as_label()));
-        }
         parts.extend(
             self.credentials
                 .iter()
+                .filter(|credential| {
+                    !matches!(credential, DescribeCredentialRequirementV1::Fresh { .. })
+                })
                 .map(DescribeCredentialRequirementV1::hint),
         );
         (!parts.is_empty()).then(|| parts.join(", "))
-    }
-
-    fn as_command_requirements(&self) -> SessionRequirements {
-        SessionRequirements {
-            auth_strength: self
-                .auth_strength
-                .map(DescribeAuthStrengthV1::as_auth_strength),
-            credentials: self
-                .credentials
-                .iter()
-                .map(DescribeCredentialRequirementV1::as_command_requirement)
-                .collect(),
-        }
-    }
-
-    fn from_command_requirements(requirements: &SessionRequirements) -> Option<Self> {
-        let session = Self {
-            auth_strength: requirements
-                .auth_strength
-                .map(DescribeAuthStrengthV1::from_auth_strength),
-            credentials: requirements
-                .credentials
-                .iter()
-                .map(DescribeCredentialRequirementV1::from_command_requirement)
-                .collect(),
-        };
-        (!session.is_empty()).then_some(session)
     }
 }
 
@@ -295,35 +206,13 @@ pub enum DescribeVisibilityModeV1 {
     Public,
     /// Command requires an authenticated user.
     Authenticated,
-    /// Command requires one or more capabilities.
+    /// Legacy capability mode, accepted and treated as public.
     CapabilityGated,
     /// Command should be hidden from normal help surfaces.
     Hidden,
 }
 
 impl DescribeVisibilityModeV1 {
-    /// Converts the protocol visibility label into the internal policy enum.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::command_policy::VisibilityMode;
-    /// use osp_cli::core::plugin::DescribeVisibilityModeV1;
-    ///
-    /// assert_eq!(
-    ///     DescribeVisibilityModeV1::CapabilityGated.as_visibility_mode(),
-    ///     VisibilityMode::CapabilityGated
-    /// );
-    /// ```
-    pub fn as_visibility_mode(self) -> VisibilityMode {
-        match self {
-            DescribeVisibilityModeV1::Public => VisibilityMode::Public,
-            DescribeVisibilityModeV1::Authenticated => VisibilityMode::Authenticated,
-            DescribeVisibilityModeV1::CapabilityGated => VisibilityMode::CapabilityGated,
-            DescribeVisibilityModeV1::Hidden => VisibilityMode::Hidden,
-        }
-    }
-
     /// Returns the canonical protocol label for this visibility mode.
     ///
     /// # Examples
@@ -371,7 +260,7 @@ impl DescribeCommandAuthV1 {
     ///
     /// assert_eq!(
     ///     auth.hint().as_deref(),
-    ///     Some("cap: ldap.write; feature: write-mode; run: auth: strong, token: osp valid")
+    ///     Some("run: token: osp valid")
     /// );
     /// ```
     pub fn hint(&self) -> Option<String> {
@@ -380,31 +269,10 @@ impl DescribeCommandAuthV1 {
         match self.visibility {
             Some(DescribeVisibilityModeV1::Public) | None => {}
             Some(DescribeVisibilityModeV1::Authenticated) => parts.push("auth".to_string()),
-            Some(DescribeVisibilityModeV1::CapabilityGated) => {
-                if self.required_capabilities.len() == 1 {
-                    parts.push(format!("cap: {}", self.required_capabilities[0]));
-                } else if self.required_capabilities.is_empty() {
-                    parts.push("cap".to_string());
-                } else {
-                    parts.push(format!("caps: {}", self.required_capabilities.len()));
-                }
-            }
+            Some(DescribeVisibilityModeV1::CapabilityGated) => {}
             Some(DescribeVisibilityModeV1::Hidden) => parts.push("hidden".to_string()),
         }
 
-        match self.feature_flags.as_slice() {
-            [] => {}
-            [feature] => parts.push(format!("feature: {feature}")),
-            features => parts.push(format!("features: {}", features.len())),
-        }
-
-        if let Some(session) = self
-            .visible_session
-            .as_ref()
-            .and_then(|session| session.hint())
-        {
-            parts.push(format!("show: {session}"));
-        }
         if let Some(session) = self.run_session.as_ref().and_then(|session| session.hint()) {
             parts.push(format!("run: {session}"));
         }
@@ -956,87 +824,6 @@ impl DescribeCommandV1 {
         }
     }
 
-    /// Converts command auth metadata into an internal command policy for
-    /// `path`.
-    ///
-    /// This is the host-side bridge from wire-format describe data into the
-    /// runtime policy evaluator in [`crate::core::command_policy`].
-    ///
-    /// Required capabilities and feature flags are normalized by trimming
-    /// surrounding whitespace and lowercasing the values before they enter the
-    /// runtime policy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::command_policy::{CommandPath, VisibilityMode};
-    /// use osp_cli::core::plugin::{
-    ///     DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1,
-    /// };
-    /// use std::collections::BTreeMap;
-    ///
-    /// let command = DescribeCommandV1 {
-    ///     name: "decide".to_string(),
-    ///     about: String::new(),
-    ///     auth: Some(DescribeCommandAuthV1 {
-    ///         visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
-    ///         required_capabilities: vec![" Orch.Approval.Decide ".to_string()],
-    ///         feature_flags: vec![" Review ".to_string()],
-    ///         ..DescribeCommandAuthV1::default()
-    ///     }),
-    ///     args: Vec::new(),
-    ///     flags: BTreeMap::new(),
-    ///     subcommands: Vec::new(),
-    /// };
-    ///
-    /// let policy = command
-    ///     .command_policy(CommandPath::new(["orch", "approval", "decide"]))
-    ///     .unwrap();
-    ///
-    /// assert_eq!(policy.visibility, VisibilityMode::CapabilityGated);
-    /// assert!(policy
-    ///     .required_capabilities
-    ///     .contains("orch.approval.decide"));
-    /// assert!(policy.feature_flags.contains("review"));
-    /// ```
-    pub fn command_policy(&self, path: CommandPath) -> Option<CommandPolicy> {
-        let auth = self.auth.as_ref()?;
-        Some(Self::command_policy_for_auth(path, auth))
-    }
-
-    pub(crate) fn command_policy_for_auth(
-        path: CommandPath,
-        auth: &DescribeCommandAuthV1,
-    ) -> CommandPolicy {
-        let mut policy = CommandPolicy::new(path);
-        if let Some(visibility) = auth.visibility {
-            policy = policy.visibility(visibility.as_visibility_mode());
-        }
-        for capability in &auth.required_capabilities {
-            policy = policy.require_capability(capability.clone());
-        }
-        for feature in &auth.feature_flags {
-            policy = policy.feature_flag(feature.clone());
-        }
-        if let Some(requirements) = auth.visible_session.as_ref() {
-            if let Some(auth_strength) = requirements.auth_strength {
-                policy = policy.require_visible_auth_strength(auth_strength.as_auth_strength());
-            }
-            for requirement in &requirements.credentials {
-                policy = policy.require_visible_credential(requirement.as_command_requirement());
-            }
-        }
-        if let Some(requirements) = auth.run_session.as_ref() {
-            if let Some(auth_strength) = requirements.auth_strength {
-                policy = policy.require_auth_strength(auth_strength.as_auth_strength());
-            }
-            for requirement in &requirements.credentials {
-                policy = policy.require_credential(requirement.as_command_requirement());
-            }
-        }
-        policy
-    }
-
     /// Fills unannotated descendants with their nearest parent's auth policy.
     pub(crate) fn inherit_auth_from_parents(&mut self) {
         self.inherit_auth(None);
@@ -1208,24 +995,7 @@ impl From<&CommandDef> for DescribeCommandV1 {
         Self {
             name: command.name.clone(),
             about: command.about.clone().unwrap_or_default(),
-            auth: (!command.policy.is_empty()).then(|| DescribeCommandAuthV1 {
-                visibility: match command.policy.visibility {
-                    VisibilityMode::Public => None,
-                    VisibilityMode::Authenticated => Some(DescribeVisibilityModeV1::Authenticated),
-                    VisibilityMode::CapabilityGated => {
-                        Some(DescribeVisibilityModeV1::CapabilityGated)
-                    }
-                    VisibilityMode::Hidden => Some(DescribeVisibilityModeV1::Hidden),
-                },
-                required_capabilities: command.policy.required_capabilities.clone(),
-                feature_flags: command.policy.feature_flags.clone(),
-                visible_session: DescribeSessionRequirementsV1::from_command_requirements(
-                    &command.policy.visible_session_requirements,
-                ),
-                run_session: DescribeSessionRequirementsV1::from_command_requirements(
-                    &command.policy.run_session_requirements,
-                ),
-            }),
+            auth: command.auth.clone(),
             args: command.args.iter().map(DescribeArgV1::from).collect(),
             flags: command
                 .flags
@@ -1256,11 +1026,7 @@ impl From<&DescribeCommandV1> for CommandDef {
                 Some(DescribeVisibilityModeV1::Hidden)
             ),
             sort_key: None,
-            policy: command
-                .auth
-                .as_ref()
-                .map(command_policy_from_describe)
-                .unwrap_or_default(),
+            auth: command.auth.clone(),
             args: command.args.iter().map(ArgDef::from).collect(),
             flags: collect_describe_flags(&command.flags),
             subcommands: command.subcommands.iter().map(CommandDef::from).collect(),
@@ -1402,23 +1168,6 @@ fn validate_suggestions(suggestions: &[DescribeSuggestionV1], owner: &str) -> Re
 }
 
 fn validate_command_auth(auth: &DescribeCommandAuthV1) -> Result<(), String> {
-    if auth
-        .required_capabilities
-        .iter()
-        .any(|value| value.trim().is_empty())
-    {
-        return Err("required_capabilities must not contain empty values".to_string());
-    }
-    if auth
-        .feature_flags
-        .iter()
-        .any(|value| value.trim().is_empty())
-    {
-        return Err("feature_flags must not contain empty values".to_string());
-    }
-    if let Some(requirements) = auth.visible_session.as_ref() {
-        validate_session_requirements("visible_session", requirements)?;
-    }
     if let Some(requirements) = auth.run_session.as_ref() {
         validate_session_requirements("run_session", requirements)?;
     }
@@ -1429,11 +1178,10 @@ fn validate_session_requirements(
     owner: &str,
     requirements: &DescribeSessionRequirementsV1,
 ) -> Result<(), String> {
-    if requirements
-        .credentials
-        .iter()
-        .any(|requirement| requirement.service().trim().is_empty())
-    {
+    if requirements.credentials.iter().any(|requirement| {
+        !matches!(requirement, DescribeCredentialRequirementV1::Fresh { .. })
+            && requirement.service().trim().is_empty()
+    }) {
         return Err(format!(
             "{owner} credentials must not contain empty services"
         ));
@@ -1506,29 +1254,6 @@ fn collect_describe_flags(flags: &BTreeMap<String, DescribeFlagV1>) -> Vec<FlagD
     definitions.into_values().collect()
 }
 
-fn command_policy_from_describe(auth: &DescribeCommandAuthV1) -> CommandPolicyDef {
-    CommandPolicyDef {
-        visibility: match auth.visibility {
-            Some(DescribeVisibilityModeV1::Authenticated) => VisibilityMode::Authenticated,
-            Some(DescribeVisibilityModeV1::CapabilityGated) => VisibilityMode::CapabilityGated,
-            Some(DescribeVisibilityModeV1::Hidden) => VisibilityMode::Hidden,
-            Some(DescribeVisibilityModeV1::Public) | None => VisibilityMode::Public,
-        },
-        required_capabilities: auth.required_capabilities.clone(),
-        feature_flags: auth.feature_flags.clone(),
-        visible_session_requirements: auth
-            .visible_session
-            .as_ref()
-            .map(DescribeSessionRequirementsV1::as_command_requirements)
-            .unwrap_or_default(),
-        run_session_requirements: auth
-            .run_session
-            .as_ref()
-            .map(DescribeSessionRequirementsV1::as_command_requirements)
-            .unwrap_or_default(),
-    }
-}
-
 fn describe_value_type(value_kind: Option<ValueKind>) -> Option<DescribeValueTypeV1> {
     match value_kind {
         Some(ValueKind::Path) => Some(DescribeValueTypeV1::Path),
@@ -1548,9 +1273,8 @@ mod tests {
         DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCommandV1,
         DescribeCredentialRequirementV1, DescribeSessionRequirementsV1, DescribeV1,
         DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1, ResponseMetaV1, ResponseV1,
-        canonical_plugin_command_name, validate_command_auth,
+        canonical_plugin_command_name,
     };
-    use crate::core::command_policy::{AuthStrength, CommandPath, VisibilityMode};
     use serde_json::json;
 
     #[test]
@@ -1588,16 +1312,6 @@ mod tests {
                 "/commands/0/args/0/suggestions/0/value",
                 json!(""),
                 "argument",
-            ),
-            (
-                "/commands/0/auth/feature_flags",
-                json!([" "]),
-                "feature_flags",
-            ),
-            (
-                "/commands/0/auth/visible_session/credentials/0/service",
-                json!(" "),
-                "visible_session credentials",
             ),
         ] {
             let mut invalid = describe.clone();
@@ -1732,54 +1446,6 @@ mod tests {
     }
 
     #[test]
-    fn command_auth_converts_to_generic_command_policy_unit() {
-        let command = DescribeCommandV1 {
-            name: "orch".to_string(),
-            about: String::new(),
-            auth: Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
-                required_capabilities: vec!["orch.approval.decide".to_string()],
-                feature_flags: vec!["orch".to_string()],
-                run_session: Some(DescribeSessionRequirementsV1 {
-                    auth_strength: Some(DescribeAuthStrengthV1::Strong),
-                    credentials: vec![DescribeCredentialRequirementV1::valid("osp")],
-                }),
-                ..DescribeCommandAuthV1::default()
-            }),
-            args: Vec::new(),
-            flags: BTreeMap::new(),
-            subcommands: Vec::new(),
-        };
-
-        let policy = command
-            .command_policy(CommandPath::new(["orch", "approval", "decide"]))
-            .expect("auth metadata should build a policy");
-        assert_eq!(policy.visibility, VisibilityMode::CapabilityGated);
-        assert!(
-            policy
-                .required_capabilities
-                .contains("orch.approval.decide")
-        );
-        assert!(policy.feature_flags.contains("orch"));
-        assert_eq!(
-            policy.run_session_requirements.auth_strength,
-            Some(AuthStrength::Strong)
-        );
-    }
-
-    #[test]
-    fn command_auth_validation_rejects_blank_entries_unit() {
-        let err = validate_command_auth(&DescribeCommandAuthV1 {
-            visibility: None,
-            required_capabilities: vec![" ".to_string()],
-            feature_flags: Vec::new(),
-            ..DescribeCommandAuthV1::default()
-        })
-        .expect_err("blank capabilities should be rejected");
-        assert!(err.contains("required_capabilities"));
-    }
-
-    #[test]
     fn command_auth_hint_stays_compact_and_stable_unit() {
         let auth = DescribeCommandAuthV1 {
             visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
@@ -1791,12 +1457,7 @@ mod tests {
             }),
             ..DescribeCommandAuthV1::default()
         };
-        assert_eq!(
-            auth.hint().as_deref(),
-            Some(
-                "cap: orch.approval.decide; feature: orch; run: auth: strong, token: osp fresh(600s)"
-            )
-        );
+        assert_eq!(auth.hint(), None);
         assert_eq!(
             DescribeVisibilityModeV1::Authenticated.as_label(),
             "authenticated"

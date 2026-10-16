@@ -58,6 +58,20 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   execution preparation and live session facts. Remove recovery requests and
   outcomes. The hook survives REPL rebuilds and runs before native metadata
   preparation; help, completion and builtins do not acquire credentials.
+- **Breaking:** Remove builtin-policy builders, policy contexts, registries,
+  overrides and the mirrored command-policy DSL. `CommandDef` carries wire auth
+  directly. `CommandAccess` is `Runnable`, `Denied(reason)` or `Hidden(reason)`.
+  Remove the unused `CredentialState::present()` constructor.
+- **Breaking:** Remove config keys `auth.visible.builtins` and
+  `auth.visible.plugins`; configs that set them now fail as unknown keys.
+- **Breaking:** Remove capability, profile, product-availability, feature,
+  visible-session, auth-strength and credential-freshness gates. Protocol-v1
+  DTOs still parse the legacy fields and ignore them; `capability_gated` is
+  public. Plugins can still require authentication or present/valid credentials.
+- **Breaking:** Doctor session JSON drops `auth_strength`, `capability_count`
+  and `enabled_features`. Plugin command listings drop `required_capabilities`,
+  `feature_flags` and `visible_session`; run requirements and hints show only
+  supported fields. Credential validity and TTL diagnostics remain live.
 
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide

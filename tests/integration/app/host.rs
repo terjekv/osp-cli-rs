@@ -4,9 +4,6 @@ use clap::Command;
 use osp_cli::App;
 use osp_cli::app::{BufferedUiSink, StdIoUiSink, UiSink};
 use osp_cli::config::ConfigLayer;
-use osp_cli::core::command_policy::{
-    CommandPath, CommandPolicy, CommandPolicyContext, CommandPolicyRegistry, VisibilityMode,
-};
 use osp_cli::core::output_model::DisplayRule;
 use osp_cli::core::plugin::{
     PLUGIN_PROTOCOL_V1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
@@ -836,46 +833,6 @@ fn app_host_surfaces_native_commands_in_help_and_dispatch() {
         .expect("native command output should be row array");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["active_profile"], "default");
-}
-
-#[test]
-fn app_host_merges_active_profile_into_product_policy_context() {
-    with_config_path(
-        r#"
-[default]
-profile.default = "uio"
-
-[profile.uio]
-
-[profile.tsd]
-"#,
-        || {
-            let mut policy = CommandPolicyRegistry::new();
-            policy.register(
-                CommandPolicy::new(CommandPath::new(["config"]))
-                    .visibility(VisibilityMode::Authenticated)
-                    .allow_profiles(["tsd"]),
-            );
-            let app = App::builder()
-                .with_builtin_policy(policy)
-                .with_policy_context(CommandPolicyContext::default().authenticated(true))
-                .build();
-
-            let mut default_sink = BufferedUiSink::default();
-            app.run_with_sink(["osp", "config", "get", "theme.name"], &mut default_sink)
-                .expect_err("default profile should be outside the policy allowlist");
-
-            let mut selected_sink = BufferedUiSink::default();
-            let selected_exit = app
-                .run_with_sink(
-                    ["osp", "--profile", "tsd", "config", "get", "theme.name"],
-                    &mut selected_sink,
-                )
-                .expect("selected-profile access should be evaluated");
-            assert_eq!(selected_exit, 0, "{}", selected_sink.stderr);
-            assert!(selected_sink.stdout.contains("theme.name"));
-        },
-    );
 }
 
 #[test]

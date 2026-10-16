@@ -7,7 +7,6 @@
 //! - expanding aliases into prefilled command and flag state
 //! - re-rooting the tree when the REPL is inside a shell scope
 
-use crate::app::CMD_CONFIG;
 use crate::cli::invocation::scan_command_tokens;
 use crate::cli::pipeline::{is_cli_help_stage, validate_cli_dsl_stages};
 use crate::completion::{
@@ -37,12 +36,11 @@ pub(crate) fn build_repl_completion_tree(
         .build_from_specs(&surface.specs, default_pipe_verbs())
         .into_diagnostic()
         .wrap_err("failed to build REPL completion tree")?;
-    if view.auth.is_builtin_visible(CMD_CONFIG) {
-        CompletionTreeBuilder
-            .apply_config_set_keys(&mut tree, config_set_key_specs(view))
-            .into_diagnostic()
-            .wrap_err("failed to attach config completion keys")?;
-    }
+    CompletionTreeBuilder
+        .apply_config_set_keys(&mut tree, config_set_key_specs(view))
+        .into_diagnostic()
+        .wrap_err("failed to attach config completion keys")?;
+
     inject_invocation_flags(&mut tree.root);
     mark_context_only_flags(&mut tree.root);
 

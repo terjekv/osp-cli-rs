@@ -19,7 +19,6 @@ use crate::cli::commands::doctor as doctor_cmd;
 use crate::cli::invocation::{InvocationOptions, scan_cli_argv};
 use crate::cli::{Cli, Commands, ConfigCommands, PluginsCommands, ThemeCommands};
 use crate::config::{ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions, RuntimeLoadOptions};
-use crate::core::command_policy::{CommandPath, VisibilityMode};
 use crate::core::document::Document;
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::plugin::{
@@ -59,35 +58,20 @@ fn repl_view<'a>(
     repl::ReplViewContext::from_parts(runtime, session)
 }
 
-fn make_completion_state(auth_visible_builtins: Option<&str>) -> AppState {
-    make_completion_state_with_entries_and_native(
-        auth_visible_builtins,
-        &[],
-        NativeCommandRegistry::default(),
-    )
+fn make_completion_state() -> AppState {
+    make_completion_state_with_entries_and_native(&[], NativeCommandRegistry::default())
 }
 
-fn make_completion_state_with_entries(
-    auth_visible_builtins: Option<&str>,
-    entries: &[(&str, &str)],
-) -> AppState {
-    make_completion_state_with_entries_and_native(
-        auth_visible_builtins,
-        entries,
-        NativeCommandRegistry::default(),
-    )
+fn make_completion_state_with_entries(entries: &[(&str, &str)]) -> AppState {
+    make_completion_state_with_entries_and_native(entries, NativeCommandRegistry::default())
 }
 
 fn make_completion_state_with_entries_and_native(
-    auth_visible_builtins: Option<&str>,
     entries: &[(&str, &str)],
     native_commands: NativeCommandRegistry,
 ) -> AppState {
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "default");
-    if let Some(allowlist) = auth_visible_builtins {
-        defaults.set("auth.visible.builtins", allowlist);
-    }
     defaults.set("repl.history.path", "/tmp/osp-test-repl.history");
     defaults.set(
         "repl.shellable_commands",
@@ -163,7 +147,7 @@ impl NativeCommand for TestNativeCommand {
         let mut describe = DescribeCommandV1::from_clap(self.command());
         describe.auth = self.auth();
         describe.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-            visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+            visibility: Some(DescribeVisibilityModeV1::Authenticated),
             required_capabilities: vec!["ldap.user.read".to_string()],
             feature_flags: Vec::new(),
             ..DescribeCommandAuthV1::default()
@@ -241,7 +225,7 @@ fn test_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
 }
 
 fn render_prompt_snapshot(entries: &[(&str, &str)]) -> String {
-    let state = make_completion_state_with_entries(None, entries);
+    let state = make_completion_state_with_entries(entries);
     crate::repl::presentation::build_repl_prompt(repl_view(&state.runtime, &state.session)).left
 }
 
@@ -526,36 +510,6 @@ JSON
 "#,
         )
         .expect("plugin script should be written");
-    let mut perms = std::fs::metadata(&plugin_path)
-        .expect("metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
-    plugin_path
-}
-
-#[cfg(unix)]
-fn write_auth_pipeline_test_plugin(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let plugin_path = dir.join("osp-orch");
-    std::fs::write(
-        &plugin_path,
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{"protocol_version":1,"plugin_id":"orch","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"orch","about":"orch plugin","auth":{"visibility":"authenticated"},"args":[],"flags":{},"subcommands":[{"name":"approval","about":"approval","args":[],"flags":{},"subcommands":[{"name":"decide","about":"decide","auth":{"visibility":"capability_gated","required_capabilities":["orch.approval.decide"]},"args":[],"flags":{},"subcommands":[]}]}]}]}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{"protocol_version":1,"ok":true,"data":{"message":"ok"},"error":null,"meta":{"format_hint":"table","columns":["message"]}}
-JSON
-"#,
-    )
-    .expect("plugin script should be written");
     let mut perms = std::fs::metadata(&plugin_path)
         .expect("metadata should be readable")
         .permissions();

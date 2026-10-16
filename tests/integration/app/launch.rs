@@ -1,10 +1,6 @@
 use crate::temp_support::make_temp_dir;
-use anyhow::Result;
-use clap::Command;
 use osp_cli::app::{AppSession, AppStateBuilder, LaunchContext, RuntimeContext, TerminalKind};
 use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
-use osp_cli::core::command_policy::{AuthStrength, CommandPath, CredentialState, VisibilityMode};
-use osp_cli::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry};
 
 use super::support::{with_path_prefix, write_executable_script};
 
@@ -42,44 +38,6 @@ JSON
         name = name,
     );
     write_executable_script(&plugin_path, &script);
-}
-
-struct NativeLaunchProbe;
-
-impl NativeCommand for NativeLaunchProbe {
-    fn command(&self) -> Command {
-        Command::new("launch-native").about("Launch-aware native command")
-    }
-
-    fn auth(&self) -> Option<osp_cli::core::plugin::DescribeCommandAuthV1> {
-        Some(osp_cli::core::plugin::DescribeCommandAuthV1 {
-            visibility: Some(osp_cli::core::plugin::DescribeVisibilityModeV1::Authenticated),
-            required_capabilities: Vec::new(),
-            feature_flags: vec!["launch".to_string()],
-            visible_session: Some(osp_cli::core::plugin::DescribeSessionRequirementsV1 {
-                auth_strength: Some(osp_cli::core::plugin::DescribeAuthStrengthV1::Strong),
-                credentials: Vec::new(),
-            }),
-            run_session: Some(osp_cli::core::plugin::DescribeSessionRequirementsV1 {
-                auth_strength: None,
-                credentials: vec![
-                    osp_cli::core::plugin::DescribeCredentialRequirementV1::fresh("osp", 600),
-                ],
-            }),
-        })
-    }
-
-    fn execute(
-        &self,
-        _args: &[String],
-        _context: &NativeCommandContext<'_>,
-    ) -> Result<NativeCommandOutcome> {
-        Ok(NativeCommandOutcome::Exit(0))
-    }
-}
-
-fn launch_native_registry() -> NativeCommandRegistry {
-    NativeCommandRegistry::new().with_command(NativeLaunchProbe)
 }
 
 #[cfg(unix)]
@@ -132,115 +90,6 @@ fn app_state_builder_uses_launch_context_for_plugin_roots_and_path_discovery() {
                 .any(|plugin| plugin.plugin_id == "path-probe")
         );
     });
-}
-
-#[test]
-fn app_state_builder_projects_native_registry_into_external_policy() {
-    let config = resolved_config(&[]);
-    let state = AppStateBuilder::from_resolved_config(
-        RuntimeContext::new(None, TerminalKind::Cli, None),
-        config,
-    )
-    .expect("app state builder should derive host inputs")
-    .with_native_commands(launch_native_registry())
-    .build();
-
-    assert!(
-        state
-            .clients
-            .native_commands()
-            .command("launch-native")
-            .is_some()
-    );
-    assert!(
-        state
-            .runtime
-            .auth()
-            .external_policy()
-            .contains(&CommandPath::new(["launch-native"]))
-    );
-    let policy = state
-        .runtime
-        .auth()
-        .external_policy()
-        .resolved_policy(&CommandPath::new(["launch-native"]))
-        .expect("native policy should resolve");
-    assert_eq!(policy.visibility, VisibilityMode::Authenticated);
-    assert!(policy.feature_flags.contains("launch"));
-    assert_eq!(
-        policy.visible_session_requirements.auth_strength,
-        Some(AuthStrength::Strong)
-    );
-    assert_eq!(policy.run_session_requirements.credentials.len(), 1);
-}
-
-#[test]
-fn auth_state_enforces_native_session_requirements_end_to_end() {
-    let config = resolved_config(&[]);
-    let mut state = AppStateBuilder::from_resolved_config(
-        RuntimeContext::new(None, TerminalKind::Cli, None),
-        config,
-    )
-    .expect("app state builder should derive host inputs")
-    .with_native_commands(launch_native_registry())
-    .build();
-
-    state.runtime.set_policy_context(
-        osp_cli::core::command_policy::CommandPolicyContext::default()
-            .with_profile("unrelated-product-profile")
-            .with_features(["launch"]),
-    );
-    assert_eq!(
-        state
-            .runtime
-            .auth()
-            .policy_context()
-            .active_profile
-            .as_deref(),
-        Some("default")
-    );
-    let hidden = state
-        .runtime
-        .auth()
-        .external_command_access("launch-native");
-    assert_eq!(
-        hidden.reasons,
-        vec![
-            osp_cli::core::command_policy::AccessReason::InsufficientAuthStrength(
-                AuthStrength::Strong
-            )
-        ]
-    );
-
-    state.runtime.set_policy_context(
-        osp_cli::core::command_policy::CommandPolicyContext::default()
-            .authenticated(true)
-            .with_auth_strength(AuthStrength::Strong)
-            .with_features(["launch"]),
-    );
-    let denied = state
-        .runtime
-        .auth()
-        .external_command_access("launch-native");
-    assert_eq!(
-        denied.reasons,
-        vec![osp_cli::core::command_policy::AccessReason::MissingCredential("osp".to_string())]
-    );
-
-    state.runtime.set_policy_context(
-        osp_cli::core::command_policy::CommandPolicyContext::default()
-            .authenticated(true)
-            .with_auth_strength(AuthStrength::Strong)
-            .with_features(["launch"])
-            .with_credential("osp", CredentialState::valid_for(900)),
-    );
-    assert!(
-        state
-            .runtime
-            .auth()
-            .external_command_access("launch-native")
-            .is_runnable()
-    );
 }
 
 #[test]

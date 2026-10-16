@@ -126,57 +126,51 @@ pub(crate) fn build_repl_surface(
             .collect::<Vec<_>>(),
     );
 
-    if view.auth.is_builtin_visible(CMD_PLUGINS) {
-        root_words.extend([CMD_PLUGINS.to_string(), CMD_LIST.to_string()]);
-        specs.push(plugins_command_spec(catalog, help_layout));
-        overview_entries.push(ReplOverviewEntry {
-            name: CMD_PLUGINS.to_string(),
-            summary: "Inspect and manage plugin providers".to_string(),
-        });
-    }
-    if view.auth.is_builtin_visible(CMD_DOCTOR)
-        && let Some(def) = doctor_cmd::doctor_command_def(command_sort_key(CMD_DOCTOR, help_layout))
-    {
+    root_words.extend([CMD_PLUGINS.to_string(), CMD_LIST.to_string()]);
+    specs.push(plugins_command_spec(catalog, help_layout));
+    overview_entries.push(ReplOverviewEntry {
+        name: CMD_PLUGINS.to_string(),
+        summary: "Inspect and manage plugin providers".to_string(),
+    });
+
+    if let Some(def) = doctor_cmd::doctor_command_def(command_sort_key(CMD_DOCTOR, help_layout)) {
         root_words.push(CMD_DOCTOR.to_string());
         specs.push(command_spec_from_command_def(&def));
         overview_entries.push(overview_entry_from_command_def(&def));
     }
-    if view.auth.is_builtin_visible(CMD_THEME) {
-        root_words.extend([
-            CMD_THEME.to_string(),
-            CMD_LIST.to_string(),
-            CMD_SHOW.to_string(),
-            CMD_USE.to_string(),
-        ]);
-        let def =
-            theme_cmd::theme_command_def(view.themes, command_sort_key(CMD_THEME, help_layout));
-        specs.push(command_spec_from_command_def(&def));
-        overview_entries.push(overview_entry_from_command_def(&def));
-    }
-    if view.auth.is_builtin_visible(CMD_CONFIG) {
-        root_words.extend([
-            CMD_CONFIG.to_string(),
-            "alias".to_string(),
-            "add".to_string(),
-            "get".to_string(),
-            "show".to_string(),
-            "explain".to_string(),
-            "set".to_string(),
-            "remove".to_string(),
-            "doctor".to_string(),
-        ]);
-        specs.push(config_command_spec(view));
-        specs.push(alias_command_spec(view, &aliases));
-        overview_entries.push(ReplOverviewEntry {
-            name: CMD_CONFIG.to_string(),
-            summary: "Inspect and edit runtime config".to_string(),
-        });
-        overview_entries.push(ReplOverviewEntry {
-            name: "alias".to_string(),
-            summary: "Create and manage command aliases".to_string(),
-        });
-    }
-    if history_enabled && view.auth.is_builtin_visible(CMD_HISTORY) {
+    root_words.extend([
+        CMD_THEME.to_string(),
+        CMD_LIST.to_string(),
+        CMD_SHOW.to_string(),
+        CMD_USE.to_string(),
+    ]);
+    let def = theme_cmd::theme_command_def(view.themes, command_sort_key(CMD_THEME, help_layout));
+    specs.push(command_spec_from_command_def(&def));
+    overview_entries.push(overview_entry_from_command_def(&def));
+
+    root_words.extend([
+        CMD_CONFIG.to_string(),
+        "alias".to_string(),
+        "add".to_string(),
+        "get".to_string(),
+        "show".to_string(),
+        "explain".to_string(),
+        "set".to_string(),
+        "remove".to_string(),
+        "doctor".to_string(),
+    ]);
+    specs.push(config_command_spec(view));
+    specs.push(alias_command_spec(view, &aliases));
+    overview_entries.push(ReplOverviewEntry {
+        name: CMD_CONFIG.to_string(),
+        summary: "Inspect and edit runtime config".to_string(),
+    });
+    overview_entries.push(ReplOverviewEntry {
+        name: "alias".to_string(),
+        summary: "Create and manage command aliases".to_string(),
+    });
+
+    if history_enabled {
         root_words.extend([
             CMD_HISTORY.to_string(),
             CMD_LIST.to_string(),
@@ -187,14 +181,12 @@ pub(crate) fn build_repl_surface(
         specs.push(command_spec_from_command_def(&def));
         overview_entries.push(overview_entry_from_command_def(&def));
     }
-    if view.auth.is_builtin_visible(CMD_CONTEXT) {
-        root_words.push(CMD_CONTEXT.to_string());
-        specs.push(context_command_spec(help_layout));
-        overview_entries.push(ReplOverviewEntry {
-            name: CMD_CONTEXT.to_string(),
-            summary: "Inspect or clear remembered session values".to_string(),
-        });
-    }
+    root_words.push(CMD_CONTEXT.to_string());
+    specs.push(context_command_spec(help_layout));
+    overview_entries.push(ReplOverviewEntry {
+        name: CMD_CONTEXT.to_string(),
+        summary: "Inspect or clear remembered session values".to_string(),
+    });
 
     overview_entries.extend(catalog.iter().map(|entry| {
         let mut overview = plugin_overview_entry(entry);

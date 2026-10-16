@@ -38,12 +38,12 @@ use clap::Command;
 
 use crate::completion::CommandSpec;
 use crate::config::ResolvedConfig;
-use crate::core::command_policy::CommandPolicyRegistry;
+use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
 use crate::core::runtime::RuntimeHints;
-use crate::plugin::catalog::register_describe_command_policies;
+use crate::plugin::catalog::collect_command_auth;
 
 /// Elevation requested for one native-command execution.
 ///
@@ -567,17 +567,17 @@ pub trait NativeCommand: Send + Sync {
 
     /// Prepares metadata when an invocation fails strict parsing or requests help.
     ///
-    /// For ordinary execution, the host authorizes the command root as runnable
-    /// before calling this. For help, it first authorizes the cached command
-    /// path as visible and treats preparation errors as a cache miss so help
+    /// For ordinary execution, the host checks cached-path visibility and runs
+    /// the product access hook before calling this. For help, it checks cached
+    /// visibility and treats preparation errors as a cache miss so help
     /// remains available offline and without acquiring credentials. Arguments
     /// are the original supplied arguments, without the registered command name
     /// or DSL pipeline. Remote discovery is permitted, but this must not execute
     /// the requested action.
     /// Return `true` only when the grammar changed: the host then normalizes,
     /// describes, and strictly parses the invocation once more, and authorizes
-    /// its full path against both host policy and refreshed native declarations
-    /// before execution. Installed host restrictions remain in force.
+    /// its full path against refreshed native declarations and product visibility
+    /// before execution. The product hook is not called again after refresh.
     fn prepare_invocation_metadata(
         &self,
         _args: &[String],
@@ -817,13 +817,13 @@ impl NativeCommandRegistry {
             .collect()
     }
 
-    /// Builds a command-policy registry derived from command descriptions.
-    pub fn command_policy_registry(&self) -> CommandPolicyRegistry {
-        let mut registry = CommandPolicyRegistry::new();
+    /// Collects inherited wire auth by canonical command path.
+    pub(crate) fn command_auth(&self) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
+        let mut registry = BTreeMap::new();
         for command in self.commands.values() {
             let mut describe = command.describe();
             describe.inherit_auth_from_parents();
-            register_describe_command_policies(&mut registry, &describe, &[]);
+            collect_command_auth(&mut registry, &describe, &[]);
         }
         registry
     }

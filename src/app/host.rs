@@ -34,8 +34,7 @@ use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
 
 pub(crate) use super::bootstrap::prepare_startup_host;
 pub(crate) use super::dispatch::{
-    DispatchPlan, RunAction, build_dispatch_plan, ensure_builtin_visible_for,
-    normalize_profile_override,
+    DispatchPlan, RunAction, build_dispatch_plan, normalize_profile_override,
 };
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
@@ -124,7 +123,6 @@ struct KnownErrorChain<'a> {
     clap: Option<&'a clap::Error>,
     config: Option<&'a crate::config::ConfigError>,
     plugin: Option<&'a PluginDispatchError>,
-    missing_capabilities: Option<&'a crate::app::dispatch::MissingCommandCapabilities>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -170,9 +168,6 @@ impl<'a> KnownErrorChain<'a> {
             clap: find_error_in_chain::<clap::Error>(err),
             config: find_error_in_chain::<crate::config::ConfigError>(err),
             plugin: find_error_in_chain::<PluginDispatchError>(err),
-            missing_capabilities: find_error_in_chain::<
-                crate::app::dispatch::MissingCommandCapabilities,
-            >(err),
         }
     }
 }
@@ -615,11 +610,6 @@ fn prepare_host_run(
         .set_product_defaults(app.product_defaults.clone());
     {
         let _phase = crate::startup_trace::phase("auth policy context setup");
-        state.runtime.set_policy_context(app.policy_context.clone());
-        state
-            .runtime
-            .auth
-            .replace_builtin_policy(app.builtin_policy.clone());
         state.runtime.set_access_policy(app.access_policy.clone());
     }
     {
@@ -796,13 +786,6 @@ pub fn render_report_message(
                 message.push_str(&source_text);
             }
             next = source.source();
-        }
-        if let Some(access) = known.missing_capabilities {
-            let normal_detail = access.normal_detail();
-            if !message.contains(&normal_detail) {
-                message.push('\n');
-                message.push_str(&normal_detail);
-            }
         }
     }
 

@@ -20,8 +20,6 @@ expression: sanitized
     "source": null,
     "auth_hint": null,
     "auth_visibility": null,
-    "required_capabilities": [],
-    "feature_flags": [],
     "subcommands": []
   }
 ]

@@ -9,9 +9,8 @@
 use miette::{Result, miette};
 
 use super::{
-    AppClients, AppRuntime, AppSession, CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY,
-    CMD_PLUGINS, CMD_THEME, CliCommandResult, ResolvedInvocation, UiSink, UiState,
-    ensure_builtin_access, run_cli_command_with_ui,
+    AppClients, AppRuntime, AppSession, CliCommandResult, ResolvedInvocation, UiSink, UiState,
+    run_cli_command_with_ui,
 };
 use crate::cli::commands::{
     config as config_cmd, context as context_cmd, doctor as doctor_cmd, history as history_cmd,
@@ -102,66 +101,47 @@ impl<'a> BuiltinExecutor<'a> {
     ) -> Result<Option<CliCommandResult>> {
         command.validate_dispatch_surface(matches!(surface, BuiltinSurface::Repl { .. }))?;
         match command {
-            Commands::Plugins(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_PLUGINS)?;
-                plugins_cmd::run_plugins_command(
-                    plugins_cmd::PluginsCommandContext::from_parts(self.runtime, self.clients),
-                    args,
-                )
-                .map(Some)
-            }
-            Commands::Doctor(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_DOCTOR)?;
-                doctor_cmd::run_doctor_command(
-                    doctor_cmd::DoctorCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        self.clients,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
-            }
-            Commands::Theme(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_THEME)?;
-                theme_cmd::run_theme_command(
-                    &mut self.session.config_overrides,
-                    theme_cmd::ThemeCommandContext::from_parts(self.runtime, surface.ui()),
-                    args,
-                )
-                .map(Some)
-            }
-            Commands::Config(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_CONFIG)?;
-                config_cmd::run_config_command(
-                    config_cmd::ConfigCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
-            }
-            Commands::Alias(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_CONFIG)?;
-                config_cmd::run_alias_command(
-                    config_cmd::ConfigCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
-            }
-            Commands::History(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_HISTORY)?;
-                self.run_history_command(surface, args).map(Some)
-            }
+            Commands::Plugins(args) => plugins_cmd::run_plugins_command(
+                plugins_cmd::PluginsCommandContext::from_parts(self.runtime, self.clients),
+                args,
+            )
+            .map(Some),
+            Commands::Doctor(args) => doctor_cmd::run_doctor_command(
+                doctor_cmd::DoctorCommandContext::from_parts(
+                    self.runtime,
+                    self.session,
+                    self.clients,
+                    surface.ui(),
+                ),
+                args,
+            )
+            .map(Some),
+            Commands::Theme(args) => theme_cmd::run_theme_command(
+                &mut self.session.config_overrides,
+                theme_cmd::ThemeCommandContext::from_parts(self.runtime, surface.ui()),
+                args,
+            )
+            .map(Some),
+            Commands::Config(args) => config_cmd::run_config_command(
+                config_cmd::ConfigCommandContext::from_parts(
+                    self.runtime,
+                    self.session,
+                    surface.ui(),
+                ),
+                args,
+            )
+            .map(Some),
+            Commands::Alias(args) => config_cmd::run_alias_command(
+                config_cmd::ConfigCommandContext::from_parts(
+                    self.runtime,
+                    self.session,
+                    surface.ui(),
+                ),
+                args,
+            )
+            .map(Some),
+            Commands::History(args) => self.run_history_command(surface, args).map(Some),
             Commands::Context(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_CONTEXT)?;
                 context_cmd::run_context_command(self.session, args).map(Some)
             }
             Commands::Completions(_) => unreachable!("validated dispatch surface"),

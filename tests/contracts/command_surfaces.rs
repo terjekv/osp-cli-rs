@@ -252,41 +252,6 @@ fn intro_command_compact_and_austere_diverge_by_presentation_contract() {
 }
 
 #[test]
-fn intro_command_switches_to_completion_hint_when_help_is_hidden_contract() {
-    let stdout = run_cli_stdout_with_config(
-        Some(
-            r#"[default]
-ui.presentation = "austere"
-auth.visible.builtins = "config,theme,plugins"
-"#,
-        ),
-        &["--user", "anonymous", "--no-env", "intro"],
-    );
-
-    assert!(stdout.contains("Use completion to explore commands."));
-    assert!(!stdout.contains("See help for more."));
-}
-
-#[test]
-fn intro_command_hides_protected_builtins_from_visible_intro_commands_contract() {
-    let stdout = run_cli_stdout_with_config(
-        Some(
-            r#"[default]
-ui.presentation = "compact"
-auth.visible.builtins = "help"
-"#,
-        ),
-        &["--user", "anonymous", "--no-env", "intro"],
-    );
-
-    assert!(stdout.contains("Commands:"), "{stdout:?}");
-    assert!(stdout.contains("help"), "{stdout:?}");
-    assert!(!stdout.contains("config"), "{stdout:?}");
-    assert!(!stdout.contains("theme"), "{stdout:?}");
-    assert!(!stdout.contains("plugins"), "{stdout:?}");
-}
-
-#[test]
 fn intro_command_shape_matrix_preserves_none_minimal_and_full_chrome_contract() {
     let none = run_cli_stdout_with_config(
         Some(

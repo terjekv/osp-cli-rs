@@ -35,7 +35,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
 
 #[test]
 fn repl_help_chrome_variants_render_expected_structure_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let known_sections =
         "Usage: config <COMMAND>\n\nCommands:\n  show\n\nOptions:\n  -h, --help  Print help\n";
     let headings = repl_help::render_repl_help_with_chrome(
@@ -68,7 +68,7 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
     assert!(unicode.contains("Commands"));
     assert!(unicode.contains("Options"));
 
-    let austere = make_completion_state_with_entries(None, &[("ui.presentation", "austere")]);
+    let austere = make_completion_state_with_entries(&[("ui.presentation", "austere")]);
     let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins commands` to list plugin-provided commands.\n";
     let rendered = repl_help::render_repl_help_with_chrome(
         repl_view(&austere.runtime, &austere.session),

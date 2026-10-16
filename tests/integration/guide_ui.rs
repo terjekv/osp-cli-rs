@@ -1,7 +1,4 @@
-use osp_cli::core::command_def::{
-    ArgDef, CommandDef, CommandPolicyDef, FlagDef, ValueChoice, ValueKind,
-};
-use osp_cli::core::command_policy::VisibilityMode;
+use osp_cli::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
 use osp_cli::core::document::{DocBlock, Document};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
@@ -71,8 +68,6 @@ fn guide_payload_value_extraction_degrades_and_renders_as_plain_values() {
 
 #[test]
 fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts() {
-    assert!(CommandPolicyDef::default().is_empty());
-
     let profile_choice = ValueChoice::new("prod")
         .help("Production profile")
         .display("Production")
@@ -89,13 +84,6 @@ fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts()
         .help("Human output")
         .display("Text")
         .sort("020");
-    let policy = CommandPolicyDef {
-        visibility: VisibilityMode::Authenticated,
-        required_capabilities: vec!["deploy.write".to_string()],
-        feature_flags: vec!["beta".to_string()],
-        ..CommandPolicyDef::default()
-    };
-
     let authored = CommandDef::new("deploy")
         .about("Deploy pending changes")
         .long_about("Long deploy help")
@@ -105,7 +93,6 @@ fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts()
         .alias("ship")
         .aliases(["rollout", "push"])
         .sort("020")
-        .policy(policy.clone())
         .arg(
             ArgDef::new("profile")
                 .value_name("PROFILE")
@@ -158,7 +145,6 @@ fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts()
     assert_eq!(authored.aliases, vec!["ship", "rollout", "push"]);
     assert_eq!(authored.long_about.as_deref(), Some("Long deploy help"));
     assert_eq!(authored.sort_key.as_deref(), Some("020"));
-    assert_eq!(authored.policy, policy);
     assert_eq!(authored.args[0].defaults, vec!["default", "prod"]);
     let format_flag = authored
         .flags

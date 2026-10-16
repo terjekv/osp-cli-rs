@@ -246,7 +246,7 @@ fn write_session_auth_plugin(dir: &std::path::Path) -> std::path::PathBuf {
 PATH=/usr/bin:/bin:$PATH
 if [ "$1" = "--describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"secure","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"secure","about":"secure plugin","auth":{"visibility":"authenticated","run_session":{"credentials":[{"state":"fresh","service":"osp","min_ttl_seconds":600}]}},"args":[],"flags":{},"subcommands":[]}]}
+{"protocol_version":1,"plugin_id":"secure","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"secure","about":"secure plugin","auth":{"visibility":"authenticated","run_session":{"credentials":[{"state":"valid","service":"osp"}]}},"args":[],"flags":{},"subcommands":[]}]}
 JSON
   exit 0
 fi

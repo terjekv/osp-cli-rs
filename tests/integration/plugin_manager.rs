@@ -1,8 +1,6 @@
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
-use osp_cli::core::command_policy::{CommandPath, VisibilityMode};
-#[cfg(unix)]
 use osp_cli::plugin::{PluginDispatchContext, PluginManager, PluginSource};
 
 #[cfg(unix)]
@@ -36,28 +34,6 @@ JSON
 "#,
         plugin_id = plugin_id,
         command_name = command_name,
-    );
-    write_executable_script(&plugin_path, &script);
-}
-
-#[cfg(unix)]
-fn write_auth_plugin(dir: &std::path::Path, plugin_id: &str) {
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{plugin_id}","about":"{plugin_id} plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[{{"name":"approval","about":"approval commands","args":[],"flags":{{}},"subcommands":[{{"name":"decide","about":"decide approvals","auth":{{"visibility":"capability_gated","required_capabilities":["{plugin_id}.approval.decide"],"feature_flags":["{plugin_id}"]}},"args":[],"flags":{{}},"subcommands":[]}}]}}]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"message":"ok"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
-JSON
-"#,
-        plugin_id = plugin_id,
     );
     write_executable_script(&plugin_path, &script);
 }
@@ -231,7 +207,47 @@ fn plugin_manager_surfaces_provider_selection_across_catalog_help_and_completion
 
 #[cfg(unix)]
 #[test]
-fn plugin_manager_projects_recursive_auth_metadata_into_catalog_and_policy_registry() {
+fn plugin_manager_projects_session_requirements_into_catalog_and_policy_registry() {
+    let root = make_temp_dir("osp-cli-plugin-manager-integration-session-policy");
+    let plugins_dir = root.join("plugins");
+    std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
+
+    write_session_auth_plugin(&plugins_dir, "secure");
+    let manager = PluginManager::new(vec![plugins_dir]);
+
+    let catalog = manager.command_catalog();
+    let secure = catalog
+        .iter()
+        .find(|entry| entry.name == "secure")
+        .expect("secure command should exist");
+    assert_eq!(secure.auth_hint().as_deref(), Some("auth"));
+}
+
+#[cfg(unix)]
+fn write_auth_plugin(dir: &std::path::Path, plugin_id: &str) {
+    let plugin_path = dir.join(format!("osp-{plugin_id}"));
+    let script = format!(
+        r#"#!/bin/sh
+PATH=/usr/bin:/bin:$PATH
+if [ "$1" = "--describe" ]; then
+  cat <<'JSON'
+{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{plugin_id}","about":"{plugin_id} plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[{{"name":"approval","about":"approval commands","args":[],"flags":{{}},"subcommands":[{{"name":"decide","about":"decide approvals","auth":{{"visibility":"capability_gated","required_capabilities":["{plugin_id}.approval.decide"],"feature_flags":["{plugin_id}"]}},"args":[],"flags":{{}},"subcommands":[]}}]}}]}}]}}
+JSON
+  exit 0
+fi
+
+cat <<'JSON'
+{{"protocol_version":1,"ok":true,"data":{{"message":"ok"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
+JSON
+"#,
+        plugin_id = plugin_id,
+    );
+    write_executable_script(&plugin_path, &script);
+}
+
+#[cfg(unix)]
+#[test]
+fn plugin_manager_projects_recursive_auth_metadata_into_catalog() {
     let root = make_temp_dir("osp-cli-plugin-manager-integration-policy");
     let plugins_dir = root.join("plugins");
     std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
@@ -249,53 +265,4 @@ fn plugin_manager_projects_recursive_auth_metadata_into_catalog_and_policy_regis
 
     let help = manager.repl_help_text();
     assert!(help.contains("orch [approval] - orch plugin [auth] (orch/explicit)"));
-
-    let registry = manager.command_policy_registry();
-    let root_policy = registry
-        .resolved_policy(&CommandPath::new(["orch"]))
-        .expect("root command policy should exist");
-    assert_eq!(root_policy.visibility, VisibilityMode::Authenticated);
-
-    let nested_policy = registry
-        .resolved_policy(&CommandPath::new(["orch", "approval", "decide"]))
-        .expect("nested command policy should exist");
-    assert_eq!(nested_policy.visibility, VisibilityMode::CapabilityGated);
-    assert!(
-        nested_policy
-            .required_capabilities
-            .contains("orch.approval.decide")
-    );
-    assert!(nested_policy.feature_flags.contains("orch"));
-}
-
-#[cfg(unix)]
-#[test]
-fn plugin_manager_projects_session_requirements_into_catalog_and_policy_registry() {
-    let root = make_temp_dir("osp-cli-plugin-manager-integration-session-policy");
-    let plugins_dir = root.join("plugins");
-    std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-
-    write_session_auth_plugin(&plugins_dir, "secure");
-    let manager = PluginManager::new(vec![plugins_dir]);
-
-    let catalog = manager.command_catalog();
-    let secure = catalog
-        .iter()
-        .find(|entry| entry.name == "secure")
-        .expect("secure command should exist");
-    assert_eq!(
-        secure.auth_hint().as_deref(),
-        Some("auth; show: auth: strong; run: token: osp fresh(600s)")
-    );
-
-    let policy = manager
-        .command_policy_registry()
-        .resolved_policy(&CommandPath::new(["secure"]))
-        .expect("secure policy should exist");
-    assert_eq!(policy.visibility, VisibilityMode::Authenticated);
-    assert_eq!(
-        policy.visible_session_requirements.auth_strength,
-        Some(osp_cli::core::command_policy::AuthStrength::Strong)
-    );
-    assert_eq!(policy.run_session_requirements.credentials.len(), 1);
 }

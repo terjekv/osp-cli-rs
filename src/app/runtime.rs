@@ -23,7 +23,7 @@
 //! - callers usually receive [`AppRuntime`] and [`AppClients`] from host
 //!   bootstrap rather than assembling them field-by-field
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -32,9 +32,9 @@ use super::access::{AccessPolicy, Visibility};
 use super::host::ErrorDetail;
 use crate::config::{ConfigLayer, ResolvedConfig, RuntimeLoadOptions};
 use crate::core::command_policy::{
-    AccessReason, CommandAccess, CommandPath, CommandPolicy, CommandPolicyContext,
-    CommandPolicyRegistry, VisibilityMode,
+    AccessReason, CommandAccess, CommandPath, SessionFacts, evaluate_auth,
 };
+use crate::core::plugin::DescribeCommandAuthV1;
 use crate::native::NativeCommandRegistry;
 use crate::plugin::PluginManager;
 use crate::plugin::config::{PluginConfigEntry, PluginConfigEnv, PluginConfigEnvCache};
@@ -508,13 +508,6 @@ impl AppRuntime {
         &self.auth
     }
 
-    /// Updates product-owned authentication facts after session acquisition.
-    /// Profile identity remains owned by the resolved host configuration.
-    pub fn set_policy_context(&mut self, context: CommandPolicyContext) {
-        self.auth
-            .set_policy_context(policy_context_for_resolved(context, self.config.resolved()));
-    }
-
     /// Projects the authenticated subject into the host context used by
     /// prompts and product defaults without re-resolving invocation config.
     pub fn set_authenticated_subject(&mut self, subject: Option<&str>) {
@@ -546,187 +539,75 @@ impl AppRuntime {
     }
 }
 
-/// Authorization and command-visibility state derived from configuration.
+/// Declared external authentication and the shared product access hook.
+#[derive(Default)]
 pub struct AuthState {
     access_policy: Option<Arc<dyn AccessPolicy>>,
-    builtins_allowlist: Option<HashSet<String>>,
-    external_allowlist: Option<HashSet<String>>,
-    policy_context: CommandPolicyContext,
-    builtin_policy: CommandPolicyRegistry,
-    external_policy: CommandPolicyRegistry,
+    command_auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,
 }
 
 impl AuthState {
-    /// Builds authorization state from the resolved configuration.
-    pub fn from_resolved(config: &ResolvedConfig) -> Self {
-        Self {
-            access_policy: None,
-            builtins_allowlist: parse_allowlist(config.get_string("auth.visible.builtins")),
-            // Non-builtin top-level commands currently still use the historical
-            // `auth.visible.plugins` key. That surface now covers both external
-            // plugins and native registered integrations dispatched via the
-            // generic external command path.
-            external_allowlist: parse_allowlist(config.get_string("auth.visible.plugins")),
-            policy_context: policy_context_for_resolved(CommandPolicyContext::default(), config),
-            builtin_policy: CommandPolicyRegistry::default(),
-            external_policy: CommandPolicyRegistry::default(),
-        }
-    }
-
-    /// Builds authorization state and external policy from the current config
-    /// and active command registries.
-    pub(crate) fn from_resolved_with_external_policies(
-        config: &ResolvedConfig,
+    pub(crate) fn from_commands(
         plugins: &PluginManager,
         native_commands: &NativeCommandRegistry,
     ) -> Self {
-        let mut auth = Self::from_resolved(config);
-        let plugin_policy = plugins.command_policy_registry();
-        let external_policy =
-            merge_policy_registries(plugin_policy, native_commands.command_policy_registry());
-        auth.replace_external_policy(external_policy);
-        auth
+        let mut command_auth = plugins.command_auth();
+        command_auth.extend(native_commands.command_auth());
+        Self {
+            command_auth,
+            access_policy: None,
+        }
     }
 
-    /// Returns live authentication and credential facts.
-    pub fn session_facts(&self) -> crate::command_policy::SessionFacts {
+    /// Reads live product facts without acquiring credentials.
+    pub fn session_facts(&self) -> SessionFacts {
         self.access_policy
             .as_ref()
             .map(|policy| policy.session_facts())
-            .unwrap_or_else(|| crate::command_policy::SessionFacts {
-                authenticated: self.policy_context.authenticated,
-                credentials: self.policy_context.credentials.clone(),
-            })
+            .unwrap_or_default()
     }
 
-    pub(crate) fn effective_policy_context(&self) -> CommandPolicyContext {
-        let mut context = self.policy_context.clone();
-        let facts = self.session_facts();
-        context.authenticated = facts.authenticated;
-        context.credentials = facts.credentials;
-        context
+    pub(crate) fn replace_command_auth(
+        &mut self,
+        auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,
+    ) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
+        std::mem::replace(&mut self.command_auth, auth)
     }
 
-    fn product_hidden(&self, path: &CommandPath) -> Option<CommandAccess> {
-        let policy = self.access_policy.as_ref()?;
-        for end in 1..=path.as_slice().len() {
-            if let Visibility::Hidden(message) = policy.visibility(&path.as_slice()[..end]) {
-                return Some(CommandAccess::hidden(
-                    crate::command_policy::AccessReason::HiddenByProduct(message),
-                ));
-            }
-        }
-        None
+    pub(crate) fn refresh_native_auth(
+        &mut self,
+        description: &crate::core::plugin::DescribeCommandV1,
+    ) {
+        let root = description.name.trim().to_ascii_lowercase();
+        self.command_auth
+            .retain(|path, _| path.as_slice().first() != Some(&root));
+        crate::plugin::catalog::collect_command_auth(&mut self.command_auth, description, &[]);
     }
 
-    /// Returns the context used when evaluating command policies.
-    pub fn policy_context(&self) -> &CommandPolicyContext {
-        &self.policy_context
-    }
-
-    /// Replaces the context used when evaluating command policies.
-    pub fn set_policy_context(&mut self, context: CommandPolicyContext) {
-        self.policy_context = context;
-    }
-
-    /// Returns the policy registry for built-in commands.
-    pub fn builtin_policy(&self) -> &CommandPolicyRegistry {
-        &self.builtin_policy
-    }
-
-    /// Returns the mutable policy registry for built-in commands.
-    pub fn builtin_policy_mut(&mut self) -> &mut CommandPolicyRegistry {
-        &mut self.builtin_policy
-    }
-
-    /// Replaces the policy registry for built-in commands.
-    pub fn replace_builtin_policy(&mut self, registry: CommandPolicyRegistry) {
-        self.builtin_policy = registry;
-    }
-
-    /// Returns the policy registry for externally dispatched commands.
-    pub fn external_policy(&self) -> &CommandPolicyRegistry {
-        &self.external_policy
-    }
-
-    /// Returns the mutable policy registry for externally dispatched commands.
-    pub fn external_policy_mut(&mut self) -> &mut CommandPolicyRegistry {
-        &mut self.external_policy
-    }
-
-    /// Replaces the policy registry for externally dispatched commands.
-    pub fn replace_external_policy(&mut self, registry: CommandPolicyRegistry) {
-        self.external_policy = registry;
-    }
-
-    /// Evaluates access for a built-in command.
-    pub fn builtin_access(&self, command: &str) -> CommandAccess {
-        command_access_for(
-            command,
-            &self.builtins_allowlist,
-            &self.builtin_policy,
-            &self.policy_context,
-        )
-    }
-
-    /// Evaluates access for an external command.
+    /// Evaluates an external command root.
     pub fn external_command_access(&self, command: &str) -> CommandAccess {
         self.external_command_path_access(&CommandPath::new([command]))
     }
 
-    /// Evaluates access for an external command path.
+    /// Combines product visibility with declared command auth for all readers.
     pub fn external_command_path_access(&self, path: &CommandPath) -> CommandAccess {
-        if let Some(access) = self.product_hidden(path) {
-            return access;
-        }
-        command_access_for_path(
-            path,
-            &self.external_allowlist,
-            &self.external_policy,
-            &self.effective_policy_context(),
-        )
+        self.external_command_access_with_auth(path, self.command_auth.get(path))
     }
 
-    pub(crate) fn external_command_path_access_with_policy(
+    pub(crate) fn external_command_access_with_auth(
         &self,
         path: &CommandPath,
-        policy: &CommandPolicyRegistry,
+        auth: Option<&DescribeCommandAuthV1>,
     ) -> CommandAccess {
-        if let Some(access) = self.product_hidden(path) {
-            return access;
+        // A hidden parent hides its descendants, including direct dispatch.
+        if let Some(policy) = &self.access_policy {
+            for end in 1..=path.as_slice().len() {
+                if let Visibility::Hidden(message) = policy.visibility(&path.as_slice()[..end]) {
+                    return CommandAccess::Hidden(AccessReason::HiddenByProduct(message));
+                }
+            }
         }
-        command_access_for_path(
-            path,
-            &self.external_allowlist,
-            policy,
-            &self.effective_policy_context(),
-        )
-    }
-
-    /// Returns whether a built-in command should be shown to the user.
-    pub fn is_builtin_visible(&self, command: &str) -> bool {
-        self.builtin_access(command).is_visible()
-    }
-
-    /// Returns whether an external command should be shown to the user.
-    pub(crate) fn filter_command_spec(
-        &self,
-        command: &mut crate::completion::CommandSpec,
-        prefix: &[String],
-    ) {
-        let mut path = prefix.to_vec();
-        path.push(command.name.clone());
-        command.subcommands.retain(|child| {
-            let path = CommandPath::new(
-                path.iter()
-                    .cloned()
-                    .chain(std::iter::once(child.name.clone())),
-            );
-            self.external_command_path_access(&path).is_visible()
-        });
-        for child in &mut command.subcommands {
-            self.filter_command_spec(child, &path);
-        }
+        evaluate_auth(auth, &self.session_facts())
     }
 
     pub(crate) fn filter_help_document(
@@ -764,106 +645,36 @@ impl AuthState {
         filter(self, &mut document.blocks, path, false);
     }
 
-    /// Returns whether the external command is visible under combined access.
+    pub(crate) fn filter_command_spec(
+        &self,
+        command: &mut crate::completion::CommandSpec,
+        prefix: &[String],
+    ) {
+        let mut path = prefix.to_vec();
+        path.push(command.name.clone());
+        command.subcommands.retain(|child| {
+            let path = CommandPath::new(
+                path.iter()
+                    .cloned()
+                    .chain(std::iter::once(child.name.clone())),
+            );
+            self.external_command_path_access(&path).is_visible()
+        });
+        for child in &mut command.subcommands {
+            self.filter_command_spec(child, &path);
+        }
+    }
+
+    /// Whether an external root is offered by the combined access decision.
     pub fn is_external_command_visible(&self, command: &str) -> bool {
         self.external_command_access(command).is_visible()
     }
 }
 
-pub(crate) fn policy_context_for_resolved(
-    context: CommandPolicyContext,
-    config: &ResolvedConfig,
-) -> CommandPolicyContext {
-    context.with_profile(config.active_profile())
-}
-
-fn parse_allowlist(raw: Option<&str>) -> Option<HashSet<String>> {
-    let raw = raw.map(str::trim).filter(|value| !value.is_empty())?;
-
-    if raw == "*" {
-        return None;
-    }
-
-    let values = raw
-        .split([',', ' '])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase())
-        .collect::<HashSet<String>>();
-    if values.is_empty() {
-        None
-    } else {
-        Some(values)
-    }
-}
-
-fn is_visible_in_allowlist(allowlist: &Option<HashSet<String>>, command: &str) -> bool {
-    match allowlist {
-        None => true,
-        Some(values) => values.contains(&command.to_ascii_lowercase()),
-    }
-}
-
-fn command_access_for(
-    command: &str,
-    allowlist: &Option<HashSet<String>>,
-    registry: &CommandPolicyRegistry,
-    context: &CommandPolicyContext,
-) -> CommandAccess {
-    let normalized = command.trim().to_ascii_lowercase();
-    command_access_for_path(
-        &CommandPath::new([normalized]),
-        allowlist,
-        registry,
-        context,
-    )
-}
-
-fn command_access_for_path(
-    path: &CommandPath,
-    allowlist: &Option<HashSet<String>>,
-    registry: &CommandPolicyRegistry,
-    context: &CommandPolicyContext,
-) -> CommandAccess {
-    let default_policy = CommandPolicy::new(path.clone()).visibility(VisibilityMode::Public);
-    let mut access = registry
-        .evaluate(path, context)
-        .unwrap_or_else(|| crate::core::command_policy::evaluate_policy(&default_policy, context));
-
-    if let Some(root) = path.as_slice().first()
-        && !is_visible_in_allowlist(allowlist, root)
-    {
-        access = CommandAccess::hidden(AccessReason::HiddenByPolicy);
-    }
-
-    access
-}
-
-fn merge_policy_registries(
-    mut left: CommandPolicyRegistry,
-    right: CommandPolicyRegistry,
-) -> CommandPolicyRegistry {
-    for policy in right.entries() {
-        left.register(policy.clone());
-    }
-    left
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
+    use super::ConfigState;
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
-    use crate::core::command_policy::{
-        AccessReason, CommandPath, CommandPolicy, CommandPolicyContext, CommandPolicyRegistry,
-        VisibilityMode,
-    };
-
-    use super::{
-        AuthState, ConfigState, RuntimeContext, TerminalKind, command_access_for,
-        is_visible_in_allowlist, parse_allowlist,
-    };
-
     fn resolved_with(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
         let mut file = ConfigLayer::default();
         for (key, value) in entries {
@@ -881,29 +692,16 @@ mod tests {
     }
 
     #[test]
-    fn runtime_context_and_allowlists_normalize_inputs() {
-        let context = RuntimeContext::new(
+    fn runtime_context_normalizes_inputs() {
+        let context = super::RuntimeContext::new(
             Some("  Dev  ".to_string()),
-            TerminalKind::Repl,
+            super::TerminalKind::Repl,
             Some("xterm-256color".to_string()),
         );
         assert_eq!(context.profile_override(), Some("dev"));
-        assert_eq!(context.terminal_kind(), TerminalKind::Repl);
+        assert_eq!(context.terminal_kind(), super::TerminalKind::Repl);
         assert_eq!(context.terminal_env(), Some("xterm-256color"));
-
-        assert_eq!(parse_allowlist(None), None);
-        assert_eq!(parse_allowlist(Some("   ")), None);
-        assert_eq!(parse_allowlist(Some("*")), None);
-        assert_eq!(
-            parse_allowlist(Some(" LDAP, mreg ldap ")),
-            Some(HashSet::from(["ldap".to_string(), "mreg".to_string()]))
-        );
-
-        let allowlist = Some(HashSet::from(["ldap".to_string()]));
-        assert!(is_visible_in_allowlist(&allowlist, "LDAP"));
-        assert!(!is_visible_in_allowlist(&allowlist, "orch"));
     }
-
     #[test]
     fn config_state_tracks_noops_changes_and_transaction_errors() {
         let resolved = resolved_with(&[]);
@@ -930,77 +728,5 @@ mod tests {
             .expect_err("transaction error should propagate");
         assert_eq!(err, "boom");
         assert_eq!(state.revision(), 3);
-    }
-
-    #[test]
-    fn auth_state_and_command_access_layer_policy_overrides_on_allowlists() {
-        let resolved = resolved_with(&[
-            ("auth.visible.builtins", "config"),
-            ("auth.visible.plugins", "ldap"),
-        ]);
-        let mut auth = AuthState::from_resolved(&resolved);
-        auth.set_policy_context(
-            CommandPolicyContext::default()
-                .authenticated(true)
-                .with_capabilities(["orch.approval.decide"]),
-        );
-        assert!(auth.policy_context().authenticated);
-
-        auth.builtin_policy_mut().register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-        assert!(auth.builtin_access("config").is_runnable());
-        assert!(auth.is_builtin_visible("config"));
-        assert!(!auth.is_builtin_visible("theme"));
-
-        let mut plugin_registry = CommandPolicyRegistry::new();
-        plugin_registry.register(
-            CommandPolicy::new(CommandPath::new(["ldap"]))
-                .visibility(VisibilityMode::CapabilityGated)
-                .require_capability("orch.approval.decide"),
-        );
-        plugin_registry.register(
-            CommandPolicy::new(CommandPath::new(["orch"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-        auth.replace_external_policy(plugin_registry);
-
-        assert!(auth.external_policy().contains(&CommandPath::new(["ldap"])));
-        assert!(
-            auth.external_policy_mut()
-                .contains(&CommandPath::new(["ldap"]))
-        );
-        assert!(auth.external_command_access("ldap").is_runnable());
-        assert!(auth.is_external_command_visible("ldap"));
-
-        let hidden = auth.external_command_access("orch");
-        assert_eq!(hidden.reasons, vec![AccessReason::HiddenByPolicy]);
-        assert!(!hidden.is_visible());
-    }
-
-    #[test]
-    fn command_access_for_uses_registry_when_present_and_public_default_otherwise() {
-        let context = CommandPolicyContext::default();
-        let allowlist = Some(HashSet::from(["config".to_string()]));
-        let mut registry = CommandPolicyRegistry::new();
-        registry.register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-
-        let denied = command_access_for("config", &allowlist, &registry, &context);
-        assert_eq!(denied.reasons, vec![AccessReason::Unauthenticated]);
-        assert!(denied.is_visible());
-        assert!(!denied.is_runnable());
-
-        let hidden = command_access_for("theme", &allowlist, &registry, &context);
-        assert_eq!(hidden.reasons, vec![AccessReason::HiddenByPolicy]);
-        assert!(!hidden.is_visible());
-
-        let fallback =
-            command_access_for("config", &None, &CommandPolicyRegistry::default(), &context);
-        assert!(fallback.is_visible());
-        assert!(fallback.is_runnable());
     }
 }

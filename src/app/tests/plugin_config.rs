@@ -127,7 +127,7 @@ fn plugin_config_env_collects_shared_and_plugin_specific_entries_unit() {
 #[test]
 fn plugin_dispatch_context_refreshes_cached_plugin_env_after_config_change() {
     let mut state =
-        make_completion_state_with_entries(None, &[("extensions.plugins.env.endpoint", "before")]);
+        make_completion_state_with_entries(&[("extensions.plugins.env.endpoint", "before")]);
     let before = super::plugin_dispatch_context_for_runtime(&state.runtime, &state.clients, None);
     assert_eq!(
         before.shared_env,
@@ -155,7 +155,7 @@ fn plugin_dispatch_context_refreshes_cached_plugin_env_after_config_change() {
 
 #[test]
 fn plugin_dispatch_context_owns_invocation_provider_override_unit() {
-    let state = make_completion_state_with_entries(None, &[]);
+    let state = make_completion_state_with_entries(&[]);
     let invocation = crate::app::ResolvedInvocation {
         ui: state.runtime.ui.clone(),
         plugin_provider: Some("cfg".to_string()),
@@ -173,14 +173,11 @@ fn plugin_dispatch_context_owns_invocation_provider_override_unit() {
 
 #[test]
 fn app_clients_plugin_config_entries_match_shared_projection_helper_unit() {
-    let state = make_completion_state_with_entries(
-        None,
-        &[
-            ("extensions.plugins.env.endpoint", "shared"),
-            ("extensions.plugins.cfg.env.endpoint", "plugin"),
-            ("extensions.plugins.cfg.env.api.token", "token-123"),
-        ],
-    );
+    let state = make_completion_state_with_entries(&[
+        ("extensions.plugins.env.endpoint", "shared"),
+        ("extensions.plugins.cfg.env.endpoint", "plugin"),
+        ("extensions.plugins.cfg.env.api.token", "token-123"),
+    ]);
 
     let from_clients = state
         .clients
@@ -193,13 +190,10 @@ fn app_clients_plugin_config_entries_match_shared_projection_helper_unit() {
 
 #[test]
 fn plugin_dispatch_context_filters_colliding_projected_env_entries_unit() {
-    let state = make_completion_state_with_entries(
-        None,
-        &[
-            ("extensions.plugins.cfg.env.api.token", "dot"),
-            ("extensions.plugins.cfg.env.api-token", "dash"),
-        ],
-    );
+    let state = make_completion_state_with_entries(&[
+        ("extensions.plugins.cfg.env.api.token", "dot"),
+        ("extensions.plugins.cfg.env.api-token", "dash"),
+    ]);
 
     let context = super::plugin_dispatch_context_for_runtime(&state.runtime, &state.clients, None);
     assert_eq!(
@@ -262,36 +256,4 @@ fn external_plugin_dispatch_warns_when_config_env_collides_unit() {
         message.level == crate::ui::messages::MessageLevel::Warning
             && message.text.contains("OSP_PLUGIN_CFG_API_TOKEN")
     }));
-}
-
-#[cfg(unix)]
-#[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
-#[test]
-fn app_state_seeds_plugin_command_policy_registry_unit() {
-    let root = make_temp_dir("osp-cli-test-plugin-policy-seed");
-    let plugins_dir = root.join("plugins");
-    std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-    write_auth_pipeline_test_plugin(&plugins_dir);
-
-    let state = make_test_state(vec![plugins_dir]);
-
-    let root_policy = state
-        .runtime
-        .auth
-        .external_policy()
-        .resolved_policy(&CommandPath::new(["orch"]))
-        .expect("root plugin policy should exist");
-    assert_eq!(root_policy.visibility, VisibilityMode::Authenticated);
-
-    let nested_policy = state
-        .runtime
-        .auth
-        .external_policy()
-        .resolved_policy(&CommandPath::new(["orch", "approval", "decide"]))
-        .expect("nested plugin policy should exist");
-    assert!(
-        nested_policy
-            .required_capabilities
-            .contains("orch.approval.decide")
-    );
 }

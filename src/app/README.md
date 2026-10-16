@@ -20,17 +20,17 @@ modules should not import `app`; the one current exception is
 | `rebuild.rs`, `repl_lifecycle.rs` | Rebuilding state after config or auth changes |
 | `dispatch.rs` | Choosing builtin, native or plugin for a command line |
 | `command_plan.rs` | Shared inline parse/help classification and command pipeline policy |
-| `builtin.rs` | Running builtins after an access check |
+| `builtin.rs` | Running public builtin commands |
 | `external.rs` | Native and plugin commands, including help and progress |
 | `command_output.rs` | Shaping the final result before rendering |
 | `help.rs`, `config_explain.rs` | Help rendering policy; `config explain` output |
-| `access.rs` | Hooks a wrapper uses to recover from missing access (e.g. log in) |
+| `access.rs` | Product visibility, startup, acquisition and live session facts |
 | `facts.rs` | Pure facts derived from host state, shared by several surfaces |
 | `sink.rs`, `timing.rs`, `logging.rs` | Output sinks, timing badges, developer logging |
 
 ## Rules worth knowing
 
-- Visibility and access are decided once, from command policy, before
+- Visibility and access combine declared auth with the product hook before
   dispatch. Handlers do not re-check them their own way.
 - Runtime config loads source layers once per request, then derives presentation
   defaults on that snapshot. Process error display settings are derived on failure.
@@ -46,5 +46,5 @@ modules should not import `app`; the one current exception is
   provider conflicts.
 
 Help results use `CliCommandResult::document`. Builtins supply clap metadata;
-plugins and native commands retain their text-help boundary. Only doctor keeps
+native commands also use clap metadata; plugins retain their text-help boundary. Only doctor keeps
 a separate data fallback beside a presentation document.

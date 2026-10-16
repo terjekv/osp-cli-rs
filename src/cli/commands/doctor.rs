@@ -7,12 +7,10 @@
 use clap::CommandFactory;
 use miette::Result;
 
+use crate::app::CliCommandResult;
 use crate::app::session::LastFailureDiagnostics;
 use crate::app::{
     AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
-};
-use crate::app::{
-    CMD_CONFIG, CMD_PLUGINS, CMD_THEME, CliCommandResult, ensure_builtin_visible_for,
 };
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{DoctorArgs, DoctorCommands, InlineCommandCli, PluginsArgs, PluginsCommands};
@@ -64,34 +62,25 @@ pub(crate) fn run_doctor_command(
 ) -> Result<CliCommandResult> {
     let command = args.command.unwrap_or(DoctorCommands::All);
     match command {
-        DoctorCommands::Config => {
-            ensure_builtin_visible_for(context.auth, CMD_CONFIG)?;
-            Ok(CliCommandResult::output(
-                rows_to_output_result(config_cmd::config_diagnostics_rows(context.config)),
-                None,
-            ))
-        }
-        DoctorCommands::Plugins => {
-            ensure_builtin_visible_for(context.auth, CMD_PLUGINS)?;
-            plugins_cmd::run_plugins_command(
-                context.plugins,
-                PluginsArgs {
-                    command: PluginsCommands::Doctor,
-                },
-            )
-        }
+        DoctorCommands::Config => Ok(CliCommandResult::output(
+            rows_to_output_result(config_cmd::config_diagnostics_rows(context.config)),
+            None,
+        )),
+        DoctorCommands::Plugins => plugins_cmd::run_plugins_command(
+            context.plugins,
+            PluginsArgs {
+                command: PluginsCommands::Doctor,
+            },
+        ),
         DoctorCommands::Last => Ok(render_last_failure_document(
             context.ui,
             context.last_failure,
             context.last_failure_diagnostics,
         )),
-        DoctorCommands::Theme => {
-            ensure_builtin_visible_for(context.auth, CMD_THEME)?;
-            Ok(CliCommandResult::output(
-                rows_to_output_result(theme_doctor_rows(context.themes)),
-                None,
-            ))
-        }
+        DoctorCommands::Theme => Ok(CliCommandResult::output(
+            rows_to_output_result(theme_doctor_rows(context.themes)),
+            None,
+        )),
         DoctorCommands::All => run_doctor_all(context),
     }
 }
@@ -133,22 +122,20 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
         .iter()
         .map(|(service, state)| CredentialDiagnostics { service, state })
         .collect::<Vec<_>>();
-    let mut sections: Vec<(&str, Vec<Row>)> =
-        vec![("session", session_doctor_rows(context.auth, &credentials))];
+    let mut sections: Vec<(&str, Vec<Row>)> = vec![(
+        "session",
+        session_doctor_rows(&facts, context.config.config.active_profile(), &credentials),
+    )];
 
-    if context.auth.is_builtin_visible(CMD_CONFIG) {
-        sections.push((
-            "config",
-            config_cmd::config_diagnostics_rows(context.config),
-        ));
-    }
-    if context.auth.is_builtin_visible(CMD_PLUGINS) {
-        let report = context.plugins.plugin_manager.doctor();
-        sections.push(("plugins", plugins_cmd::doctor_rows(&report)));
-    }
-    if context.auth.is_builtin_visible(CMD_THEME) {
-        sections.push(("theme", theme_doctor_rows(context.themes)));
-    }
+    sections.push((
+        "config",
+        config_cmd::config_diagnostics_rows(context.config),
+    ));
+
+    let report = context.plugins.plugin_manager.doctor();
+    sections.push(("plugins", plugins_cmd::doctor_rows(&report)));
+
+    sections.push(("theme", theme_doctor_rows(context.themes)));
 
     if matches!(context.ui.render_settings.format, OutputFormat::Json) {
         return Ok(CliCommandResult::json(doctor_report_json_value(&sections)));
@@ -171,8 +158,11 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
     ))
 }
 
-fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_>]) -> Vec<Row> {
-    let context = auth.effective_policy_context();
+fn session_doctor_rows(
+    context: &crate::core::command_policy::SessionFacts,
+    profile: &str,
+    credentials: &[CredentialDiagnostics<'_>],
+) -> Vec<Row> {
     let invalid_credentials = context
         .credentials
         .values()
@@ -188,11 +178,8 @@ fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_
             "not_authenticated"
         },
         "authenticated" => context.authenticated,
-        "auth_strength" => context.auth_strength.map(|strength| strength.as_label()),
-        "profile" => context.active_profile.clone(),
+        "profile" => profile,
         "credentials" => serde_json::json!(credentials),
-        "capability_count" => context.capabilities.len() as i64,
-        "enabled_features" => context.enabled_features.iter().cloned().collect::<Vec<_>>(),
     };
     vec![row]
 }
@@ -391,14 +378,11 @@ mod tests {
 
     fn doctor_context(
         format: OutputFormat,
-        builtins: Option<&str>,
+        _builtins: Option<&str>,
     ) -> DoctorCommandContext<'static> {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
-        if let Some(builtins) = builtins {
-            defaults.set("auth.visible.builtins", builtins);
-        }
         let mut resolver = ConfigResolver::default();
         resolver.set_defaults(defaults);
         let resolved = Box::leak(Box::new(
@@ -408,7 +392,7 @@ mod tests {
         ));
         let ui = Box::leak(Box::new(ui_state(format, 0)));
         let themes = Box::leak(Box::new(ThemeCatalog::default()));
-        let auth = Box::leak(Box::new(AuthState::from_resolved(resolved)));
+        let auth = Box::leak(Box::new(AuthState::default()));
         let config_overrides = Box::leak(Box::new(ConfigLayer::default()));
         let product_defaults = Box::leak(Box::new(ConfigLayer::default()));
         let plugin_manager = Box::leak(Box::new(
@@ -572,20 +556,6 @@ mod tests {
         assert!(json.get("plugins").is_some());
         assert!(json.get("theme").is_some());
 
-        let filtered = run_doctor_command(
-            doctor_context(OutputFormat::Json, Some("theme")),
-            DoctorArgs {
-                command: Some(DoctorCommands::All),
-            },
-        )
-        .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Json(json)) = filtered.output else {
-            panic!("expected json output");
-        };
-        assert!(json.get("theme").is_some());
-        assert!(json.get("config").is_none());
-        assert!(json.get("plugins").is_none());
-
         let theme = run_doctor_command(
             doctor_context(OutputFormat::Table, Some("theme")),
             DoctorArgs {
@@ -621,24 +591,6 @@ mod tests {
             .expect("doctor guide output should keep a structured fallback");
         assert!(rows[0].get("config").is_some());
         assert!(rows[0].get("theme").is_some());
-
-        let config_err = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("theme")),
-            DoctorArgs {
-                command: Some(DoctorCommands::Config),
-            },
-        )
-        .expect_err("hidden config builtin should fail");
-        assert!(!config_err.to_string().trim().is_empty());
-
-        let theme_err = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("config")),
-            DoctorArgs {
-                command: Some(DoctorCommands::Theme),
-            },
-        )
-        .expect_err("hidden theme builtin should fail");
-        assert!(!theme_err.to_string().trim().is_empty());
 
         let def = doctor_command_def("30").expect("doctor clap grammar should project");
         let names = def

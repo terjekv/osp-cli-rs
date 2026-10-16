@@ -42,8 +42,6 @@ fn with_test_xdg_env<T>(run: impl FnOnce() -> T) -> T {
     output
 }
 
-struct SessionGuardedNativeCommand;
-
 struct CompletionRefreshingNativeCommand;
 
 struct CapabilityGatedNativeCommand;
@@ -76,7 +74,7 @@ impl crate::NativeCommand for CapabilityGatedNativeCommand {
     fn describe(&self) -> DescribeCommandV1 {
         let mut command = DescribeCommandV1::from_clap(self.command());
         command.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-            visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+            visibility: Some(DescribeVisibilityModeV1::Authenticated),
             required_capabilities: vec!["ldap.user.read".to_string()],
             ..DescribeCommandAuthV1::default()
         });
@@ -124,42 +122,6 @@ impl crate::app::AccessPolicy for StartupResolutionProbe {
                 runtime.context().terminal_kind(),
             ));
         Ok(())
-    }
-}
-
-impl crate::NativeCommand for SessionGuardedNativeCommand {
-    fn command(&self) -> clap::Command {
-        clap::Command::new("secure").about("Guarded test command")
-    }
-
-    fn auth(&self) -> Option<crate::core::plugin::DescribeCommandAuthV1> {
-        Some(crate::core::plugin::DescribeCommandAuthV1 {
-            visibility: Some(crate::core::plugin::DescribeVisibilityModeV1::Public),
-            run_session: Some(crate::core::plugin::DescribeSessionRequirementsV1 {
-                auth_strength: Some(crate::core::plugin::DescribeAuthStrengthV1::Strong),
-                credentials: vec![
-                    crate::core::plugin::DescribeCredentialRequirementV1::Fresh {
-                        service: "osp".to_string(),
-                        min_ttl_seconds: 900,
-                    },
-                ],
-            }),
-            ..crate::core::plugin::DescribeCommandAuthV1::default()
-        })
-    }
-
-    fn execute(
-        &self,
-        args: &[String],
-        _context: &crate::NativeCommandContext<'_>,
-    ) -> anyhow::Result<crate::NativeCommandOutcome> {
-        if args.iter().any(|arg| arg == "--help") {
-            return Ok(crate::NativeCommandOutcome::Help(
-                "Usage: osp secure".to_string(),
-            ));
-        }
-
-        Ok(crate::NativeCommandOutcome::Exit(0))
     }
 }
 
@@ -357,81 +319,6 @@ fn app_builder_product_defaults_flow_through_public_builder_surface_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_builder_policy_context_flows_through_public_builder_surface_unit() {
-    with_test_xdg_env(|| {
-        let registry =
-            crate::NativeCommandRegistry::new().with_command(SessionGuardedNativeCommand);
-        let mut denied_sink = BufferedUiSink::default();
-        let denied_exit = crate::app::App::builder()
-            .with_native_commands(registry.clone())
-            .build_with_sink(&mut denied_sink)
-            .run_process(["osp", "--defaults-only", "secure"]);
-
-        assert_ne!(denied_exit, 0);
-        assert!(
-            denied_sink
-                .stderr
-                .contains("requires strong authentication")
-        );
-
-        let mut allowed_sink = BufferedUiSink::default();
-        let allowed_exit = crate::app::App::builder()
-            .with_policy_context(
-                crate::core::command_policy::CommandPolicyContext::default()
-                    .authenticated(true)
-                    .with_auth_strength(crate::core::command_policy::AuthStrength::Strong)
-                    .with_credential(
-                        "osp",
-                        crate::core::command_policy::CredentialState::valid_for(900),
-                    ),
-            )
-            .with_native_commands(registry)
-            .build_with_sink(&mut allowed_sink)
-            .run_process(["osp", "--defaults-only", "secure"]);
-
-        assert_eq!(allowed_exit, 0);
-        assert!(allowed_sink.stdout.is_empty());
-        assert!(allowed_sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
-fn app_builder_builtin_policy_flows_through_public_builder_surface_unit() {
-    with_test_xdg_env(|| {
-        let mut builtin_policy = crate::core::command_policy::CommandPolicyRegistry::new();
-        builtin_policy.register(
-            crate::core::command_policy::CommandPolicy::new(
-                crate::core::command_policy::CommandPath::new(["config"]),
-            )
-            .visibility(crate::core::command_policy::VisibilityMode::Authenticated),
-        );
-        let mut denied_sink = BufferedUiSink::default();
-        let denied_exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy.clone())
-            .build_with_sink(&mut denied_sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_ne!(denied_exit, 0);
-        assert!(denied_sink.stderr.contains("requires authentication"));
-
-        let mut allowed_sink = BufferedUiSink::default();
-        let allowed_exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy)
-            .with_policy_context(
-                crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-            )
-            .build_with_sink(&mut allowed_sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_eq!(allowed_exit, 0);
-        assert!(allowed_sink.stdout.contains("theme.name"));
-        assert!(allowed_sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
 fn free_process_wrapper_renders_usage_errors_to_bound_sink_unit() {
     with_test_xdg_env(|| {
         let mut sink = BufferedUiSink::default();
@@ -448,11 +335,7 @@ fn free_process_wrapper_renders_usage_errors_to_bound_sink_unit() {
 
 #[test]
 fn native_commands_project_into_auth_catalog_unit() {
-    let state = make_completion_state_with_entries_and_native(
-        None,
-        &[("auth.visible.plugins", "ldap")],
-        test_native_registry(),
-    );
+    let state = make_completion_state_with_entries_and_native(&[], test_native_registry());
     let catalog = super::authorized_command_catalog_for(
         &state.runtime.auth,
         &state.clients,
@@ -472,7 +355,6 @@ fn native_commands_project_into_auth_catalog_unit() {
 #[test]
 fn native_command_can_restart_repl_after_refreshing_completion_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(CompletionRefreshingNativeCommand),
     );
@@ -498,16 +380,12 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
 
 #[cfg(unix)]
 #[test]
-fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
+fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(CapabilityGatedNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    state.runtime.set_policy_context(
-        crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-    );
     let history = make_test_history(&mut state);
 
     let error = repl_dispatch::execute_repl_plugin_line(
@@ -524,7 +402,7 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(immediate.contains("command `ldap user`"));
-    assert!(immediate.contains("capability `ldap.user.read`"));
+    assert!(immediate.contains("requires authentication"));
     assert!(immediate.contains("Try: authenticate"));
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
@@ -541,7 +419,7 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
     };
 
     let recap = doctor("doctor last");
-    assert!(recap.contains("capability `ldap.user.read`"));
+    assert!(recap.contains("requires authentication"));
     assert!(
         recap.contains("Action:  authenticate"),
         "unexpected recap: {recap}"
@@ -550,15 +428,15 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
     assert!(!recap.contains("doctor last"));
 
     let verbose = doctor("-v doctor last");
-    assert!(verbose.contains("ldap.user.read"));
+    assert!(verbose.contains("requires authentication"));
     assert!(!verbose.contains("osp::auth::missing_capabilities"));
 
     let debug = doctor("-vv doctor last");
-    assert!(debug.contains("ldap.user.read"));
+    assert!(debug.contains("requires authentication"));
     assert!(!debug.contains("Stack backtrace"));
 
     let forensic = doctor("-vvv doctor last");
-    assert!(forensic.contains("ldap.user.read"));
+    assert!(forensic.contains("requires authentication"));
     assert!(!forensic.contains("run `doctor last"));
 }
 
@@ -566,7 +444,6 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
 #[test]
 fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
@@ -623,7 +500,6 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
 #[test]
 fn native_missing_argument_names_input_and_scoped_help_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );

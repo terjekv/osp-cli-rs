@@ -570,11 +570,7 @@ impl AppStateParts {
         .with_error_detail(init.error_detail);
         let auth = {
             let _phase = crate::startup_trace::phase("auth policy catalog setup");
-            crate::app::AuthState::from_resolved_with_external_policies(
-                config.resolved(),
-                clients.plugins(),
-                clients.native_commands(),
-            )
+            crate::app::AuthState::from_commands(clients.plugins(), clients.native_commands())
         };
         let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);
         let session = session_override.unwrap_or_default();

@@ -66,7 +66,6 @@
 //!   instead of forking generic host behavior
 
 use crate::config::ConfigLayer;
-use crate::core::command_policy::{CommandPolicyContext, CommandPolicyRegistry};
 use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
 use crate::ui::messages::{MessageBuffer, MessageLevel, adjust_verbosity};
@@ -106,7 +105,6 @@ pub(crate) use config_explain::{
     explain_runtime_config, format_scope, is_sensitive_key, push_missing_config_key_messages,
     render_config_explain_text,
 };
-pub(crate) use dispatch::ensure_builtin_access;
 pub(crate) use facts::*;
 pub use host::ErrorDetail;
 pub use host::run_from;
@@ -130,8 +128,6 @@ pub(crate) struct AppDefinition {
     product_defaults: ConfigLayer,
     product_help_options: Vec<(String, String)>,
     config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
-    policy_context: CommandPolicyContext,
-    builtin_policy: CommandPolicyRegistry,
     access_policy: Option<Arc<dyn AccessPolicy>>,
 }
 
@@ -152,16 +148,6 @@ impl AppDefinition {
         help: impl Into<String>,
     ) -> Self {
         self.product_help_options.push((syntax.into(), help.into()));
-        self
-    }
-
-    fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.policy_context = policy_context;
-        self
-    }
-
-    fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.builtin_policy = builtin_policy;
         self
     }
 
@@ -279,26 +265,6 @@ impl App {
         value: &'static str,
     ) -> Self {
         self.definition.config_flags.push((name, help, key, value));
-        self
-    }
-
-    /// Replaces the product-owned command-policy context used at runtime.
-    ///
-    /// Wrapper crates should use this to project their normalized auth/session
-    /// facts into the generic command-policy engine instead of re-checking
-    /// those facts ad hoc inside command handlers.
-    pub fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.definition = self.definition.with_policy_context(policy_context);
-        self
-    }
-
-    /// Replaces the product-owned policy registry for built-in commands.
-    ///
-    /// Wrapper crates should use this when they need product policy to gate
-    /// upstream built-ins such as `config` without forking the generic host
-    /// grammar or dispatch code.
-    pub fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.definition = self.definition.with_builtin_policy(builtin_policy);
         self
     }
 
@@ -661,22 +627,6 @@ impl AppBuilder {
         value: &'static str,
     ) -> Self {
         self.definition.config_flags.push((name, help, key, value));
-        self
-    }
-
-    /// Replaces the product-owned command-policy context used at runtime.
-    ///
-    /// Use this when a wrapper crate already has normalized auth/session facts
-    /// and wants those facts applied consistently across startup, dispatch, and
-    /// REPL rebuilds.
-    pub fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.definition = self.definition.with_policy_context(policy_context);
-        self
-    }
-
-    /// Replaces the product-owned policy registry for built-in commands.
-    pub fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.definition = self.definition.with_builtin_policy(builtin_policy);
         self
     }
 

@@ -4,31 +4,17 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
     use clap::{Arg, ArgAction, builder::PossibleValue};
     use osp_cli::app::BufferedUiSink;
     use osp_cli::completion::SuggestionEntry;
-    use osp_cli::core::command_def::{CommandDef, CommandPolicyDef};
-    use osp_cli::core::command_policy::{
-        AuthStrength, CommandAccess, CommandPath, CommandPolicyContext, CredentialRequirement,
-        CredentialState, SessionRequirements, VisibilityMode,
-    };
-    use osp_cli::core::plugin::{DescribeCommandV1, DescribeV1, PLUGIN_PROTOCOL_V1};
+    use osp_cli::core::command_def::CommandDef;
+    use osp_cli::core::command_policy::{CredentialState, SessionFacts};
+    use osp_cli::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, DescribeV1, PLUGIN_PROTOCOL_V1};
     use osp_cli::plugin::{PluginDispatchContext, PluginManager, PluginSource};
 
-    let policy = CommandPolicyDef {
-        visibility: VisibilityMode::Authenticated,
-        required_capabilities: vec!["directory.read".to_string()],
-        feature_flags: vec!["directory".to_string()],
-        visible_session_requirements: SessionRequirements {
-            auth_strength: Some(AuthStrength::Basic),
-            credentials: vec![CredentialRequirement::present("audit")],
-        },
-        run_session_requirements: SessionRequirements {
-            auth_strength: Some(AuthStrength::Basic),
-            credentials: vec![
-                CredentialRequirement::valid("directory"),
-                CredentialRequirement::fresh("osp", 300),
-            ],
-        },
-    };
-    let command = CommandDef::from_clap(
+    let auth: DescribeCommandAuthV1 = serde_json::from_value(serde_json::json!({
+        "visibility": "authenticated", "required_capabilities": ["directory.read"], "feature_flags": ["directory"],
+        "visible_session": {"auth_strength": "basic", "credentials": [{"state": "present", "service": "audit"}]},
+        "run_session": {"auth_strength": "basic", "credentials": [{"state": "valid", "service": "directory"}, {"state": "fresh", "service": "osp", "min_ttl_seconds": 300}]}
+    })).unwrap();
+    let mut command = CommandDef::from_clap(
         clap::Command::new("sdk-directory")
             .about("Inspect directory records")
             .subcommand(
@@ -60,8 +46,8 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
                             ]),
                     ),
             ),
-    )
-    .policy(policy.clone());
+    );
+    command.auth = Some(auth);
     let describe = DescribeV1 {
         protocol_version: PLUGIN_PROTOCOL_V1,
         plugin_id: "sdk".to_string(),
@@ -165,31 +151,11 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
         assert_eq!(inspect.flags[spelling].alias_of.as_deref(), Some("--format"));
     }
 
-    let context = CommandPolicyContext::default()
-        .with_auth_strength(AuthStrength::Basic)
-        .with_capabilities(["directory.read"])
-        .with_features(["directory"])
-        .with_credential("audit", CredentialState::present())
-        .with_credential("directory", CredentialState::valid())
-        .with_credential("osp", CredentialState::valid_for(900));
-    let registry = manager.command_policy_registry();
-    for path in [
-        CommandPath::new(["sdk-directory"]),
-        CommandPath::new(["sdk-directory", "inspect"]),
-    ] {
-        let resolved = registry.resolved_policy(&path).expect("policy should be registered");
-        assert_eq!(resolved.visibility, policy.visibility);
-        assert_eq!(
-            resolved.required_capabilities.iter().map(String::as_str).collect::<Vec<_>>(),
-            vec!["directory.read"]
-        );
-        assert_eq!(
-            resolved.feature_flags.iter().map(String::as_str).collect::<Vec<_>>(),
-            vec!["directory"]
-        );
-        assert_eq!(resolved.visible_session_requirements, policy.visible_session_requirements);
-        assert_eq!(resolved.run_session_requirements, policy.run_session_requirements);
-        assert_eq!(registry.evaluate(&path, &context), Some(CommandAccess::visible_runnable()));
+    struct ProductSession;
+    impl osp_cli::app::AccessPolicy for ProductSession {
+        fn session_facts(&self) -> SessionFacts {
+            SessionFacts { authenticated: true, credentials: [("directory".into(), CredentialState::valid())].into() }
+        }
     }
     let response = manager
         .dispatch(
@@ -206,7 +172,7 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
 
     let mut sink = BufferedUiSink::default();
     let exit = osp_cli::App::new()
-        .with_policy_context(context)
+        .with_access_policy(ProductSession)
         .run_with_sink(
             ["osp", "--defaults-only", "--plugin-dir", dir.to_str().unwrap(), "--json",
                 "sdk-directory", "inspect", "people", "--fmt", "json"],

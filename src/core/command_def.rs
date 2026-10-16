@@ -12,18 +12,12 @@
 //! - [`crate::core::command_def::ArgDef`] and
 //!   [`crate::core::command_def::FlagDef`] describe the user-facing invocation
 //!   surface
-//! - [`crate::core::command_def::CommandPolicyDef`] carries the coarse
-//!   visibility/auth requirements that
-//!   travel with a command definition
-//!
-//! Contract:
-//!
 //! - this module owns declarative command shape, not runtime dispatch
 //! - the types here should stay presentation-neutral and broadly reusable
 //! - richer runtime policy evaluation lives in
 //!   [`crate::core::command_policy`], not here
 
-use crate::core::command_policy::{SessionRequirements, VisibilityMode};
+use crate::core::plugin::DescribeCommandAuthV1;
 
 /// Declarative command description used for help, completion, and plugin metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -47,69 +41,14 @@ pub struct CommandDef {
     pub hidden: bool,
     /// Optional presentation key used to order sibling commands.
     pub sort_key: Option<String>,
-    /// Policy metadata that controls command visibility and availability.
-    pub policy: CommandPolicyDef,
+    /// Optional plugin-wire authentication requirements.
+    pub auth: Option<DescribeCommandAuthV1>,
     /// Positional arguments accepted by the command.
     pub args: Vec<ArgDef>,
     /// Flags and options accepted by the command.
     pub flags: Vec<FlagDef>,
     /// Nested subcommands exposed below this command.
     pub subcommands: Vec<CommandDef>,
-}
-
-/// Simplified policy description attached to a [`CommandDef`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandPolicyDef {
-    /// Visibility mode applied to the command.
-    pub visibility: VisibilityMode,
-    /// Capabilities required to execute or reveal the command.
-    pub required_capabilities: Vec<String>,
-    /// Feature flags that must be enabled for the command to exist.
-    pub feature_flags: Vec<String>,
-    /// Session-state requirements that gate visibility.
-    pub visible_session_requirements: SessionRequirements,
-    /// Session-state requirements that gate execution.
-    pub run_session_requirements: SessionRequirements,
-}
-
-impl Default for CommandPolicyDef {
-    fn default() -> Self {
-        Self {
-            visibility: VisibilityMode::Public,
-            required_capabilities: Vec::new(),
-            feature_flags: Vec::new(),
-            visible_session_requirements: SessionRequirements::default(),
-            run_session_requirements: SessionRequirements::default(),
-        }
-    }
-}
-
-impl CommandPolicyDef {
-    /// Returns `true` when the policy matches the default public,
-    /// unrestricted state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::command_def::CommandPolicyDef;
-    /// use osp_cli::core::command_policy::VisibilityMode;
-    ///
-    /// assert!(CommandPolicyDef::default().is_empty());
-    /// assert!(!CommandPolicyDef {
-    ///     visibility: VisibilityMode::Authenticated,
-    ///     required_capabilities: Vec::new(),
-    ///     feature_flags: Vec::new(),
-    ///     ..CommandPolicyDef::default()
-    /// }
-    /// .is_empty());
-    /// ```
-    pub fn is_empty(&self) -> bool {
-        self.visibility == VisibilityMode::Public
-            && self.required_capabilities.is_empty()
-            && self.feature_flags.is_empty()
-            && self.visible_session_requirements.is_empty()
-            && self.run_session_requirements.is_empty()
-    }
 }
 
 /// Positional argument definition for a command.
@@ -202,17 +141,8 @@ impl CommandDef {
     ///
     /// ```
     /// use osp_cli::core::command_def::{
-    ///     ArgDef, CommandDef, CommandPolicyDef, FlagDef, ValueChoice, ValueKind,
+    ///     ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind,
     /// };
-    /// use osp_cli::core::command_policy::VisibilityMode;
-    ///
-    /// let policy = CommandPolicyDef {
-    ///     visibility: VisibilityMode::Authenticated,
-    ///     required_capabilities: vec!["plugins.write".to_string()],
-    ///     feature_flags: vec!["beta".to_string()],
-    ///     ..CommandPolicyDef::default()
-    /// };
-    ///
     /// let command = CommandDef::new("theme")
     ///     .about("Inspect themes")
     ///     .long_about("Long theme help")
@@ -222,7 +152,6 @@ impl CommandDef {
     ///     .alias("skin")
     ///     .aliases(["palette"])
     ///     .sort("10")
-    ///     .policy(policy.clone())
     ///     .arg(
     ///         ArgDef::new("name")
     ///             .help("Theme name")
@@ -242,7 +171,6 @@ impl CommandDef {
     /// assert_eq!(command.after_help.as_deref(), Some("after text"));
     /// assert_eq!(command.aliases, vec!["skin".to_string(), "palette".to_string()]);
     /// assert_eq!(command.sort_key.as_deref(), Some("10"));
-    /// assert_eq!(command.policy, policy);
     /// assert_eq!(command.args[0].choices.len(), 2);
     /// assert_eq!(command.flags[0].long.as_deref(), Some("raw"));
     /// assert_eq!(command.subcommands[0].name, "list");
@@ -305,12 +233,6 @@ impl CommandDef {
     /// Sets a sort key used when presenting the command alongside peers.
     pub fn sort(mut self, sort_key: impl Into<String>) -> Self {
         self.sort_key = Some(sort_key.into());
-        self
-    }
-
-    /// Replaces the command policy metadata.
-    pub fn policy(mut self, policy: CommandPolicyDef) -> Self {
-        self.policy = policy;
         self
     }
 
@@ -583,7 +505,7 @@ fn clap_command_to_def(command: clap::Command) -> CommandDef {
             .collect(),
         hidden: command.is_hide_set(),
         sort_key: None,
-        policy: CommandPolicyDef::default(),
+        auth: None,
         args: command
             .get_positionals()
             .filter(|arg| !arg.is_hide_set())

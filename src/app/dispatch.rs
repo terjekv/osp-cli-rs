@@ -5,20 +5,13 @@
 //! also owns the early native-vs-plugin source choice so later execution paths
 //! do not have to repeat visibility and provider-selection logic.
 
-use std::collections::BTreeSet;
-
 use miette::{Result, miette};
 
 use crate::app::{AppClients, AuthState, TerminalKind};
 use crate::cli::{Cli, Commands, ConfigCommands};
-use crate::core::command_policy::{
-    AccessReason, CommandAccess, CommandPath, CommandPolicyRegistry,
-};
+use crate::core::command_policy::{AccessReason, CommandAccess, CommandPath};
 use crate::normalize::normalize_optional_identifier;
 use crate::plugin::CommandCatalogEntry;
-
-#[cfg(test)]
-use super::{CMD_CONFIG, CMD_DOCTOR, CMD_HISTORY, CMD_PLUGINS, CMD_THEME};
 
 pub(crate) enum RunAction {
     Repl,
@@ -119,102 +112,73 @@ pub(crate) fn normalize_cli_profile(cli: &mut Cli) -> Option<String> {
     normalized
 }
 
-#[cfg(test)]
-pub(crate) fn ensure_dispatch_visibility(auth: &AuthState, action: &RunAction) -> Result<()> {
-    match action {
-        RunAction::Builtin(Commands::Plugins(_)) => ensure_builtin_visible_for(auth, CMD_PLUGINS),
-        RunAction::Builtin(Commands::Doctor(_)) => ensure_builtin_visible_for(auth, CMD_DOCTOR),
-        RunAction::Builtin(Commands::Theme(_)) => ensure_builtin_visible_for(auth, CMD_THEME),
-        RunAction::Builtin(Commands::Config(_) | Commands::Alias(_)) => {
-            ensure_builtin_visible_for(auth, CMD_CONFIG)
-        }
-        RunAction::Builtin(Commands::History(_)) => ensure_builtin_visible_for(auth, CMD_HISTORY),
-        RunAction::Builtin(_) | RunAction::Repl => Ok(()),
-        // External command auth needs provider/native metadata to resolve the
-        // real command path. Do that in the runtime dispatch layer instead of
-        // guessing from raw tokens here.
-        RunAction::External(_) => Ok(()),
+/// Checks visibility before invoking the product for an execution attempt.
+/// The final runnable check follows any native metadata refresh.
+pub(crate) fn before_external_run(
+    runtime: &mut crate::app::AppRuntime,
+    path: &CommandPath,
+    requirement: ExternalPathAccessRequirement,
+    kind: &'static str,
+) -> Result<()> {
+    ensure_external_access(runtime, path, ExternalPathAccessRequirement::Visible, kind)?;
+    if requirement == ExternalPathAccessRequirement::Runnable
+        && let Some(policy) = runtime.access_policy()
+    {
+        policy.before_run(path.as_slice(), runtime)?;
     }
+    Ok(())
 }
 
-pub(crate) fn ensure_builtin_visible_for(auth: &AuthState, command: &str) -> Result<()> {
-    ensure_command_access(command, "command", auth.builtin_access(command))
-}
-
-#[cfg(test)]
-pub(crate) fn ensure_plugin_visible_for(auth: &AuthState, command: &str) -> Result<()> {
-    ensure_command_access(
-        command,
-        "plugin command",
-        auth.external_command_access(command),
+pub(crate) fn ensure_external_access(
+    runtime: &crate::app::AppRuntime,
+    path: &CommandPath,
+    requirement: ExternalPathAccessRequirement,
+    kind: &'static str,
+) -> Result<()> {
+    check_access(
+        path,
+        kind,
+        runtime.auth().external_command_path_access(path),
+        requirement,
     )
 }
 
-pub(crate) fn ensure_builtin_access(
-    runtime: &mut crate::app::AppRuntime,
-    session: &mut crate::app::AppSession,
-    command: &str,
-) -> Result<()> {
-    ensure_command_access_for(runtime, session, false, command, "command", |auth| {
-        auth.builtin_access(command)
-    })
-}
-
-pub(crate) fn ensure_external_command_access(
-    runtime: &mut crate::app::AppRuntime,
-    session: &mut crate::app::AppSession,
-    command: &str,
-) -> Result<()> {
-    ensure_command_access_for(runtime, session, true, command, "plugin command", |auth| {
-        auth.external_command_access(command)
-    })
-}
-
-pub(crate) fn ensure_external_path_access(
-    runtime: &mut crate::app::AppRuntime,
-    session: &mut crate::app::AppSession,
+pub(crate) fn check_access(
     path: &CommandPath,
-    requirement: ExternalPathAccessRequirement,
     kind: &'static str,
-) -> Result<()> {
-    let command = path.as_slice().join(" ");
-    match requirement {
-        ExternalPathAccessRequirement::Visible => ensure_command_visibility(
-            &command,
-            kind,
-            runtime.auth().external_command_path_access(path),
-        ),
-        ExternalPathAccessRequirement::Runnable => {
-            ensure_command_access_for(runtime, session, true, &command, kind, |auth| {
-                auth.external_command_path_access(path)
-            })
-        }
-    }
-}
-
-pub(crate) fn ensure_external_path_access_with_policy(
-    runtime: &mut crate::app::AppRuntime,
-    session: &mut crate::app::AppSession,
-    path: &CommandPath,
+    access: CommandAccess,
     requirement: ExternalPathAccessRequirement,
-    kind: &'static str,
-    policy: &CommandPolicyRegistry,
 ) -> Result<()> {
-    let command = path.as_slice().join(" ");
-    match requirement {
-        ExternalPathAccessRequirement::Visible => ensure_command_visibility(
-            &command,
-            kind,
-            runtime
-                .auth()
-                .external_command_path_access_with_policy(path, policy),
-        ),
-        ExternalPathAccessRequirement::Runnable => {
-            ensure_command_access_for(runtime, session, true, &command, kind, |auth| {
-                auth.external_command_path_access_with_policy(path, policy)
-            })
-        }
+    if match requirement {
+        ExternalPathAccessRequirement::Visible => access.is_visible(),
+        ExternalPathAccessRequirement::Runnable => access.is_runnable(),
+    } {
+        return Ok(());
     }
+    let reason = access.reason();
+    if let Some(AccessReason::HiddenByProduct(Some(message))) = reason {
+        return Err(miette!("{message}"));
+    }
+    let (detail, action) = match reason {
+        Some(AccessReason::Unauthenticated) => (
+            "requires authentication".to_string(),
+            "authenticate, then retry".to_string(),
+        ),
+        Some(AccessReason::MissingCredential(service)) => (
+            format!("requires credential `{service}`"),
+            format!("configure the `{service}` credential, then retry"),
+        ),
+        Some(AccessReason::InvalidCredential(service)) => (
+            format!("requires a valid `{service}` credential"),
+            format!("renew the `{service}` credential, then retry"),
+        ),
+        _ => (
+            "is hidden by current auth policy".to_string(),
+            "ask the command owner to enable access, then retry".to_string(),
+        ),
+    };
+    let command = path.as_slice().join(" ");
+    Err(miette!("{kind} `{command}` {detail}. Try: {action}"))
 }
 
 pub(crate) fn resolve_external_command_source(
@@ -227,6 +191,12 @@ pub(crate) fn resolve_external_command_source(
         return Ok(ExternalCommandSource::Plugin);
     }
 
+    check_access(
+        &CommandPath::new([command]),
+        "command",
+        auth.external_command_access(command),
+        ExternalPathAccessRequirement::Visible,
+    )?;
     let catalog = invocation_command_catalog(auth, clients, command)?;
     let matching = matching_external_command_entries(&catalog, command);
     let has_native = matching.iter().any(|entry| is_native_command_entry(entry));
@@ -350,230 +320,17 @@ pub(crate) fn normalize_profile_override(value: Option<String>) -> Option<String
     normalize_optional_identifier(value)
 }
 
-#[derive(Debug, thiserror::Error, miette::Diagnostic)]
-#[error(
-    "{kind} `{command}` requires {required}. Try: authenticate with an identity granted {required}, then retry"
-)]
-#[diagnostic(
-    code(osp::auth::missing_capabilities),
-    help(
-        "The capability policy gate for `{command}` requires {required}. If authenticating again does not add them, ask the command owner for access."
-    )
-)]
-pub(crate) struct MissingCommandCapabilities {
-    kind: &'static str,
-    command: String,
-    required: String,
-}
-
-impl MissingCommandCapabilities {
-    fn new(kind: &'static str, command: &str, missing: &BTreeSet<String>) -> Self {
-        let required = match missing.iter().next() {
-            Some(capability) if missing.len() == 1 => format!("capability `{capability}`"),
-            _ => format!(
-                "capabilities {}",
-                missing
-                    .iter()
-                    .map(|capability| format!("`{capability}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        };
-        Self {
-            kind,
-            command: command.to_string(),
-            required,
-        }
-    }
-
-    pub(crate) fn normal_detail(&self) -> String {
-        format!(
-            "Missing requirement: `{}` needs {} for this command path.",
-            self.command, self.required
-        )
-    }
-}
-
-fn ensure_command_access(command: &str, kind: &'static str, access: CommandAccess) -> Result<()> {
-    if let Some(AccessReason::HiddenByProduct(Some(message))) = access.reasons.first() {
-        return Err(miette!("{message}"));
-    }
-    if access.is_runnable() {
-        return Ok(());
-    }
-
-    if !access.missing_capabilities.is_empty() {
-        return Err(miette::Report::new(MissingCommandCapabilities::new(
-            kind,
-            command,
-            &access.missing_capabilities,
-        )));
-    }
-
-    let detail = access
-        .reasons
-        .first()
-        .map(render_access_reason)
-        .unwrap_or_else(|| "denied by current auth policy".to_string());
-    let action = access
-        .reasons
-        .first()
-        .map(access_reason_action)
-        .unwrap_or_else(|| "ask the command owner for access, then retry".to_string());
-    Err(miette!("{kind} `{command}` {detail}. Try: {action}"))
-}
-
-fn ensure_command_visibility(
-    command: &str,
-    kind: &'static str,
-    access: CommandAccess,
-) -> Result<()> {
-    if access.is_visible() {
-        return Ok(());
-    }
-    ensure_command_access(command, kind, access)
-}
-
-pub(crate) fn before_external_run(
-    runtime: &mut crate::app::AppRuntime,
-    path: &CommandPath,
-    requirement: ExternalPathAccessRequirement,
-    kind: &'static str,
-) -> Result<()> {
-    ensure_command_visibility(
-        &path.as_slice().join(" "),
-        kind,
-        runtime.auth().external_command_path_access(path),
-    )?;
-    if requirement == ExternalPathAccessRequirement::Runnable
-        && let Some(policy) = runtime.access_policy()
-    {
-        policy.before_run(path.as_slice(), runtime)?;
-    }
-    Ok(())
-}
-
-fn ensure_command_access_for(
-    runtime: &mut crate::app::AppRuntime,
-    _session: &mut crate::app::AppSession,
-    _external: bool,
-    command: &str,
-    kind: &'static str,
-    access_for: impl Fn(&AuthState) -> CommandAccess,
-) -> Result<()> {
-    ensure_command_access(command, kind, access_for(runtime.auth()))
-}
-
-fn render_access_reason(reason: &AccessReason) -> String {
-    match reason {
-        AccessReason::HiddenByProduct(_) | AccessReason::HiddenByPolicy => {
-            "is hidden by current auth policy".to_string()
-        }
-        AccessReason::DisabledByProduct => "is disabled by current product policy".to_string(),
-        AccessReason::Unauthenticated => "requires authentication".to_string(),
-        AccessReason::MissingCapabilities => "requires additional capabilities".to_string(),
-        AccessReason::MissingCredential(service) => {
-            format!("requires credential `{service}`")
-        }
-        AccessReason::InvalidCredential(service) => {
-            format!("requires a valid `{service}` credential")
-        }
-        AccessReason::InsufficientCredentialTtl {
-            service,
-            required_ttl_seconds,
-        } => format!(
-            "requires `{service}` credential with at least {required_ttl_seconds}s remaining"
-        ),
-        AccessReason::InsufficientAuthStrength(required) => {
-            format!("requires {} authentication", required.as_label())
-        }
-        AccessReason::FeatureDisabled(flag) => format!("requires feature `{flag}`"),
-        AccessReason::ProfileUnavailable(profile) if profile.is_empty() => {
-            "requires an eligible profile".to_string()
-        }
-        AccessReason::ProfileUnavailable(profile) => {
-            format!("is unavailable in profile `{profile}`")
-        }
-    }
-}
-
-fn access_reason_action(reason: &AccessReason) -> String {
-    match reason {
-        AccessReason::Unauthenticated => "authenticate, then retry".to_string(),
-        AccessReason::MissingCapabilities => {
-            "authenticate with an identity granted the required capabilities, then retry"
-                .to_string()
-        }
-        AccessReason::MissingCredential(service) => {
-            format!("configure the `{service}` credential, then retry")
-        }
-        AccessReason::InvalidCredential(service)
-        | AccessReason::InsufficientCredentialTtl { service, .. } => {
-            format!("renew the `{service}` credential, then retry")
-        }
-        AccessReason::InsufficientAuthStrength(required) => {
-            format!(
-                "authenticate with {} authentication, then retry",
-                required.as_label()
-            )
-        }
-        AccessReason::FeatureDisabled(flag) => {
-            format!("enable feature `{flag}`, then retry")
-        }
-        AccessReason::ProfileUnavailable(profile) if profile.is_empty() => {
-            "switch to an eligible profile, then retry".to_string()
-        }
-        AccessReason::ProfileUnavailable(profile) => {
-            format!("switch from profile `{profile}` to an eligible profile, then retry")
-        }
-        AccessReason::HiddenByProduct(_)
-        | AccessReason::HiddenByPolicy
-        | AccessReason::DisabledByProduct => {
-            "ask the command owner to enable access, then retry".to_string()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-
-    use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
-    use crate::core::command_policy::{AccessReason, CommandPath, CommandPolicy, VisibilityMode};
-    use clap::Parser;
-
     use super::{
-        DispatchPlan, RunAction, build_dispatch_plan, ensure_builtin_visible_for,
-        ensure_dispatch_visibility, ensure_plugin_visible_for, normalize_cli_profile,
+        DispatchPlan, RunAction, build_dispatch_plan, normalize_cli_profile,
         normalize_profile_override,
     };
-    use crate::app::{AuthState, TerminalKind};
     use crate::cli::{Cli, Commands};
-
+    use clap::Parser;
     fn parse_cli(args: &[&str]) -> Cli {
-        Cli::try_parse_from(args).expect("cli args should parse")
+        Cli::try_parse_from(args).unwrap()
     }
-
-    fn auth_state(builtins: Option<&[&str]>, plugins: Option<&[&str]>) -> AuthState {
-        let mut file = ConfigLayer::default();
-        if let Some(items) = builtins {
-            file.set("auth.visible.builtins", items.join(","));
-        }
-        if let Some(items) = plugins {
-            file.set("auth.visible.plugins", items.join(","));
-        }
-
-        let resolved = ConfigResolver::from_loaded_layers_with_schema(
-            LoadedLayers {
-                file,
-                ..LoadedLayers::default()
-            },
-            crate::config::ConfigSchema::default(),
-        )
-        .resolve(ResolveOptions::default())
-        .expect("auth visibility config should resolve");
-        AuthState::from_resolved(&resolved)
-    }
-
     #[test]
     fn normalize_profile_helpers_trim_blank_values_and_rewrite_cli_unit() {
         assert_eq!(
@@ -646,112 +403,5 @@ mod tests {
         assert!(matches!(plan.action, RunAction::External(tokens)
             if tokens == vec!["dev", "config", "set", "ui.format"]));
         assert!(plan.profile_override.is_none());
-    }
-
-    #[test]
-    fn dispatch_visibility_helpers_cover_allowlists_unrunnable_commands_and_terminals_unit() {
-        let auth = auth_state(Some(&["config", "history"]), Some(&["ldap"]));
-
-        ensure_builtin_visible_for(&auth, "config").expect("config should be visible");
-        ensure_plugin_visible_for(&auth, "ldap").expect("ldap should be visible");
-        assert!(
-            ensure_builtin_visible_for(&auth, "theme")
-                .expect_err("theme should be hidden")
-                .to_string()
-                .contains("hidden by current auth policy")
-        );
-        assert!(
-            ensure_plugin_visible_for(&auth, "mreg")
-                .expect_err("mreg should be hidden")
-                .to_string()
-                .contains("hidden by current auth policy")
-        );
-
-        let mut gated_auth = auth_state(None, None);
-        gated_auth.builtin_policy_mut().register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-        let err = ensure_builtin_visible_for(&gated_auth, "config")
-            .expect_err("unauthenticated builtin should be denied");
-        assert!(err.to_string().contains("requires authentication"));
-        assert!(err.to_string().contains("Try: authenticate, then retry"));
-
-        let auth = auth_state(
-            Some(&["plugins", "doctor", "theme", "config", "history"]),
-            Some(&["ldap"]),
-        );
-        for (args, expected_terminal) in [
-            (&["osp", "plugins", "list"][..], TerminalKind::Cli),
-            (&["osp", "theme", "list"][..], TerminalKind::Cli),
-            (&["osp", "history", "list"][..], TerminalKind::Cli),
-            (&["osp", "doctor", "theme"][..], TerminalKind::Cli),
-            (&["osp"][..], TerminalKind::Repl),
-        ] {
-            let mut cli = parse_cli(args);
-            let plan = build_dispatch_plan(&mut cli).expect("command should parse");
-            assert_eq!(plan.action.terminal_kind(), expected_terminal);
-            ensure_dispatch_visibility(&auth, &plan.action).expect("command should be visible");
-        }
-
-        let external = RunAction::External(vec!["ldap".to_string(), "user".to_string()]);
-        assert_eq!(external.terminal_kind(), TerminalKind::Cli);
-        ensure_dispatch_visibility(&auth, &external).expect("visible plugin should pass");
-    }
-
-    #[test]
-    fn dispatch_reason_rendering_covers_feature_profile_and_capability_denials_unit() {
-        let mut auth = auth_state(None, Some(&["ldap", "orch"]));
-        auth.builtin_policy_mut().register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated)
-                .allow_profiles(["dev"])
-                .feature_flag("config-ui"),
-        );
-        auth.external_policy_mut().register(
-            CommandPolicy::new(CommandPath::new(["orch"]))
-                .visibility(VisibilityMode::CapabilityGated)
-                .require_capability("orch.approval.decide"),
-        );
-
-        let profile_err = ensure_builtin_visible_for(&auth, "config")
-            .expect_err("active profile outside the allowlist should deny builtin");
-        assert!(
-            profile_err
-                .to_string()
-                .contains("is unavailable in profile `default`")
-        );
-
-        auth.set_policy_context(
-            crate::core::command_policy::CommandPolicyContext::default().with_profile("dev"),
-        );
-        let feature_err = ensure_builtin_visible_for(&auth, "config")
-            .expect_err("missing feature should deny builtin");
-        assert!(
-            feature_err
-                .to_string()
-                .contains("requires feature `config-ui`")
-        );
-
-        auth.set_policy_context(
-            crate::core::command_policy::CommandPolicyContext::default()
-                .authenticated(true)
-                .with_profile("dev"),
-        );
-        let capability_err = ensure_plugin_visible_for(&auth, "orch")
-            .expect_err("missing capability should deny plugin");
-        let capability_text = capability_err.to_string();
-        assert!(capability_text.contains("plugin command `orch`"));
-        assert!(capability_text.contains("capability `orch.approval.decide`"));
-        assert!(capability_text.contains("Try: authenticate"));
-
-        assert_eq!(
-            super::render_access_reason(&AccessReason::DisabledByProduct),
-            "is disabled by current product policy"
-        );
-        assert_eq!(
-            super::render_access_reason(&AccessReason::ProfileUnavailable("prod".to_string())),
-            "is unavailable in profile `prod`"
-        );
     }
 }

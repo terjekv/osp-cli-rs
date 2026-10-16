@@ -1,4 +1,3 @@
-use crate::app::dispatch::{ExternalPathAccessRequirement, before_external_run};
 use crate::repl::{ReplLineResult, ReplReloadKind};
 use miette::{Result, miette};
 
@@ -6,7 +5,10 @@ use super::command::{
     ParsedReplDispatch, execute_repl_command_dispatch, run_repl_external_command,
 };
 use crate::app;
-use crate::app::dispatch::{ensure_external_command_access, resolve_external_command_source};
+use crate::app::dispatch::{
+    ExternalPathAccessRequirement, before_external_run, ensure_external_access,
+    resolve_external_command_source,
+};
 use crate::app::sink::UiSink;
 use crate::app::{AppClients, AppRuntime, AppSession, CliCommandResult};
 use crate::app::{CMD_HELP, ResolvedInvocation};
@@ -224,13 +226,19 @@ pub(super) fn enter_repl_shell(
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
+    let path = crate::command_policy::CommandPath::new([command]);
     before_external_run(
         runtime,
-        &crate::command_policy::CommandPath::new([command]),
+        &path,
         ExternalPathAccessRequirement::Runnable,
         "command",
     )?;
-    ensure_external_command_access(runtime, session, command)?;
+    ensure_external_access(
+        runtime,
+        &path,
+        ExternalPathAccessRequirement::Runnable,
+        "command",
+    )?;
     let catalog = app::authorized_command_catalog_for(
         &runtime.auth,
         clients,

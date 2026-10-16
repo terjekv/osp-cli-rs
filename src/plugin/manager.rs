@@ -26,8 +26,8 @@
 
 use super::active::ActivePluginView;
 use super::catalog::{
-    build_command_catalog, build_command_policy_registry, build_doctor_report, list_plugins,
-    register_describe_command_policies, render_repl_help, selected_provider_label,
+    build_command_auth, build_command_catalog, build_doctor_report, collect_command_auth,
+    list_plugins, render_repl_help, selected_provider_label,
 };
 use super::conversion::to_command_spec;
 use super::discovery::DiscoveryCache;
@@ -42,7 +42,7 @@ use crate::core::plugin::{
 };
 use crate::core::runtime::RuntimeHints;
 use anyhow::{Result, anyhow};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -589,8 +589,7 @@ fn stderr_suffix(stderr: &str) -> String {
 /// cache roots, then asks it for one of three things:
 ///
 /// - plugin inventory via [`PluginManager::list_plugins`]
-/// - merged command metadata via [`PluginManager::command_catalog`] or
-///   [`PluginManager::command_policy_registry`]
+/// - merged command metadata via [`PluginManager::command_catalog`]
 /// - dispatch-time configuration such as manager-local provider selections
 ///
 /// If you are implementing the plugin executable itself rather than the host,
@@ -802,59 +801,43 @@ impl PluginManager {
             .then(|| self.with_dispatch_view(build_command_catalog))
     }
 
-    /// Builds a command policy registry from active plugin describe metadata.
-    ///
-    /// Use this when plugin auth hints need to participate in the same runtime
-    /// visibility and access evaluation as native commands. Commands that
-    /// still require provider selection are omitted until one provider is
-    /// selected explicitly.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::plugin::PluginManager;
-    ///
-    /// let registry = PluginManager::new(Vec::new()).command_policy_registry();
-    ///
-    /// assert!(registry.is_empty());
-    /// ```
-    pub fn command_policy_registry(&self) -> crate::core::command_policy::CommandPolicyRegistry {
-        self.with_passive_view(build_command_policy_registry)
+    pub(crate) fn command_auth(&self) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
+        self.with_passive_view(build_command_auth)
     }
 
-    pub(crate) fn resolved_command_path_and_policy(
+    pub(crate) fn resolved_command_path_and_auth(
         &self,
         command: &str,
         args: &[String],
         provider_override: Option<&str>,
     ) -> Result<(
         CommandPath,
-        crate::core::command_policy::CommandPolicyRegistry,
+        BTreeMap<CommandPath, DescribeCommandAuthV1>,
         bool,
     )> {
         self.with_dispatch_view(|view| {
-            let mut policy = crate::core::command_policy::CommandPolicyRegistry::new();
+            let mut auth = BTreeMap::new();
             let Ok(ProviderResolution::Selected(selection)) =
                 view.resolve_provider(command, provider_override)
             else {
-                return Ok((CommandPath::new([command]), policy, false));
+                return Ok((CommandPath::new([command]), auth, false));
             };
             let Some(describe) = selection
                 .plugin
                 .canonical_command(command)
                 .and_then(|command| command.describe())
             else {
-                return Ok((CommandPath::new([command]), policy, false));
+                return Ok((CommandPath::new([command]), auth, false));
             };
 
-            register_describe_command_policies(&mut policy, describe, &[]);
+            collect_command_auth(&mut auth, describe, &[]);
             let resolved = describe.resolve_invocation(args);
             if resolved.ambiguous {
                 return Err(anyhow!(
                     "cannot resolve plugin command `{command}`: its describe metadata does not cover the arguments before a nested command; pass a described option/argument or run the plugin directly"
                 ));
             }
-            Ok((resolved.path, policy, resolved.delegated_help))
+            Ok((resolved.path, auth, resolved.delegated_help))
         })
     }
 

@@ -27,8 +27,7 @@ use crate::repl::is_repl_shellable_command;
 use super::command_output::{PreparedPluginOutput, apply_output_stages};
 use super::dispatch::{
     ExternalCommandSource, ExternalPathAccessRequirement, before_external_run,
-    canonical_external_command_name, ensure_external_path_access,
-    ensure_external_path_access_with_policy, resolve_external_command_source,
+    canonical_external_command_name, ensure_external_access, resolve_external_command_source,
 };
 use super::sink::{ProgressUiSink, UiSink};
 use super::{
@@ -294,7 +293,6 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 },
                 "command",
             )?;
-            let mut refreshed_policy = None;
             if native_parse
                 .as_ref()
                 .is_err_and(|error| !is_native_help_error(error.kind()))
@@ -304,9 +302,8 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                     .take_while(|arg| arg.as_str() != "--")
                     .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V"))
             {
-                ensure_external_path_access(
+                ensure_external_access(
                     runtime,
-                    session,
                     &crate::command_policy::CommandPath::new([command.clone()]),
                     ExternalPathAccessRequirement::Runnable,
                     "command",
@@ -330,7 +327,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                     native_parse = native_command.command().try_get_matches_from(
                         std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
                     );
-                    refreshed_policy = Some(clients.native_commands().command_policy_registry());
+                    runtime.auth.refresh_native_auth(&native_command.describe());
                 }
             }
             let parsed_args = canonical_args.as_slice();
@@ -354,23 +351,13 @@ fn run_external_command_with_help_renderer_and_progress_inner(
             if let Err(err) = native_parse {
                 if is_native_help_error(err.kind()) {
                     mark_repl_command_accepted(&mut accepted);
-                    ensure_external_path_access(
+                    ensure_external_access(
                         runtime,
-                        session,
                         &path,
                         ExternalPathAccessRequirement::Visible,
                         "command",
                     )?;
-                    if let Some(policy) = &refreshed_policy {
-                        ensure_external_path_access_with_policy(
-                            runtime,
-                            session,
-                            &path,
-                            ExternalPathAccessRequirement::Visible,
-                            "command",
-                            policy,
-                        )?;
-                    }
+
                     let mut help = err.to_string();
                     match native_command
                         .prepare_invocation_metadata(args, runtime.config.resolved())
@@ -392,15 +379,12 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                                         &refreshed_args,
                                         &refreshed_description,
                                     );
-                                    let policy =
-                                        clients.native_commands().command_policy_registry();
-                                    ensure_external_path_access_with_policy(
+                                    runtime.auth.refresh_native_auth(&native_command.describe());
+                                    ensure_external_access(
                                         runtime,
-                                        session,
                                         &refreshed_path,
                                         ExternalPathAccessRequirement::Visible,
                                         "command",
-                                        &policy,
                                     )?;
                                     help = refreshed_error.to_string();
                                 }
@@ -438,23 +422,13 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 }
             }
             mark_repl_command_accepted(&mut accepted);
-            ensure_external_path_access(
+            ensure_external_access(
                 runtime,
-                session,
                 &path,
                 ExternalPathAccessRequirement::Runnable,
                 "command",
             )?;
-            if let Some(policy) = &refreshed_policy {
-                ensure_external_path_access_with_policy(
-                    runtime,
-                    session,
-                    &path,
-                    ExternalPathAccessRequirement::Runnable,
-                    "command",
-                    policy,
-                )?;
-            }
+
             run_native_command(
                 native_command.as_ref(),
                 runtime,
@@ -606,7 +580,7 @@ fn run_native_command(
     .with_session_context(
         session
             .native_context
-            .for_command(input.command_path.clone()),
+            .for_command(input.command_path.as_str()),
     );
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
@@ -914,9 +888,9 @@ fn run_external_plugin_command(
         .tokens
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
-    let (path, dispatch_policy, help_requested) = clients
+    let (path, dispatch_auth, help_requested) = clients
         .plugins()
-        .resolved_command_path_and_policy(command, args, invocation.plugin_provider.as_deref())
+        .resolved_command_path_and_auth(command, args, invocation.plugin_provider.as_deref())
         .map_err(|error| miette!(error.to_string()))?;
     mark_repl_command_accepted(accepted);
     let access_requirement = if help_requested {
@@ -924,62 +898,60 @@ fn run_external_plugin_command(
     } else {
         ExternalPathAccessRequirement::Runnable
     };
-    before_external_run(runtime_state, &path, access_requirement, "plugin command")?;
-    ensure_external_path_access_with_policy(
-        runtime_state,
-        session,
-        &path,
-        access_requirement,
-        "plugin command",
-        &dispatch_policy,
-    )?;
-    let runtime = ExternalCommandRuntime::from_parts(runtime_state, clients);
+    let passive_auth = runtime_state.auth.replace_command_auth(dispatch_auth);
+    let result = (|| {
+        before_external_run(runtime_state, &path, access_requirement, "plugin command")?;
+        ensure_external_access(runtime_state, &path, access_requirement, "plugin command")?;
+        let runtime = ExternalCommandRuntime::from_parts(runtime_state, clients);
 
-    tracing::debug!(
-        command = %path.as_slice().join(" "),
-        "dispatching external command"
-    );
+        tracing::debug!(
+            command = %path.as_slice().join(" "),
+            "dispatching external command"
+        );
 
-    if access_requirement == ExternalPathAccessRequirement::Visible {
+        if access_requirement == ExternalPathAccessRequirement::Visible {
+            let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
+            let raw = runtime
+                .plugins
+                .dispatch_passthrough(command, args, &dispatch_context)
+                .map_err(enrich_dispatch_error)?;
+            let mut result = if !raw.stdout.is_empty() {
+                let mut document = guide_help(&raw.stdout);
+                runtime_state
+                    .auth
+                    .filter_help_document(&mut document, path.as_slice());
+                CliCommandResult::document(document)
+            } else {
+                CliCommandResult::exit(raw.status_code)
+            };
+            if !raw.stderr.is_empty() {
+                result.stderr_text = Some(raw.stderr);
+            }
+            result.exit_code = raw.status_code;
+            return Ok(result);
+        }
+
         let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-        let raw = runtime
+        let response = runtime
             .plugins
-            .dispatch_passthrough(command, args, &dispatch_context)
+            .dispatch(command, args, &dispatch_context)
             .map_err(enrich_dispatch_error)?;
-        let mut result = if !raw.stdout.is_empty() {
-            let mut document = guide_help(&raw.stdout);
-            runtime_state
-                .auth
-                .filter_help_document(&mut document, path.as_slice());
-            CliCommandResult::document(document)
-        } else {
-            CliCommandResult::exit(raw.status_code)
-        };
-        if !raw.stderr.is_empty() {
-            result.stderr_text = Some(raw.stderr);
+
+        if response.ok
+            && let Some(entries) = response.context.as_ref()
+        {
+            let context = session
+                .native_context
+                .for_command(path.as_slice().join(" "));
+            for (kind, value) in entries {
+                context.set_context_value(kind.clone(), value.clone());
+            }
         }
-        result.exit_code = raw.status_code;
-        return Ok(result);
-    }
 
-    let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-    let response = runtime
-        .plugins
-        .dispatch(command, args, &dispatch_context)
-        .map_err(enrich_dispatch_error)?;
-
-    if response.ok
-        && let Some(entries) = response.context.as_ref()
-    {
-        let context = session
-            .native_context
-            .for_command(path.as_slice().join(" "));
-        for (kind, value) in entries {
-            context.set_context_value(kind.clone(), value.clone());
-        }
-    }
-
-    cli_result_from_plugin_response(response, &parsed.stages)
+        cli_result_from_plugin_response(response, &parsed.stages)
+    })();
+    runtime_state.auth.replace_command_auth(passive_auth);
+    result
 }
 
 #[cfg(test)]
@@ -996,7 +968,6 @@ mod tests {
     use crate::app::{BufferedUiSink, CliCommandResult, ReplCommandOutput};
     use crate::cli::invocation::InvocationOptions;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
-    use crate::core::command_policy::CommandPolicyContext;
     use crate::core::document::Document;
     use crate::core::output::OutputFormat;
     use crate::core::plugin::{
@@ -1230,8 +1201,8 @@ mod tests {
             .resolve(ResolveOptions::default())
             .expect("test config should resolve");
         let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-        let mut auth = AuthState::from_resolved(&config);
-        auth.replace_external_policy(native_commands.command_policy_registry());
+        let mut auth = AuthState::default();
+        auth.replace_command_auth(native_commands.command_auth());
         let runtime = AppRuntime::new(
             RuntimeContext::new(None, TerminalKind::Cli, None),
             ConfigState::new(config.clone()),
@@ -1284,7 +1255,7 @@ mod tests {
                 ..DescribeCommandAuthV1::default()
             });
             root.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+                visibility: Some(DescribeVisibilityModeV1::Authenticated),
                 required_capabilities: vec!["ldap.user.read".to_string()],
                 feature_flags: Vec::new(),
                 ..DescribeCommandAuthV1::default()
@@ -1314,7 +1285,7 @@ mod tests {
                 ..DescribeCommandAuthV1::default()
             });
             root.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+                visibility: Some(DescribeVisibilityModeV1::Authenticated),
                 required_capabilities: vec!["lookup.user.read".to_string()],
                 ..DescribeCommandAuthV1::default()
             });
@@ -1659,9 +1630,6 @@ JSON
         let (mut runtime, mut session, clients) = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
-        runtime
-            .auth
-            .set_policy_context(CommandPolicyContext::default().authenticated(true));
 
         let invocation = resolve_invocation_ui(
             runtime.config.resolved(),
@@ -1685,7 +1653,7 @@ JSON
         .expect_err("nested auth should block native external dispatch");
 
         assert!(err.to_string().contains("command `ldap user`"));
-        assert!(err.to_string().contains("capability `ldap.user.read`"));
+        assert!(err.to_string().contains("requires authentication"));
         assert!(err.to_string().contains("Try: authenticate"));
     }
 
@@ -1694,9 +1662,6 @@ JSON
         let (mut runtime, mut session, clients) = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(AliasedNestedAuthNativeCommand),
         );
-        runtime
-            .auth
-            .set_policy_context(CommandPolicyContext::default().authenticated(true));
 
         let invocation = resolve_invocation_ui(
             runtime.config.resolved(),
@@ -1714,7 +1679,7 @@ JSON
         .expect_err("the canonical aliased child policy should deny execution");
 
         assert!(err.to_string().contains("command `lookup user`"));
-        assert!(err.to_string().contains("lookup.user.read"));
+        assert!(err.to_string().contains("requires authentication"));
     }
 
     #[test]
@@ -1753,37 +1718,38 @@ JSON
     }
 
     #[test]
-    fn external_native_help_keeps_hidden_profile_and_feature_gates_unit() {
-        use crate::core::command_policy::{CommandPath, CommandPolicy, VisibilityMode};
-
-        let policies = [
-            CommandPolicy::new(CommandPath::new(["ldap", "user"]))
-                .visibility(VisibilityMode::Hidden),
-            CommandPolicy::new(CommandPath::new(["ldap", "user"])).allow_profiles(["other"]),
-            CommandPolicy::new(CommandPath::new(["ldap", "user"])).feature_flag("ldap-user"),
-        ];
-
-        for policy in policies {
-            let (mut runtime, mut session, clients) = make_test_state_with_registry(
-                NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
-            );
-            runtime.auth.external_policy_mut().register(policy);
-            let invocation = resolve_invocation_ui(
-                runtime.config.resolved(),
-                &runtime.ui,
-                &InvocationOptions::default(),
-            );
-
-            run_external_command_with_help_renderer(
-                &mut runtime,
-                &mut session,
-                &clients,
-                &["ldap".to_string(), "user".to_string(), "--help".to_string()],
-                &invocation,
-                Document::from_help_text,
-            )
-            .expect_err("hidden command help must remain inaccessible");
+    fn external_native_help_obeys_product_visibility_unit() {
+        struct ProductAccess;
+        impl crate::app::AccessPolicy for ProductAccess {
+            fn visibility(&self, path: &[String]) -> crate::app::Visibility {
+                if path == ["ldap", "user"] {
+                    crate::app::Visibility::Hidden(Some(
+                        "Use the product's operator profile".into(),
+                    ))
+                } else {
+                    crate::app::Visibility::Shown
+                }
+            }
         }
+        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+            NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
+        );
+        runtime.set_access_policy(Some(std::sync::Arc::new(ProductAccess)));
+        let invocation = resolve_invocation_ui(
+            runtime.config.resolved(),
+            &runtime.ui,
+            &InvocationOptions::default(),
+        );
+        let error = run_external_command_with_help_renderer(
+            &mut runtime,
+            &mut session,
+            &clients,
+            &["ldap".into(), "user".into(), "--help".into()],
+            &invocation,
+            Document::from_help_text,
+        )
+        .expect_err("hidden command help must remain inaccessible");
+        assert_eq!(error.to_string(), "Use the product's operator profile");
     }
 
     #[cfg(unix)]

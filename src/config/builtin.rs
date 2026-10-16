@@ -372,16 +372,6 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: None,
             },
             BuiltinKey {
-                key: "auth.visible.builtins",
-                schema: SchemaEntry::string().with_doc("Visible builtin auth command allow-list"),
-                default: None,
-            },
-            BuiltinKey {
-                key: "auth.visible.plugins",
-                schema: SchemaEntry::string().with_doc("Visible plugin auth command allow-list"),
-                default: None,
-            },
-            BuiltinKey {
                 key: "debug.level",
                 schema: SchemaEntry::integer().with_doc("Developer debug verbosity"),
                 default: Some(ConfigValue::from(0)),

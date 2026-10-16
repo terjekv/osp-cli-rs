@@ -233,7 +233,7 @@ fn repl_dsl_capability_is_declared_per_command_unit() {
 
 #[test]
 fn external_inline_builtin_reuses_repl_dsl_policy_unit() {
-    let mut state = make_completion_state(None);
+    let mut state = make_completion_state();
     let command = Commands::Config(crate::cli::ConfigArgs {
         command: ConfigCommands::Set(crate::cli::ConfigSetArgs {
             key: "ui.mode".to_string(),

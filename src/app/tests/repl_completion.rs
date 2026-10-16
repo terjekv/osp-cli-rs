@@ -124,7 +124,7 @@ fn doctor_clap_projection_and_repl_surface_have_path_flag_and_help_parity_unit()
     let mut clap_surface = Vec::new();
     command_def_surface(&doctor_def, "", &mut clap_surface);
 
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let surface =
         surface::build_repl_surface(repl_view(&state.runtime, &state.session), &sample_catalog());
     let doctor_spec = surface
@@ -202,7 +202,7 @@ fn doctor_clap_projection_and_repl_surface_have_path_flag_and_help_parity_unit()
     ignore = "help completion walks the full command tree under Miri"
 )]
 fn repl_help_alias_parsing_and_completion_cover_root_and_scoped_paths_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     for (line, expected_dispatch) in [
         (
             "help ldap user",
@@ -249,7 +249,7 @@ fn repl_help_alias_parsing_and_completion_cover_root_and_scoped_paths_unit() {
     assert!(!root_values.contains(&"help".to_string()));
     assert!(!root_values.iter().any(|value| value.starts_with("--")));
 
-    let mut state = make_completion_state(None);
+    let mut state = make_completion_state();
     state.session.scope.enter("orch");
     let catalog = sample_catalog_with_provision_context();
     let engine = completion_engine_for(&state, &catalog);
@@ -264,7 +264,7 @@ fn repl_help_alias_parsing_and_completion_cover_root_and_scoped_paths_unit() {
 #[test]
 #[cfg_attr(miri, ignore = "alias completion clones large command subtrees")]
 fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
-    let mut state = make_completion_state(None);
+    let mut state = make_completion_state();
     let config = state.runtime.config.resolved();
     assert!(repl::is_repl_shellable_command(config, "ldap"));
     assert!(repl::is_repl_shellable_command(config, "LDAP"));
@@ -314,7 +314,7 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
             .is_some()
     );
 
-    let mut state = make_completion_state(None);
+    let mut state = make_completion_state();
     let catalog = sample_catalog();
     let engine = completion_engine_for(&state, &catalog);
     let values = complete_values(&engine, "or");
@@ -344,10 +344,8 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
             "red".to_string()
         ]
     );
-    let state = make_completion_state_with_entries(
-        None,
-        &[("alias.ops", "orch provision --provider alpha")],
-    );
+    let state =
+        make_completion_state_with_entries(&[("alias.ops", "orch provision --provider alpha")]);
     let catalog = sample_catalog();
     let engine = completion_engine_for(&state, &catalog);
     let values = complete_values(&engine, "op");
@@ -360,7 +358,7 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
         None
     );
 
-    let mut state = make_completion_state_with_entries(None, &[("alias.st", "status")]);
+    let mut state = make_completion_state_with_entries(&[("alias.st", "status")]);
     state.session.scope.enter("orch");
     let catalog = sample_catalog();
     let tree = completion_tree_for(&state, &catalog);
@@ -378,10 +376,8 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
         "relative alias should resolve as a complete shell command, got {suggestions:?}"
     );
 
-    let mut state = make_completion_state_with_entries(
-        None,
-        &[("alias.vm", "provision guest --provider alpha")],
-    );
+    let mut state =
+        make_completion_state_with_entries(&[("alias.vm", "provision guest --provider alpha")]);
     state.session.scope.enter("orch");
     let catalog = sample_catalog_with_provision_context();
     let engine = completion_engine_for(&state, &catalog);
@@ -389,7 +385,7 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
     assert!(values.contains(&"red".to_string()));
     assert!(!values.contains(&"blue".to_string()));
 
-    let mut state = make_completion_state_with_entries(None, &[("alias.ops", "orch provision")]);
+    let mut state = make_completion_state_with_entries(&[("alias.ops", "orch provision")]);
     state.session.scope.enter("orch");
     let catalog = sample_catalog_with_provision_context();
     let engine = completion_engine_for(&state, &catalog);
@@ -402,7 +398,7 @@ fn repl_shell_and_scoped_alias_completion_cover_scope_rules_unit() {
 #[cfg_attr(miri, ignore = "alias completion clones large command subtrees")]
 fn repl_alias_completion_inherits_prefilled_context_unit() {
     for alias in ["orch", "--json orch"] {
-        let state = make_completion_state_with_entries(None, &[("alias.ops", alias)]);
+        let state = make_completion_state_with_entries(&[("alias.ops", alias)]);
         let catalog = sample_catalog();
         let engine = completion_engine_for(&state, &catalog);
         let values = complete_values(&engine, "ops prov");
@@ -416,7 +412,7 @@ fn repl_alias_completion_inherits_prefilled_context_unit() {
             Some(vec!["json".to_string()]),
         ),
     ] {
-        let state = make_completion_state_with_entries(None, &[("alias.me", alias)]);
+        let state = make_completion_state_with_entries(&[("alias.me", alias)]);
         let catalog = sample_catalog_with_provision_context();
         let tree = completion_tree_for(&state, &catalog);
         let alias_node = tree
@@ -441,7 +437,7 @@ fn repl_alias_completion_inherits_prefilled_context_unit() {
         "orch provision guest --provider alpha",
         "--json orch provision guest --provider alpha",
     ] {
-        let state = make_completion_state_with_entries(None, &[("alias.me", alias)]);
+        let state = make_completion_state_with_entries(&[("alias.me", alias)]);
         let catalog = sample_catalog_with_provision_context();
         let engine = completion_engine_for(&state, &catalog);
         let values = complete_values(&engine, "me --image ");
@@ -449,8 +445,7 @@ fn repl_alias_completion_inherits_prefilled_context_unit() {
         assert!(!values.contains(&"blue".to_string()));
     }
 
-    let state =
-        make_completion_state_with_entries(None, &[("alias.me", "orch provision guest ${1}")]);
+    let state = make_completion_state_with_entries(&[("alias.me", "orch provision guest ${1}")]);
     let catalog = sample_catalog_with_provision_context();
     let engine = completion_engine_for(&state, &catalog);
     let values = complete_values(&engine, "me ");
@@ -460,7 +455,7 @@ fn repl_alias_completion_inherits_prefilled_context_unit() {
 
 #[test]
 fn repl_completion_tree_contains_builtin_and_plugin_commands_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
 
@@ -492,7 +487,7 @@ fn repl_completion_tree_contains_builtin_and_plugin_commands_unit() {
 
 #[test]
 fn repl_alias_remove_completion_suggests_resolved_alias_names_unit() {
-    let state = make_completion_state_with_entries(None, &[("alias.lsng", "ldap netgroup")]);
+    let state = make_completion_state_with_entries(&[("alias.lsng", "ldap netgroup")]);
     let catalog = sample_catalog();
     let engine = completion_engine_for(&state, &catalog);
 
@@ -501,7 +496,7 @@ fn repl_alias_remove_completion_suggests_resolved_alias_names_unit() {
 
 #[test]
 fn repl_completion_tree_injects_config_set_schema_keys_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
 
@@ -523,24 +518,8 @@ fn repl_completion_tree_injects_config_set_schema_keys_unit() {
 }
 
 #[test]
-fn repl_completion_tree_respects_builtin_visibility_unit() {
-    let state = make_completion_state(Some("theme"));
-    let catalog = sample_catalog();
-    let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
-
-    let tree =
-        completion::build_repl_completion_tree(repl_view(&state.runtime, &state.session), &surface)
-            .expect("repl completion tree should build");
-    assert!(tree.root.children.contains_key("theme"));
-    assert!(!tree.root.children.contains_key("config"));
-    assert!(!tree.root.children.contains_key("alias"));
-    assert!(!tree.root.children.contains_key("plugins"));
-    assert!(!tree.root.children.contains_key("history"));
-}
-
-#[test]
 fn repl_completion_tree_roots_to_active_shell_scope_unit() {
-    let mut state = make_completion_state(None);
+    let mut state = make_completion_state();
     state.session.scope.enter("orch");
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
@@ -557,7 +536,7 @@ fn repl_completion_tree_roots_to_active_shell_scope_unit() {
 
 #[test]
 fn repl_surface_drives_overview_and_completion_visibility_unit() {
-    let state = make_completion_state(Some("theme config"));
+    let state = make_completion_state();
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
 
@@ -571,8 +550,8 @@ fn repl_surface_drives_overview_and_completion_visibility_unit() {
     assert!(names.contains(&"config"));
     assert!(names.contains(&"alias"));
     assert!(names.contains(&"orch"));
-    assert!(!names.contains(&"plugins"));
-    assert!(!names.contains(&"history"));
+    assert!(names.contains(&"plugins"));
+    assert!(names.contains(&"history"));
     assert!(!surface.root_words.contains(&"cd".to_string()));
     assert!(surface.root_words.contains(&"theme".to_string()));
     assert!(surface.root_words.contains(&"config".to_string()));
@@ -582,8 +561,7 @@ fn repl_surface_drives_overview_and_completion_visibility_unit() {
 
 #[test]
 fn compact_repl_surface_omits_options_overview_and_prioritizes_builtins_unit() {
-    let state =
-        make_completion_state_with_entries(Some("theme config"), &[("ui.presentation", "compact")]);
+    let state = make_completion_state_with_entries(&[("ui.presentation", "compact")]);
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
 
@@ -592,7 +570,7 @@ fn compact_repl_surface_omits_options_overview_and_prioritizes_builtins_unit() {
         .iter()
         .map(|entry| entry.name.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(names[..5], ["exit", "help", "last", "source", "theme"]);
+    assert_eq!(names[..5], ["exit", "help", "last", "source", "plugins"]);
     assert!(!names.contains(&"options"));
     let orch_index = names
         .iter()
@@ -608,7 +586,7 @@ fn compact_repl_surface_omits_options_overview_and_prioritizes_builtins_unit() {
 #[test]
 #[cfg_attr(miri, ignore = "root completion sorts a large command tree under Miri")]
 fn compact_root_completion_suggestions_prioritize_core_commands_unit() {
-    let state = make_completion_state_with_entries(None, &[("ui.presentation", "compact")]);
+    let state = make_completion_state_with_entries(&[("ui.presentation", "compact")]);
     let catalog = sample_catalog();
     let surface = surface::build_repl_surface(repl_view(&state.runtime, &state.session), &catalog);
     let tree =
@@ -634,7 +612,7 @@ fn compact_root_completion_suggestions_prioritize_core_commands_unit() {
 
 #[test]
 fn repl_surface_exposes_selected_provider_for_conflicts_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let surface = surface::build_repl_surface(
         repl_view(&state.runtime, &state.session),
         &sample_conflicted_catalog(),
@@ -661,14 +639,14 @@ fn repl_surface_exposes_selected_provider_for_conflicts_unit() {
 
 #[test]
 fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let surface = surface::build_repl_surface(
         repl_view(&state.runtime, &state.session),
         &[crate::plugin::CommandCatalogEntry {
             name: "orch".to_string(),
             about: "orch plugin".to_string(),
             auth: Some(crate::core::plugin::DescribeCommandAuthV1 {
-                visibility: Some(crate::core::plugin::DescribeVisibilityModeV1::CapabilityGated),
+                visibility: Some(crate::core::plugin::DescribeVisibilityModeV1::Authenticated),
                 required_capabilities: vec!["orch.approval.decide".to_string()],
                 feature_flags: vec!["orch".to_string()],
                 ..crate::core::plugin::DescribeCommandAuthV1::default()
@@ -697,5 +675,5 @@ fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
         .find(|entry| entry.name == "orch")
         .expect("orch command spec should exist");
     let tooltip = spec.tooltip.as_deref().expect("tooltip should exist");
-    assert!(tooltip.contains("[cap: orch.approval.decide; feature: orch]"));
+    assert!(tooltip.contains("[auth]"));
 }

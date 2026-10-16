@@ -391,43 +391,36 @@ fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
             let auth_visibility = command
                 .auth
                 .as_ref()
-                .and_then(|auth| auth.visibility.map(|visibility| visibility.as_label()))
+                .and_then(|auth| {
+                    auth.visibility
+                        .filter(|visibility| {
+                            !matches!(
+                                visibility,
+                                crate::core::plugin::DescribeVisibilityModeV1::CapabilityGated
+                            )
+                        })
+                        .map(|visibility| visibility.as_label())
+                })
                 .map_or(serde_json::Value::Null, Into::into);
-            let required_capabilities = serde_json::Value::Array(
-                command
-                    .auth
-                    .as_ref()
-                    .map(|auth| {
-                        auth.required_capabilities
-                            .iter()
-                            .map(|value| value.clone().into())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            );
-            let feature_flags = serde_json::Value::Array(
-                command
-                    .auth
-                    .as_ref()
-                    .map(|auth| {
-                        auth.feature_flags
-                            .iter()
-                            .map(|value| value.clone().into())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            );
-            let visible_session = command
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.visible_session.as_ref())
-                .and_then(|session| serde_json::to_value(session).ok())
-                .unwrap_or(serde_json::Value::Null);
             let run_session = command
                 .auth
                 .as_ref()
                 .and_then(|auth| auth.run_session.as_ref())
-                .and_then(|session| serde_json::to_value(session).ok())
+                .and_then(|session| {
+                    let credentials = session
+                        .credentials
+                        .iter()
+                        .filter(|requirement| {
+                            !matches!(
+                                requirement,
+                                crate::core::plugin::DescribeCredentialRequirementV1::Fresh { .. }
+                            )
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    (!credentials.is_empty())
+                        .then(|| serde_json::json!({"credentials": credentials}))
+                })
                 .unwrap_or(serde_json::Value::Null);
             let subcommands = serde_json::Value::Array(
                 command
@@ -459,13 +452,8 @@ fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
                     .map_or(serde_json::Value::Null, Into::into),
                 "auth_hint" => auth_hint,
                 "auth_visibility" => auth_visibility,
-                "required_capabilities" => required_capabilities,
-                "feature_flags" => feature_flags,
                 "subcommands" => subcommands,
             };
-            if !visible_session.is_null() {
-                row.insert("visible_session".to_string(), visible_session);
-            }
             if !run_session.is_null() {
                 row.insert("run_session".to_string(), run_session);
             }
@@ -657,26 +645,6 @@ mod tests {
             commands[0].get("providers"),
             Some(&serde_json::json!(["alpha", "beta"]))
         );
-        assert_eq!(
-            row_str(&commands[0], "auth_visibility"),
-            Some("capability_gated")
-        );
-        assert_eq!(
-            row_str(&commands[0], "auth_hint"),
-            Some("cap: shared.run; feature: shared; show: auth: strong, token: osp valid")
-        );
-        assert_eq!(
-            commands[0].get("required_capabilities"),
-            Some(&serde_json::json!(["shared.run"]))
-        );
-        assert_eq!(
-            commands[0].get("visible_session"),
-            Some(&serde_json::json!({
-                "auth_strength": "strong",
-                "credentials": [{"state": "valid", "service": "osp"}]
-            }))
-        );
-
         let config = plugin_config_rows(
             "demo",
             &[
