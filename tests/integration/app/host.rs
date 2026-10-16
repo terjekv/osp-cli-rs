@@ -562,8 +562,13 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             .expect("explicit human formats should preserve the curated collection"),
             0,
         );
+        let expected_name = if format == "--md" {
+            r"db01.uio.no \(stale\)"
+        } else {
+            "db01.uio.no (stale)"
+        };
         assert!(
-            rendered.stdout.contains("db01.uio.no (stale)"),
+            rendered.stdout.contains(expected_name),
             "{format}: {}",
             rendered.stdout
         );
@@ -634,8 +639,13 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
                 "{format}: {}",
                 grouped.stdout
             );
+            let expected_state = if format == "--md" {
+                r"powered\_on"
+            } else {
+                "powered_on"
+            };
             assert!(
-                grouped.stdout.contains("powered_on"),
+                grouped.stdout.contains(expected_state),
                 "{format}: {}",
                 grouped.stdout
             );
