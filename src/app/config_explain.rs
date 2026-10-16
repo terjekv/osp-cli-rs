@@ -479,11 +479,12 @@ pub(crate) fn push_missing_config_key_messages(
     messages.push_titled(
         MessageLevel::Error,
         "Unknown configuration key",
-        format!("config key not found: {key}"),
+        format!(
+            "Unknown config key '{key}'.\nhint: Run {} to see the keys.",
+            crate::core::CommandScope::OneShot.command("config list")
+        ),
     );
-    if !suggestions.is_empty() {
-        messages.warning(format!("did you mean: {}", suggestions.join(", ")));
-    }
+    let _ = suggestions;
 }
 
 pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<String> {

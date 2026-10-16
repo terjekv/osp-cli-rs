@@ -347,7 +347,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     let failed = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_plain_output_since(failed, "doctor last -v", Duration::from_secs(5)),
+        session.wait_for_plain_output_since(failed, "error:", Duration::from_secs(5)),
         "the failed output pipeline should leave an inspectable failure: {}",
         session.output_snapshot(12000)
     );
@@ -358,7 +358,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
         let start = session.output_len();
         session.write_bytes(b"\r");
         assert!(
-            session.wait_for_plain_output_since(start, failed_command, Duration::from_secs(5)),
+            session.wait_for_plain_output_since(start, "theme …", Duration::from_secs(5)),
             "the diagnostic should identify the original command: {}",
             session.output_snapshot(12000)
         );
@@ -370,7 +370,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     session.write_bytes(b"\r");
     let failure = wait_for_repl_json(&session, start);
     assert_eq!(failure["status"], "error");
-    assert_eq!(failure["command"], failed_command);
+    assert_eq!(failure["command"], "theme …");
     assert!(
         failure["summary"]
             .as_str()

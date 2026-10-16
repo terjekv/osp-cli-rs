@@ -391,7 +391,7 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     let immediate = sink.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(immediate.contains("command ldap user"));
     assert!(immediate.contains("requires authentication"));
-    assert!(immediate.contains("Try: authenticate"));
+    assert!(immediate.contains("hint: authenticate"));
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
         &mut state, &history, line, None,
@@ -439,9 +439,9 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap usr", Some(&mut sink))
         .expect("failure should render through the sink");
     let immediate = &sink.stderr;
-    assert!(immediate.contains("subcommand 'usr'"));
+    assert!(immediate.contains("Unknown command 'ldap usr'"));
     assert!(
-        immediate.contains("More: rerun with -v"),
+        immediate.contains("hint: Did you mean ldap user?"),
         "unexpected immediate error: {immediate}"
     );
     assert!(!immediate.contains("Usage:"));
@@ -458,15 +458,15 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     };
 
     let recap = doctor("doctor last");
-    assert!(recap.contains("Action:  use `ldap user`"));
+    assert!(recap.contains("Action:  Did you mean ldap user?"));
     assert!(!recap.contains("Usage:"));
 
     let verbose = doctor("-v doctor last");
-    assert!(verbose.contains("Usage: ldap"));
+    assert!(!verbose.contains("Usage: ldap"));
     assert!(!verbose.contains("native command execution failed"));
 
     let debug = doctor("-vv doctor last");
-    assert!(debug.contains("subcommand 'usr'"));
+    assert!(debug.contains("Unknown command 'ldap usr'"));
     assert!(!debug.contains("Stack backtrace"));
 
     let forensic = doctor("-vvv doctor last");
@@ -488,7 +488,10 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
         .expect("failure should render through the sink");
     let immediate = &sink.stderr;
     assert!(immediate.contains("<USERNAME>"), "{immediate}");
-    assert!(immediate.contains("More: rerun with -v"), "{immediate}");
+    assert!(
+        immediate.contains("hint: Run ldap user --help."),
+        "{immediate}"
+    );
     assert!(!immediate.contains("Usage:"));
 }
 
@@ -818,8 +821,8 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         ),
     );
     assert!(rendered.contains("queried fallback backend"));
-    assert!(rendered.contains("NOT_FOUND: missing user"));
-    assert_eq!(report.to_string(), "NOT_FOUND: missing user");
+    assert_eq!(report.to_string(), "missing user");
+    assert_eq!(report.to_string(), "missing user");
     assert_eq!(
         output
             .document
@@ -900,19 +903,16 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
     let terse = render_report_message(&report, MessageLevel::Success, &settings);
-    assert!(
-        terse.contains("resource_not_found: No visible resource matched"),
-        "{terse}"
-    );
+    assert!(terse.contains("No visible resource matched"), "{terse}");
     assert!(!terse.contains("http_status"));
 
     let normal = render_report_message(&report, MessageLevel::Info, &settings);
-    assert!(normal.contains("http_status"));
-    assert!(normal.contains("missing.uio.no"));
+    assert!(!normal.contains("http_status"));
+    assert!(!normal.contains("missing.uio.no"));
 
     let debug = render_report_message(&report, MessageLevel::Trace, &settings);
-    assert!(debug.contains("Backend details"));
-    assert!(debug.contains("missing.uio.no"));
+    assert!(!debug.contains("Backend details"));
+    assert!(!debug.contains("missing.uio.no"));
 }
 
 #[test]
@@ -946,7 +946,7 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
     );
     assert_eq!(
         result.failure_report.as_ref().map(ToString::to_string),
-        Some("NOT_FOUND: missing user".to_string())
+        Some("missing user".to_string())
     );
     assert!(!result.messages.is_empty());
 }

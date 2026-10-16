@@ -66,8 +66,7 @@
 use crate::config::ConfigLayer;
 use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
-use crate::ui::messages::{MessageBuffer, MessageLevel, adjust_verbosity};
-use crate::ui::{MessageRequest, render_messages};
+use crate::ui::messages::{MessageLevel, adjust_verbosity};
 use std::ffi::OsString;
 use std::sync::Arc;
 
@@ -545,10 +544,12 @@ impl App {
                         render_settings: error_render_settings.clone(),
                     },
                 );
+                let evidence = host::report_evidence(&err, verbosity);
+                sink::write_diagnostics(sink, &evidence.0, &error_render_settings);
                 let rendered = render_process_error(&err, &error_render_settings, verbosity, false);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
-                    if verbosity >= MessageLevel::Info {
+                    if debug_level >= 2 {
                         sink.write_stderr(&format!(
                             "{}\n",
                             render_report_message(&err, verbosity, &error_render_settings)
@@ -556,13 +557,14 @@ impl App {
                         ));
                     }
                 } else {
-                    sink.write_stderr(&rendered);
+                    sink::write_diagnostics(sink, &rendered, &error_render_settings);
                 }
                 if debug_level >= 2
                     && let Some(backtrace) = host::render_backtrace(&err, &error_render_settings)
                 {
                     sink.write_stderr(&format!("{backtrace}\n"));
                 }
+                sink::write_diagnostics(sink, &evidence.1, &error_render_settings);
                 classify_exit_code(&err)
             }
         };
@@ -628,16 +630,8 @@ pub(crate) fn render_process_error(
     verbosity: MessageLevel,
     detail_hint: bool,
 ) -> String {
-    let level = if settings.format == OutputFormat::Json {
-        MessageLevel::Success
-    } else {
-        verbosity
-    };
-    let mut message = render_report_message(err, level, settings);
-    if detail_hint && settings.format != OutputFormat::Json {
-        message.truncate(message.find("\nTry:").unwrap_or(message.len()));
-        message.push_str("\nMore: rerun with -v, or run `doctor last -v`");
-    }
+    let _ = (verbosity, detail_hint);
+    let message = render_report_message(err, MessageLevel::Success, settings);
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
         let code = match exit_code {
@@ -652,21 +646,29 @@ pub(crate) fn render_process_error(
         );
     }
 
-    let mut messages = MessageBuffer::default();
-    messages.push_titled(
-        MessageLevel::Error,
-        if classify_exit_code(err) == host::EXIT_CODE_USAGE {
-            "Invalid command"
-        } else {
-            "Command failed"
-        },
-        crate::ui::visible_inline_text(&message),
-    );
-    render_messages(&messages, &{
-        let mut request = MessageRequest::new(settings, verbosity);
-        request.settings.chrome_frame = crate::ui::section_chrome::SectionFrameStyle::TopBottom;
-        request.ruled_policy = crate::ui::section_chrome::RuledSectionPolicy::Shared;
-        request.settings.width = request.settings.width.or(Some(12));
-        request
-    })
+    let mut lines = message.lines();
+    let first = lines
+        .next()
+        .unwrap_or("Command failed.")
+        .trim_start_matches("error: ");
+    let mut rendered = format!("error: {first}\n");
+    let mut hint = None;
+    for line in lines {
+        let line = line.trim();
+        if let Some(action) = line
+            .strip_prefix("hint: ")
+            .or_else(|| line.strip_prefix("Try: "))
+            .or_else(|| line.strip_prefix("try: "))
+            .or_else(|| line.strip_prefix("tip: "))
+        {
+            hint.get_or_insert(action);
+        } else if line.starts_with("request-id:") {
+            rendered.push_str(line);
+            rendered.push('\n');
+        }
+    }
+    if let Some(action) = hint {
+        rendered.push_str(&format!("hint: {action}\n"));
+    }
+    rendered
 }

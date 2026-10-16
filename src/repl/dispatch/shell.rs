@@ -472,11 +472,14 @@ mod tests {
             crate::repl::dispatch::execute_repl_plugin_line(state, &history, line, Some(&mut sink))
                 .expect("dispatch should render the usage error");
             let output: serde_json::Value = serde_json::from_str(&sink.stdout).unwrap();
-            output["error"]["message"].as_str().unwrap().to_string()
+            output["error"]["details"]["action"]
+                .as_str()
+                .unwrap()
+                .to_string()
         };
-        assert!(hint(&mut state, "ldap usr").contains("Try: use `ldap user`"));
+        assert!(hint(&mut state, "ldap usr").contains("Did you mean ldap user?"));
         state.session.scope.enter("ldap");
-        assert!(hint(&mut state, "usr").contains("Try: use `user`"));
+        assert!(hint(&mut state, "usr").contains("Did you mean user?"));
     }
 
     #[test]

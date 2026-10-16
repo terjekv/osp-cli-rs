@@ -1,7 +1,7 @@
 ---
 source: tests/contracts/config_commands/read.rs
+assertion_line: 246
 expression: sanitized
 ---
-- Unknown configuration key 
-  config key not found: missing.key
-------------------------
+error: Unknown config key 'missing.key'.
+hint: Run osp config list to see the keys.

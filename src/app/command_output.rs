@@ -59,6 +59,8 @@ impl CommandBody {
 
 #[derive(Debug)]
 pub(crate) struct CommandOutput {
+    pub(crate) diagnostics: (String, String),
+    pub(crate) retained_evidence: String,
     pub(crate) exit_code: i32,
     /// External process status must not replace captured output with an envelope.
     pub(crate) preserve_process_output: bool,
@@ -74,6 +76,8 @@ pub(crate) struct CommandOutput {
 impl CommandOutput {
     pub(crate) fn exit(exit_code: i32) -> Self {
         Self {
+            diagnostics: Default::default(),
+            retained_evidence: String::new(),
             exit_code,
             preserve_process_output: false,
             messages: MessageBuffer::default(),
@@ -83,6 +87,19 @@ impl CommandOutput {
             stderr_text: String::new(),
             failure_report: None,
         }
+    }
+
+    pub(crate) fn document_with_output(
+        document: Document,
+        mut output: OutputResult,
+        format_hint: Option<OutputFormat>,
+    ) -> Self {
+        output
+            .meta
+            .render_recommendation
+            .get_or_insert(RenderRecommendation::Document);
+        output.document = Some(OutputDocument::Semantic(document));
+        Self::output(output, format_hint)
     }
 
     pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
@@ -113,19 +130,6 @@ impl CommandOutput {
         Self::output(document.to_output_result(), None)
     }
 
-    pub(crate) fn document_with_output(
-        document: Document,
-        mut output: OutputResult,
-        format_hint: Option<OutputFormat>,
-    ) -> Self {
-        output
-            .meta
-            .render_recommendation
-            .get_or_insert(RenderRecommendation::Document);
-        output.document = Some(OutputDocument::Semantic(document));
-        Self::output(output, format_hint)
-    }
-
     pub(crate) fn from_data(
         data: Value,
         meta: &ResponseMetaV1,
@@ -143,6 +147,33 @@ impl CommandOutput {
             result.messages.warning(format!(
                 "Pipe stages ran over this page only, so counts and groups are partial; {rest}"
             ));
+        }
+        if let CommandBody::Output(output) = &result.body {
+            let data = crate::ui::json_value(output);
+            let data = meta
+                .row_path
+                .as_deref()
+                .and_then(|path| data.get(path))
+                .unwrap_or(&data);
+            let rows = data
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_else(|| std::slice::from_ref(data));
+            for (index, row) in rows.iter().enumerate() {
+                for column in &meta.detail_columns {
+                    if let Some(value) = column
+                        .split('.')
+                        .try_fold(row, |value, part| value.get(part))
+                    {
+                        let path = if rows.len() > 1 {
+                            format!("{index}.{column}")
+                        } else {
+                            column.clone()
+                        };
+                        render_detail_fields(&path, value, &mut result.stderr_text);
+                    }
+                }
+            }
         }
         result.presentation = CommandPresentation {
             lines: meta.presentation_lines.clone(),
@@ -203,6 +234,38 @@ impl CommandOutput {
     }
 }
 
+fn render_detail_fields(path: &str, value: &Value, out: &mut String) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if !["password", "token", "secret", "cookie", "authorization"]
+                    .iter()
+                    .any(|secret| key.to_ascii_lowercase().contains(secret))
+                {
+                    render_detail_fields(&format!("{path}.{key}"), value, out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, value) in items.iter().enumerate() {
+                render_detail_fields(&format!("{path}.{index}"), value, out);
+            }
+        }
+        Value::Null => {}
+        value => out.push_str(&format!(
+            "detail: {}={}\n",
+            crate::diagnostics::safe_text(path),
+            crate::diagnostics::safe_text(
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+                    .as_str()
+            )
+        )),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct CommandBackendDetails {
     pub(super) error: ResponseErrorV1,
@@ -234,7 +297,12 @@ pub(crate) fn json_failure_error(
     {
         serde_json::json!(backend.error)
     } else {
-        serde_json::json!({"code": code, "message": message, "details": null})
+        let (summary, action) = message
+            .split_once("\nhint:")
+            .map_or((message.as_str(), None), |(summary, action)| {
+                (summary, Some(action.trim()))
+            });
+        serde_json::json!({"code": code, "message": summary, "details": action.map(|action| serde_json::json!({"action": action}))})
     }
 }
 
@@ -263,6 +331,7 @@ pub(crate) fn run_cli_command(
     result: &CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
+    super::sink::write_diagnostics(sink, &result.diagnostics.0, &ui.render_settings);
     if ui.render_settings.format == OutputFormat::Json
         && result.exit_code != 0
         && !result.preserve_process_output
@@ -277,102 +346,63 @@ pub(crate) fn run_cli_command(
             .iter()
             .find(|entry| entry.level == MessageLevel::Error)
             .map(|entry| entry.text.clone())
-            .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
+            .or_else(|| {
+                result.failure_report.as_ref().map(|report| {
+                    super::host::render_report_message(
+                        report,
+                        MessageLevel::Success,
+                        &ui.render_settings,
+                    )
+                })
+            })
             .unwrap_or_else(|| "command failed".to_string());
-        let error = json_failure_error(result.failure_report.as_ref(), "command_failed", message);
+        let code = if result.exit_code == super::host::EXIT_CODE_USAGE {
+            "usage_error"
+        } else if result.messages.entries().is_empty()
+            && result.failure_report.as_ref().is_some_and(|report| {
+                super::host::find_error_in_chain::<CommandBackendDetails>(report).is_none()
+            })
+        {
+            "command_error"
+        } else {
+            "command_failed"
+        };
+        let error = json_failure_error(result.failure_report.as_ref(), code, message);
         sink.write_stdout(&render_json_failure(
             error,
             result.exit_code,
             messages,
             data,
         ));
-        if let Some(report) = &result.failure_report {
-            if ui.verbosity >= MessageLevel::Info {
-                sink.write_stderr(&format!(
-                    "{}\n",
-                    super::host::render_report_message(report, ui.verbosity, &ui.render_settings)
-                        .trim_end()
-                ));
-            }
-            if ui.debug_level >= 2
-                && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
-            {
-                sink.write_stderr(&format!("{backtrace}\n"));
-            }
+        if let Some(report) = &result.failure_report
+            && ui.debug_level >= 2
+            && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
+        {
+            sink.write_stderr(&format!("{backtrace}\n"));
         }
         if !result.stderr_text.is_empty() {
             sink.write_stderr(&result.stderr_text);
         }
+        super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
         return Ok(result.exit_code);
     }
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
-    let has_error_message = result
-        .messages
-        .entries()
-        .iter()
-        .any(|entry| entry.level == MessageLevel::Error);
-    if let Some(report) = &result.failure_report
-        && !has_error_message
-    {
-        sink.write_stderr(&super::render_process_error(
-            report,
+    if let Some(report) = &result.failure_report {
+        super::sink::write_diagnostics(
+            sink,
+            &super::render_process_error(report, &ui.render_settings, ui.verbosity, false),
             &ui.render_settings,
-            ui.verbosity,
-            false,
-        ));
+        );
     }
-    if let Some(report) = &result.failure_report
-        && has_error_message
-        && ui.verbosity >= MessageLevel::Info
-    {
-        let detail = super::host::render_report_message(report, ui.verbosity, &ui.render_settings);
-        let summary =
-            super::host::render_report_message(report, MessageLevel::Success, &ui.render_settings);
-        let extra = detail
-            .strip_prefix(summary.trim())
-            .unwrap_or(&detail)
-            .trim();
-        if !extra.is_empty() {
-            sink.write_stderr(&format!("{extra}\n"));
-        }
-    }
-    let show_failure_data = ui.verbosity >= MessageLevel::Info
-        && result.failure_report.as_ref().is_some_and(|report| {
-            let empty = match &result.body {
-                CommandBody::None => true,
-                CommandBody::Text(text) => text.trim().is_empty(),
-                CommandBody::Output(output) => progress_output_is_empty(output),
-                CommandBody::Json(value) => {
-                    value.is_null()
-                        || value.as_array().is_some_and(Vec::is_empty)
-                        || value.as_object().is_some_and(serde_json::Map::is_empty)
-                }
-            };
-            if empty {
-                return false;
-            }
-            let data = result.body.json_value();
-            !super::host::find_error_in_chain::<CommandBackendDetails>(report).is_some_and(
-                |backend| {
-                    backend.error.details == data
-                        || backend
-                            .error
-                            .details
-                            .as_object()
-                            .is_some_and(|details| details.values().any(|value| value == &data))
-                },
-            )
-        });
-    if result.failure_report.is_none() || show_failure_data {
+    if result.failure_report.is_none() {
         let rendered = result.render(config, &ui.render_settings);
-        if result.failure_report.is_some()
-            || result
-                .messages
-                .entries()
-                .iter()
-                .any(|entry| entry.level == MessageLevel::Error)
+        if result
+            .messages
+            .entries()
+            .iter()
+            .any(|entry| entry.level == MessageLevel::Error)
         {
             sink.write_stderr(&rendered);
         } else {
@@ -395,6 +425,7 @@ pub(crate) fn run_cli_command(
     if !result.stderr_text.is_empty() {
         sink.write_stderr(&result.stderr_text);
     }
+    super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
     Ok(result.exit_code)
 }
 
@@ -533,13 +564,28 @@ pub(crate) fn emit_messages_for_ui(
         return;
     }
 
-    let rendered = crate::ui::render_messages(messages, &{
-        let mut request = crate::ui::MessageRequest::new(&ui.render_settings, verbosity);
-        request.layout = crate::ui::messages::message_layout_from_config(config);
-        request
-    });
-    if !rendered.is_empty() {
-        sink.write_stderr(&rendered);
+    let _ = config;
+    for entry in messages
+        .entries()
+        .iter()
+        .filter(|entry| entry.level <= verbosity)
+    {
+        let prefix = match entry.level {
+            MessageLevel::Error => "error",
+            MessageLevel::Warning => "warning",
+            MessageLevel::Success => "success",
+            MessageLevel::Info => "info",
+            MessageLevel::Trace => "detail",
+            MessageLevel::Evidence => "evidence",
+        };
+        super::sink::write_diagnostics(
+            sink,
+            &format!(
+                "{prefix}: {}\n",
+                crate::ui::sanitize_human_text(&entry.text)
+            ),
+            &ui.render_settings,
+        );
     }
 }
 
@@ -565,14 +611,25 @@ pub(crate) fn cli_result_from_plugin_response(
     response: ResponseV1,
     stages: &[String],
 ) -> Result<CommandOutput> {
-    let mut result =
-        CommandOutput::from_data(response.data, &response.meta, &response.messages, stages);
+    let messages = response
+        .messages
+        .into_iter()
+        .filter(|message| response.ok || message.level != MessageLevel::Success)
+        .collect::<Vec<_>>();
+    let mut result = CommandOutput::from_data(response.data, &response.meta, &messages, stages);
     if !response.ok {
         let report = if let Some(error) = response.error {
-            result
-                .messages
-                .error(format!("{}: {}", error.code, error.message));
-            let report = miette!("{}: {}", error.code, error.message);
+            let mut message = error.message.clone();
+            if let Some(id) = error.details.get("request_id").and_then(Value::as_str) {
+                message.push_str(&format!(
+                    "\nrequest-id: {}",
+                    crate::diagnostics::safe_text(id)
+                ));
+            }
+            if let Some(action) = error.details.get("action").and_then(Value::as_str) {
+                message.push_str(&format!("\nhint: {action}"));
+            }
+            let report = miette!("{message}");
             miette::Report::new(CommandBackendDetails {
                 error,
                 source: report,
@@ -697,19 +754,18 @@ pub(crate) fn render_repl_command(
     if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
         if let Some(report) = result.failure_report.take() {
-            if ui.render_settings.format != OutputFormat::Json
-                && super::host::has_report_detail(&report, ui.verbosity, &ui.render_settings)
-            {
-                sink.write_stderr("More: rerun with -v, or run `doctor last -v`\n");
-            }
             session.record_failure_report(
                 line,
                 std::sync::Arc::new(report),
                 ui.render_settings.plain_copy_settings(),
             );
+            if let Some(last) = session.last_failure.as_mut() {
+                last.command_evidence = result.retained_evidence.clone();
+            }
         }
         return Ok(String::new());
     }
+    super::sink::write_diagnostics(sink, &result.diagnostics.0, &ui.render_settings);
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
@@ -732,6 +788,7 @@ pub(crate) fn render_repl_command(
     if !matches!(saved.body, CommandBody::None) {
         session.record_success_output(line, saved, stages);
     }
+    super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
     Ok(rendered)
 }
 

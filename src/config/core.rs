@@ -1677,6 +1677,19 @@ fn adapt_value_for_schema(
         other => (false, other),
     };
 
+    if key == "debug.level"
+        && let ConfigValue::String(value) = value
+        && value.trim().parse::<i64>().is_err()
+    {
+        return Err(ConfigError::InvalidConfigValue {
+            key: key.to_owned(),
+            reason: format!(
+                "must be 0, 1, 2 or 3; got '{}'",
+                crate::diagnostics::safe_text(value)
+            ),
+        });
+    }
+
     let adapted = match schema.value_type {
         SchemaValueType::String => match value {
             ConfigValue::String(value) => ConfigValue::String(value.clone()),

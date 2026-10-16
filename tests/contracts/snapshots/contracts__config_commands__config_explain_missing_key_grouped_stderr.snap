@@ -1,9 +1,7 @@
 ---
 source: tests/contracts/config_commands/explain.rs
+assertion_line: 794
 expression: sanitized
 ---
-- Unknown configuration key 
-  config key not found: ui.m
-- Warning --------------
-  did you mean: ui.margin, ui.messages.layout, ui.mode
-------------------------
+error: Unknown config key 'ui.m'.
+hint: Run osp config list to see the keys.

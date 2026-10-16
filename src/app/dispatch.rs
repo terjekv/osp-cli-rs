@@ -157,8 +157,11 @@ pub(crate) fn before_external_run(
     requirement: ExternalPathAccessRequirement,
     kind: &'static str,
 ) -> Result<()> {
-    before_external_dispatch(runtime, path, kind)?;
-    before_external_execution(runtime, path, requirement, kind)
+    let diagnostics = crate::diagnostics::DiagnosticSink::default();
+    let _scope = diagnostics.enter();
+    before_external_dispatch(runtime, path, kind)
+        .and_then(|()| before_external_execution(runtime, path, requirement, kind))
+        .map_err(|error| super::host::report_with_evidence(error, diagnostics))
 }
 
 pub(crate) fn ensure_external_access(
@@ -210,7 +213,7 @@ pub(crate) fn check_access(
         ),
     };
     let command = path.as_slice().join(" ");
-    Err(miette!("{kind} `{command}` {detail}. Try: {action}"))
+    Err(miette!("{kind} {command} {detail}.\nhint: {action}"))
 }
 
 pub(crate) fn resolve_external_command_source(
@@ -233,12 +236,12 @@ pub(crate) fn resolve_external_command_source(
         return Err(match closest_external_command(&catalog, command) {
             Some(suggestion) => {
                 miette!(
-                    "unknown command `{command}`\nTry: use command `{}`",
+                    "Unknown command '{command}'.\nhint: Did you mean {}?",
                     scope.command(&suggestion)
                 )
             }
             None => miette!(
-                "unknown command `{command}`\nTry: run `{}` to list commands",
+                "Unknown command '{command}'.\nhint: Run {} to list commands.",
                 scope.command("help")
             ),
         });

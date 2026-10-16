@@ -431,3 +431,33 @@ impl UiSink for BufferedUiSink {
         self.stderr.push_str(text);
     }
 }
+
+pub(crate) fn write_diagnostics(
+    sink: &mut dyn UiSink,
+    text: &str,
+    settings: &crate::ui::RenderSettings,
+) {
+    if !sink.stderr_is_terminal() || !settings.resolve_render_settings().color {
+        sink.write_stderr(text);
+        return;
+    }
+    let mut rendered = String::new();
+    for line in text.split_inclusive('\n') {
+        if let Some((prefix, body)) = line.split_once(": ") {
+            let style = match prefix {
+                "error" => nu_ansi_term::Color::Red.normal(),
+                "warning" => nu_ansi_term::Color::Yellow.normal(),
+                "info" => nu_ansi_term::Color::Cyan.normal(),
+                "evidence" | "debug" | "trace" => nu_ansi_term::Style::new().dimmed(),
+                _ => {
+                    rendered.push_str(line);
+                    continue;
+                }
+            };
+            let _ = write!(rendered, "{} {body}", style.paint(format!("{prefix}:")));
+        } else {
+            rendered.push_str(line);
+        }
+    }
+    sink.write_stderr(&rendered);
+}

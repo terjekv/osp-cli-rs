@@ -54,8 +54,8 @@ fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
         String::from_utf8_lossy(&output.stdout)
     );
     let stderr = stderr_utf8(output.stderr);
-    assert!(stderr.contains("boom exited with status 7"));
-    assert!(stderr.contains("backend exploded"));
+    assert!(stderr.contains("Plugin boom crashed (exit status 7)"));
+    assert!(!stderr.contains("backend exploded"));
 }
 
 #[cfg(unix)]

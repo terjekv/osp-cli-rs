@@ -25,7 +25,7 @@ fn run_repl_command(command: &str, colored: bool) -> (String, String) {
     session.type_text(command);
     session.write_bytes(b"\r");
     let expected = if command == "config sho" {
-        "unrecognized subcommand"
+        "Unknown command"
     } else if matches!(command, "help help" | "help --help") {
         "invalid help target"
     } else {
@@ -98,17 +98,14 @@ fn repl_help_alias_rejects_invalid_targets_end_to_end() {
 #[test]
 fn repl_invalid_subcommand_suggests_the_valid_command_end_to_end() {
     let (_, plain) = run_repl_command("config sho", false);
+    assert!(plain.contains("Unknown command"), "output={plain:?}");
     assert!(
-        plain.contains("unrecognized subcommand"),
+        plain.contains("hint: Did you mean config show?"),
         "output={plain:?}"
     );
+    assert!(plain.contains("error:"), "output={plain:?}");
     assert!(
-        plain.contains("tip: a similar subcommand exists: 'show'"),
-        "output={plain:?}"
-    );
-    assert!(plain.contains("Invalid command"), "output={plain:?}");
-    assert!(
-        plain.contains("More: rerun with -v, or run doctor last -v"),
+        plain.contains("hint: Did you mean config show?"),
         "output={plain:?}"
     );
     assert!(

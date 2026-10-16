@@ -206,6 +206,15 @@ fn run_config_get(
     session: &AppSession,
     args: ConfigGetArgs,
 ) -> Result<CommandOutput> {
+    if runtime.launch.runtime_load.include_env
+        && let Some(path) = std::env::var_os("OSP_CONFIG_FILE")
+        && !std::path::Path::new(&path).exists()
+    {
+        return Err(miette!(
+            "Config file {} does not exist.",
+            std::path::Path::new(&path).display()
+        ));
+    }
     let mut messages = MessageBuffer::default();
     let rows = config_get_rows(runtime, session, &args, &mut messages)?;
     match rows {

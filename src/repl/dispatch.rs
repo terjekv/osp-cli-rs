@@ -29,7 +29,6 @@ use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppRuntime, AppSession};
 use crate::app::{ResolvedInvocation, render_report_message, resolve_invocation_ui};
 use crate::cli::invocation::scan_command_tokens;
-use crate::ui::messages::MessageLevel;
 
 use super::{ReplViewContext, completion, input};
 
@@ -299,19 +298,22 @@ pub(crate) fn execute_repl_plugin_line(
                     .session
                     .record_failure_report(&resolved, err.clone(), plain_settings);
             }
+            let evidence = crate::app::host::report_evidence(&err, ui.verbosity);
+            crate::app::sink::write_diagnostics(sink, &evidence.0, &ui.render_settings);
             let rendered =
                 crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&rendered);
-                if ui.verbosity >= MessageLevel::Info {
+                if ui.debug_level >= 2 {
                     sink.write_stderr(&format!(
                         "{}\n",
                         render_report_message(&err, ui.verbosity, &ui.render_settings).trim_end()
                     ));
                 }
             } else {
-                sink.write_stderr(&rendered);
+                crate::app::sink::write_diagnostics(sink, &rendered, &ui.render_settings);
             }
+            crate::app::sink::write_diagnostics(sink, &evidence.1, &ui.render_settings);
             if ui.debug_level >= 2
                 && let Some(backtrace) =
                     crate::app::host::render_backtrace(&err, &ui.render_settings)

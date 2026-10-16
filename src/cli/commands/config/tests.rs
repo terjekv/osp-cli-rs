@@ -501,7 +501,7 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
                 MessageLevel::Error
             )
         )
-        .contains("config key not found: missing.key")
+        .contains("Unknown config key 'missing.key'.")
     );
 }
 

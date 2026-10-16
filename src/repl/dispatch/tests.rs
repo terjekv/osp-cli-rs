@@ -680,15 +680,15 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
         .last_failure
         .clone()
         .expect("non-bang failures should be recorded");
-    assert_eq!(last_failure.command_line, "intro --wat | config");
+    assert_eq!(last_failure.command_line, "intro …");
     assert!(last_failure.summary.contains("--wat"));
     assert!(state.session.prompt_timing.badge().is_some());
 
     let mut sink = crate::app::BufferedUiSink::default();
     execute_repl_plugin_line(&mut state, &history, "config sho", Some(&mut sink))
         .expect("syntax errors should render through the sink");
-    assert!(sink.stderr.contains("unrecognized subcommand 'sho'"));
-    assert!(sink.stderr.contains("Invalid command"));
+    assert!(sink.stderr.contains("Unknown command 'config sho'"));
+    assert!(sink.stderr.contains("error:"));
 }
 
 #[test]

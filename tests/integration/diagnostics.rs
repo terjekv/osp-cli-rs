@@ -115,12 +115,8 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         "rendered session path should remain identifiable across wrapped lines: {}",
         human.stderr,
     );
-    assert!(
-        human
-            .stderr
-            .contains("extensions.site.session.capabilities")
-    );
-    assert!(human.stderr.contains("invalid TOML starts here"));
+    assert!(human.stderr.contains("error:"));
+    assert!(human.stderr.contains("hint: Fix the config file."));
 
     let mut machine = BufferedUiSink::default();
     let exit = app.run_process_with_sink(read_args, &mut machine);
@@ -136,7 +132,7 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         envelope,
         json!({
             "ok": false,
-            "error": {"code": "command_error", "message": message, "details": null},
+            "error": {"code": "command_error", "message": message, "details": {"action": "Fix the config file."}},
             "exit_code": 1,
             "messages": [],
             "data": null

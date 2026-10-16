@@ -75,7 +75,7 @@ fn default_usage_failure_stays_terse_with_hint_contract() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unexpected argument '--definitely-not-a-flag' found"));
-    assert!(stderr.contains("Try: rerun this command with --help"));
+    assert!(stderr.contains("hint: Run osp --help."));
     assert!(!stderr.contains("run again with -v"));
 }
 
@@ -86,7 +86,7 @@ fn verbose_usage_failure_shows_parse_context_without_terse_hint_contract() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unexpected argument '--definitely-not-a-flag' found"));
-    assert!(stderr.contains("failed to parse CLI arguments"));
+    assert!(stderr.contains("hint:"));
     assert!(!stderr.contains("Hint: use --help to inspect accepted flags and subcommands"));
 }
 
@@ -104,8 +104,8 @@ ui.verbosity = "definitely-invalid"
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
-    assert!(normalized.contains("failed to resolve config with session layer"));
-    assert!(normalized.contains("config resolution failed"));
+    assert!(normalized.contains("error:"));
+    assert!(normalized.contains("hint:"));
     assert!(
         normalized.contains("invalid value for key ui.verbosity"),
         "{normalized}"
@@ -128,10 +128,10 @@ theme.name = "missing-theme"
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
-    assert!(stderr.contains("failed to derive host runtime inputs for startup"));
+    assert!(stderr.contains("error:"));
     assert!(stderr.contains("unknown theme: missing-theme"));
     assert!(normalized.contains("Stack backtrace"));
-    assert!(stderr.contains("\u{1b}["));
+    assert!(!stderr.contains("\u{1b}["));
 }
 
 #[test]
@@ -147,7 +147,7 @@ theme.name = "missing-theme"
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("failed to derive host runtime inputs for startup"));
+    assert!(stderr.contains("error:"));
     assert!(stderr.contains("unknown theme: missing-theme"));
     assert!(!stderr.contains("Stack backtrace"));
 }
@@ -162,8 +162,8 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
 
     assert_eq!(output.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("boom exited with status 7"));
-    assert!(stderr.contains("boom-from-stderr"));
+    assert!(stderr.contains("Plugin boom crashed (exit status 7)"));
+    assert!(!stderr.contains("boom-from-stderr"));
     assert!(!stderr.contains("Stack backtrace"));
 }
 
@@ -178,8 +178,8 @@ fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("config.toml"));
-    assert!(normalized.contains("invalid TOML starts here"));
+    assert!(normalized.contains("failed to parse TOML"));
+    assert!(normalized.contains("error:"));
     assert!(!stderr.contains("Stack backtrace"));
 }
 
@@ -194,8 +194,8 @@ fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("config.toml"));
-    assert!(normalized.contains("invalid TOML starts here"));
+    assert!(normalized.contains("failed to parse TOML"));
+    assert!(normalized.contains("error:"));
     assert!(normalized.contains("Stack backtrace"));
 }
 

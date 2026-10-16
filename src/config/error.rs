@@ -197,7 +197,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// Resolution requested a profile that is not known.
-    #[error("unknown profile '{profile}'. known profiles: {}", .known.join(","))]
+    #[error("Unknown profile '{profile}'. Available: {}.", .known.join(", "))]
     UnknownProfile {
         /// Requested profile name.
         profile: String,
@@ -445,7 +445,7 @@ mod tests {
                     profile: "prod".to_string(),
                     known: vec!["default".to_string(), "dev".to_string()],
                 },
-                "unknown profile 'prod'. known profiles: default,dev",
+                "Unknown profile 'prod'. Available: default, dev.",
             ),
             (
                 ConfigError::InvalidPlaceholderSyntax {

@@ -299,11 +299,12 @@ pub struct AppSession {
 /// The last failed REPL command and its original diagnostic evidence.
 #[derive(Debug, Clone)]
 pub struct LastFailure {
-    /// Command line that produced the failure.
+    /// Command label identifying the failure without retaining its arguments.
     pub command_line: String,
     /// Short failure summary suitable for prompts or status output.
     pub summary: String,
     evidence: FailureEvidence,
+    pub(crate) command_evidence: String,
 }
 
 #[derive(Debug, Clone)]
@@ -323,6 +324,7 @@ impl LastFailure {
             command_line,
             summary,
             evidence: FailureEvidence::Text(detail),
+            command_evidence: String::new(),
         }
     }
 
@@ -338,9 +340,30 @@ impl LastFailure {
         );
         let backtrace =
             super::host::capture_missing_report_backtrace(&report).map(std::sync::Arc::new);
+        let report = if super::host::find_error_in_chain::<
+            super::command_output::CommandBackendDetails,
+        >(&report)
+        .is_some()
+            || super::host::find_error_in_chain::<crate::config::ConfigError>(&report).is_some()
+        {
+            std::sync::Arc::new(miette::miette!("{}", summary))
+        } else {
+            report
+        };
+        let root = command_line.split_whitespace().next().unwrap_or_default();
+        let command_line = if command_line.split_whitespace().nth(1).is_some() {
+            format!("{root} …")
+        } else {
+            root.to_owned()
+        };
         Self {
             command_line,
             summary,
+            command_evidence: super::host::report_evidence(
+                &report,
+                crate::core::MessageLevel::Evidence,
+            )
+            .0,
             evidence: FailureEvidence::Report {
                 report,
                 settings: Box::new(settings),

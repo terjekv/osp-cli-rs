@@ -14,7 +14,7 @@ use miette::{Result, miette};
 use nu_ansi_term::Style;
 
 use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
-use crate::ui::{RenderBackend, RenderSettings};
+use crate::ui::RenderSettings;
 use std::backtrace::Backtrace;
 use std::borrow::Cow;
 use std::ffi::OsString;
@@ -113,6 +113,7 @@ struct BoxedContextError {
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
     backtrace: Backtrace,
     command_path: Option<String>,
+    command_suffix: Option<String>,
 }
 
 #[derive(Debug)]
@@ -120,6 +121,7 @@ struct ReportContextError {
     context: Option<ErrorContext>,
     source: miette::Report,
     error_display: Option<ErrorDisplaySettings>,
+    diagnostics: Option<crate::diagnostics::DiagnosticSink>,
     backtrace: Option<Backtrace>,
 }
 
@@ -558,12 +560,20 @@ fn run(
                     .iter()
                     .find(|flag| flag.name == name)
                     .ok_or_else(|| miette!("unknown product action: {name}"))?;
-                (flag.run)(&mut state.runtime).map(|message| {
-                    if !message.is_empty() {
-                        sink.write_stdout(&format!("{message}\n"));
+                let diagnostics = crate::diagnostics::DiagnosticSink::default();
+                let _scope = diagnostics.enter();
+                match (flag.run)(&mut state.runtime) {
+                    Ok(message) => {
+                        let evidence = diagnostics.render(invocation_ui.ui.verbosity, false);
+                        sink.write_stderr(&evidence.0);
+                        if !message.is_empty() {
+                            sink.write_stdout(&format!("{message}\n"));
+                        }
+                        sink.write_stderr(&evidence.1);
+                        Ok(0)
                     }
-                    0
-                })
+                    Err(error) => Err(report_with_evidence(error, diagnostics)),
+                }
             }
             RunAction::Repl => {
                 state.runtime.ui = invocation_ui.ui.clone();
@@ -758,7 +768,25 @@ pub fn render_report_message(
     let known = KnownErrorChain::inspect(err);
     let detailed = level >= MessageLevel::Info;
     let mut rendered = if let Some(clap) = known.clap {
-        if detailed {
+        if let Some(name) = clap
+            .to_string()
+            .split("unrecognized subcommand '")
+            .nth(1)
+            .and_then(|s| s.split("'").next())
+        {
+            let path = known
+                .boxed_context
+                .and_then(|c| c.command_path.as_deref())
+                .unwrap_or_default();
+            let command = settings
+                .runtime
+                .command_scope
+                .command(&format!("{path} {name}"));
+            format!(
+                "Unknown command '{}'.",
+                command.strip_prefix("osp ").unwrap_or(&command)
+            )
+        } else if detailed {
             clap.to_string()
         } else {
             terse_clap_error(clap)
@@ -768,9 +796,10 @@ pub fn render_report_message(
     };
     if !detailed {
         if let Some(hint) = known_error_hint(&known, &settings.runtime.command_scope)
+            && !rendered.contains("\nhint:")
             && !rendered.contains(&hint)
         {
-            rendered.push_str("\nTry: ");
+            rendered.push_str("\nhint: ");
             rendered.push_str(&hint);
         }
         return rendered;
@@ -800,63 +829,7 @@ pub fn render_report_message(
         }
         current = source.source();
     }
-    if let Some(config) = known.config
-        && <crate::config::ConfigError as miette::Diagnostic>::source_code(config).is_some()
-    {
-        rendered.push_str("\n\n");
-        let mut snippet = render_diagnostic_with_settings(&SourceSnippet(config), settings);
-        // Graphical handlers can omit zero-width labels at the end of a file.
-        if let Some(labels) = <crate::config::ConfigError as miette::Diagnostic>::labels(config) {
-            for label in labels {
-                if label.is_empty()
-                    && let Some(text) = label.label()
-                    && !snippet.contains(text)
-                {
-                    snippet.push_str(&format!("\n{text}\n"));
-                }
-            }
-        }
-        rendered.push_str(&snippet);
-    }
-    if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
-        && !backend.error.details.is_null()
-        && backend
-            .error
-            .details
-            .as_object()
-            .is_none_or(|object| !object.is_empty())
-    {
-        let mut record_settings = settings.clone();
-        record_settings.format = OutputFormat::Mreg;
-        record_settings.format_explicit = true;
-        let output = crate::core::output_model::OutputResult::from_rows(
-            crate::core::output_model::rows_from_value(backend.error.details.clone()),
-        );
-        rendered.push_str("\nBackend details:\n");
-        rendered.push_str(&crate::ui::render(
-            &output,
-            &crate::ui::RenderRequest::new(&record_settings),
-        ));
-    }
     rendered
-}
-
-// Only source annotations are added here; the message and causes were rendered above.
-#[derive(Debug)]
-struct SourceSnippet<'a>(&'a crate::config::ConfigError);
-impl std::fmt::Display for SourceSnippet<'_> {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-impl std::error::Error for SourceSnippet<'_> {}
-impl miette::Diagnostic for SourceSnippet<'_> {
-    fn source_code(&self) -> Option<&dyn miette::SourceCode> {
-        self.0.source_code()
-    }
-    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
-        self.0.labels()
-    }
 }
 
 pub(crate) fn has_report_detail(
@@ -899,50 +872,41 @@ fn report_backtrace(err: &miette::Report) -> Option<&Backtrace> {
 }
 
 pub(crate) fn render_backtrace(err: &miette::Report, settings: &RenderSettings) -> Option<String> {
-    report_backtrace(err).map(|trace| format_backtrace(&trace.to_string(), settings))
-}
-
-fn render_diagnostic_with_settings(
-    diagnostic: &dyn miette::Diagnostic,
-    settings: &RenderSettings,
-) -> String {
-    let handler = build_miette_handler(settings);
-    format!(
-        "{:?}",
-        HandlerDebug {
-            handler: &handler,
-            diagnostic,
+    report_backtrace(err).map(|trace| {
+        let mut causes = Vec::new();
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+        while let Some(source) = current {
+            let context = source
+                .downcast_ref::<BoxedContextError>()
+                .map(|error| error.context)
+                .or_else(|| {
+                    source
+                        .downcast_ref::<ReportContextError>()
+                        .and_then(|error| error.context)
+                });
+            if let Some(context) = context {
+                let text = context.to_string();
+                if !causes.contains(&text) {
+                    causes.push(text);
+                }
+            }
+            current = source.source();
         }
-    )
-}
-
-fn build_miette_handler(settings: &RenderSettings) -> miette::MietteHandler {
-    let resolved = settings.resolve_render_settings();
-    let mut opts = miette::MietteHandlerOpts::new()
-        .with_cause_chain()
-        .context_lines(2);
-
-    if let Some(width) = resolved.width {
-        opts = opts.width(width);
-    }
-
-    match resolved.backend {
-        RenderBackend::Rich => opts
-            .force_graphical(true)
-            .color(resolved.color)
-            .unicode(resolved.unicode)
-            .build(),
-        RenderBackend::Plain => opts
-            .force_graphical(true)
-            .color(false)
-            .unicode(false)
-            .build(),
-    }
+        let mut rendered = String::new();
+        if !causes.is_empty() {
+            rendered.push_str(&format!("debug: Error context: {}.\n", causes.join(" -> ")));
+        }
+        rendered.push_str(&format_backtrace(&trace.to_string(), settings));
+        rendered
+    })
 }
 
 fn format_backtrace(backtrace: &str, settings: &RenderSettings) -> String {
     let resolved = settings.resolve_render_settings();
-    let heading = if resolved.color {
+    let heading = if resolved.color && {
+        use std::io::IsTerminal;
+        std::io::stderr().is_terminal()
+    } {
         Style::new().bold().paint("Stack backtrace").to_string()
     } else {
         "Stack backtrace".to_string()
@@ -950,22 +914,18 @@ fn format_backtrace(backtrace: &str, settings: &RenderSettings) -> String {
     format!("{heading}:\n{backtrace}")
 }
 
-struct HandlerDebug<'a> {
-    handler: &'a dyn miette::ReportHandler,
-    diagnostic: &'a dyn miette::Diagnostic,
-}
-
-impl Debug for HandlerDebug<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.handler.debug(self.diagnostic, f)
-    }
-}
-
 fn known_error_hint(
     known: &KnownErrorChain<'_>,
     scope: &crate::core::CommandScope,
 ) -> Option<String> {
     if let Some(config_err) = known.config {
+        if matches!(
+            config_err,
+            crate::config::ConfigError::UnknownProfile { .. }
+                | crate::config::ConfigError::FileRead { .. }
+        ) {
+            return None;
+        }
         return Some(match config_err {
             crate::config::ConfigError::UnknownProfile { .. } => {
                 format!(
@@ -987,7 +947,19 @@ fn known_error_hint(
         let path = known
             .boxed_context
             .and_then(|context| context.command_path.as_deref());
-        return Some(clap_error_action(clap, path, scope));
+        let mut action = clap_error_action(clap, path, scope);
+        if action.starts_with("Did you mean ") {
+            action.pop();
+            if let Some(suffix) = known
+                .boxed_context
+                .and_then(|c| c.command_suffix.as_deref())
+            {
+                action.push(' ');
+                action.push_str(suffix);
+            }
+            action.push('?');
+        }
+        return Some(action);
     }
 
     None
@@ -1017,7 +989,7 @@ fn terse_clap_error(error: &clap::Error) -> String {
     for tip in rendered
         .lines()
         .map(str::trim)
-        .filter(|line| line.starts_with("tip:"))
+        .filter(|line| line.starts_with("hint:"))
     {
         terse.push('\n');
         terse.push_str(tip);
@@ -1046,7 +1018,10 @@ fn clap_error_action(
     let prefix = command_path.filter(|path| !path.is_empty());
     match (prefix, suggestions.as_slice()) {
         (Some(prefix), [suggestion]) => {
-            format!("use `{}`", scope.command(&format!("{prefix} {suggestion}")))
+            format!(
+                "Did you mean {}?",
+                scope.command(&format!("{prefix} {suggestion}"))
+            )
         }
         (Some(prefix), suggestions) if !suggestions.is_empty() => format!(
             "use one of {}; run `{}` to see every subcommand",
@@ -1058,13 +1033,37 @@ fn clap_error_action(
             scope.command(&format!("{prefix} --help"))
         ),
         (None, [suggestion]) => format!("use subcommand `{suggestion}`"),
-        (Some(prefix), _) => format!("use `{}`", scope.command(&format!("{prefix} --help"))),
-        _ => "rerun this command with `--help` to inspect accepted values and options".to_string(),
+        (Some(prefix), _) => format!("Run {}.", scope.command(&format!("{prefix} --help"))),
+        _ => format!("Run {}.", scope.command("--help")),
     }
 }
 
 fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> String {
     if let Some(config_err) = known.config {
+        if let crate::config::ConfigError::InvalidConfigValue { key, reason } = config_err
+            && key == "debug.level"
+        {
+            let path = crate::config::RuntimeConfigPaths::discover()
+                .config_file
+                .map(|path| format!(" ({})", path.display()))
+                .unwrap_or_default();
+            return format!(
+                "debug.level {reason}{path}.\nhint: Fix it, or run osp config set debug.level 0."
+            );
+        }
+        if let crate::config::ConfigError::FileRead { path, .. } = config_err
+            && !std::path::Path::new(path).exists()
+        {
+            return format!("Config file {path} does not exist.");
+        }
+        if let crate::config::ConfigError::LayerLoad { path, inner } = config_err {
+            let message = inner.to_string();
+            return format!(
+                "{} ({}).\nhint: Fix the config file.",
+                message.lines().next().unwrap_or("Invalid config"),
+                crate::diagnostics::safe_text(path)
+            );
+        }
         return config_err.to_string();
     }
 
@@ -1114,6 +1113,12 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    let args = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
+    let command_suffix = args
+        .last()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        .map(str::to_owned);
     let mut path = if command.get_name() == "osp" {
         Vec::new()
     } else {
@@ -1131,6 +1136,7 @@ where
         source: Box::new(err),
         backtrace: Backtrace::force_capture(),
         command_path: Some(path.join(" ")),
+        command_suffix,
     })
 }
 
@@ -1143,6 +1149,7 @@ where
         source: Box::new(err),
         backtrace: Backtrace::force_capture(),
         command_path: None,
+        command_suffix: None,
     })
 }
 
@@ -1155,6 +1162,7 @@ pub(crate) fn report_anyhow_with_context(
         source: err.into_boxed_dyn_error(),
         backtrace: Backtrace::force_capture(),
         command_path: None,
+        command_suffix: None,
     })
 }
 
@@ -1166,6 +1174,7 @@ pub(crate) fn report_report_with_context(
         context: Some(context),
         source: err,
         error_display: None,
+        diagnostics: None,
         backtrace: Some(Backtrace::force_capture()),
     })
 }
@@ -1179,8 +1188,38 @@ pub(crate) fn report_with_invocation(
         context: None,
         source: err,
         error_display: Some(settings),
+        diagnostics: None,
         backtrace,
     })
+}
+
+pub(crate) fn report_with_evidence(
+    err: miette::Report,
+    diagnostics: crate::diagnostics::DiagnosticSink,
+) -> miette::Report {
+    miette::Report::new(ReportContextError {
+        context: None,
+        source: err,
+        error_display: None,
+        diagnostics: Some(diagnostics),
+        backtrace: None,
+    })
+}
+
+pub(crate) fn report_evidence(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
+) -> (String, String) {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+    while let Some(source) = current {
+        if let Some(context) = source.downcast_ref::<ReportContextError>()
+            && let Some(diagnostics) = &context.diagnostics
+        {
+            return diagnostics.render(level, true);
+        }
+        current = source.source();
+    }
+    Default::default()
 }
 
 pub(crate) fn error_display_settings(err: &miette::Report) -> Option<&ErrorDisplaySettings> {
