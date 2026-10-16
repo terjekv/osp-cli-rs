@@ -17,13 +17,14 @@ profile.default = "default"
 ui.presentation = "expressive"
 repl.intro = "full"
 repl.simple_prompt = true
-user.full_name = "demo operator"
+user.name = "demo"
+user.display_names.demo = "demo operator"
 domain = "example.uio.no"
 theme.name = "dracula"
 repl.intro_tips = ["Inspect ownership before making changes."]
 repl.intro_template.full = """
 ## Operator desk
-Welcome {{ user.full_name }}.
+Welcome {{ display_name }}.
 Theme: {{ theme_display }}
 Tip: {{ tip }}
 

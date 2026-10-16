@@ -174,7 +174,7 @@ fn intro_command_expressive_guide_contract() {
 ui.presentation = "expressive"
 repl.intro = "full"
 repl.simple_prompt = true
-user.display_name = "Demo"
+user.display_names.oistes = "Demo"
 user.name = "oistes"
 theme.name = "rose-pine-moon"
 "#;
@@ -335,7 +335,7 @@ fn intro_command_expressive_guide_surfaces_user_context_and_sections_contract() 
 repl.intro = "full"
 ui.presentation = "expressive"
 user.name = "oistes"
-user.display_name = "Oistes"
+user.display_names.oistes = "Oistes"
 theme.name = "rose-pine-moon"
 "#,
         ),
@@ -395,7 +395,7 @@ fn intro_command_expressive_guide_preserves_user_context_and_section_order_contr
 ui.presentation = "expressive"
 repl.intro = "full"
 repl.simple_prompt = true
-user.display_name = "Demo"
+user.display_names.oistes = "Demo"
 user.name = "oistes"
 theme.name = "rose-pine-moon"
 "#,
