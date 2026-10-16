@@ -17,7 +17,7 @@
 //! - editor/menu behavior belongs in `repl::engine`
 //! - generic non-interactive command execution should not drift into this layer
 
-mod builtins;
+pub(crate) mod builtins;
 mod command;
 mod shell;
 
@@ -187,15 +187,18 @@ pub(crate) fn execute_repl_plugin_line(
             let rest = rest.trim_start();
             let root = rest.split_whitespace().next().unwrap_or("");
             let catalog = crate::app::authorized_command_catalog_for(
-                &state.runtime.auth, &state.clients,
+                &state.runtime.auth,
+                &state.clients,
                 state.clients.native_commands().catalog(),
             );
             let surface = super::surface::build_repl_surface(
-                ReplViewContext::from_parts(&state.runtime, &state.session), &catalog,
+                ReplViewContext::from_parts(&state.runtime, &state.session),
+                &catalog,
             );
             if surface.root_words.iter().any(|word| word == root) {
                 return Ok(ExecutedReplLine::flat(
-                    ReplResult::ReplaceInput(rest.to_string()), state.runtime.ui.debug_level,
+                    ReplResult::ReplaceInput(rest.to_string()),
+                    state.runtime.ui.debug_level,
                 ));
             }
         }

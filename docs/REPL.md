@@ -386,3 +386,12 @@ Pasting `osp COMMAND …` with a known root command removes only `osp` and
 returns the rest as editable input. Press Enter to execute it. Launcher flags
 such as `osp -u USER …` or `osp --prod …` stay visible; these lines are not
 normalized because their first word after `osp` is not a command root.
+
+`each 'host {}'` runs once per `VALUE` value of the saved result, after its
+pipeline. Values are shell-quoted into `{}`; put the placeholder outside quotes
+inside the template. More than 50 values or a command path not ending in a recognized read
+verb (such as host, info, find, list, get, or status) requires `--yes`. This
+includes mutations and unclassified integration commands. Existing
+command confirmations still apply. `--ignore-errors` continues after failures;
+a final `N ok, M failed` tally is always printed after execution. Like `source`,
+exit or reload stops the batch, and nested source/each commands are refused.

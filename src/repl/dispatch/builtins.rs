@@ -19,6 +19,7 @@ pub(super) enum ReplBuiltin {
     Last,
     Pagination(PaginationDirection),
     Source(SourceCommand),
+    Each(EachCommand),
     Bang(BangCommand),
 }
 
@@ -60,6 +61,7 @@ pub(super) fn execute_repl_builtin(
         ReplBuiltin::Pagination(direction) => {
             execute_pagination_builtin(state, history, direction, sink)
         }
+        ReplBuiltin::Each(command) => execute_each_command(state, history, command, sink),
         ReplBuiltin::Source(command) => execute_source_command(state, history, command, sink),
         ReplBuiltin::Bang(command) => {
             execute_bang_command(&mut state.session, history, raw, command)
@@ -87,6 +89,18 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
     if raw.split_whitespace().next() == Some("last") {
         return Ok(Some(ReplBuiltin::Last));
     }
+    if raw.split_whitespace().next() == Some("each") {
+        use clap::Parser;
+        let words =
+            shell_words::split(raw).map_err(|err| miette!("invalid each command: {err}"))?;
+        return match EachCommand::try_parse_from(words) {
+            Ok(command) => Ok(Some(ReplBuiltin::Each(command))),
+            Err(err) if err.kind() == clap::error::ErrorKind::DisplayHelp => {
+                Ok(Some(ReplBuiltin::Each(EachCommand::default())))
+            }
+            Err(err) => Err(miette!(err.to_string())),
+        };
+    }
     if let Some(command) = parse_source_builtin(raw)? {
         return Ok(Some(ReplBuiltin::Source(command)));
     }
@@ -94,6 +108,105 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
         return Ok(Some(ReplBuiltin::Bang(command)));
     }
     Ok(None)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, clap::Parser)]
+#[command(
+    name = "each",
+    about = "Run a command for every value of the saved result"
+)]
+pub(crate) struct EachCommand {
+    /// Command template containing {}.
+    template: Option<String>,
+    /// Allow more than 50 values and commands that change data.
+    #[arg(long)]
+    yes: bool,
+    /// Continue after command errors.
+    #[arg(long)]
+    ignore_errors: bool,
+}
+
+fn execute_each_command(
+    state: &mut crate::app::AppState,
+    history: &SharedHistory,
+    command: EachCommand,
+    sink: &mut dyn UiSink,
+) -> Result<ReplResult> {
+    use clap::CommandFactory;
+    let Some(template) = command.template else {
+        return Ok(ReplResult::Print(
+            EachCommand::command().render_long_help().to_string(),
+        ));
+    };
+    if !template.contains("{}") {
+        return Err(miette!("each requires a template containing {{}}"));
+    }
+    let parsed =
+        crate::repl::input::ReplParsedLine::parse(&template, state.runtime.config.resolved())?;
+    let tokens = parsed.prefixed_tokens(&state.session.scope);
+    // Repeating a write is where `each` can hurt; reads run freely.
+    const WRITE_VERBS: &[&str] = &[
+        "add", "approve", "cancel", "clear", "close", "create", "delete", "destroy", "disable",
+        "enable", "login", "logout", "move", "pair", "power", "prune", "reboot", "reject",
+        "remove", "rename", "renew", "reset", "resize", "rm", "set", "start", "stop", "unset",
+        "update",
+    ];
+    let writes = tokens
+        .iter()
+        .take_while(|word| !word.contains("{}") && !word.starts_with('-'))
+        .any(|word| WRITE_VERBS.contains(&word.as_str()));
+    if writes && !command.yes {
+        return Err(miette!("each requires --yes for commands that change data"));
+    }
+    let last = state
+        .session
+        .last_success()
+        .ok_or_else(|| miette!("No recorded successful REPL result in this session."))?;
+    let mut stages = last.stages.clone();
+    stages.push("VALUE".to_string());
+    let mut ui = state.runtime.ui.clone();
+    ui.render_settings.format = crate::core::output::OutputFormat::Json;
+    ui.render_settings.format_explicit = true;
+    let rendered = crate::app::render_saved_repl_output(
+        state.runtime.config.resolved(),
+        &ui,
+        &last.output,
+        &stages,
+    )?;
+    let values: serde_json::Value =
+        serde_json::from_str(&rendered).map_err(|err| miette!("each: {err}"))?;
+    let rows = crate::core::output_model::rows_from_value(values);
+    if rows.len() > 50 && !command.yes {
+        return Err(miette!("each requires --yes for more than 50 values"));
+    }
+    let (mut ok, mut failed) = (0, 0);
+    let mut result = Ok(ReplResult::Continue);
+    for row in rows {
+        let value = row.get("value").unwrap_or(&serde_json::Value::Null);
+        let text = value
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| value.to_string());
+        let line = template.replace("{}", &shell_words::quote(&text));
+        match execute_source_line(state, history, &line, "each", sink) {
+            Ok(None) => ok += 1,
+            Ok(Some(stop)) => {
+                ok += 1;
+                result = Ok(stop);
+                break;
+            }
+            Err(err) => {
+                failed += 1;
+                if !command.ignore_errors {
+                    result = Err(err);
+                    break;
+                }
+                sink.write_stderr(&format!("each: {err}\n"));
+            }
+        }
+    }
+    sink.write_stderr(&format!("{ok} ok, {failed} failed\n"));
+    result
 }
 
 fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
@@ -189,9 +302,11 @@ fn execute_source_line(
         .ok()
         .and_then(|words| words.into_iter().next())
         .as_deref()
-        == Some("source")
+        .is_some_and(|word| matches!(word, "source" | "each"))
     {
-        return Err(miette!("nested `source` commands are not supported"));
+        return Err(miette!(
+            "nested `source` or `each` commands are not supported"
+        ));
     }
     let executed = super::execute_repl_plugin_line(state, history, line, Some(sink))?;
     match executed.result {

@@ -901,7 +901,7 @@ pub(crate) fn command_help_document(
     )
 }
 
-pub(crate) fn repl_only_commands() -> [clap::Command; 5] {
+pub(crate) fn repl_only_commands() -> [clap::Command; 6] {
     use clap::{Arg, ArgAction, Command, ValueHint};
     [
         Command::new("help").about("Show REPL help"),
@@ -913,6 +913,7 @@ pub(crate) fn repl_only_commands() -> [clap::Command; 5] {
                     .action(ArgAction::SetTrue)
                     .help("Show the pre-pipeline result"),
             ),
+        <crate::repl::dispatch::builtins::EachCommand as clap::CommandFactory>::command(),
         Command::new("source")
             .about("Run commands from files")
             .arg(
