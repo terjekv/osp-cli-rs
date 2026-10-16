@@ -386,36 +386,20 @@ pub enum DoctorCommands {
 /// Built-in plugin management subcommands.
 #[derive(Debug, Subcommand)]
 pub enum PluginsCommands {
-    /// List discovered plugins.
-    #[command(display_order = 10)]
+    /// List plugins.
     List,
-    /// List commands exported by plugins.
-    #[command(display_order = 11)]
-    Commands,
-    /// Show plugin-declared configuration metadata.
-    #[command(display_order = 12)]
-    Config(PluginConfigArgs),
-    /// Force a fresh plugin discovery pass.
-    #[command(display_order = 13)]
+    /// Drop cached describe metadata.
     Refresh,
-    /// Enable a plugin-backed command.
-    #[command(display_order = 15)]
-    Enable(PluginCommandStateArgs),
-    /// Disable a plugin-backed command.
-    #[command(display_order = 16)]
-    Disable(PluginCommandStateArgs),
-    /// Clear persisted state for a command.
-    #[command(display_order = 17)]
-    ClearState(PluginCommandClearArgs),
-    /// Select the provider implementation used for a command.
-    #[command(display_order = 18)]
-    SelectProvider(PluginProviderSelectArgs),
-    /// Clear an explicit provider selection for a command.
-    #[command(display_order = 19)]
-    ClearProvider(PluginProviderClearArgs),
-    /// Run plugin diagnostics.
-    #[command(display_order = 14)]
-    Doctor,
+    /// Enable a plugin.
+    Enable {
+        /// Plugin name.
+        name: String,
+    },
+    /// Disable a plugin.
+    Disable {
+        /// Plugin name.
+        name: String,
+    },
 }
 
 /// Top-level theme command arguments.
@@ -452,26 +436,6 @@ pub struct ThemeShowArgs {
 pub struct ThemeUseArgs {
     /// Theme name to activate.
     pub name: String,
-}
-
-/// Shared arguments for enabling or disabling a plugin command.
-#[derive(Debug, Args, Clone, Default)]
-pub struct PluginScopeArgs {
-    /// Apply the change globally instead of to a profile.
-    #[arg(long = "global", conflicts_with = "profile")]
-    pub global: bool,
-
-    /// Apply the change to a named profile.
-    #[arg(long = "profile")]
-    pub profile: Option<String>,
-
-    /// Target a specific terminal context, or the current one when omitted.
-    #[arg(
-        long = "terminal",
-        num_args = 0..=1,
-        default_missing_value = "__current__"
-    )]
-    pub terminal: Option<String>,
 }
 
 /// Shared config write scope arguments.
@@ -518,17 +482,6 @@ pub struct ConfigStoreArgs {
     pub save: bool,
 }
 
-/// Shared plugin command target arguments.
-#[derive(Debug, Args, Clone)]
-pub struct PluginCommandTargetArgs {
-    /// Command name to mutate.
-    pub command: String,
-
-    /// Shared global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub scope: PluginScopeArgs,
-}
-
 /// Shared config read-output arguments.
 #[derive(Debug, Args, Clone, Default)]
 pub struct ConfigReadOutputArgs {
@@ -541,47 +494,6 @@ pub struct ConfigReadOutputArgs {
     pub raw: bool,
 }
 
-/// Shared arguments for enabling or disabling a plugin command.
-#[derive(Debug, Args)]
-pub struct PluginCommandStateArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for clearing persisted command state.
-#[derive(Debug, Args)]
-pub struct PluginCommandClearArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for selecting a provider implementation for a command.
-#[derive(Debug, Args)]
-pub struct PluginProviderSelectArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-
-    /// Plugin identifier to bind to the command.
-    pub plugin_id: String,
-}
-
-/// Arguments for clearing a provider selection.
-#[derive(Debug, Args)]
-pub struct PluginProviderClearArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for `plugins config`.
-#[derive(Debug, Args)]
-pub struct PluginConfigArgs {
-    /// Plugin identifier whose config schema should be shown.
-    pub plugin_id: String,
-}
 
 /// Top-level config command arguments.
 #[derive(Args)]

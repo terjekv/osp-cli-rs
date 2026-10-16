@@ -9,7 +9,7 @@ use miette::Result;
 use crate::app::CommandOutput;
 use crate::app::{AppClients, AppRuntime, AppSession, LastFailure, UiState};
 use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{DoctorArgs, DoctorCommands, PluginsArgs, PluginsCommands};
+use crate::cli::{DoctorArgs, DoctorCommands};
 use crate::core::MessageLevel;
 use crate::core::command_policy::CredentialState;
 use crate::core::document::{DocBlock, Document};
@@ -35,13 +35,9 @@ pub(crate) fn run_doctor_command(
             rows_to_output_result(config_cmd::config_diagnostics_rows(runtime, session, ui)),
             None,
         )),
-        DoctorCommands::Plugins => plugins_cmd::run_plugins_command(
-            runtime,
-            clients,
-            PluginsArgs {
-                command: PluginsCommands::Doctor,
-            },
-        ),
+        DoctorCommands::Plugins => Ok(CommandOutput::output(
+            rows_to_output_result(plugins_cmd::plugin_rows(clients, true)), None,
+        )),
         DoctorCommands::Last => Ok(render_last_failure_document(
             ui,
             session.last_failure.as_ref(),
