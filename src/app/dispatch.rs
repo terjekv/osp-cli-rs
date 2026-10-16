@@ -358,31 +358,13 @@ fn closest_external_command(catalog: &[CommandCatalogEntry], command: &str) -> O
         .iter()
         .map(|entry| {
             (
-                levenshtein_distance(&command, &entry.name.to_ascii_lowercase()),
+                strsim::levenshtein(&command, &entry.name.to_ascii_lowercase()),
                 &entry.name,
             )
         })
         .filter(|(distance, _)| *distance <= max_distance)
         .min_by(|left, right| left.cmp(right))
         .map(|(_, name)| name.clone())
-}
-
-fn levenshtein_distance(left: &str, right: &str) -> usize {
-    let mut row = (0..=right.chars().count()).collect::<Vec<_>>();
-    for (left_index, left_char) in left.chars().enumerate() {
-        let mut diagonal = row[0];
-        row[0] = left_index + 1;
-        for (right_index, right_char) in right.chars().enumerate() {
-            let above = row[right_index + 1];
-            row[right_index + 1] = if left_char == right_char {
-                diagonal
-            } else {
-                1 + diagonal.min(above).min(row[right_index])
-            };
-            diagonal = above;
-        }
-    }
-    row[right.chars().count()]
 }
 
 pub(crate) fn normalize_profile_override(value: Option<String>) -> Option<String> {
