@@ -524,12 +524,6 @@ mod tests {
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::Path;
-    use std::sync::Mutex;
-
-    fn env_lock() -> &'static Mutex<()> {
-        crate::tests::env_lock()
-    }
 
     fn unique_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
         crate::tests::make_temp_dir(prefix)
@@ -680,26 +674,24 @@ accent = "#123456"
     #[cfg_attr(miri, ignore = "theme path environment integration test")]
     #[test]
     fn theme_path_helpers_expand_home_and_drop_blank_entries_unit() {
-        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        if crate::tests::isolated_test() {
+            return;
+        }
+
         let original = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", "/tmp/theme-home") };
+        let home = crate::tests::make_temp_dir("osp-env");
+        unsafe { std::env::set_var("HOME", home.path()) };
 
         assert_eq!(expand_theme_path("   "), None);
         assert_eq!(
             expand_theme_path("~"),
-            Some(std::path::PathBuf::from("/tmp/theme-home"))
+            Some(std::path::PathBuf::from(home.path()))
         );
-        assert_eq!(
-            expand_theme_path("~/themes"),
-            Some(std::path::PathBuf::from("/tmp/theme-home/themes"))
-        );
-        assert_eq!(
-            expand_theme_path("~\\themes"),
-            Some(std::path::PathBuf::from("/tmp/theme-home/themes"))
-        );
+        assert_eq!(expand_theme_path("~/themes"), Some(home.join("themes")));
+        assert_eq!(expand_theme_path("~\\themes"), Some(home.join("themes")));
         assert_eq!(
             normalize_theme_paths(vec![" ".to_string(), "~/themes".to_string()]),
-            vec![std::path::PathBuf::from("/tmp/theme-home/themes")]
+            vec![home.join("themes")]
         );
 
         match original {
@@ -844,22 +836,21 @@ text = "#ffffff"
     #[cfg_attr(miri, ignore = "theme path environment integration test")]
     #[test]
     fn default_theme_paths_tracks_home_config_root_unit() {
-        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        if crate::tests::isolated_test() {
+            return;
+        }
+
         let original_home = std::env::var("HOME").ok();
         let original_xdg_config_home = std::env::var("XDG_CONFIG_HOME").ok();
-        unsafe { std::env::set_var("HOME", "/tmp/osp-theme-loader-home") };
+        let home = crate::tests::make_temp_dir("osp-env");
+        unsafe { std::env::set_var("HOME", home.path()) };
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 
-        assert_eq!(
-            default_theme_paths(),
-            vec![Path::new("/tmp/osp-theme-loader-home/.config/osp/themes").to_path_buf()]
-        );
+        assert_eq!(default_theme_paths(), vec![home.join(".config/osp/themes")]);
 
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", "/tmp/osp-theme-loader-xdg") };
-        assert_eq!(
-            default_theme_paths(),
-            vec![Path::new("/tmp/osp-theme-loader-xdg/osp/themes").to_path_buf()]
-        );
+        let xdg = crate::tests::make_temp_dir("osp-env");
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", xdg.path()) };
+        assert_eq!(default_theme_paths(), vec![xdg.join("osp/themes")]);
 
         match original_home {
             Some(value) => unsafe { std::env::set_var("HOME", value) },

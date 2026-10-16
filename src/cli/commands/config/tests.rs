@@ -17,7 +17,6 @@ use crate::ui::messages::MessageBuffer;
 use crate::ui::messages::MessageLevel;
 use crate::ui::theme_catalog::ThemeCatalog;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 fn build_resolved_config(defaults: ConfigLayer, terminal: TerminalKind) -> ResolvedConfig {
     let mut defaults = defaults;
@@ -204,12 +203,7 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     assert!(fixture.session.config_overrides.entries().is_empty());
 }
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn with_temp_config_paths<T>(callback: impl FnOnce(PathBuf, PathBuf) -> T) -> T {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
     let root = crate::tests::make_temp_dir("osp-cli-config-tests");
     let config_path = root.join("config.toml");
     let secrets_path = root.join("secrets.toml");
@@ -681,6 +675,9 @@ fn persistent_config_writes_are_rejected_when_file_loading_is_disabled_unit() {
 #[cfg_attr(miri, ignore = "persistent config filesystem integration test")]
 #[test]
 fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_temp_config_paths(|config_path, secrets_path| {
         let mut config_args = config_set_args("ui.format", "json");
         config_args.store.config_store = true;

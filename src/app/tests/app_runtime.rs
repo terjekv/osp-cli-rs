@@ -1,44 +1,8 @@
 use super::*;
 use std::sync::{Arc, Mutex};
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn with_test_xdg_env<T>(run: impl FnOnce() -> T) -> T {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
-    let original_home = std::env::var("HOME").ok();
-    let original_xdg_config_home = std::env::var("XDG_CONFIG_HOME").ok();
-    let original_xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
-    let original_xdg_data_home = std::env::var("XDG_DATA_HOME").ok();
-
-    unsafe {
-        std::env::set_var("HOME", "/tmp/osp-app-runtime-home");
-        std::env::set_var("XDG_CONFIG_HOME", "/tmp/osp-app-runtime-xdg/config");
-        std::env::set_var("XDG_CACHE_HOME", "/tmp/osp-app-runtime-xdg/cache");
-        std::env::set_var("XDG_DATA_HOME", "/tmp/osp-app-runtime-xdg/data");
-    }
-
-    let output = run();
-
-    match original_home {
-        Some(value) => unsafe { std::env::set_var("HOME", value) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
-    match original_xdg_config_home {
-        Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
-    }
-    match original_xdg_cache_home {
-        Some(value) => unsafe { std::env::set_var("XDG_CACHE_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    match original_xdg_data_home {
-        Some(value) => unsafe { std::env::set_var("XDG_DATA_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_DATA_HOME") },
-    }
-
-    output
+    run()
 }
 
 struct CompletionRefreshingNativeCommand;
@@ -127,6 +91,9 @@ impl crate::app::AccessPolicy for StartupResolutionProbe {
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let app = crate::app::App::new();
         let mut help_sink = BufferedUiSink::default();
@@ -164,6 +131,9 @@ fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn app_public_entrypoints_cover_repeated_sink_and_free_process_wrappers_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let app = crate::app::App::new();
         assert_eq!(
@@ -200,6 +170,9 @@ fn app_public_entrypoints_cover_repeated_sink_and_free_process_wrappers_unit() {
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("profile.default", "default");
@@ -249,6 +222,9 @@ fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
 #[cfg_attr(miri, ignore = "public app startup context integration test")]
 #[test]
 fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         #[derive(Clone)]
         struct SubjectHook(Arc<Mutex<Option<String>>>);
@@ -285,6 +261,9 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn app_product_defaults_flow_through_public_setup_surface_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("extensions.site.enabled", true);
@@ -321,6 +300,9 @@ fn app_product_defaults_flow_through_public_setup_surface_unit() {
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn free_process_wrapper_renders_usage_errors_to_bound_sink_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut sink = BufferedUiSink::default();
         let exit = crate::app::run_process_with_sink(["osp", "--definitely-not-a-flag"], &mut sink);
@@ -953,6 +935,9 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
 
 #[test]
 fn exit_code_classification_reserves_specific_codes_for_usage_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let clap_report = super::run_from(["osp", "--defaults-only", "--definitely-not-a-flag"])
             .expect_err("parse should fail");

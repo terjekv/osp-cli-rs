@@ -1,7 +1,7 @@
 use super::{OspCompletionMenu, needs_space_prefix};
 use nu_ansi_term::{Color, Style};
 use reedline::{Completer, Editor, Menu, MenuEvent, Span, Suggestion, UndoBehavior};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone)]
@@ -98,10 +98,6 @@ fn dispatch_tab_like_reedline(menu: &mut OspCompletionMenu, editor: &mut Editor)
     }
 }
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn make_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
     crate::tests::make_temp_dir(prefix)
 }
@@ -115,7 +111,7 @@ fn restore_env(key: &str, value: Option<String>) {
 }
 
 fn set_env_var_for_test(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // Test-only environment mutation is process-global on Rust 2024.
+    // Only the isolated child test reaches this environment mutation.
     unsafe {
         std::env::set_var(key, value);
     }
@@ -859,7 +855,10 @@ fn contract_root_menu_refresh_keeps_the_inserted_command_visible_and_selected_un
 #[cfg_attr(miri, ignore = "completion trace filesystem integration test")]
 #[test]
 fn trace_paths_record_complete_cycle_and_accept_events() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let trace_dir = make_temp_dir("osp-menu-trace");
     let trace_path = trace_dir.join("trace.jsonl");
     let previous_enabled = std::env::var("OSP_REPL_TRACE_COMPLETION").ok();

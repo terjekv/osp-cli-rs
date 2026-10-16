@@ -669,7 +669,6 @@ fn project_dirs() -> Option<ProjectDirs> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
     use super::{
         RuntimeBootstrapMode, RuntimeConfigPaths, RuntimeDefaults, RuntimeEnvironment,
@@ -686,11 +685,6 @@ mod tests {
             .iter()
             .find(|entry| entry.key == key && entry.scope == Scope::global())
             .map(|entry| &entry.value)
-    }
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        &LOCK
     }
 
     #[test]
@@ -823,6 +817,9 @@ mod tests {
 
     #[test]
     fn runtime_environment_uses_home_and_temp_fallbacks_for_state_paths_unit() {
+        if crate::tests::isolated_test() {
+            return;
+        }
         let env = RuntimeEnvironment::from_pairs([("HOME", "/home/tester")]);
 
         assert_eq!(
@@ -838,12 +835,12 @@ mod tests {
             Some(PathBuf::from("/home/tester/.local/state/osp"))
         );
 
-        let _guard = env_lock().lock().expect("env lock should not be poisoned");
         let previous_tmpdir = std::env::var("TMPDIR").ok();
-        unsafe { std::env::set_var("TMPDIR", "/tmp/osp-runtime-temp") };
+        let temp = crate::tests::make_temp_dir("osp-env");
+        unsafe { std::env::set_var("TMPDIR", temp.path()) };
 
         let env = RuntimeEnvironment::from_pairs(std::iter::empty::<(&str, &str)>());
-        let expected_root = PathBuf::from("/tmp/osp-runtime-temp/osp");
+        let expected_root = temp.join("osp");
 
         assert_eq!(
             env.repl_history_path(),

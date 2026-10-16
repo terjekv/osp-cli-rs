@@ -579,17 +579,15 @@ mod tests {
         SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
         render_section_block_with_overrides, render_section_divider,
     };
-    use std::sync::Mutex;
     use unicode_width::UnicodeWidthStr;
-
-    fn env_lock() -> &'static Mutex<()> {
-        crate::tests::env_lock()
-    }
 
     #[cfg_attr(miri, ignore = "terminal environment integration test")]
     #[test]
     fn section_divider_ignores_columns_env_without_explicit_width() {
-        let _guard = env_lock().lock().expect("lock should not be poisoned");
+        if crate::tests::isolated_test() {
+            return;
+        }
+
         let original = std::env::var("COLUMNS").ok();
         unsafe {
             std::env::set_var("COLUMNS", "99");

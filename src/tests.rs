@@ -1,13 +1,11 @@
+#[path = "../tests/support/isolation.rs"]
+mod isolation;
+pub(crate) use isolation::isolated_test;
+
 use crate::core::output::OutputFormat;
 use std::ffi::OsStr;
 use std::ops::Deref;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-
-pub(crate) fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 /// Owns a test temp directory and removes it when dropped.
 ///

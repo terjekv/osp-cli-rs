@@ -96,6 +96,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
 
 #[test]
 fn rebuild_repl_state_preserves_last_failure_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.record_repl_failure("ldap user nope", "boom", "boom detail");

@@ -28,10 +28,6 @@ use crate::repl::ReplTabMode;
 use crate::repl::menu::{OspCompletionMenu, SharedCompletionMenu};
 use reedline::Emacs;
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn completion_tree_with_config_show() -> CompletionTree {
     let show = CompletionNode::default()
         .with_flag("--sources", FlagNode::new().flag_only())
@@ -586,7 +582,10 @@ fn path_suggestions_cover_files_directories_and_quote_variants_unit() {
 #[cfg_attr(miri, ignore = "trace file filesystem integration test")]
 #[test]
 fn trace_completion_env_controls_and_jsonl_output_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let temp_dir = make_temp_dir("osp-repl-trace");
     let trace_path = temp_dir.join("trace.jsonl");
     let previous_enabled = std::env::var("OSP_REPL_TRACE_COMPLETION").ok();
@@ -729,20 +728,24 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
 
 #[test]
 fn expand_home_and_prompt_renderers_behave_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let previous_home = std::env::var("HOME").ok();
-    set_env_var_for_test("HOME", "/tmp/osp-home");
+    let home = crate::tests::make_temp_dir("osp-env");
+    set_env_var_for_test("HOME", home.path().to_str().unwrap());
     assert_eq!(
         crate::normalize::expand_home("~"),
-        Some(std::path::PathBuf::from("/tmp/osp-home"))
+        Some(std::path::PathBuf::from(home.path()))
     );
     assert_eq!(
         crate::normalize::expand_home("~/cache"),
-        Some(std::path::PathBuf::from("/tmp/osp-home/cache"))
+        Some(home.join("cache"))
     );
     assert_eq!(
         crate::normalize::expand_home("~\\cache"),
-        Some(std::path::PathBuf::from("/tmp/osp-home/cache"))
+        Some(home.join("cache"))
     );
     assert_eq!(
         crate::normalize::expand_home("/etc/hosts"),
@@ -1040,9 +1043,7 @@ fn restore_env(key: &str, value: Option<String>) {
 }
 
 fn set_env_var_for_test(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // Test-only environment mutation is process-global on Rust 2024.
-    // Keep the unsafe boundary explicit and local to these regression
-    // tests instead of spreading raw calls through the module.
+    // Only the isolated child test reaches this environment mutation.
     unsafe {
         std::env::set_var(key, value);
     }

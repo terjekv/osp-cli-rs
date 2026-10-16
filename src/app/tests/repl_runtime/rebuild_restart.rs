@@ -1,5 +1,6 @@
 #[test]
 fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.prompt_prefix = "osp-dev".to_string();
@@ -42,6 +43,7 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
 
 #[test]
 fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.config_overrides.set("theme.name", "dracula");
@@ -66,6 +68,7 @@ fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
 
 #[test]
 fn rebuild_repl_state_preserves_session_render_defaults_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.config_overrides.set("ui.format", "table");
@@ -78,6 +81,7 @@ fn rebuild_repl_state_preserves_session_render_defaults_unit() {
 #[cfg_attr(miri, ignore = "plugin restart filesystem/process integration test")]
 #[test]
 fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
+    if crate::tests::isolated_test() { return; }
     with_temp_config_paths(|| {
         let dir = make_temp_dir("osp-cli-repl-plugin-enable");
         let _plugin = write_pipeline_test_plugin(&dir);
@@ -170,6 +174,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
 
 #[test]
 fn repl_config_unset_rebuilds_runtime_state_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state
@@ -205,6 +210,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 
 #[test]
 fn repl_config_unset_dry_run_preserves_session_state_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state

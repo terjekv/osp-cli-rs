@@ -437,9 +437,6 @@ fn miri_root_dir(prefix: &str) -> Option<std::path::PathBuf> {
 
 #[cfg(unix)]
 fn with_temp_config_paths<T>(callback: impl FnOnce() -> T) -> T {
-    let _guard = crate::tests::env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = make_temp_dir("osp-cli-test-config-paths");
     let config_path = root.join("config.toml");
     let secrets_path = root.join("secrets.toml");

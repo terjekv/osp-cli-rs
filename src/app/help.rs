@@ -265,41 +265,9 @@ mod tests {
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
     use crate::ui::HelpLayout;
     use std::ffi::OsString;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn with_test_xdg_env<T>(run: impl FnOnce() -> T) -> T {
-        let _guard = env_lock().lock().expect("env lock should not be poisoned");
-        let original_home = std::env::var("HOME").ok();
-        let original_xdg_config_home = std::env::var("XDG_CONFIG_HOME").ok();
-        let original_xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
-
-        unsafe {
-            std::env::set_var("HOME", "/tmp/osp-help-home");
-            std::env::set_var("XDG_CONFIG_HOME", "/tmp/osp-help-xdg/config");
-            std::env::set_var("XDG_CACHE_HOME", "/tmp/osp-help-xdg/cache");
-        }
-
-        let output = run();
-
-        match original_home {
-            Some(value) => unsafe { std::env::set_var("HOME", value) },
-            None => unsafe { std::env::remove_var("HOME") },
-        }
-        match original_xdg_config_home {
-            Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
-            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
-        }
-        match original_xdg_cache_home {
-            Some(value) => unsafe { std::env::set_var("XDG_CACHE_HOME", value) },
-            None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-        }
-
-        output
+        run()
     }
 
     fn help_args(args: &[&str]) -> Vec<OsString> {
@@ -309,6 +277,9 @@ mod tests {
     #[cfg_attr(miri, ignore = "help bootstrap config/theme integration test")]
     #[test]
     fn render_settings_for_help_combines_presentation_format_and_level_overrides_unit() {
+        if crate::tests::isolated_test() {
+            return;
+        }
         with_test_xdg_env(|| {
             let mut product_defaults = ConfigLayer::default();
             product_defaults.set("theme.path", Vec::<String>::new());
