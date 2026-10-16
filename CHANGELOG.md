@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Default history exclusions use `history*`, covering every history command
+  and its flag variants.
+
 - In a shell, Ctrl-R inside history search widens to all entries in the same
   identity/profile file, preserving the query. Prompts distinguish the shell
   from `all`. Global selections run outside the shell for that line; Tab keeps
