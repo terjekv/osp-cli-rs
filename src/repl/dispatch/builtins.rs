@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use crate::repl::{ReplLineResult, SharedHistory, expand_history};
+pub(super) use crate::repl::history_store::BangCommand;
+use crate::repl::history_store::split_bang_request;
+use crate::repl::{ReplLineResult, SharedHistory};
 use miette::{Result, WrapErr, miette};
 
 use crate::app::sink::UiSink;
@@ -31,15 +33,6 @@ pub(super) struct SourceCommand {
     paths: Vec<PathBuf>,
     ignore_errors: bool,
     help: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BangCommand {
-    Last,
-    Relative(usize),
-    Absolute { id: usize, suffix: Option<String> },
-    Prefix(String),
-    Contains(String),
 }
 
 pub(super) fn execute_repl_builtin(
@@ -313,6 +306,12 @@ pub(super) fn parse_bang_command(raw: &str) -> Result<Option<BangCommand>> {
             suffix: (!suffix.trim_start().is_empty()).then(|| suffix.trim_start().to_string()),
         }));
     }
+    if let Some(offset) = rest.strip_prefix('-') {
+        return Ok(Some(BangCommand::Relative(offset.parse().unwrap_or(0))));
+    }
+    if let Ok(id) = rest.parse::<usize>() {
+        return Ok(Some(BangCommand::Absolute { id, suffix: None }));
+    }
     Ok(Some(BangCommand::Prefix(rest.to_string())))
 }
 
@@ -324,38 +323,10 @@ pub(super) fn execute_bang_command(
 ) -> Result<ReplLineResult> {
     let elevated = split_bang_request(raw).is_some_and(|(elevated, _)| elevated);
     let scope = current_history_scope(session);
-    let recent = history.recent_commands_for(scope.as_deref());
-    let expanded = match command {
-        BangCommand::Last => history.expand_last_command(raw),
-        BangCommand::Relative(offset) => {
-            expand_history(&format!("!-{offset}"), &recent, scope.as_deref(), true)
-        }
-        BangCommand::Absolute { id, suffix } => {
-            expand_history(&format!("!{id}"), &recent, scope.as_deref(), true).map(|expanded| {
-                match suffix {
-                    Some(suffix) => format!("{expanded} {suffix}"),
-                    None => expanded,
-                }
-            })
-        }
-        BangCommand::Prefix(prefix) => {
-            if prefix.is_empty() {
-                return Ok(ReplLineResult::Continue(render_bang_help()));
-            }
-            expand_history(&format!("!{prefix}"), &recent, scope.as_deref(), true)
-        }
-        BangCommand::Contains(term) => {
-            let mut found = None;
-            for full in recent.iter().rev() {
-                let visible = strip_history_scope(full, scope.as_deref());
-                if visible.contains(&term) {
-                    found = Some(visible);
-                    break;
-                }
-            }
-            found
-        }
-    };
+    if matches!(&command, BangCommand::Prefix(prefix) if prefix.is_empty()) {
+        return Ok(ReplLineResult::Continue(render_bang_help()));
+    }
+    let expanded = history.expand(&command, scope.as_deref(), elevated);
 
     let Some(expanded) = expanded else {
         return Ok(ReplLineResult::Continue(format!(
@@ -363,30 +334,11 @@ pub(super) fn execute_bang_command(
         )));
     };
 
-    Ok(ReplLineResult::ReplaceInput(if elevated {
-        if expanded.split_whitespace().next() == Some("sudo") {
-            expanded
-        } else {
-            format!("sudo {expanded}")
-        }
-    } else {
-        expanded
-    }))
+    Ok(ReplLineResult::ReplaceInput(expanded))
 }
 
 pub(super) fn current_history_scope(session: &AppSession) -> Option<String> {
     session.scope.history_scope_prefix()
-}
-
-pub(super) fn strip_history_scope(command: &str, scope: Option<&str>) -> String {
-    let trimmed = command.trim();
-    match scope {
-        Some(prefix) => trimmed
-            .strip_prefix(prefix)
-            .map(|rest| rest.trim_start().to_string())
-            .unwrap_or_else(|| trimmed.to_string()),
-        None => trimmed.to_string(),
-    }
 }
 
 fn render_bang_help() -> String {
@@ -454,20 +406,6 @@ fn execute_last_result_builtin(
 
 pub(super) fn is_repl_bang_request(raw: &str) -> bool {
     split_bang_request(raw).is_some()
-}
-
-fn split_bang_request(raw: &str) -> Option<(bool, &str)> {
-    let raw = raw.trim();
-    if raw.starts_with('!') {
-        return Some((false, raw));
-    }
-
-    let rest = raw.strip_prefix("sudo")?;
-    if !rest.chars().next().is_some_and(char::is_whitespace) {
-        return None;
-    }
-    let bang = rest.trim_start();
-    bang.starts_with('!').then_some((true, bang))
 }
 
 #[cfg(test)]

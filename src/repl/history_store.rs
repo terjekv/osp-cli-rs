@@ -34,6 +34,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::normalize::normalize_optional_identifier;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BangCommand {
+    Last,
+    Relative(usize),
+    Absolute { id: usize, suffix: Option<String> },
+    Prefix(String),
+    Contains(String),
+}
+
+pub(crate) fn split_bang_request(raw: &str) -> Option<(bool, &str)> {
+    let raw = raw.trim();
+    if raw.starts_with('!') {
+        return Some((false, raw));
+    }
+
+    let rest = raw.strip_prefix("sudo")?;
+    if !rest.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let bang = rest.trim_start();
+    bang.starts_with('!').then_some((true, bang))
+}
+
 /// Configuration for REPL history persistence, visibility, and shell scoping.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -424,30 +447,22 @@ impl SharedHistory {
         }
     }
 
-    pub(crate) fn last_command(&self) -> Option<String> {
-        let store = self.inner.lock().ok()?;
-        store
-            .last_command
-            .clone()
-            .or_else(|| store.recent_commands().last().cloned())
-    }
-
     /// The same expansion is used by Tab completion and Enter dispatch.
     pub(crate) fn expand_last_command(&self, raw: &str) -> Option<String> {
-        let mut words = raw.split_whitespace();
-        let elevated = match (words.next(), words.next(), words.next()) {
-            (Some("!!"), None, None) => false,
-            (Some("sudo"), Some("!!"), None) => true,
-            _ => return None,
-        };
-        let command = self.last_command()?;
-        Some(
-            if elevated && command.split_whitespace().next() != Some("sudo") {
-                format!("sudo {command}")
-            } else {
-                command
-            },
-        )
+        let (elevated, bang) = split_bang_request(raw)?;
+        if bang != "!!" {
+            return None;
+        }
+        self.expand(&BangCommand::Last, None, elevated)
+    }
+
+    pub(crate) fn expand(
+        &self,
+        command: &BangCommand,
+        scope: Option<&str>,
+        elevated: bool,
+    ) -> Option<String> {
+        self.inner.lock().ok()?.expand(command, scope, elevated)
     }
 
     /// Commit the editor's pending record, or save an accepted basic-mode replay.
@@ -684,6 +699,53 @@ impl OspHistoryStore {
     /// Returns the number of removed entries.
     pub fn clear_for(&mut self, shell_prefix: Option<&str>) -> Result<usize> {
         self.prune_for(0, shell_prefix)
+    }
+
+    pub(crate) fn expand(
+        &self,
+        command: &BangCommand,
+        scope: Option<&str>,
+        elevated: bool,
+    ) -> Option<String> {
+        let expanded = if matches!(command, BangCommand::Last) {
+            self.last_command.clone().or_else(|| {
+                self.recent_commands_for(self.shell_prefix().as_deref())
+                    .last()
+                    .cloned()
+            })?
+        } else {
+            let recent = self.recent_commands_for(scope);
+            let selected = match command {
+                BangCommand::Last => unreachable!(),
+                BangCommand::Relative(offset) => recent.get(recent.len().checked_sub(*offset)?),
+                BangCommand::Absolute { id, .. } => recent.get(id.checked_sub(1)?),
+                BangCommand::Prefix(prefix) => recent
+                    .iter()
+                    .rev()
+                    .find(|full| strip_shell_prefix(full, scope).starts_with(prefix)),
+                BangCommand::Contains(term) => recent
+                    .iter()
+                    .rev()
+                    .find(|full| strip_shell_prefix(full, scope).contains(term)),
+            }?;
+            let visible = strip_shell_prefix(selected, scope);
+            match command {
+                BangCommand::Absolute {
+                    suffix: Some(suffix),
+                    ..
+                } => {
+                    format!("{visible} {suffix}")
+                }
+                _ => visible,
+            }
+        };
+        Some(
+            if elevated && expanded.split_whitespace().next() != Some("sudo") {
+                format!("sudo {expanded}")
+            } else {
+                expanded
+            },
+        )
     }
 
     fn profile_allows(&self, record: &HistoryRecord) -> bool {
@@ -1373,7 +1435,7 @@ pub(crate) fn apply_shell_prefix(command: &str, shell_prefix: Option<&str>) -> S
     }
 }
 
-fn strip_shell_prefix(command: &str, shell_prefix: Option<&str>) -> String {
+pub(crate) fn strip_shell_prefix(command: &str, shell_prefix: Option<&str>) -> String {
     let trimmed = command.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -1405,78 +1467,12 @@ fn now_ms() -> i64 {
     }
 }
 
-/// Expands shell-style history references against the provided command list.
-///
-/// Supports `!!`, `!-N`, `!N`, and prefix search forms such as `!osp`.
-pub(crate) fn expand_history(
-    input: &str,
-    history: &[String],
-    shell_prefix: Option<&str>,
-    strip_prefix: bool,
-) -> Option<String> {
-    if !input.starts_with('!') {
-        return Some(input.to_string());
-    }
-
-    let entries: Vec<(&str, String)> = history
-        .iter()
-        .filter(|cmd| command_matches_shell_prefix(cmd, shell_prefix))
-        .map(|cmd| {
-            let view = strip_shell_prefix(cmd, shell_prefix);
-            (cmd.as_str(), view)
-        })
-        .collect();
-
-    if entries.is_empty() {
-        return None;
-    }
-
-    let select = |full: &str, view: &str, strip: bool| -> String {
-        if strip {
-            view.to_string()
-        } else {
-            full.to_string()
-        }
-    };
-
-    if input == "!!" {
-        let (full, view) = entries.last()?;
-        return Some(select(full, view, strip_prefix));
-    }
-
-    if let Some(rest) = input.strip_prefix("!-") {
-        let idx = rest.parse::<usize>().ok()?;
-        if idx == 0 || idx > entries.len() {
-            return None;
-        }
-        let (full, view) = entries.get(entries.len() - idx)?;
-        return Some(select(full, view, strip_prefix));
-    }
-
-    let rest = input.strip_prefix('!')?;
-    if let Ok(abs_id) = rest.parse::<usize>() {
-        if abs_id == 0 || abs_id > entries.len() {
-            return None;
-        }
-        let (full, view) = entries.get(abs_id - 1)?;
-        return Some(select(full, view, strip_prefix));
-    }
-
-    for (full, view) in entries.iter().rev() {
-        if view.starts_with(rest) {
-            return Some(select(full, view, strip_prefix));
-        }
-    }
-
-    None
-}
-
 fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
     let trimmed = command.trim();
     if trimmed.is_empty() {
         return true;
     }
-    if trimmed.starts_with('!') || is_sudo_bang_command(trimmed) {
+    if split_bang_request(trimmed).is_some() {
         return true;
     }
     // Use the command lexer so help-like text inside a quoted value is not
@@ -1524,13 +1520,6 @@ pub(super) fn is_sensitive_config_set_tokens(tokens: &[String]) -> bool {
         return false;
     };
     set.store.secrets || crate::config::is_sensitive_key(&set.key)
-}
-
-fn is_sudo_bang_command(command: &str) -> bool {
-    let Some(rest) = command.strip_prefix("sudo") else {
-        return false;
-    };
-    rest.chars().next().is_some_and(char::is_whitespace) && rest.trim_start().starts_with('!')
 }
 
 fn matches_pattern(pattern: &str, command: &str) -> bool {

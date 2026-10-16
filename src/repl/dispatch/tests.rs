@@ -7,7 +7,7 @@ use super::{
     execute_repl_plugin_line, finalize_repl_command, handle_repl_exit_request,
     is_repl_bang_request, leave_repl_shell, parse_bang_command, parse_clap_help,
     parse_repl_builtin, render_repl_command_output, repl_command_spec, repl_help_for_scope,
-    run_repl_command, strip_history_scope,
+    run_repl_command,
 };
 use crate::app::{AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
 use crate::app::{CliCommandResult, ReplCommandOutput, StructuredCommandOutput};
@@ -349,11 +349,11 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
     session.scope.enter("ldap");
     assert_eq!(current_history_scope(&session).as_deref(), Some("ldap "));
     assert_eq!(
-        strip_history_scope("ldap user alice", Some("ldap")),
+        crate::repl::history_store::strip_shell_prefix("ldap user alice", Some("ldap")),
         "user alice".to_string()
     );
     assert_eq!(
-        strip_history_scope("config show", Some("ldap")),
+        crate::repl::history_store::strip_shell_prefix("config show", Some("ldap")),
         "config show".to_string()
     );
 

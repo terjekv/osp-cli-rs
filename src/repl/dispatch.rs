@@ -44,10 +44,7 @@ use shell::{ReplShortcutPlan, classify_repl_shortcut, execute_repl_shortcut};
 #[cfg(test)]
 pub(crate) use crate::app::command_plan::repl_command_spec;
 #[cfg(test)]
-use builtins::{
-    BangCommand, current_history_scope, execute_bang_command, parse_bang_command,
-    strip_history_scope,
-};
+use builtins::{BangCommand, current_history_scope, execute_bang_command, parse_bang_command};
 #[cfg(test)]
 use command::{
     command_side_effects, config_key_change_requires_intro, finalize_repl_command, parse_clap_help,

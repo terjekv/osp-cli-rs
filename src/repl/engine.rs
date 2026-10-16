@@ -32,7 +32,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use super::highlight::{HighlightDebugSpan, debug_highlight};
-pub(crate) use super::history_store::expand_history;
 pub use super::history_store::{
     HistoryConfig, HistoryConfigBuilder, HistoryEntry, HistoryShellContext, SharedHistory,
 };

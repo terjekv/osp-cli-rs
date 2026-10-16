@@ -132,8 +132,7 @@ pub use engine::{
     debug_history_menu, debug_history_menu_steps,
 };
 pub(crate) use engine::{
-    CompletionTraceEvent, CompletionTraceMenuState, expand_history, trace_completion,
-    trace_completion_enabled,
+    CompletionTraceEvent, CompletionTraceMenuState, trace_completion, trace_completion_enabled,
 };
 pub(crate) use host::{ReplViewContext, run_plugin_repl, run_repl_debug_command_for};
 #[cfg(test)]

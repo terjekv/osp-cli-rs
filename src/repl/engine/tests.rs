@@ -19,9 +19,9 @@ use super::{
     build_history_menu, build_history_picker_options, build_repl_highlighter,
     color_from_style_spec, contains_cursor_position_report, debug_completion,
     debug_completion_steps, debug_history_menu, debug_history_menu_steps, default_pipe_verbs,
-    evaluate_repl_submission, expand_history, expand_home, history_picker_items,
-    is_cursor_position_error, parse_cursor_position_report, path_suggestions, split_path_stub,
-    trace_completion, trace_completion_enabled,
+    evaluate_repl_submission, expand_home, history_picker_items, is_cursor_position_error,
+    parse_cursor_position_report, path_suggestions, split_path_stub, trace_completion,
+    trace_completion_enabled,
 };
 use crate::core::shell_words::QuoteStyle;
 use crate::repl::LineProjection;
@@ -96,22 +96,19 @@ fn disabled_history() -> SharedHistory {
 
 #[test]
 fn history_expansion_variants_resolve_recent_relative_and_prefix_queries_unit() {
-    let latest_only = vec!["ldap user oistes".to_string()];
-    assert_eq!(
-        expand_history("!!", &latest_only, None, false),
-        Some("ldap user oistes".to_string())
-    );
+    use crate::repl::history_store::BangCommand;
 
-    let history = vec![
-        "ldap user oistes".to_string(),
-        "ldap netgroup ucore".to_string(),
-    ];
+    let history = test_history(&["ldap user oistes", "ldap netgroup ucore"]);
     assert_eq!(
-        expand_history("!-1", &history, None, false),
+        history.expand(&BangCommand::Last, None, false),
         Some("ldap netgroup ucore".to_string())
     );
     assert_eq!(
-        expand_history("!ldap user", &history, None, false),
+        history.expand(&BangCommand::Relative(1), None, false),
+        Some("ldap netgroup ucore".to_string())
+    );
+    assert_eq!(
+        history.expand(&BangCommand::Prefix("ldap user".to_string()), None, false),
         Some("ldap user oistes".to_string())
     );
 }
