@@ -65,19 +65,22 @@ That includes:
 - `--format` and format shorthands like `--json`
 - `-v/-q/-d`
 
-Failures use the same renderer as one-shot commands: a concise summary by
-default and a full report at `-v` and above. `-vv` additionally enables trace
-messages and all human fields; further `v`s saturate. Plugin messages survive
-failed commands. Usage failures are titled “Invalid command”.
+Failures use the same renderer as one-shot commands: `error:`, an optional
+`request-id:`, and at most one `hint:`. Failure wording stays stable as verbosity
+increases. Plugin messages preserve sanitized text, levels and ordering on
+failed commands; known injected secrets are redacted.
 
 Launch `-v`/`-q`/`-d` flags set session defaults. Per-line flags add to those
-defaults for one command only. `-d` shows command dispatch, plugin stderr,
-service requests and outcomes; `-dd` adds internal events and the captured
-backtrace on stderr. File logging is independent of per-line stderr settings.
+defaults for one command only. `-v` explains service and session selection,
+`-vv` shows exchanges, and `-vvv` adds response/cache evidence. These diagnostics
+and verbose field supplements are complete stderr lines above the prompt.
+`-d` shows host dispatch; `-dd` adds internal host decisions and captured
+backtraces. File logging is independent of per-line stderr settings.
 
-Read the short failure, then rerun with `-v` or inspect `doctor last -v`.
-Use `doctor last -dd` for its saved backtrace, or `-v -dd` on the original
-command to capture an explanation and diagnostic trace for a bug report.
+Read the error and its hint. `doctor last -vvv` reads retained sanitized evidence
+without repeating the failed operation. `doctor last -dd` writes the captured
+backtrace to stderr. `doctor` checks local setup without contacting services.
+A configured `repl.intro=none` remains disabled at every verbosity level.
 
 For successful results, the REPL also keeps the last replayable output:
 

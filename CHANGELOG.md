@@ -7,6 +7,23 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** `config get` rejects a missing explicitly selected config file
+  instead of silently returning defaults.
+
+- **Breaking:** Add command detail level `evidence` above `trace`, with useful
+  cumulative `-v`, `-vv`, and `-vvv` service evidence. Native handlers receive a
+  command-local diagnostic sink; plugins receive `OSP_COMMAND_VERBOSITY`.
+- **Breaking:** Move service exchanges from developer logging to command
+  verbosity and human supplements to stderr. CLI and REPL failures use concise
+  `error:`, optional `request-id:`, and `hint:` lines; JSON actions live in
+  `error.details.action`. Doctor reports local setup without remote probes.
+- Keep a disabled REPL introduction disabled when verbosity increases. Host
+  progress measures rendered height rather than asking native commands to
+  estimate it. Retained failure command labels omit arguments.
+- Restrict diagnostic logging to reviewed host/service events and withhold
+  arbitrary plugin stderr, including help output. Preserve structured plugin UI
+  text with terminal sanitization and redaction of injected secrets.
+
 - **Breaking:** Plugins are drop-in `osp-NAME` executables. Builtins and native
   commands win name clashes; the first plugin found wins. PATH is searched by
   default. Root help now lists plugins, and inventory shows shadowed entries.
@@ -17,7 +34,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   listed but do not block execution. Remove bundled `manifest.toml` files.
 - **Breaking:** Plugin argv no longer includes a leading command name. Read
   `OSP_COMMAND` instead, using symlinks for multiple names from one executable.
-  Runs inherit stdio and the full environment, have no timeout, and preserve
+  Runs inherit stdin/stdout and the full environment, have no timeout, and preserve
   exit codes. `extensions.plugins.timeout_ms` now limits describe only.
   `--help` and `-h` always use the executable's own parser and terminal output.
 - Plugins may return bare JSON arrays or objects. Explicit format flags and DSL

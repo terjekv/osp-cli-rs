@@ -86,6 +86,12 @@ The product computes validity and remaining lifetime; doctor does not acquire
 credentials or age a cached snapshot. Human output formats the same facts.
 `auth_strength`, `capability_count` and `enabled_features` are no longer emitted.
 
+`AccessPolicy::local_checks` supplies product-specific local doctor rows, including
+the selected service URL, identity, profile and locally known expiry. The hook
+must not contact services or acquire credentials. A saved credential is not proof
+that its server will accept it. Command handlers report credential provenance
+through `DiagnosticEvent::Context`, never credential values.
+
 ## Explicit product actions
 
 `App::with_action_flag(name, help, optional_value, action)` registers an

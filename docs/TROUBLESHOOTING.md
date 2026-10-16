@@ -21,13 +21,14 @@ These commands usually tell you the most with the least effort:
 
 Use these to identify the problem before changing settings.
 
-By default, failures give an actionable summary. `-v` adds the full report,
-including causes, backend details and source annotations. `-vv` adds trace-level
-messages and human fields; it uses the same failure report. Further `v`s saturate.
+Failures give one actionable error and an optional request ID and hint. Use
+`-v` to inspect service/account/session selection, `-vv` to inspect exchanges,
+and `-vvv` for additional response and cache evidence. Use `-d` for host
+loading/dispatch, or `-dd` for additional host decisions and backtraces.
 
-Use `-d` for command dispatch, plugin stderr, service requests and outcomes.
-`-dd` adds internal events and captured error backtraces; `-ddd` adds trace events.
-For a bug report, run `osp -v -dd ... 2>osp.txt`. JSON stdout stays unchanged.
+`doctor` checks this machine only. It cannot establish remote service health
+or resolve an unreachable service. Check connectivity or your VPN for network
+failures. JSON command data stays on stdout; diagnostics go to stderr.
 
 For startup delays before the first REPL prompt or a one-shot command, run
 `OSP_TRACE_STARTUP=1 osp` or `OSP_TRACE_STARTUP=json osp ...` and inspect the

@@ -14,51 +14,59 @@ Use:
 
 Behavior:
 
-- default: errors, warnings, and normal success messages
-- `-v`: full failure report, including causes, backend details and source snippets
-- `-vv`: same detailed failure report as `-v`, with trace-level messages
-- `-vvv`: same as `-vv`; use `-dd` for captured backtraces
-- `-q`: fewer non-essential messages
-- `-qq`: quiet except for errors
+- default: command results, warnings, actionable errors and server request IDs
+- `-v`: selected service, account, profile and credential source; command totals
+- `-vv`: actual exchanges, response status, request IDs and elapsed time
+- `-vvv`: response size, directory projection and cache age/lifetime evidence
+- `-q`: fewer nonessential messages
+- `-qq`: errors only
 
-These flags work in both CLI and REPL and apply to one invocation at a time.
+The levels are cumulative and saturate at `-vvv`. Configured `ui.verbosity`
+values stay supported; `evidence` follows `trace`. Counts add to the configured
+base. Per-line REPL flags restore the session baseline after each command.
+Help detail remains command output on stdout.
 
-`-v`/`-q` set how much osp tells you: messages, failure explanations, human
-field detail and help. `-d` shows what osp is doing. The axes compose freely;
-`-q -d` keeps quiet messages with operator logs. Further counts saturate.
+Service diagnostics and human field supplements go to stderr, including with
+JSON and output pipelines. Verbosity does not create service requests or enable
+a disabled REPL introduction. Unknown measurements are omitted.
+
+Failures use the same presentation in CLI and REPL:
+
+```text
+error: The operation failed.
+request-id: req-123
+hint: Check the selected account.
+```
+
+The request ID and hint are optional. There is at most one hint. Local parse
+errors have no service context or elapsed-time summary. JSON failures retain
+`ok`, `error`, `exit_code`, `messages` and `data`; the next action is available
+as `error.details.action`.
 
 ## Developer Debug Output
 
-Use:
+- `-d`: compact startup, handler selection, outcome and phase times
+- `-dd`: additional host decisions and captured error backtraces
+- `-ddd`: host trace events with relative elapsed time
 
-- `-d`
-- `-dd`
-- `-ddd`
+Host diagnostics use `debug:` and `trace:` prefixes. Service traffic belongs
+to `-vv`, independently of `-d`. Dependency logging is not enabled by repeated
+`-d` flags. File logs keep timestamps and sanitized event names and fields.
 
-Behavior:
-
-- `-d`: command dispatch, service requests, plugin stderr and the final outcome
-- `-dd`: internal debug events and the error’s captured backtrace
-- `-ddd`: the most detailed terminal debug stream
-
-Debug logs are written to `stderr`, not `stdout`. Operator trace lines contain
-the time, level, target, message and event fields. At `-dd` and above they also
-include span context.
+Plugin stderr is drained concurrently. Unverified prose is withheld; `-dd`
+reports that the plugin wrote it. This also applies to plugin help. Executable
+stdout, stdin, exit status and inherited environment retain their contracts.
+The REPL's debug timing badge remains available.
 
 ## Timing Hints
 
-At debug levels, `osp` shows timing information:
-
-- CLI: `finished` log event on `stderr`, after any error, with exit code and elapsed time
-- REPL: right-hand prompt badge with the last command timing
-
-Color bands:
+At debug levels, the CLI's `Command complete` event includes startup and dispatch
+times. The REPL's right-hand prompt shows the last command timing, independently
+of the command's service totals. Its color bands are:
 
 - `0-250ms`: green
 - `250-1000ms`: warning
 - `>1000ms`: red
-
-Higher debug levels may show more detailed timing breakdowns.
 
 ## Startup Tracing
 
@@ -107,9 +115,15 @@ Useful config keys:
 
 Use `config explain <key>` to see where an effective value comes from.
 
-For a bug report, use `-v -dd 2>osp.txt` to capture the full explanation,
-operator trace, internal events and a captured backtrace. `doctor last -v`
-shows the saved REPL report; `doctor last -dd` writes its backtrace to stderr.
+Use `-vvv -dd 2>osp.txt` to collect service evidence and host diagnostics.
+`doctor last -vvv` reads the retained command evidence without replaying a
+request; `doctor last -dd` shows its captured backtrace. Retained command labels
+omit arguments. No last-command record is persisted by one-shot commands.
+
+`doctor` checks local configuration, selected session bindings, plugin inventory
+and trust-file readability. It does not log in or contact services. A present
+credential has not been verified against its server. Detailed config/plugin/theme
+subcommands and the complete JSON report remain available.
 
 ## Plugin Runtime Hints
 
@@ -118,8 +132,11 @@ as configuration inputs:
 
 - `OSP_UI_VERBOSITY`
 - `OSP_DEBUG_LEVEL`
+- `OSP_COMMAND_VERBOSITY` (numeric `0` through `3`)
 
-Plugins should keep data output on `stdout` and diagnostics on `stderr`.
+`OSP_UI_VERBOSITY` keeps the plugin vocabulary: both command levels 2 and 3
+export `trace`. The numeric hint distinguishes them. Plugins should keep result
+data on stdout and avoid putting credentials in any output.
 
 ## Scripting Safety
 

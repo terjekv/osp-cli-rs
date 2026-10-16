@@ -47,7 +47,8 @@ A describe error does not prevent execution.
 `OSP_COMMAND=hello`, not as a leading argument. To share an executable across
 several commands, install one symlink per name and read `OSP_COMMAND`.
 
-Stdin, stdout, stderr, and the environment are inherited. Ordinary runs have
+Stdin, stdout, and the environment are inherited. Stderr is drained; unverified
+text is withheld, with a diagnostic notice at `-dd`. Ordinary runs have
 no timeout and retain the plugin's exit code. Ctrl-C reaches the foreground
 plugin while the host waits. `osp hello --help` and `osp hello -h` always
 run the executable's own help directly, so argparse and Click work normally.
@@ -89,7 +90,7 @@ JSON-producing plugins. An argparse attribute can be a parser factory.
 
 Stdout is captured when metadata sets `"output": "json"`, an osp format flag
 such as `--json` or `--format table` is supplied, or the command has DSL stages.
-Stdin and stderr remain live. Captured stdout is limited to 64 MiB.
+Stdin remains live; unverified stderr is withheld. Captured stdout is limited to 64 MiB.
 
 Bare JSON arrays and objects become rows for the normal renderer and DSL:
 
@@ -101,11 +102,13 @@ osp hello bob alice --loud '|' 'F name=bob'
 
 Captured text is printed as text. A DSL stage requires JSON; otherwise osp
 reports `` `hello` printed text, not JSON; pipes need JSON output ``.
-A nonzero captured run also reports `hello exited with status N`, and osp
-keeps that exit status.
+A nonzero captured run reports `error: Plugin hello crashed (exit status N).`
+and keeps that exit status.
 
-A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data,
-messages, render hints, and context retain their existing semantics. `meta`
+A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data, render hints and context retain their existing semantics. Message text
+is shown at its declared level, with terminal controls stripped, newlines
+flattened and a 512-character limit. Known secrets supplied through the plugin
+environment are redacted. `meta`
 may be omitted. An `ok: false` response is rendered as an error.
 
 ## Environment and config
@@ -137,3 +140,14 @@ osp hello --help
 The same command is available in the REPL. `hello --l<TAB>` completes the
 flag from its metadata. Running plain text plugins keeps their terminal
 behavior; JSON plugins participate in the renderer and DSL.
+
+## Command detail hints
+
+`OSP_COMMAND_VERBOSITY` is an output-only numeric hint from 0 to 3. Existing
+`OSP_UI_VERBOSITY` values remain unchanged; levels 2 and 3 both export `trace`.
+Use the numeric hint when the executable has distinct request and evidence
+views. Host flags before `--` belong to osp; plugin-owned flags go after it.
+
+Structured messages preserve their text, levels and ordering. Failure summaries
+include the plugin's reason. Terminal controls are stripped and messages are
+bounded to one line of 512 characters; known environment secrets are redacted.

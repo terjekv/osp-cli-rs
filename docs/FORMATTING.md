@@ -96,21 +96,11 @@ These are also invocation-local:
 `-v/-q` control process-facing error detail and message verbosity. `-d`
 controls developer debug logs and timing on `stderr`.
 
-Failures are concise below info verbosity. `-v` and above show one full report
-with each cause, backend details and source annotations once. `-vv` additionally
-reveals trace messages and all human fields; extra `v`s saturate. `-dd` writes
-the captured error backtrace to stderr without changing stdout or failure text.
-
-Normal operator flow:
-
-1. run the command normally
-2. if it fails, rerun with `-v`; add `-d` for the operator trace or `-dd` for internals
-3. in the REPL, `doctor last -v` lets you inspect the recorded
-   failure again without retyping the command
-4. in the REPL, `last` replays the last successful result and `last --raw`
-   shows the pre-pipeline payload
-
-Examples:
+Failures use `error:`, optional `request-id:`, and at most one `hint:` line
+in CLI and REPL. `-v` adds command context, `-vv` exchanges, and `-vvv` further
+evidence. Human supplements go to stderr. JSON failures keep a single envelope
+on stdout, with the action in `error.details.action`. Host debug detail stays
+on the independent `-d` axis. See [logging](LOGGING.md).
 
 ```bash
 osp plugins list -v
