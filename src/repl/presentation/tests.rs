@@ -687,7 +687,8 @@ fn session_history_opt_out_enables_incognito_prompt_indicator_unit() {
     state.runtime.ui.render_settings.unicode = crate::core::output::UnicodeMode::Always;
     state.session.history_enabled = false;
 
-    let render = build_repl_prompt_right_renderer(repl_view(&state), DebugTimingState::default());
+    let render =
+        build_repl_prompt_right_renderer(repl_view(&state), DebugTimingState::default(), None);
     let prompt_right = render();
 
     let stripped = output_support::strip_ansi(&prompt_right);

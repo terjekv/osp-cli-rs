@@ -7,6 +7,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Native products can contribute sanitized cached status to the REPL right prompt.
+
 - Add `AccessPolicy::before_dispatch` for product credential acquisition before
   native parsing, explicit help, metadata preparation, or REPL shell entry.
   Root help, completion and background refresh remain side-effect free.

@@ -575,11 +575,39 @@ pub(crate) fn build_repl_prompt(view: ReplViewContext<'_>) -> ReplPrompt {
 pub(crate) fn build_repl_prompt_right_renderer(
     view: ReplViewContext<'_>,
     timing: DebugTimingState,
+    product: Option<crate::repl::PromptRightRenderer>,
 ) -> crate::repl::PromptRightRenderer {
     let resolved = view.ui.render_settings.resolve_render_settings();
     let history_enabled = history::repl_history_enabled(view.config) && view.history_enabled;
     let native_context = view.native_context.clone();
-    Arc::new(move || render_repl_prompt_right(&resolved, history_enabled, &timing, &native_context))
+    let left_width = crate::ui::display_width(&build_repl_prompt(view).left);
+    Arc::new(move || {
+        let base = render_repl_prompt_right(&resolved, history_enabled, &timing, &native_context);
+        let status = product.as_ref().map(|render| render()).unwrap_or_default();
+        let status = crate::ui::sanitize_human_text(&status).replace('\n', " ");
+        if status.is_empty() {
+            base
+        } else {
+            let context = render_repl_prompt_context(&resolved, &native_context);
+            let incognito = render_repl_prompt_incognito(&resolved, history_enabled);
+            let mut parts = [context, incognito, status]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            let timing = render_repl_prompt_timing(&resolved, &timing);
+            // Attention wins the fixed prompt budget; Reedline handles draft collisions.
+            if !timing.is_empty()
+                && left_width
+                    + crate::ui::display_width(&parts.join("  "))
+                    + crate::ui::display_width(&timing)
+                    + 3
+                    <= resolved.width.unwrap_or(80)
+            {
+                parts.push(timing);
+            }
+            parts.join("  ")
+        }
+    })
 }
 
 #[cfg(test)]

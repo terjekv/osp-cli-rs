@@ -619,6 +619,14 @@ pub trait NativeCommand: Send + Sync {
     /// editing never performs network I/O per keystroke.
     fn augment_completion(&self, _completion: &mut CompletionNode) {}
 
+    /// Returns a cached, single-line product status for the right prompt.
+    ///
+    /// Called during editor paints: never perform I/O or wait for a worker here.
+    /// The host sanitizes text and omits it in basic and JSON sessions.
+    fn repl_status(&self) -> Option<String> {
+        None
+    }
+
     /// Refreshes runtime completion data on a host-owned background thread.
     ///
     /// The host invokes this once when an authorized interactive REPL starts.

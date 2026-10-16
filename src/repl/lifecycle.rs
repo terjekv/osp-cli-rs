@@ -132,7 +132,7 @@ impl ReplCycle {
         };
 
         Ok(Self {
-            run_config: build_repl_cycle_run_config(runtime, session, prepared),
+            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared),
             help_text: intro_text,
             clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
         })
@@ -142,10 +142,34 @@ impl ReplCycle {
 fn build_repl_cycle_run_config(
     runtime: &AppRuntime,
     session: &AppSession,
+    clients: &AppClients,
     prepared: PreparedReplSurfaceState,
 ) -> ReplRunConfig {
     let view = ReplViewContext::from_parts(runtime, session);
 
+    let product_status =
+        if runtime.ui.render_settings.format == crate::core::output::OutputFormat::Json {
+            None
+        } else {
+            let commands = clients
+                .native_commands()
+                .catalog()
+                .into_iter()
+                .filter(|entry| {
+                    runtime
+                        .auth
+                        .external_command_access(&entry.name)
+                        .is_visible()
+                })
+                .filter_map(|entry| clients.native_commands().command(&entry.name).cloned())
+                .collect::<Vec<_>>();
+            Some(std::sync::Arc::new(move || {
+                commands
+                    .iter()
+                    .find_map(|command| command.repl_status())
+                    .unwrap_or_default()
+            }) as crate::repl::PromptRightRenderer)
+        };
     ReplRunConfig::builder(
         build_repl_prompt(view),
         history::build_history_config(runtime, session),
@@ -157,6 +181,7 @@ fn build_repl_cycle_run_config(
     .with_prompt_right(Some(build_repl_prompt_right_renderer(
         view,
         session.prompt_timing.clone(),
+        product_status,
     )))
     .with_line_projector(Some(input::build_repl_ui_line_projector(
         runtime.config.resolved(),

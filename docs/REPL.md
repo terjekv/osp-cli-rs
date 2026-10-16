@@ -319,3 +319,13 @@ computed after startup. The editor prints it above the prompt; work posted
 before the editor starts is queued. The basic reader also displays notices on
 stderr, although it cannot redraw a partially typed line. Notice delivery does
 not wait for network work or block the prompt.
+
+### Product status
+
+Native commands may supply `repl_status()` as cached plain text in a separate
+right-prompt slot. Rendering never performs network I/O. The host sanitizes
+control sequences and line breaks; Reedline measures terminal cells and omits
+the right prompt when it collides with input. Context and incognito remain;
+product attention takes priority over timing. Basic and JSON sessions omit it.
+A cached update is visible at the next editor paint. Without a meaningful
+transition notice, an idle prompt does not repaint until the next key.
