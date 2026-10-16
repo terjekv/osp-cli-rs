@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Move completion-debug menu fields into `CompletionDebug::menu`
+  (`MenuDebug`). The `repl debug-complete` JSON keys remain unchanged.
+
 - **Breaking:** Remove `NativeSessionContext::set_context_value_with_prompt`;
   use `set_prompt_value(key, label, value)` instead.
 

@@ -9,9 +9,7 @@ use super::config::{DEFAULT_HISTORY_MENU_ROWS, ReplAppearance};
 use super::overlay::{build_completion_menu, build_history_menu};
 use super::{HISTORY_MENU_NAME, LineProjector, SharedHistory};
 use crate::completion::{CompletionEngine, CompletionTree};
-use crate::repl::menu::{
-    MenuDebug, MenuStyleDebug, OspCompletionMenu, debug_snapshot, display_text,
-};
+use crate::repl::menu::{MenuDebug, OspCompletionMenu, debug_snapshot, display_text};
 use reedline::{Completer, Editor, Menu, MenuEvent, UndoBehavior};
 use serde::Serialize;
 
@@ -43,26 +41,9 @@ pub struct CompletionDebug {
     pub stub: String,
     /// Candidate matches visible to the menu.
     pub matches: Vec<CompletionDebugMatch>,
-    /// Selected match index, or `-1` when no match is selected.
-    pub selected: i64,
-    /// Selected menu row.
-    pub selected_row: usize,
-    /// Selected menu column.
-    pub selected_col: u16,
-    /// Number of menu columns.
-    pub columns: u16,
-    /// Number of menu rows.
-    pub rows: usize,
-    /// Number of visible menu rows after clipping.
-    pub visible_rows: u16,
-    /// Menu indentation used for rendering.
-    pub menu_indent: u16,
-    /// Effective menu style snapshot.
-    pub menu_styles: MenuStyleDebug,
-    /// Optional selected-item description.
-    pub menu_description: Option<String>,
-    /// Rendered description as shown in the menu.
-    pub menu_description_rendered: Option<String>,
+    /// Completion menu layout, selection, styling, and rendered lines.
+    #[serde(flatten)]
+    pub menu: MenuDebug,
     /// Virtual render width.
     pub width: u16,
     /// Virtual render height.
@@ -71,8 +52,6 @@ pub struct CompletionDebug {
     pub unicode: bool,
     /// Whether ANSI styling was enabled.
     pub color: bool,
-    /// Rendered menu lines captured for debugging.
-    pub rendered: Vec<String>,
 }
 
 /// Synthetic editor action used by menu-debug stepping.
@@ -493,25 +472,7 @@ fn snapshot_menu_debug(
         })
         .collect::<Vec<_>>();
 
-    let MenuDebug {
-        columns,
-        rows,
-        visible_rows,
-        indent,
-        selected_index,
-        selected_row,
-        selected_col,
-        description,
-        description_rendered,
-        styles,
-        rendered,
-    } = debug_snapshot(menu, editor, options.width, options.height, options.ansi);
-
-    let selected = if matches.is_empty() {
-        -1
-    } else {
-        selected_index
-    };
+    let menu = debug_snapshot(menu, editor, options.width, options.height, options.ansi);
 
     CompletionDebug {
         line,
@@ -519,20 +480,10 @@ fn snapshot_menu_debug(
         replace_range,
         stub,
         matches,
-        selected,
-        selected_row,
-        selected_col,
-        columns,
-        rows,
-        visible_rows,
-        menu_indent: indent,
-        menu_styles: styles,
-        menu_description: description,
-        menu_description_rendered: description_rendered,
+        menu,
         width: options.width,
         height: options.height,
         unicode: options.unicode,
         color: options.ansi,
-        rendered,
     }
 }

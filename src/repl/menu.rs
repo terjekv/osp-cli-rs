@@ -16,7 +16,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::repl::CompletionTraceMenuState;
 use crate::repl::menu_core::{MenuAction, MenuCore};
 
-pub(crate) use crate::repl::menu_core::{MenuDebug, MenuStyleDebug, display_text};
+pub(crate) use crate::repl::menu_core::{MenuDebug, display_text};
 
 /// Completion menu with adaptive column layout and an optional meta line.
 ///

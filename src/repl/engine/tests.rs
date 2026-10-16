@@ -436,7 +436,7 @@ fn debug_completion_navigation_and_empty_match_states_unit() {
     assert_eq!(debug.line, "zzz");
     assert_eq!(debug.cursor, 3);
     assert!(debug.matches.is_empty());
-    assert_eq!(debug.selected, -1);
+    assert_eq!(debug.menu.selected_index, -1);
     assert_eq!(debug.stub, "zzz");
     assert_eq!(debug.replace_range, [0, 3]);
 }

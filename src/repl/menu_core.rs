@@ -86,18 +86,36 @@ pub struct MenuStyleDebug {
     pub selected_match: StyleDebug,
 }
 
-pub(crate) struct MenuDebug {
-    pub(crate) columns: u16,
-    pub(crate) rows: usize,
-    pub(crate) visible_rows: u16,
-    pub(crate) indent: u16,
-    pub(crate) selected_index: i64,
-    pub(crate) selected_row: usize,
-    pub(crate) selected_col: u16,
-    pub(crate) description: Option<String>,
-    pub(crate) description_rendered: Option<String>,
-    pub(crate) styles: MenuStyleDebug,
-    pub(crate) rendered: Vec<String>,
+/// Editor-independent completion menu snapshot used by REPL debug output.
+#[derive(Debug, Clone, Serialize)]
+pub struct MenuDebug {
+    /// Number of menu columns.
+    pub columns: u16,
+    /// Number of menu rows.
+    pub rows: usize,
+    /// Number of visible menu rows after clipping.
+    pub visible_rows: u16,
+    /// Menu indentation used for rendering.
+    #[serde(rename = "menu_indent")]
+    pub indent: u16,
+    /// Selected match index, or `-1` when no match is selected.
+    #[serde(rename = "selected")]
+    pub selected_index: i64,
+    /// Selected menu row.
+    pub selected_row: usize,
+    /// Selected menu column.
+    pub selected_col: u16,
+    /// Optional selected-item description.
+    #[serde(rename = "menu_description")]
+    pub description: Option<String>,
+    /// Rendered description as shown in the menu.
+    #[serde(rename = "menu_description_rendered")]
+    pub description_rendered: Option<String>,
+    /// Effective menu style snapshot.
+    #[serde(rename = "menu_styles")]
+    pub styles: MenuStyleDebug,
+    /// Rendered menu lines captured for debugging.
+    pub rendered: Vec<String>,
 }
 
 impl MenuCore {
