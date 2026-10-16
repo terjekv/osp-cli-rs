@@ -7,6 +7,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Add `FlagCompletions::positionals` for dynamic suggestions keyed
+  by zero-based argument slot, including variadic slots. Omitted slots keep static
+  suggestions; empty lists suppress them. Struct literals must supply the field
+  or use `..FlagCompletions::default()`.
+
 - **Breaking:** Native command factories leave clap grammars unbuilt so invocation help can
   set usage names before clap caches them.
 

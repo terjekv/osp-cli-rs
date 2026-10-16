@@ -162,7 +162,7 @@ pub struct FlagHints {
     pub required_common: Vec<String>,
 }
 
-/// Context-dependent flag metadata returned before suggestion ranking.
+/// Context-dependent flag and positional metadata returned before suggestion ranking.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FlagCompletions {
     /// Replaces flag-name hints when present; otherwise keeps static hints.
@@ -170,6 +170,11 @@ pub struct FlagCompletions {
     /// Replaces suggestions for these flags, including with an empty list.
     /// Path and large-catalog completion retain their usual precedence.
     pub values: BTreeMap<String, Vec<SuggestionEntry>>,
+    /// Replaces suggestions at zero-based slots in [`CompletionNode::args`].
+    /// Omitted slots retain static suggestions; an empty list suppresses them.
+    /// A variadic slot uses the same index for every repeated value. Unknown
+    /// slots are ignored. Path and large-catalog completion keep precedence.
+    pub positionals: BTreeMap<usize, Vec<SuggestionEntry>>,
 }
 
 /// A local completion callback shared by tree clones.
@@ -183,11 +188,13 @@ pub struct FlagCompletions {
 pub struct DynamicCompletion(std::sync::Arc<dyn Fn(&CommandLine) -> FlagCompletions + Send + Sync>);
 
 impl DynamicCompletion {
-    /// Supplies context-dependent flag hints and value suggestions.
+    /// Supplies context-dependent flag hints and flag or positional suggestions.
     ///
     /// The tree keeps its static grammar for parsing. The callback replaces
     /// only suggestion metadata, and may return empty value lists to suppress
-    /// static suggestions. Flags outside a returned hint list are hidden.
+    /// static suggestions. Positional overrides use zero-based argument slots,
+    /// including repeated values of a variadic slot. Omitted flags and slots keep
+    /// their static suggestions. Flags outside a returned hint list are hidden.
     ///
     /// # Examples
     ///
@@ -221,6 +228,11 @@ impl DynamicCompletion {
         for (flag, entries) in completion.values {
             if let Some(flag) = node.flags.get_mut(&flag) {
                 flag.suggestions = entries;
+            }
+        }
+        for (slot, entries) in completion.positionals {
+            if let Some(arg) = node.args.get_mut(slot) {
+                arg.suggestions = entries;
             }
         }
         node
@@ -498,7 +510,7 @@ pub struct CompletionNode {
     pub args: Vec<ArgNode>,
     /// Extra flag-name hints contributed by this node.
     pub flag_hints: Option<FlagHints>,
-    /// Optional local callback for context-dependent flag completion.
+    /// Optional local callback for context-dependent flag and positional completion.
     pub dynamic: Option<DynamicCompletion>,
 }
 

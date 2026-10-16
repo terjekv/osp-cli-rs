@@ -1,6 +1,6 @@
 use osp_cli::completion::{
-    CompletionEngine, CompletionNode, CompletionTreeBuilder, ContextScope, DynamicCompletion,
-    FlagCompletions, FlagNode, SuggestionEntry, SuggestionOutput,
+    ArgNode, CompletionEngine, CompletionNode, CompletionTreeBuilder, ContextScope,
+    DynamicCompletion, FlagCompletions, FlagNode, SuggestionEntry, SuggestionOutput,
 };
 use std::collections::BTreeMap;
 
@@ -145,4 +145,85 @@ fn completion_engine_keeps_subtree_context_flags_outside_matched_scope() {
     let values = suggestion_values(suggestions);
     assert!(values.contains(&"red".to_string()));
     assert!(values.contains(&"blue".to_string()));
+}
+
+#[test]
+fn completion_engine_applies_dynamic_positional_slot_overrides() {
+    for inherited_flags in [false, true] {
+        let mut deploy = CompletionNode::new("deploy")
+            .arg(ArgNode::named("scope").suggestions([
+                SuggestionEntry::from("local"),
+                SuggestionEntry::from("empty"),
+            ]))
+            .arg(ArgNode::named("image").suggestions([SuggestionEntry::from("static-image")]))
+            .arg(
+                ArgNode::named("tags")
+                    .multi()
+                    .suggestions([SuggestionEntry::from("static-tag")]),
+            );
+        deploy.dynamic = Some(DynamicCompletion::new(|cmd| {
+            let suppress = cmd.head().iter().any(|value| value == "empty");
+            FlagCompletions {
+                positionals: BTreeMap::from([
+                    (
+                        1,
+                        if suppress {
+                            Vec::new()
+                        } else {
+                            vec![SuggestionEntry::from("image value")]
+                        },
+                    ),
+                    (
+                        2,
+                        if suppress {
+                            Vec::new()
+                        } else {
+                            vec![
+                                SuggestionEntry::from("tag-one"),
+                                SuggestionEntry::from("tag-two"),
+                            ]
+                        },
+                    ),
+                ]),
+                ..FlagCompletions::default()
+            }
+        }));
+        let mut service = CompletionNode::new("service");
+        if inherited_flags {
+            service = service.flag("--switch", FlagNode::new().flag_only());
+        } else {
+            deploy = deploy.flag("--switch", FlagNode::new().flag_only());
+        }
+        let tree = CompletionTreeBuilder
+            .build_from_specs(&[service.subcommand(deploy)], [])
+            .expect("completion tree should build");
+        let engine = CompletionEngine::new(tree);
+
+        for (line, expected) in [
+            ("service deploy l", vec!["local"]),
+            ("service deploy local i", vec!["image value"]),
+            ("service deploy local \"im", vec!["image value"]),
+            ("service deploy empty i", vec![]),
+            (
+                "service deploy local \"image value\" t",
+                vec!["tag-one", "tag-two"],
+            ),
+            (
+                "service deploy local \"image value\" tag-one t",
+                vec!["tag-one", "tag-two"],
+            ),
+            ("service deploy empty \"image value\" t", vec![]),
+        ] {
+            assert_eq!(
+                suggestion_values(engine.complete(line, line.len()).1),
+                expected,
+                "{line}, inherited flags: {inherited_flags}",
+            );
+        }
+        let line = "service deploy local im --switch";
+        assert_eq!(
+            suggestion_values(engine.complete(line, line.find(" --switch").unwrap()).1),
+            vec!["image value"],
+        );
+    }
 }

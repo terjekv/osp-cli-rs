@@ -147,6 +147,11 @@ impl SuggestionEngine {
                 show_flag_names,
                 ..
             } => {
+                let context = if std::ptr::eq(nodes.context_node, nodes.flag_scope_node) {
+                    std::borrow::Cow::Borrowed(flag_scope.as_ref())
+                } else {
+                    resolve_dynamic(nodes.context_node, &completion_cmd)
+                };
                 let request = PositionalRequest {
                     context_node: nodes.context_node,
                     flag_scope_node: &flag_scope,
@@ -156,7 +161,7 @@ impl SuggestionEngine {
                     show_subcommands: *show_subcommands,
                     show_flag_names: *show_flag_names,
                 };
-                let mut out = self.positional_suggestions(request);
+                let mut out = self.positional_suggestions(request, &context);
                 sort_suggestion_outputs(&mut out);
                 return out;
             }
@@ -166,7 +171,11 @@ impl SuggestionEngine {
         out
     }
 
-    fn positional_suggestions(&self, request: PositionalRequest<'_>) -> Vec<SuggestionOutput> {
+    fn positional_suggestions(
+        &self,
+        request: PositionalRequest<'_>,
+        resolved_context: &CompletionNode,
+    ) -> Vec<SuggestionOutput> {
         let mut out = Vec::new();
 
         if request.show_subcommands {
@@ -185,7 +194,7 @@ impl SuggestionEngine {
         {
             Vec::new()
         } else {
-            self.arg_value_suggestions(request.context_node, request.arg_index, request.stub)
+            self.arg_value_suggestions(resolved_context, request.arg_index, request.stub)
         };
         for value in values {
             let duplicate = matches!(&value, SuggestionOutput::Item(new)
