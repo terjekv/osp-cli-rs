@@ -947,11 +947,12 @@ mod tests {
     use crate::app::{BufferedUiSink, CliCommandResult, ReplCommandOutput};
     use crate::cli::invocation::InvocationOptions;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+    use crate::core::MessageLevel;
     use crate::core::document::Document;
     use crate::core::output::OutputFormat;
     use crate::core::plugin::{
         DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
-        ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
+        ResponseMessageV1, ResponseMetaV1, ResponseV1,
     };
     use crate::native::{
         NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
@@ -959,7 +960,6 @@ mod tests {
     };
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
-    use crate::ui::messages::MessageLevel;
     use clap::Command;
     #[cfg(unix)]
     use std::fs;
@@ -1016,7 +1016,7 @@ mod tests {
                         data: serde_json::json!([{ "command": "ldap", "args": args }]),
                         error: None,
                         messages: vec![ResponseMessageV1 {
-                            level: ResponseMessageLevelV1::Info,
+                            level: MessageLevel::Info,
                             text: "native ok".to_string(),
                         }],
                         context: None,
@@ -1363,7 +1363,7 @@ JSON
             data: serde_json::json!({ "message": "hello" }),
             error: None,
             messages: vec![ResponseMessageV1 {
-                level: ResponseMessageLevelV1::Warning,
+                level: MessageLevel::Warning,
                 text: "warning from plugin".to_string(),
             }],
             context: None,
@@ -1448,7 +1448,7 @@ JSON
                         result.output,
                         Some(ReplCommandOutput::Output(guide))
                             if guide
-                                .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::Usage: osp ldap")
+                                .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::Usage: osp ldap")
                     ));
                 }
                 NativeOutcomeKind::Exit => {
@@ -1553,7 +1553,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::")
+                    .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::")
         ));
     }
 
@@ -1581,7 +1581,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .output.document.as_ref().expect("expected document").value.to_string().contains("HELP::Usage: osp ldap")
+                    .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::Usage: osp ldap")
         ));
     }
 

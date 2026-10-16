@@ -247,7 +247,7 @@ pub(crate) fn build_logging_config(
 pub(crate) fn message_verbosity_from_config(config: &ResolvedConfig) -> MessageLevel {
     config
         .get_string("ui.message.verbosity")
-        .and_then(parse_message_level)
+        .and_then(MessageLevel::parse)
         .unwrap_or(MessageLevel::Success)
 }
 
@@ -283,23 +283,9 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
     Ok(resolved)
 }
 
-fn parse_message_level(value: &str) -> Option<MessageLevel> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "error" => Some(MessageLevel::Error),
-        "warning" | "warn" => Some(MessageLevel::Warning),
-        "success" => Some(MessageLevel::Success),
-        "info" => Some(MessageLevel::Info),
-        "trace" => Some(MessageLevel::Trace),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_logging_config, debug_verbosity_from_config, message_verbosity_from_config,
-        parse_message_level,
-    };
+    use super::{build_logging_config, debug_verbosity_from_config, message_verbosity_from_config};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::ui::messages::MessageLevel;
 
@@ -320,9 +306,9 @@ mod tests {
 
     #[test]
     fn parse_message_level_accepts_warn_alias_and_rejects_unknown_values_unit() {
-        assert_eq!(parse_message_level(" warn "), Some(MessageLevel::Warning));
-        assert_eq!(parse_message_level("TRACE"), Some(MessageLevel::Trace));
-        assert_eq!(parse_message_level("loud"), None);
+        assert_eq!(MessageLevel::parse(" warn "), Some(MessageLevel::Warning));
+        assert_eq!(MessageLevel::parse("TRACE"), Some(MessageLevel::Trace));
+        assert_eq!(MessageLevel::parse("loud"), None);
     }
 
     #[test]

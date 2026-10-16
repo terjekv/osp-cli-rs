@@ -180,7 +180,7 @@ fn render_austere(
     let mut lines = Vec::new();
     for level in MessageLevel::ordered().filter(|level| *level <= max_level) {
         for entry in buffer.entries_for_level(level) {
-            let prefix = paint(styler, level.as_env_str(), level.style_token());
+            let prefix = paint(styler, level.as_str(), level.style_token());
             let colon = paint(styler, ":", StyleToken::Punctuation);
             lines.push(format!("  {prefix}{colon} {}", entry.text));
         }

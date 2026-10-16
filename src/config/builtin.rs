@@ -231,7 +231,7 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 key: "ui.message.verbosity",
                 schema: SchemaEntry::string()
                     .with_allowed_values(
-                        crate::core::runtime::UiVerbosity::ALL
+                        crate::core::MessageLevel::ALL
                             .iter()
                             .map(|value| value.as_str()),
                     )

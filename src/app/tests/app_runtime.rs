@@ -888,7 +888,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             details: serde_json::json!({}),
         }),
         messages: vec![ResponseMessageV1 {
-            level: ResponseMessageLevelV1::Warning,
+            level: MessageLevel::Warning,
             text: "queried fallback backend".to_string(),
         }],
         context: None,
@@ -1012,7 +1012,7 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
             details: serde_json::json!({}),
         }),
         messages: vec![ResponseMessageV1 {
-            level: ResponseMessageLevelV1::Warning,
+            level: MessageLevel::Warning,
             text: "queried fallback backend".to_string(),
         }],
         context: None,

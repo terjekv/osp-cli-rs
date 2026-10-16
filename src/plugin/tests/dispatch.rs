@@ -116,7 +116,7 @@ fn dispatch_warns_and_skips_colliding_injected_env_config_unit() {
 
     assert!(response.ok);
     assert!(response.messages.iter().any(|message| {
-        message.level == crate::core::plugin::ResponseMessageLevelV1::Warning
+        message.level == crate::core::MessageLevel::Warning
             && message.text.contains("OSP_PLUGIN_CFG_API_TOKEN")
     }));
 }

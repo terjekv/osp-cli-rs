@@ -21,7 +21,8 @@
 use super::manager::{
     DiscoveredPlugin, PluginDispatchContext, PluginDispatchError, PluginManager, RawPluginOutput,
 };
-use crate::core::plugin::{DescribeV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseV1};
+use crate::core::MessageLevel;
+use crate::core::plugin::{DescribeV1, ResponseMessageV1, ResponseV1};
 use anyhow::{Result, anyhow};
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -173,7 +174,7 @@ impl ExecutedPluginCommand {
         response
             .messages
             .extend(self.warnings.into_iter().map(|text| ResponseMessageV1 {
-                level: ResponseMessageLevelV1::Warning,
+                level: MessageLevel::Warning,
                 text,
             }));
 

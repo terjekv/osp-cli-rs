@@ -50,8 +50,20 @@ pub const ENV_OSP_TERMINAL: &str = "OSP_TERMINAL";
 pub const ENV_OSP_TERMINAL_KIND: &str = "OSP_TERMINAL_KIND";
 
 /// UI message verbosity derived from runtime hints and environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub enum UiVerbosity {
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageLevel {
     /// Show only errors.
     Error,
     /// Show errors and warnings.
@@ -65,7 +77,7 @@ pub enum UiVerbosity {
     Trace,
 }
 
-impl UiVerbosity {
+impl MessageLevel {
     /// All variants in canonical configuration order.
     pub const ALL: [Self; 5] = [
         Self::Error,
@@ -78,11 +90,11 @@ impl UiVerbosity {
     /// Returns the canonical string representation for this verbosity level.
     pub fn as_str(self) -> &'static str {
         match self {
-            UiVerbosity::Error => "error",
-            UiVerbosity::Warning => "warning",
-            UiVerbosity::Success => "success",
-            UiVerbosity::Info => "info",
-            UiVerbosity::Trace => "trace",
+            MessageLevel::Error => "error",
+            MessageLevel::Warning => "warning",
+            MessageLevel::Success => "success",
+            MessageLevel::Info => "info",
+            MessageLevel::Trace => "trace",
         }
     }
 
@@ -91,19 +103,19 @@ impl UiVerbosity {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::runtime::UiVerbosity;
+    /// use osp_cli::core::MessageLevel;
     ///
-    /// assert_eq!(UiVerbosity::parse("warn"), Some(UiVerbosity::Warning));
-    /// assert_eq!(UiVerbosity::parse("TRACE"), Some(UiVerbosity::Trace));
-    /// assert_eq!(UiVerbosity::parse("loud"), None);
+    /// assert_eq!(MessageLevel::parse("warn"), Some(MessageLevel::Warning));
+    /// assert_eq!(MessageLevel::parse("TRACE"), Some(MessageLevel::Trace));
+    /// assert_eq!(MessageLevel::parse("loud"), None);
     /// ```
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "error" => Some(UiVerbosity::Error),
-            "warning" | "warn" => Some(UiVerbosity::Warning),
-            "success" => Some(UiVerbosity::Success),
-            "info" => Some(UiVerbosity::Info),
-            "trace" => Some(UiVerbosity::Trace),
+            "error" => Some(MessageLevel::Error),
+            "warning" | "warn" => Some(MessageLevel::Warning),
+            "success" => Some(MessageLevel::Success),
+            "info" => Some(MessageLevel::Info),
+            "trace" => Some(MessageLevel::Trace),
             _ => None,
         }
     }
@@ -157,7 +169,7 @@ impl RuntimeTerminalKind {
 #[must_use]
 pub struct RuntimeHints {
     /// Effective UI message verbosity.
-    pub ui_verbosity: UiVerbosity,
+    pub ui_verbosity: MessageLevel,
     /// Effective debug level capped to the supported range.
     pub debug_level: u8,
     /// Effective output format preference.
@@ -177,7 +189,7 @@ pub struct RuntimeHints {
 impl Default for RuntimeHints {
     fn default() -> Self {
         Self {
-            ui_verbosity: UiVerbosity::Success,
+            ui_verbosity: MessageLevel::Success,
             debug_level: 0,
             format: OutputFormat::Auto,
             color: ColorMode::Auto,
@@ -199,22 +211,23 @@ impl RuntimeHints {
     ///
     /// ```
     /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
-    /// use osp_cli::core::runtime::{RuntimeHints, UiVerbosity};
+    /// use osp_cli::core::MessageLevel;
+    /// use osp_cli::core::runtime::RuntimeHints;
     ///
     /// let hints = RuntimeHints::new(
-    ///     UiVerbosity::Info,
+    ///     MessageLevel::Info,
     ///     7,
     ///     OutputFormat::Json,
     ///     ColorMode::Always,
     ///     UnicodeMode::Never,
     /// );
     ///
-    /// assert_eq!(hints.ui_verbosity, UiVerbosity::Info);
+    /// assert_eq!(hints.ui_verbosity, MessageLevel::Info);
     /// assert_eq!(hints.debug_level, 3);
     /// assert_eq!(hints.profile, None);
     /// ```
     pub fn new(
-        ui_verbosity: UiVerbosity,
+        ui_verbosity: MessageLevel,
         debug_level: u8,
         format: OutputFormat,
         color: ColorMode,
@@ -278,10 +291,11 @@ impl RuntimeHints {
     ///
     /// ```
     /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
+    /// use osp_cli::core::MessageLevel;
     /// use osp_cli::core::runtime::{
     ///     ENV_OSP_COLOR, ENV_OSP_DEBUG_LEVEL, ENV_OSP_FORMAT, ENV_OSP_PROFILE,
     ///     ENV_OSP_TERMINAL_KIND, ENV_OSP_UI_VERBOSITY, RuntimeHints,
-    ///     RuntimeTerminalKind, UiVerbosity,
+    ///     RuntimeTerminalKind,
     /// };
     ///
     /// let hints = RuntimeHints::from_env_iter([
@@ -293,7 +307,7 @@ impl RuntimeHints {
     ///     (ENV_OSP_TERMINAL_KIND, "repl"),
     /// ]);
     ///
-    /// assert_eq!(hints.ui_verbosity, UiVerbosity::Trace);
+    /// assert_eq!(hints.ui_verbosity, MessageLevel::Trace);
     /// assert_eq!(hints.debug_level, 3);
     /// assert_eq!(hints.format, OutputFormat::Json);
     /// assert_eq!(hints.color, ColorMode::Never);
@@ -314,8 +328,8 @@ impl RuntimeHints {
 
         let ui_verbosity = values
             .get(ENV_OSP_UI_VERBOSITY)
-            .and_then(|value| UiVerbosity::parse(value))
-            .unwrap_or(UiVerbosity::Success);
+            .and_then(|value| MessageLevel::parse(value))
+            .unwrap_or(MessageLevel::Success);
         let debug_level = values
             .get(ENV_OSP_DEBUG_LEVEL)
             .and_then(|value| value.trim().parse::<u8>().ok())
@@ -367,10 +381,11 @@ impl RuntimeHints {
     ///
     /// ```
     /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
-    /// use osp_cli::core::runtime::{RuntimeHints, RuntimeTerminalKind, UiVerbosity};
+    /// use osp_cli::core::MessageLevel;
+    /// use osp_cli::core::runtime::{RuntimeHints, RuntimeTerminalKind};
     ///
     /// let hints = RuntimeHints::new(
-    ///     UiVerbosity::Info,
+    ///     MessageLevel::Info,
     ///     2,
     ///     OutputFormat::Json,
     ///     ColorMode::Always,
@@ -412,14 +427,14 @@ impl RuntimeHints {
 mod tests {
     use super::{
         ENV_OSP_COLOR, ENV_OSP_DEBUG_LEVEL, ENV_OSP_FORMAT, ENV_OSP_PROFILE, ENV_OSP_TERMINAL,
-        ENV_OSP_UI_VERBOSITY, ENV_OSP_UNICODE, RuntimeHints, RuntimeTerminalKind, UiVerbosity,
+        ENV_OSP_UI_VERBOSITY, ENV_OSP_UNICODE, MessageLevel, RuntimeHints, RuntimeTerminalKind,
     };
     use crate::core::output::{ColorMode, OutputFormat, UnicodeMode};
 
     #[test]
     fn env_roundtrip_keeps_runtime_hints() {
         let hints = RuntimeHints::new(
-            UiVerbosity::Trace,
+            MessageLevel::Trace,
             7,
             OutputFormat::Json,
             ColorMode::Never,
@@ -430,7 +445,7 @@ mod tests {
         .with_terminal_kind(RuntimeTerminalKind::Repl);
 
         let parsed = RuntimeHints::from_env_iter(hints.env_pairs());
-        assert_eq!(parsed.ui_verbosity, UiVerbosity::Trace);
+        assert_eq!(parsed.ui_verbosity, MessageLevel::Trace);
         assert_eq!(parsed.debug_level, 3);
         assert_eq!(parsed.format, OutputFormat::Json);
         assert_eq!(parsed.color, ColorMode::Never);
@@ -443,7 +458,7 @@ mod tests {
     #[test]
     fn new_and_with_helpers_build_runtime_hints_unit() {
         let hints = RuntimeHints::new(
-            UiVerbosity::Info,
+            MessageLevel::Info,
             9,
             OutputFormat::Table,
             ColorMode::Always,
@@ -453,7 +468,7 @@ mod tests {
         .with_terminal(Some(" xterm-256color ".to_string()))
         .with_terminal_kind(RuntimeTerminalKind::Cli);
 
-        assert_eq!(hints.ui_verbosity, UiVerbosity::Info);
+        assert_eq!(hints.ui_verbosity, MessageLevel::Info);
         assert_eq!(hints.debug_level, 3);
         assert_eq!(hints.profile.as_deref(), Some("dev"));
         assert_eq!(hints.terminal.as_deref(), Some("xterm-256color"));
@@ -470,7 +485,7 @@ mod tests {
             (ENV_OSP_UNICODE, "emoji"),
         ]);
 
-        assert_eq!(parsed.ui_verbosity, UiVerbosity::Success);
+        assert_eq!(parsed.ui_verbosity, MessageLevel::Success);
         assert_eq!(parsed.debug_level, 0);
         assert_eq!(parsed.format, OutputFormat::Auto);
         assert_eq!(parsed.color, ColorMode::Auto);

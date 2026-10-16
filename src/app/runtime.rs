@@ -261,7 +261,7 @@ impl UiState {
     /// )
     /// .unwrap();
     ///
-    /// assert_eq!(ui.message_verbosity.as_env_str(), "info");
+    /// assert_eq!(ui.message_verbosity.as_str(), "info");
     /// assert_eq!(ui.render_settings.runtime.terminal.as_deref(), Some("xterm-256color"));
     /// ```
     pub fn from_resolved_config(

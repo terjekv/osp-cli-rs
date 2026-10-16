@@ -14,15 +14,7 @@ pub(crate) use render::{
     MessageChrome, MessageRenderOptions, render_messages_with_styler_from_config,
 };
 
-/// Severity level for buffered UI messages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MessageLevel {
-    Error,
-    Warning,
-    Success,
-    Info,
-    Trace,
-}
+pub use crate::core::MessageLevel;
 
 impl MessageLevel {
     pub fn title(self) -> &'static str {
@@ -35,7 +27,7 @@ impl MessageLevel {
         }
     }
 
-    fn as_rank(self) -> i8 {
+    pub(crate) fn as_rank(self) -> i8 {
         match self {
             MessageLevel::Error => 0,
             MessageLevel::Warning => 1,
@@ -45,17 +37,7 @@ impl MessageLevel {
         }
     }
 
-    pub fn as_env_str(self) -> &'static str {
-        match self {
-            MessageLevel::Error => "error",
-            MessageLevel::Warning => "warning",
-            MessageLevel::Success => "success",
-            MessageLevel::Info => "info",
-            MessageLevel::Trace => "trace",
-        }
-    }
-
-    fn from_rank(rank: i8) -> Self {
+    pub(crate) fn from_rank(rank: i8) -> Self {
         match rank {
             i8::MIN..=0 => MessageLevel::Error,
             1 => MessageLevel::Warning,
@@ -66,14 +48,7 @@ impl MessageLevel {
     }
 
     pub(crate) fn ordered() -> impl Iterator<Item = Self> {
-        [
-            MessageLevel::Error,
-            MessageLevel::Warning,
-            MessageLevel::Success,
-            MessageLevel::Info,
-            MessageLevel::Trace,
-        ]
-        .into_iter()
+        Self::ALL.into_iter()
     }
 
     pub(crate) fn style_token(self) -> StyleToken {

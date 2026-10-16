@@ -4,10 +4,9 @@ use clap::Command;
 use osp_cli::App;
 use osp_cli::app::{BufferedUiSink, StdIoUiSink, UiSink};
 use osp_cli::config::ConfigLayer;
+use osp_cli::core::MessageLevel;
 use osp_cli::core::output_model::DisplayRule;
-use osp_cli::core::plugin::{
-    PLUGIN_PROTOCOL_V1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
-};
+use osp_cli::core::plugin::{PLUGIN_PROTOCOL_V1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use osp_cli::{
     NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
     NativeProgressEvent,
@@ -288,15 +287,15 @@ impl NativeCommand for CuratedOrchRowsCommand {
             error: None,
             messages: vec![
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Warning,
+                    level: MessageLevel::Warning,
                     text: "Results are incomplete".to_string(),
                 },
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Info,
+                    level: MessageLevel::Info,
                     text: "provider evidence".to_string(),
                 },
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Trace,
+                    level: MessageLevel::Trace,
                     text: "runtime target vmware:prod".to_string(),
                 },
             ],

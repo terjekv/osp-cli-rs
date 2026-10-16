@@ -358,11 +358,12 @@ impl PluginDispatchContext {
     ///
     /// ```
     /// use osp_cli::core::output::{ColorMode, OutputFormat, UnicodeMode};
-    /// use osp_cli::core::runtime::{RuntimeHints, RuntimeTerminalKind, UiVerbosity};
+    /// use osp_cli::core::MessageLevel;
+    /// use osp_cli::core::runtime::{RuntimeHints, RuntimeTerminalKind, };
     /// use osp_cli::plugin::PluginDispatchContext;
     ///
     /// let context = PluginDispatchContext::new(RuntimeHints::new(
-    ///     UiVerbosity::Info,
+    ///     MessageLevel::Info,
     ///     2,
     ///     OutputFormat::Json,
     ///     ColorMode::Always,

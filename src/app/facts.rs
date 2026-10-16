@@ -7,11 +7,10 @@
 //! grab bag of reusable derivation helpers.
 
 use crate::config::{ConfigValue, ResolvedConfig};
-use crate::core::runtime::{RuntimeHints, RuntimeTerminalKind, UiVerbosity};
+use crate::core::runtime::{RuntimeHints, RuntimeTerminalKind};
 use crate::plugin::config::{PluginConfigScope, config_value_to_plugin_env};
 use crate::plugin::{DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchContext};
 use crate::ui::RenderRuntime;
-use crate::ui::messages::MessageLevel;
 use crate::ui::theme::normalize_theme_name;
 use crate::ui::theme_catalog::ThemeCatalog;
 use miette::{Result, miette};
@@ -190,7 +189,7 @@ fn plugin_env_issue_text(entry: &crate::plugin::config::PluginConfigEntry) -> Op
 
 fn runtime_hints(context: &RuntimeContext, active_profile: &str, ui: &UiState) -> RuntimeHints {
     RuntimeHints::new(
-        to_ui_verbosity(ui.message_verbosity),
+        ui.message_verbosity,
         ui.debug_verbosity.min(3),
         ui.render_settings.format,
         ui.render_settings.color,
@@ -202,16 +201,6 @@ fn runtime_hints(context: &RuntimeContext, active_profile: &str, ui: &UiState) -
         TerminalKind::Cli => RuntimeTerminalKind::Cli,
         TerminalKind::Repl => RuntimeTerminalKind::Repl,
     })
-}
-
-fn to_ui_verbosity(level: MessageLevel) -> UiVerbosity {
-    match level {
-        MessageLevel::Error => UiVerbosity::Error,
-        MessageLevel::Warning => UiVerbosity::Warning,
-        MessageLevel::Success => UiVerbosity::Success,
-        MessageLevel::Info => UiVerbosity::Info,
-        MessageLevel::Trace => UiVerbosity::Trace,
-    }
 }
 
 fn detect_terminal_width() -> Option<usize> {

@@ -5,11 +5,11 @@ use anyhow::Result;
 use clap::Command;
 use osp_cli::app::{AccessPolicy, AppRuntime, BufferedUiSink, UiSink};
 use osp_cli::config::{ConfigLayer, ResolvedConfig};
+use osp_cli::core::MessageLevel;
 use osp_cli::core::command_policy::{CredentialState, SessionFacts};
 use osp_cli::core::plugin::{
     DescribeCommandAuthV1, DescribeCredentialRequirementV1, DescribeSessionRequirementsV1,
-    DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1, ResponseMessageLevelV1, ResponseMessageV1,
-    ResponseMetaV1, ResponseV1,
+    DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
 use osp_cli::{
     App, NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
@@ -209,7 +209,7 @@ impl NativeCommand for ApprovalWorkflow {
             ..ResponseMetaV1::default()
         })
         .with_messages(vec![ResponseMessageV1 {
-            level: ResponseMessageLevelV1::Success,
+            level: MessageLevel::Success,
             text: "Plan validated for task-42".into(),
         }]);
         // Historical progress may be coalesced until the operator interaction.

@@ -47,3 +47,6 @@ pub mod row;
 pub mod runtime;
 /// Shell-like tokenization helpers.
 pub mod shell_words;
+
+/// Message severity and runtime verbosity shared with plugin responses.
+pub use runtime::MessageLevel;

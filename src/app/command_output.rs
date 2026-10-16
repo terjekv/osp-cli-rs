@@ -9,9 +9,7 @@ use crate::config::ResolvedConfig;
 use crate::core::document::Document;
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{OutputItems, OutputResult, RenderRecommendation, rows_from_value};
-use crate::core::plugin::{
-    ResponseErrorV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
-};
+use crate::core::plugin::{ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use crate::dsl::apply_output_pipeline;
 use crate::ui::clipboard::ClipboardService;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
@@ -274,7 +272,7 @@ pub(crate) fn run_cli_command(
             .filter(|entry| entry.level <= runtime.ui().message_verbosity)
             .map(|entry| {
                 serde_json::json!({
-                    "level": entry.level.as_env_str(),
+                    "level": entry.level.as_str(),
                     "text": entry.text.as_str(),
                 })
             })
@@ -520,7 +518,7 @@ pub(crate) fn emit_messages_for_ui(
             .filter(|entry| entry.level <= verbosity)
             .map(|entry| {
                 serde_json::json!({
-                    "level": entry.level.as_env_str(),
+                    "level": entry.level.as_str(),
                     "text": entry.text.as_str(),
                 })
             })
@@ -629,14 +627,7 @@ pub(crate) fn apply_output_stages(
 fn plugin_response_messages(messages: &[ResponseMessageV1]) -> MessageBuffer {
     let mut out = MessageBuffer::default();
     for message in messages {
-        let level = match message.level {
-            ResponseMessageLevelV1::Error => MessageLevel::Error,
-            ResponseMessageLevelV1::Warning => MessageLevel::Warning,
-            ResponseMessageLevelV1::Success => MessageLevel::Success,
-            ResponseMessageLevelV1::Info => MessageLevel::Info,
-            ResponseMessageLevelV1::Trace => MessageLevel::Trace,
-        };
-        out.push(level, message.text.clone());
+        out.push(message.level, message.text.clone());
     }
     out
 }

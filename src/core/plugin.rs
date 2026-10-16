@@ -43,6 +43,7 @@
 //! - caller-facing docs should describe stable wire behavior rather than
 //!   internal plugin manager details
 
+use crate::core::MessageLevel;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -500,22 +501,6 @@ pub enum ColumnAlignmentV1 {
     Right,
 }
 
-/// Message severity carried in plugin responses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ResponseMessageLevelV1 {
-    /// Error-level message.
-    Error,
-    /// Warning-level message.
-    Warning,
-    /// Success-level message.
-    Success,
-    /// Informational message.
-    Info,
-    /// Trace or debug-style message.
-    Trace,
-}
-
 /// User-facing message emitted alongside a plugin response.
 ///
 /// These messages are rendered on the host's diagnostic/message path, not
@@ -523,7 +508,7 @@ pub enum ResponseMessageLevelV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMessageV1 {
     /// Severity level for the message.
-    pub level: ResponseMessageLevelV1,
+    pub level: MessageLevel,
     /// Human-readable message text.
     pub text: String,
 }

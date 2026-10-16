@@ -624,7 +624,7 @@ impl AppState {
     /// .unwrap();
     ///
     /// assert_eq!(state.runtime.config_state().resolved().active_profile(), "default");
-    /// assert_eq!(state.runtime.ui().message_verbosity.as_env_str(), "warning");
+    /// assert_eq!(state.runtime.ui().message_verbosity.as_str(), "warning");
     /// assert!(state.clients.plugins().explicit_dirs().is_empty());
     /// ```
     pub fn from_resolved_config(
