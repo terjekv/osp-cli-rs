@@ -449,9 +449,12 @@ fn set_plugin_provider(slot: &mut Option<String>, value: &str, source: &str) -> 
     })
 }
 
-fn invocation_help_entries() -> Vec<DocumentEntry> {
+fn invocation_help_entries(level: HelpLevel) -> Vec<DocumentEntry> {
     let mut entries = Vec::new();
     for flag in INVOCATION_FLAGS {
+        if level < HelpLevel::Verbose && flag.short.is_none() {
+            continue;
+        }
         let choices = (flag.choices)();
         let name = match (flag.short, flag.value_name) {
             (Some(short), _) => format!("-{short}, {}", flag.long),
@@ -489,20 +492,24 @@ fn invocation_help_entries() -> Vec<DocumentEntry> {
     entries
 }
 
-pub(crate) fn invocation_help_view() -> Document {
-    Document {
+pub(crate) fn invocation_help_view(level: HelpLevel) -> Document {
+    let mut document = Document {
         blocks: vec![
             DocBlock::section(
                 "Common Invocation Options",
                 vec![DocBlock::Entries {
-                    entries: invocation_help_entries(),
+                    entries: invocation_help_entries(level),
                 }],
             ),
             DocBlock::Paragraph {
                 text: INVOCATION_HELP_NOTE.to_string(),
             },
         ],
+    };
+    if level < HelpLevel::Verbose {
+        document.blocks.truncate(1);
     }
+    document
 }
 
 // `last --help` crosses a raw Clap boundary; structured help uses entries directly.
@@ -510,7 +517,7 @@ pub(crate) fn invocation_help_text() -> &'static str {
     static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     TEXT.get_or_init(|| {
         let mut text = "Common Invocation Options:\n".to_string();
-        for entry in invocation_help_entries() {
+        for entry in invocation_help_entries(HelpLevel::Verbose) {
             if entry.name.len() > 32 {
                 text.push_str(&format!(
                     "  {}\n{:44}{}\n",
@@ -526,8 +533,8 @@ pub(crate) fn invocation_help_text() -> &'static str {
 }
 
 pub(crate) fn extend_with_invocation_help(view: &mut Document, level: HelpLevel) {
-    if level >= HelpLevel::Verbose {
-        view.blocks.extend(invocation_help_view().blocks);
+    if level >= HelpLevel::Normal {
+        view.blocks.extend(invocation_help_view(level).blocks);
     }
 }
 
@@ -716,7 +723,7 @@ mod tests {
     #[test]
     fn invocation_help_hidden_completion_and_cli_argv_follow_visibility_and_flag_only_inputs_unit()
     {
-        let rendered = invocation_help_view().rows();
+        let rendered = invocation_help_view(crate::core::document::HelpLevel::Verbose).rows();
         assert!(!rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)
@@ -740,7 +747,7 @@ mod tests {
         }));
 
         let mut hidden = Document::from_help_text("Usage: osp [COMMAND]\n");
-        extend_with_invocation_help(&mut hidden, HelpLevel::Normal);
+        extend_with_invocation_help(&mut hidden, HelpLevel::Tiny);
         assert!(
             !hidden
                 .rows()

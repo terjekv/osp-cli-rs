@@ -184,7 +184,11 @@ pub(crate) fn build_repl_intro_payload(
     let expanded = expand_intro_template(view, &surface.intro_commands, template);
     parse_intro_template_payload(
         &expanded,
-        &build_repl_command_overview_view(surface, help_level(view.config, 0, 0)),
+        &build_repl_command_overview_view(surface).filtered_for_help_level(help_level(
+            view.config,
+            0,
+            0,
+        )),
     )
 }
 
@@ -381,7 +385,7 @@ pub(crate) fn render_repl_command_overview(
     view: ReplViewContext<'_>,
     surface: &ReplSurface,
 ) -> String {
-    let guide = build_repl_command_overview_view(surface, help_level(view.config, 0, 0));
+    let guide = build_repl_help_view(surface, help_level(view.config, 0, 0));
     render(
         &repl_document_output(&guide),
         &crate::ui::RenderRequest {
@@ -391,11 +395,8 @@ pub(crate) fn render_repl_command_overview(
     )
 }
 
-pub(crate) fn build_repl_command_overview_view(
-    surface: &ReplSurface,
-    level: crate::core::document::HelpLevel,
-) -> Document {
-    let mut document = Document {
+pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> Document {
+    Document {
         blocks: vec![
             DocBlock::section(
                 "Usage",
@@ -420,7 +421,14 @@ pub(crate) fn build_repl_command_overview_view(
                 text: "Pipe command output with `|`; use `| H` for in-band DSL help.".into(),
             },
         ],
-    };
+    }
+}
+
+pub(crate) fn build_repl_help_view(
+    surface: &ReplSurface,
+    level: crate::core::document::HelpLevel,
+) -> Document {
+    let mut document = build_repl_command_overview_view(surface);
     crate::cli::invocation::extend_with_invocation_help(&mut document, level);
     document.filtered_for_help_level(level)
 }

@@ -1,5 +1,10 @@
 ---
-source: crates/osp-cli/tests/contracts/plugins.rs
-expression: help_flag_stdout.clone()
+source: tests/contracts/plugins/discovery_and_help.rs
+expression: sanitized
 ---
 hello plugin help text
+
+- Common Invocation Options
+  -v, --verbose  Increase message verbosity
+  -q, --quiet    Decrease message verbosity
+  -d, --debug    Increase developer log verbosity

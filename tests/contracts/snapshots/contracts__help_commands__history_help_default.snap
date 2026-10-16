@@ -34,3 +34,8 @@ Usage: osp history [OPTIONS] <COMMAND>
           Disable colors and pleasantries (equivalent to `--presentation austere`)
   -h, --help
           Print help (see a summary with '-h')
+
+- Common Invocation Options
+  -v, --verbose  Increase message verbosity
+  -q, --quiet    Decrease message verbosity
+  -d, --debug    Increase developer log verbosity

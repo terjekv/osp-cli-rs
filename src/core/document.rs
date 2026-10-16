@@ -536,7 +536,7 @@ fn finish_help_section(blocks: &mut Vec<DocBlock>, section: &mut Option<(String,
         title: title.clone(),
         level: match title.as_str() {
             "Usage" => HelpLevel::Tiny,
-            "Common Invocation Options" => HelpLevel::Verbose,
+            "Common Invocation Options" => HelpLevel::Normal,
             _ => HelpLevel::Normal,
         },
         blocks: section_blocks,
@@ -600,7 +600,7 @@ impl DocBlock {
         let title = title.into();
         let level = match title.as_str() {
             "Usage" => HelpLevel::Tiny,
-            "Common Invocation Options" => HelpLevel::Verbose,
+            "Common Invocation Options" => HelpLevel::Normal,
             _ => HelpLevel::Normal,
         };
         Self::Section {

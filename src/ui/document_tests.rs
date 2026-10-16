@@ -30,7 +30,7 @@ fn filtered_for_help_level_hides_verbose_sections_until_requested_unit() {
     assert!(normal.iter().any(|row| row["section"] == "Commands"));
     assert!(normal.iter().any(|row| row["section"] == "Notes"));
     assert!(
-        !normal
+        normal
             .iter()
             .any(|row| row["section"] == "Common Invocation Options")
     );

@@ -18,3 +18,8 @@ Usage: [INVOCATION_OPTIONS] COMMAND [ARGS]...
   context     Inspect or clear remembered session values
 
 Pipe command output with |; use | H for in-band DSL help.
+
+- Common Invocation Options
+  -v, --verbose     Increase message verbosity
+  -q, --quiet       Decrease message verbosity
+  -d, --debug       Increase developer log verbosity

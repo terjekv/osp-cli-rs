@@ -102,7 +102,15 @@ fn repl_invalid_subcommand_suggests_the_valid_command_end_to_end() {
         plain.contains("unrecognized subcommand"),
         "output={plain:?}"
     );
-    assert!(plain.contains("Try: use `config show`"), "output={plain:?}");
+    assert!(
+        plain.contains("tip: a similar subcommand exists: 'show'"),
+        "output={plain:?}"
+    );
+    assert!(plain.contains("Invalid command"), "output={plain:?}");
+    assert!(
+        plain.contains("More: rerun with -v, or run doctor last -v"),
+        "output={plain:?}"
+    );
     assert!(
         !plain.contains("For more information, try '--help'."),
         "output={plain:?}"
