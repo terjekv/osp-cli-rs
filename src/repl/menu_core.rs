@@ -799,7 +799,7 @@ pub(crate) fn display_text(suggestion: &Suggestion) -> &str {
         .unwrap_or(&suggestion.value)
 }
 
-fn truncate_to_width(input: &str, width: usize) -> String {
+pub(crate) fn truncate_to_width(input: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }

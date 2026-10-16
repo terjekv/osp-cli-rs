@@ -541,10 +541,9 @@ fn run_config_set(
             } else {
                 let path = path
                     .to_str()
-                    .and_then(|path| path.strip_prefix("~/"))
-                    .map(|relative| {
-                        crate::config::default_home_dir()
-                            .map(|home| home.join(relative))
+                    .filter(|path| path.starts_with("~/"))
+                    .map(|path| {
+                        crate::normalize::expand_home(path)
                             .ok_or_else(|| miette!("unable to locate home directory"))
                     })
                     .transpose()?

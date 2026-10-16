@@ -253,19 +253,8 @@ fn expand_theme_path(raw: &str) -> Option<PathBuf> {
         return None;
     }
 
-    if trimmed == "~" {
-        return crate::config::default_home_dir();
-    }
-
-    if let Some(home) = crate::config::default_home_dir()
-        && let Some(stripped) = trimmed
-            .strip_prefix("~/")
-            .or_else(|| trimmed.strip_prefix("~\\"))
-    {
-        return Some(home.join(stripped));
-    }
-
-    Some(PathBuf::from(trimmed))
+    crate::normalize::expand_home(trimmed)
+        .or_else(|| (trimmed != "~").then(|| PathBuf::from(trimmed)))
 }
 
 fn default_theme_paths() -> Vec<PathBuf> {

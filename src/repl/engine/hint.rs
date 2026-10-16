@@ -13,7 +13,6 @@
 use nu_ansi_term::Style;
 use reedline::{Completer, Hinter, History, SearchQuery, Suggestion};
 use std::ops::Range;
-use unicode_width::UnicodeWidthChar;
 
 use super::adapter::ReplCompleter;
 use super::editor::PaintedLine;
@@ -270,14 +269,11 @@ fn fit_terminal_width(text: &str) -> String {
         .map(|(width, _)| usize::from(width.0))
         .unwrap_or(80)
         .saturating_sub(1);
-    let mut used = 0;
-    text.chars()
+    let text = text
+        .chars()
         .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .take_while(|ch| {
-            used += ch.width().unwrap_or(0);
-            used <= width
-        })
-        .collect()
+        .collect::<String>();
+    crate::repl::menu_core::truncate_to_width(&text, width)
 }
 
 #[cfg(test)]

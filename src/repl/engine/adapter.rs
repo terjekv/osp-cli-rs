@@ -478,8 +478,10 @@ pub(crate) fn split_path_stub(stub: &str) -> (PathBuf, String, String) {
         return (PathBuf::from("."), String::new(), String::new());
     }
 
-    let expanded = expand_home(stub);
-    let mut lookup = PathBuf::from(&expanded);
+    let expanded = crate::normalize::expand_home(stub)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| stub.to_string());
+    let mut lookup = PathBuf::from(expanded);
     if stub.ends_with('/') {
         return (lookup, stub.to_string(), String::new());
     }
@@ -506,18 +508,4 @@ pub(crate) fn split_path_stub(stub: &str) -> (PathBuf, String, String) {
     }
 
     (lookup, insert_prefix, typed_prefix)
-}
-
-pub(crate) fn expand_home(path: &str) -> String {
-    if path == "~" {
-        return crate::config::default_home_dir()
-            .map(|home| home.display().to_string())
-            .unwrap_or_else(|| "~".to_string());
-    }
-    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
-        && let Some(home) = crate::config::default_home_dir()
-    {
-        return home.join(rest).display().to_string();
-    }
-    path.to_string()
 }

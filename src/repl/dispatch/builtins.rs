@@ -8,7 +8,7 @@ use miette::{Result, WrapErr, miette};
 use crate::app::sink::UiSink;
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{CMD_HELP, EXIT_CODE_WAITING_APPROVAL};
-use crate::repl::engine::expand_home;
+use crate::normalize::expand_home;
 
 use super::shell::{handle_repl_exit_request, render_repl_help_for_scope};
 
@@ -116,7 +116,11 @@ fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
                     source_help()
                 ));
             }
-            _ => paths.push(PathBuf::from(expand_home(&word))),
+            _ => paths.push(PathBuf::from(
+                expand_home(&word)
+                    .map(|path| path.display().to_string())
+                    .unwrap_or(word),
+            )),
         }
     }
     if !help && paths.is_empty() {

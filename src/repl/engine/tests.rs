@@ -19,7 +19,7 @@ use super::{
     build_history_menu, build_history_picker_options, build_repl_highlighter,
     color_from_style_spec, contains_cursor_position_report, debug_completion,
     debug_completion_steps, debug_history_menu, debug_history_menu_steps, default_pipe_verbs,
-    evaluate_repl_submission, expand_home, history_picker_items, is_cursor_position_error,
+    evaluate_repl_submission, history_picker_items, is_cursor_position_error,
     parse_cursor_position_report, path_suggestions, split_path_stub, trace_completion,
     trace_completion_enabled,
 };
@@ -729,10 +729,22 @@ fn expand_home_and_prompt_renderers_behave_unit() {
     let _guard = env_lock().lock().expect("env lock should not be poisoned");
     let previous_home = std::env::var("HOME").ok();
     set_env_var_for_test("HOME", "/tmp/osp-home");
-    assert_eq!(expand_home("~"), "/tmp/osp-home");
-    assert_eq!(expand_home("~/cache"), "/tmp/osp-home/cache");
-    assert_eq!(expand_home("~\\cache"), "/tmp/osp-home/cache");
-    assert_eq!(expand_home("/etc/hosts"), "/etc/hosts");
+    assert_eq!(
+        crate::normalize::expand_home("~"),
+        Some(std::path::PathBuf::from("/tmp/osp-home"))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("~/cache"),
+        Some(std::path::PathBuf::from("/tmp/osp-home/cache"))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("~\\cache"),
+        Some(std::path::PathBuf::from("/tmp/osp-home/cache"))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("/etc/hosts"),
+        Some(std::path::PathBuf::from("/etc/hosts"))
+    );
 
     let right: PromptRightRenderer = Arc::new(|| "rhs".to_string());
     let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), Some(right));

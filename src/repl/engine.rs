@@ -45,8 +45,7 @@ mod overlay;
 mod session;
 
 pub(crate) use adapter::{
-    CompletionTraceEvent, CompletionTraceMenuState, expand_home, trace_completion,
-    trace_completion_enabled,
+    CompletionTraceEvent, CompletionTraceMenuState, trace_completion, trace_completion_enabled,
 };
 #[cfg(test)]
 pub(crate) use adapter::{
