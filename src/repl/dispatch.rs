@@ -26,7 +26,7 @@ use miette::Result;
 use std::time::Instant;
 
 use crate::app::sink::{StdIoUiSink, UiSink};
-use crate::app::{AppClients, AppRuntime, AppSession};
+use crate::app::{AppRuntime, AppSession};
 use crate::app::{ResolvedInvocation, render_report_message, resolve_invocation_ui};
 use crate::cli::invocation::scan_command_tokens;
 use crate::ui::messages::MessageLevel;
@@ -131,9 +131,7 @@ impl ExecutedReplLine {
 }
 
 struct ReplExecutionContext<'a, 'sink> {
-    runtime: &'a mut AppRuntime,
-    session: &'a mut AppSession,
-    clients: &'a AppClients,
+    state: &'a mut crate::app::AppState,
     history: &'a SharedHistory,
     sink: &'sink mut dyn UiSink,
     accepted: &'a mut bool,
@@ -167,14 +165,12 @@ impl ReplLinePlan {
 }
 
 pub(crate) fn execute_repl_plugin_line(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     line: &str,
     sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
-    crate::app::facts::set_command_scope(runtime, &session.scope);
+    crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
     let mut stdio = StdIoUiSink;
     let sink = sink.unwrap_or(&mut stdio);
     let mut accepted = false;
@@ -183,30 +179,28 @@ pub(crate) fn execute_repl_plugin_line(
     let mut keep_history = false;
     let execution = (|| {
         if let Some(command @ builtins::BangCommand::Last) = builtins::parse_bang_command(line)? {
-            match builtins::execute_bang_command(session, history, line, command)? {
+            match builtins::execute_bang_command(&mut state.session, history, line, command)? {
                 ReplResult::ReplaceInput(expanded) => {
                     sink.write_stderr(&format!("{expanded}\n"));
                     resolved = expanded;
                 }
-                result => return Ok(ExecutedReplLine::flat(result, runtime.ui.debug_level)),
+                result => return Ok(ExecutedReplLine::flat(result, state.runtime.ui.debug_level)),
             }
         }
         // Alias expansion needs the live execution config, which the generic
         // history backend does not own. Classify before a command can edit it.
-        keep_history = input::ReplParsedLine::parse(&resolved, runtime.config.resolved())
+        keep_history = input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved())
             .is_ok_and(|parsed| {
                 !super::history_store::is_sensitive_config_set_tokens(&parsed.dispatch_tokens)
             });
         if !matches!(resolved.trim(), "next" | "prev") {
-            session.native_context.clear_pagination();
+            state.session.native_context.clear_pagination();
         }
-        let plan = classify_repl_line(runtime, session, &resolved)?;
+        let plan = classify_repl_line(&state.runtime, &state.session, &resolved)?;
         let parse_finished = Instant::now();
         execute_repl_line_plan(
             ReplExecutionContext {
-                runtime,
-                session,
-                clients,
+                state,
                 history,
                 sink,
                 accepted: &mut accepted,
@@ -226,9 +220,9 @@ pub(crate) fn execute_repl_plugin_line(
     if accepted && !is_repl_bang_request(&resolved) {
         let _ = history.with(|store| store.remember_command(&resolved));
     }
-    session.finish_repl_line();
-    let refresh_completion = session.native_context.take_completion_refresh_request()
-        | clients.native_commands().take_completion_refresh_request();
+    state.session.finish_repl_line();
+    let refresh_completion = state.session.native_context.take_completion_refresh_request()
+        | state.clients.native_commands().take_completion_refresh_request();
     match execution {
         Ok(mut executed) => {
             if refresh_completion {
@@ -240,7 +234,7 @@ pub(crate) fn execute_repl_plugin_line(
                         command::finalize_repl_command(output, true, false)
                     }
                     result @ ReplResult::ReplaceInput(_) => {
-                        session.native_context.request_completion_refresh();
+                        state.session.native_context.request_completion_refresh();
                         result
                     }
                     result => result,
@@ -254,22 +248,23 @@ pub(crate) fn execute_repl_plugin_line(
             let _logging = crate::app::logging::override_stderr_level(debug);
             tracing::info!(target: "osp", exit_code = executed.exit_code,
                 elapsed_ms = started.elapsed().as_millis(), "finished");
-            record_repl_timing(session, started, executed.timing);
+            record_repl_timing(&state.session, started, executed.timing);
             Ok(executed)
         }
         Err(err) => {
-            let fallback_ui = input::ReplParsedLine::parse(&resolved, runtime.config.resolved())
-                .ok()
-                .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
-                .map(|scanned| {
-                    resolve_invocation_ui(
-                        runtime.config.resolved(),
-                        &runtime.ui,
-                        &scanned.invocation,
-                    )
-                    .ui
-                })
-                .unwrap_or_else(|| runtime.ui.clone());
+            let fallback_ui =
+                input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved())
+                    .ok()
+                    .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
+                    .map(|scanned| {
+                        resolve_invocation_ui(
+                            state.runtime.config.resolved(),
+                            &state.runtime.ui,
+                            &scanned.invocation,
+                        )
+                        .ui
+                    })
+                    .unwrap_or_else(|| state.runtime.ui.clone());
             let settings = crate::app::host::error_display_settings(&err)
                 .cloned()
                 .unwrap_or_else(|| crate::app::host::ErrorDisplaySettings::from(&fallback_ui));
@@ -279,16 +274,24 @@ pub(crate) fn execute_repl_plugin_line(
             ));
             let ui = &settings;
             if ui.debug_level > 0 {
-                session.record_prompt_timing(ui.debug_level, started.elapsed(), None, None, None);
+                state.session.record_prompt_timing(
+                    ui.debug_level,
+                    started.elapsed(),
+                    None,
+                    None,
+                    None,
+                );
             }
             let _logging = crate::app::logging::override_stderr_level(ui.debug_level);
             let plain_settings = ui.render_settings.plain_copy_settings();
             let remember = !is_repl_bang_request(&resolved)
-                && !is_doctor_request(&resolved, runtime.config.resolved());
+                && !is_doctor_request(&resolved, state.runtime.config.resolved());
             let more = remember
                 && crate::app::host::has_report_detail(&err, ui.verbosity, &plain_settings);
             if remember {
-                session.record_failure_report(&resolved, err.clone(), plain_settings);
+                state
+                    .session
+                    .record_failure_report(&resolved, err.clone(), plain_settings);
             }
             let rendered =
                 crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
@@ -432,9 +435,7 @@ fn execute_repl_line_plan(
     parse_finished: Instant,
 ) -> Result<ExecutedReplLine> {
     let ReplExecutionContext {
-        runtime,
-        session,
-        clients,
+        state,
         history,
         sink,
         accepted,
@@ -442,33 +443,32 @@ fn execute_repl_line_plan(
     match plan {
         ReplLinePlan::Builtin { raw, builtin } => {
             *accepted = true;
-            let debug_level = input::ReplParsedLine::parse(&raw, runtime.config.resolved())
+            let debug_level = input::ReplParsedLine::parse(&raw, state.runtime.config.resolved())
                 .ok()
                 .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
                 .map(|scanned| {
                     resolve_invocation_ui(
-                        runtime.config.resolved(),
-                        &runtime.ui,
+                        state.runtime.config.resolved(),
+                        &state.runtime.ui,
                         &scanned.invocation,
                     )
                     .ui
                     .debug_level
                 })
-                .unwrap_or(runtime.ui.debug_level);
+                .unwrap_or(state.runtime.ui.debug_level);
             let _logging = crate::app::logging::override_stderr_level(debug_level);
-            let result =
-                execute_repl_builtin(runtime, session, clients, history, &raw, builtin, sink)?;
+            let result = execute_repl_builtin(state, history, &raw, builtin, sink)?;
             Ok(ExecutedReplLine::flat(result, debug_level))
         }
         ReplLinePlan::Blank => Ok(ExecutedReplLine::flat(
             ReplResult::Continue,
-            runtime.ui.debug_level,
+            state.runtime.ui.debug_level,
         )),
         ReplLinePlan::DslHelp { help } => {
             *accepted = true;
             Ok(ExecutedReplLine::flat(
                 ReplResult::Print(help),
-                runtime.ui.debug_level,
+                state.runtime.ui.debug_level,
             ))
         }
         ReplLinePlan::Shortcut { parsed, shortcut } => {
@@ -481,9 +481,8 @@ fn execute_repl_line_plan(
             let debug_level = invocation.ui.debug_level;
             let error_display = crate::app::host::ErrorDisplaySettings::from(&invocation.ui);
             let _logging = crate::app::logging::override_stderr_level(debug_level);
-            let result =
-                execute_repl_shortcut(runtime, session, clients, &parsed, *shortcut, line, sink)
-                    .map_err(|err| crate::app::host::report_with_invocation(err, error_display))?;
+            let result = execute_repl_shortcut(state, &parsed, *shortcut, line, sink)
+                .map_err(|err| crate::app::host::report_with_invocation(err, error_display))?;
             Ok(ExecutedReplLine::flat(result, debug_level))
         }
         ReplLinePlan::Command(dispatch) => {
@@ -495,9 +494,7 @@ fn execute_repl_line_plan(
             let error_display = crate::app::host::ErrorDisplaySettings::from(ui);
             execute_repl_command_dispatch(
                 ReplExecutionContext {
-                    runtime,
-                    session,
-                    clients,
+                    state,
                     history,
                     sink,
                     accepted,

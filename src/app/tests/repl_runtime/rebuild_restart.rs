@@ -125,9 +125,7 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "plugins enable hello", None,).map(|executed| executed.result)
         .expect("plugin enable should succeed");
@@ -156,9 +154,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     let history = make_test_history(&mut state);
 
     let theme_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "theme use dracula", None,).map(|executed| executed.result)
     .expect("theme use should succeed");
@@ -171,9 +167,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     ));
 
     let format_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "config set ui.format json", None,).map(|executed| executed.result)
     .expect("config set should succeed");
@@ -186,9 +180,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     ));
 
     let unset_format_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "config unset ui.format", None,).map(|executed| executed.result)
     .expect("config unset should succeed");
@@ -201,9 +193,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     ));
 
     let dry_run_unset_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "config unset ui.format --dry-run", None,).map(|executed| executed.result)
     .expect("dry-run config unset should succeed");
@@ -226,9 +216,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "config unset ui.format", None,).map(|executed| executed.result)
         .expect("config unset should succeed");
@@ -263,9 +251,7 @@ fn repl_config_unset_dry_run_preserves_session_state_unit() {
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "config unset ui.format --dry-run", None,).map(|executed| executed.result)
         .expect("dry-run config unset should succeed");

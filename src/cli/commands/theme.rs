@@ -16,43 +16,29 @@ use clap::Command;
 use miette::Result;
 use miette::miette;
 
-#[derive(Clone, Copy)]
-pub(crate) struct ThemeCommandContext<'a> {
-    pub(crate) ui: &'a UiState,
-    pub(crate) themes: &'a ThemeCatalog,
-}
-
-impl<'a> ThemeCommandContext<'a> {
-    pub(crate) fn from_parts(runtime: &'a AppRuntime, ui: &'a UiState) -> Self {
-        Self {
-            ui,
-            themes: &runtime.themes,
-        }
-    }
-}
-
 pub(crate) fn run_theme_command(
     config_overrides: &mut ConfigLayer,
-    context: ThemeCommandContext<'_>,
+    runtime: &AppRuntime,
+    ui: &UiState,
     args: ThemeArgs,
 ) -> Result<CommandOutput> {
     match args.command {
         ThemeCommands::List => {
-            let rows = theme_list_rows(context.themes, &context.ui.render_settings.theme_name);
+            let rows = theme_list_rows(&runtime.themes, &ui.render_settings.theme_name);
             let mut output = rows_to_output_result(rows);
             output.meta.display_columns =
                 Some(["name", "source", "status"].map(str::to_string).to_vec());
             Ok(CommandOutput::output(output, None))
         }
         ThemeCommands::Show(ThemeShowArgs { name }) => {
-            let selected = name.unwrap_or_else(|| context.ui.render_settings.theme_name.clone());
+            let selected = name.unwrap_or_else(|| ui.render_settings.theme_name.clone());
             Ok(CommandOutput::output(
-                rows_to_output_result(theme_show_rows(context.themes, &selected)?),
+                rows_to_output_result(theme_show_rows(&runtime.themes, &selected)?),
                 None,
             ))
         }
         ThemeCommands::Use(ThemeUseArgs { name }) => {
-            let selected = resolve_known_theme_name(&name, context.themes)?;
+            let selected = resolve_known_theme_name(&name, &runtime.themes)?;
             config_overrides.replace_scoped("theme.name", selected.clone().into(), Scope::global());
 
             let mut result = CommandOutput::exit(0);
@@ -61,9 +47,7 @@ pub(crate) fn run_theme_command(
                 .success(format!("active theme set to: {selected}"));
             result.messages.info(format!(
                 "theme change is for the current process; persistent writes land with `{}`",
-                context
-                    .ui
-                    .render_settings
+                ui.render_settings
                     .runtime
                     .command_scope
                     .command("config set")
@@ -183,8 +167,8 @@ fn theme_show_rows(themes: &ThemeCatalog, name: &str) -> Result<Vec<Row>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ThemeCommandContext, augment_theme_completion, run_theme_command, theme_command,
-        theme_list_rows, theme_show_rows,
+        augment_theme_completion, run_theme_command, theme_command, theme_list_rows,
+        theme_show_rows,
     };
     use crate::app::CommandOutput;
     use crate::app::UiState;
@@ -258,14 +242,26 @@ mod tests {
 
         let ui = test_ui_state();
         let themes = builtin_theme_catalog();
+        let mut defaults = crate::config::ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        let mut resolver = crate::config::ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(crate::config::ResolveOptions::default())
+            .unwrap();
+        let mut builder = crate::app::AppStateBuilder::new(
+            crate::app::RuntimeContext::new(None, crate::app::TerminalKind::Cli, None),
+            config,
+            ui.clone(),
+        );
+        builder.themes = Some(themes);
+        let state = builder.build();
         let mut overrides = ConfigLayer::default();
 
         let result = run_theme_command(
             &mut overrides,
-            ThemeCommandContext {
-                ui: &ui,
-                themes: &themes,
-            },
+            &state.runtime,
+            &ui,
             ThemeArgs {
                 command: ThemeCommands::List,
             },
@@ -294,14 +290,26 @@ mod tests {
         let mut ui = test_ui_state();
         ui.render_settings.theme_name = "nord".to_string();
         let themes = builtin_theme_catalog();
+        let mut defaults = crate::config::ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        let mut resolver = crate::config::ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(crate::config::ResolveOptions::default())
+            .unwrap();
+        let mut builder = crate::app::AppStateBuilder::new(
+            crate::app::RuntimeContext::new(None, crate::app::TerminalKind::Cli, None),
+            config,
+            ui.clone(),
+        );
+        builder.themes = Some(themes);
+        let state = builder.build();
         let mut overrides = ConfigLayer::default();
 
         let result = run_theme_command(
             &mut overrides,
-            ThemeCommandContext {
-                ui: &ui,
-                themes: &themes,
-            },
+            &state.runtime,
+            &ui,
             ThemeArgs {
                 command: ThemeCommands::Show(ThemeShowArgs { name: None }),
             },

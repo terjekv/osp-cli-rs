@@ -12,50 +12,32 @@ use crate::repl::ReplViewContext;
 use crate::repl::presentation::{build_repl_intro_payload, repl_document_output};
 use crate::repl::surface::ReplSurface;
 
-pub(crate) struct IntroCommandContext<'a> {
-    pub(crate) view: ReplViewContext<'a>,
-    pub(crate) surface: ReplSurface,
-}
-
-impl<'a> IntroCommandContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a AppSession,
-        clients: &'a AppClients,
-        ui: &'a crate::app::UiState,
-    ) -> Self {
-        let view = ReplViewContext {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            ui,
-            auth: &runtime.auth,
-            themes: &runtime.themes,
-            scope: &session.scope,
-            native_context: &session.native_context,
-            history_enabled: session.history_enabled,
-            actions: &[],
-        };
-        let catalog = authorized_command_catalog_for(
-            &runtime.auth,
-            clients,
-            clients.native_commands().catalog(),
-        );
-        let surface = crate::repl::surface::build_repl_surface(view, &catalog);
-
-        Self { view, surface }
-    }
+fn intro_surface<'a>(
+    runtime: &'a AppRuntime,
+    session: &'a AppSession,
+    clients: &AppClients,
+    ui: &'a crate::app::UiState,
+) -> (ReplViewContext<'a>, ReplSurface) {
+    let view = ReplViewContext {
+        ui,
+        ..ReplViewContext::from_parts(runtime, session)
+    };
+    let catalog =
+        authorized_command_catalog_for(&runtime.auth, clients, clients.native_commands().catalog());
+    let surface = crate::repl::surface::build_repl_surface(view, &catalog);
+    (view, surface)
 }
 
 pub(crate) fn run_intro_command(
-    context: IntroCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &crate::app::UiState,
     _args: IntroArgs,
 ) -> Result<CommandOutput> {
+    let (view, surface) = intro_surface(runtime, session, clients, ui);
     Ok(CommandOutput::output(
-        repl_document_output(&build_repl_intro_payload(
-            context.view,
-            &context.surface,
-            None,
-        )),
+        repl_document_output(&build_repl_intro_payload(view, &surface, None)),
         None,
     ))
 }
@@ -127,24 +109,22 @@ mod tests {
     fn intro_context_projects_visible_surface_for_repl_intro_unit() {
         let state = intro_state();
 
-        let context = IntroCommandContext::from_parts(
+        let (_, surface) = intro_surface(
             &state.runtime,
             &state.session,
             &state.clients,
             state.runtime.ui(),
         );
 
-        assert!(context.surface.root_words.iter().any(|word| word == "help"));
+        assert!(surface.root_words.iter().any(|word| word == "help"));
         assert!(
-            context
-                .surface
+            surface
                 .intro_commands
                 .iter()
                 .all(|word| word != "exit" && word != "quit")
         );
         assert!(
-            context
-                .surface
+            surface
                 .overview_entries
                 .iter()
                 .any(|entry| entry.name == "help")
@@ -154,15 +134,14 @@ mod tests {
     #[test]
     fn intro_command_returns_structured_guide_output_unit() {
         let state = intro_state();
-        let context = IntroCommandContext::from_parts(
+        let result = run_intro_command(
             &state.runtime,
             &state.session,
             &state.clients,
             state.runtime.ui(),
-        );
-
-        let result =
-            run_intro_command(context, IntroArgs::default()).expect("intro command should succeed");
+            IntroArgs::default(),
+        )
+        .expect("intro command should succeed");
 
         assert_eq!(result.exit_code, 0);
         let crate::app::CommandBody::Output(structured) = result.body else {

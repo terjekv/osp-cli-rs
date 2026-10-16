@@ -105,9 +105,9 @@ fn make_completion_state_with_entries_and_native(
 
     let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
+        config,
         launch: LaunchContext::default(),
-        native_commands: native_commands,
+        native_commands,
         ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
         plugins: Some(
             PluginManager::new(Vec::new())
@@ -432,8 +432,8 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
 
     let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
-        launch: launch,
+        config,
+        launch,
         native_commands: crate::native::NativeCommandRegistry::default(),
         ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
         plugins: Some(

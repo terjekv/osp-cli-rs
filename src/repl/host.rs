@@ -106,25 +106,13 @@ fn run_repl_cycle(
         let line = match event {
             crate::repl::ReplEvent::Line(line) => line,
             crate::repl::ReplEvent::Action(id) => {
-                return crate::app::external::run_repl_action(
-                    &mut state.runtime,
-                    &mut state.session,
-                    &state.clients,
-                    id,
-                )
-                .map_err(|err| anyhow::Error::from_boxed(err.into()));
+                return crate::app::external::run_repl_action(state, id)
+                    .map_err(|err| anyhow::Error::from_boxed(err.into()));
             }
         };
-        dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            history,
-            line,
-            None,
-        )
-        .map(|executed| executed.result)
-        .map_err(|err| anyhow::Error::from_boxed(err.into()))
+        dispatch::execute_repl_plugin_line(state, history, line, None)
+            .map(|executed| executed.result)
+            .map_err(|err| anyhow::Error::from_boxed(err.into()))
     })
     .map_err(|err| {
         crate::app::report_anyhow_with_context(
@@ -312,9 +300,9 @@ mod tests {
 
         let state = crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config: config,
+            config,
             launch: LaunchContext::default(),
-            native_commands: native_commands,
+            native_commands,
             ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
             plugins: Some(
                 crate::plugin::PluginManager::new(Vec::new())

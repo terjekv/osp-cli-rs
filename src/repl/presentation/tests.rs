@@ -66,7 +66,7 @@ fn make_state(entries: &[(&str, &str)]) -> AppState {
 
     crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
+        config,
         launch: LaunchContext::default(),
         native_commands: crate::native::NativeCommandRegistry::default(),
         ui: crate::app::UiState::new(
@@ -857,7 +857,7 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
     .expect("list-aware config should resolve");
     let state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
+        config,
         launch: LaunchContext::default(),
         native_commands: crate::native::NativeCommandRegistry::default(),
         ui: crate::app::UiState::new(

@@ -39,14 +39,7 @@ fn observe_dispatch_kind(
     history: &SharedHistory,
     line: &str,
 ) -> ObservedDispatchKind {
-    let execution = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        history,
-        line,
-        None,
-    );
+    let execution = execute_repl_plugin_line(state, history, line, None);
     if execution
         .as_ref()
         .is_ok_and(|executed| executed.exit_code != 0)
@@ -303,31 +296,17 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
         &["P name".to_string()],
     );
 
-    let processed = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "last",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("last should replay");
+    let processed = execute_repl_plugin_line(&mut state, &history, "last", None)
+        .map(|executed| executed.result)
+        .expect("last should replay");
     assert!(matches!(
         processed,
         ReplResult::Print(text) if text.contains("alice") && !text.contains("admin")
     ));
 
-    let raw = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "last --raw",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("last raw should replay");
+    let raw = execute_repl_plugin_line(&mut state, &history, "last --raw", None)
+        .map(|executed| executed.result)
+        .expect("last raw should replay");
     assert!(matches!(
         raw,
         ReplResult::Print(text) if text.contains("alice") && text.contains("admin")
@@ -417,28 +396,14 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
         .expect("history lock should be available")
         .expect("history command saves");
 
-    let bare = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "!1",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("bare absolute history recall should succeed");
+    let bare = execute_repl_plugin_line(&mut state, &history, "!1", None)
+        .map(|executed| executed.result)
+        .expect("bare absolute history recall should succeed");
     assert_eq!(bare, ReplResult::ReplaceInput("config show".to_string()));
 
-    let recalled = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "!1 --label \"two words\"",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("absolute history recall should succeed");
+    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --label \"two words\"", None)
+        .map(|executed| executed.result)
+        .expect("absolute history recall should succeed");
 
     assert_eq!(
         recalled,
@@ -460,16 +425,9 @@ fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
         .expect("scoped history command saves");
     state.session.scope.enter("ldap");
 
-    let recalled = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "!1 --json",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("scoped absolute history recall should succeed");
+    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --json", None)
+        .map(|executed| executed.result)
+        .expect("scoped absolute history recall should succeed");
 
     assert_eq!(
         recalled,
@@ -510,7 +468,7 @@ fn make_state_with_plugins(plugins: crate::plugin::PluginManager) -> AppState {
     let settings = RenderSettings::test_plain(OutputFormat::Json);
     crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
+        config,
         launch: LaunchContext::default(),
         native_commands: crate::native::NativeCommandRegistry::default(),
         ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
@@ -544,13 +502,7 @@ fn test_history() -> SharedHistory {
 fn root_help_rendering_and_shell_prefix_helpers_cover_root_paths_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let invocation = super::base_repl_invocation(&state.runtime);
-    let help = repl_help_for_scope(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &invocation,
-    )
-    .expect("root help should render");
+    let help = repl_help_for_scope(&mut state, &invocation).expect("root help should render");
     assert!(help.contains("help"));
     dispatch_snapshot_settings().bind(|| {
         insta::with_settings!({ snapshot_path => "../snapshots" }, {
@@ -574,9 +526,7 @@ fn intro_pipeline_keeps_filtered_guide_structure_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let invocation = super::base_repl_invocation(&state.runtime);
     let result = run_repl_command(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         Commands::Intro(IntroArgs::default()),
         &invocation,
         &test_history(),
@@ -612,15 +562,8 @@ fn staged_repl_line_validation_rejects_invalid_invocations_before_pipeline_execu
         let mut state = make_state_with_plugins(empty_plugins());
         state.runtime.ui.render_settings.format = OutputFormat::Table;
         let mut sink = crate::app::BufferedUiSink::default();
-        execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &test_history(),
-            line,
-            Some(&mut sink),
-        )
-        .expect("failure should render through the sink");
+        execute_repl_plugin_line(&mut state, &test_history(), line, Some(&mut sink))
+            .expect("failure should render through the sink");
         assert!(sink.stderr.contains(needle), "line: {line}");
     }
 }
@@ -632,39 +575,23 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
     let history = test_history();
 
     assert!(matches!(
-        execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &history,
-            "quit",
-            None,
-        )
-        .map(|executed| executed.result)
-        .expect("quit should exit from the REPL root"),
+        execute_repl_plugin_line(&mut state, &history, "quit", None,)
+            .map(|executed| executed.result)
+            .expect("quit should exit from the REPL root"),
         ReplResult::Exit(0)
     ));
     assert!(state.session.prompt_timing.badge().is_some());
 
     assert!(matches!(
-        execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &history,
-            "   ",
-            None,
-        )
-        .map(|executed| executed.result)
-        .expect("blank lines should be ignored"),
+        execute_repl_plugin_line(&mut state, &history, "   ", None,)
+            .map(|executed| executed.result)
+            .expect("blank lines should be ignored"),
         ReplResult::Continue
     ));
 
     assert!(matches!(
         execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "intro | H", None,).map(|executed| executed.result)
         .expect("dsl help stage should short-circuit normal command execution"),
@@ -675,9 +602,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
 
     assert!(matches!(
         execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "help", None,).map(|executed| executed.result)
         .expect("root help shortcut should render command help"),
@@ -745,9 +670,7 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
 
     let mut sink = crate::app::BufferedUiSink::default();
     execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "intro --wat | config",
         Some(&mut sink),
@@ -765,15 +688,8 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     assert!(state.session.prompt_timing.badge().is_some());
 
     let mut sink = crate::app::BufferedUiSink::default();
-    execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "config sho",
-        Some(&mut sink),
-    )
-    .expect("syntax errors should render through the sink");
+    execute_repl_plugin_line(&mut state, &history, "config sho", Some(&mut sink))
+        .expect("syntax errors should render through the sink");
     assert!(sink.stderr.contains("unrecognized subcommand 'sho'"));
     assert!(sink.stderr.contains("Invalid command"));
 }
@@ -785,9 +701,7 @@ fn intro_value_pipeline_prefers_matching_entry_content_unit() {
     invocation.ui.render_settings.format = OutputFormat::Value;
     invocation.ui.render_settings.format_explicit = true;
     let result = run_repl_command(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         Commands::Intro(IntroArgs::default()),
         &invocation,
         &test_history(),
@@ -818,9 +732,7 @@ fn theme_show_value_pipeline_renders_selected_field_rhs_unit() {
     invocation.ui.render_settings.format = OutputFormat::Value;
     invocation.ui.render_settings.format_explicit = true;
     let result = run_repl_command(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         Commands::Theme(ThemeArgs {
             command: ThemeCommands::Show(crate::cli::ThemeShowArgs {
                 name: Some("catppuccin".to_string()),
@@ -927,16 +839,9 @@ fn repl_unrelated_lines_clear_native_pagination_context_unit() {
             next: Some(vec!["trusted".to_string()]),
         });
 
-    execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "help",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("help should render");
+    execute_repl_plugin_line(&mut state, &history, "help", None)
+        .map(|executed| executed.result)
+        .expect("help should render");
     assert_eq!(state.session.native_context.pagination(), None);
 
     state
@@ -947,15 +852,9 @@ fn repl_unrelated_lines_clear_native_pagination_context_unit() {
             next: Some(vec!["trusted".to_string()]),
         });
     let mut sink = crate::app::BufferedUiSink::default();
-    let executed = execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "not-a-real-command",
-        Some(&mut sink),
-    )
-    .expect("failure should render through the sink");
+    let executed =
+        execute_repl_plugin_line(&mut state, &history, "not-a-real-command", Some(&mut sink))
+            .expect("failure should render through the sink");
     assert_ne!(executed.exit_code, 0);
     assert!(sink.stderr.contains("not-a-real-command"));
     assert_eq!(state.session.native_context.pagination(), None);

@@ -33,9 +33,7 @@ JSON
     let history = make_test_history(&mut state);
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "fail", Some(&mut sink),)
     .expect("failure should render through the sink");
@@ -73,9 +71,7 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         )));
 
     let repl_rendered = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "hello | message", None,).map(|executed| executed.result)
     .expect("repl command should succeed");
@@ -101,9 +97,7 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "hello", Some(&mut sink),)
     .expect("ambiguity should render through the sink");
@@ -115,9 +109,7 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
     );
 
     let repl_rendered = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "--plugin-provider beta-provider hello", None,).map(|executed| executed.result)
     .expect("repl command should honor one-shot provider override");

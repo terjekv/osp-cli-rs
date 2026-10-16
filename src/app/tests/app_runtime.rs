@@ -361,16 +361,10 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
     );
     let history = make_test_history(&mut state);
 
-    let result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "refreshable refresh",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("native refresh command should run");
+    let result =
+        repl_dispatch::execute_repl_plugin_line(&mut state, &history, "refreshable refresh", None)
+            .map(|executed| executed.result)
+            .expect("native refresh command should run");
 
     assert!(matches!(
         result,
@@ -392,27 +386,15 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     let history = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
-    repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap user",
-        Some(&mut sink),
-    )
-    .expect("failure should render through the sink");
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
+        .expect("failure should render through the sink");
     let immediate = sink.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(immediate.contains("command ldap user"));
     assert!(immediate.contains("requires authentication"));
     assert!(immediate.contains("Try: authenticate"));
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        line,
-        None,
+        &mut state, &history, line, None,
     )
     .map(|executed| executed.result)
     .expect("doctor last should render")
@@ -454,15 +436,8 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     let history = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
-    repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap usr",
-        Some(&mut sink),
-    )
-    .expect("failure should render through the sink");
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap usr", Some(&mut sink))
+        .expect("failure should render through the sink");
     let immediate = &sink.stderr;
     assert!(immediate.contains("subcommand 'usr'"));
     assert!(
@@ -473,12 +448,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     assert!(!immediate.contains("native command execution failed"));
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        line,
-        None,
+        &mut state, &history, line, None,
     )
     .map(|executed| executed.result)
     .expect("doctor last should render")
@@ -514,15 +484,8 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
     let history = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
-    repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap user",
-        Some(&mut sink),
-    )
-    .expect("failure should render through the sink");
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
+        .expect("failure should render through the sink");
     let immediate = &sink.stderr;
     assert!(immediate.contains("<USERNAME>"), "{immediate}");
     assert!(immediate.contains("More: rerun with -v"), "{immediate}");

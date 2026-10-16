@@ -17,7 +17,6 @@ use miette::{Result, miette};
 use std::io::IsTerminal;
 use terminal_size::{Width, terminal_size};
 
-use super::external::ExternalCommandRuntime;
 use super::{
     AppClients, AppRuntime, ConfigState, ResolvedInvocation, RuntimeContext, TerminalKind, UiState,
 };
@@ -86,14 +85,15 @@ pub(crate) fn plugin_dispatch_context_for_runtime(
 }
 
 pub(in crate::app) fn plugin_dispatch_context_for(
-    runtime: &ExternalCommandRuntime<'_>,
+    runtime: &AppRuntime,
+    clients: &AppClients,
     invocation: Option<&ResolvedInvocation>,
 ) -> PluginDispatchContext {
     build_plugin_dispatch_context(
-        runtime.context,
-        runtime.config_state,
-        runtime.clients,
-        runtime.ui,
+        &runtime.context,
+        &runtime.config,
+        clients,
+        &runtime.ui,
         invocation,
     )
 }

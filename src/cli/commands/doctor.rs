@@ -7,7 +7,7 @@
 use miette::Result;
 
 use crate::app::CommandOutput;
-use crate::app::{AppClients, AppRuntime, AppSession, AuthState, LastFailure, UiState};
+use crate::app::{AppClients, AppRuntime, AppSession, LastFailure, UiState};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{DoctorArgs, DoctorCommands, PluginsArgs, PluginsCommands};
 use crate::core::MessageLevel;
@@ -22,59 +22,35 @@ use serde_json::{Map, Value};
 
 use super::{config as config_cmd, plugins as plugins_cmd};
 
-#[derive(Clone, Copy)]
-pub(crate) struct DoctorCommandContext<'a> {
-    pub(crate) config: config_cmd::ConfigReadContext<'a>,
-    pub(crate) plugins: plugins_cmd::PluginsCommandContext<'a>,
-    pub(crate) ui: &'a UiState,
-    pub(crate) auth: &'a AuthState,
-    pub(crate) themes: &'a ThemeCatalog,
-    pub(crate) last_failure: Option<&'a LastFailure>,
-}
-
-impl<'a> DoctorCommandContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a AppSession,
-        clients: &'a AppClients,
-        ui: &'a UiState,
-    ) -> Self {
-        Self {
-            config: config_cmd::ConfigReadContext::from_parts(runtime, session, ui),
-            plugins: plugins_cmd::PluginsCommandContext::from_parts(runtime, clients),
-            ui,
-            auth: &runtime.auth,
-            themes: &runtime.themes,
-            last_failure: session.last_failure.as_ref(),
-        }
-    }
-}
-
 pub(crate) fn run_doctor_command(
-    context: DoctorCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &UiState,
     args: DoctorArgs,
 ) -> Result<CommandOutput> {
     let command = args.command.unwrap_or(DoctorCommands::All);
     match command {
         DoctorCommands::Config => Ok(CommandOutput::output(
-            rows_to_output_result(config_cmd::config_diagnostics_rows(context.config)),
+            rows_to_output_result(config_cmd::config_diagnostics_rows(runtime, session, ui)),
             None,
         )),
         DoctorCommands::Plugins => plugins_cmd::run_plugins_command(
-            context.plugins,
+            runtime,
+            clients,
             PluginsArgs {
                 command: PluginsCommands::Doctor,
             },
         ),
         DoctorCommands::Last => Ok(render_last_failure_document(
-            context.ui,
-            context.last_failure,
+            ui,
+            session.last_failure.as_ref(),
         )),
         DoctorCommands::Theme => Ok(CommandOutput::output(
-            rows_to_output_result(theme_doctor_rows(context.themes)),
+            rows_to_output_result(theme_doctor_rows(&runtime.themes)),
             None,
         )),
-        DoctorCommands::All => run_doctor_all(context),
+        DoctorCommands::All => run_doctor_all(runtime, session, clients, ui),
     }
 }
 
@@ -99,8 +75,13 @@ impl CredentialDiagnostics<'_> {
     }
 }
 
-fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CommandOutput> {
-    let facts = context.auth.session_facts();
+fn run_doctor_all(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &UiState,
+) -> Result<CommandOutput> {
+    let facts = runtime.auth.session_facts();
     let credentials = facts
         .credentials
         .iter()
@@ -108,20 +89,24 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CommandOutput> {
         .collect::<Vec<_>>();
     let mut sections: Vec<(&str, Vec<Row>)> = vec![(
         "session",
-        session_doctor_rows(&facts, context.config.config.active_profile(), &credentials),
+        session_doctor_rows(
+            &facts,
+            runtime.config.resolved().active_profile(),
+            &credentials,
+        ),
     )];
 
     sections.push((
         "config",
-        config_cmd::config_diagnostics_rows(context.config),
+        config_cmd::config_diagnostics_rows(runtime, session, ui),
     ));
 
-    let report = context.plugins.plugin_manager.doctor();
+    let report = clients.plugins().doctor();
     sections.push(("plugins", plugins_cmd::doctor_rows(&report)));
 
-    sections.push(("theme", theme_doctor_rows(context.themes)));
+    sections.push(("theme", theme_doctor_rows(&runtime.themes)));
 
-    if matches!(context.ui.render_settings.format, OutputFormat::Json) {
+    if matches!(ui.render_settings.format, OutputFormat::Json) {
         return Ok(CommandOutput::json(doctor_report_json_value(&sections)));
     }
 
@@ -334,11 +319,9 @@ fn next_failure_detail_command(current: MessageLevel, last: &LastFailure) -> Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        DoctorCommandContext, doctor_command, render_last_failure_document, run_doctor_command,
-        theme_doctor_rows,
+        doctor_command, render_last_failure_document, run_doctor_command, theme_doctor_rows,
     };
-    use crate::app::{AuthState, LastFailure, RuntimeContext, TerminalKind, UiState};
-    use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
+    use crate::app::{LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
     use crate::core::MessageLevel;
@@ -358,57 +341,30 @@ mod tests {
         )
     }
 
-    fn doctor_context(
-        format: OutputFormat,
-        _builtins: Option<&str>,
-    ) -> DoctorCommandContext<'static> {
+    fn doctor_context(format: OutputFormat, _builtins: Option<&str>) -> crate::app::AppState {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
         let mut resolver = ConfigResolver::default();
         resolver.set_defaults(defaults);
-        let resolved = Box::leak(Box::new(
-            resolver
-                .resolve(ResolveOptions::default().with_terminal("cli"))
-                .expect("test config should resolve"),
-        ));
-        let ui = Box::leak(Box::new(ui_state(format, 0)));
-        let themes = Box::leak(Box::new(ThemeCatalog::default()));
-        let auth = Box::leak(Box::new(AuthState::default()));
-        let config_overrides = Box::leak(Box::new(ConfigLayer::default()));
-        let product_defaults = Box::leak(Box::new(ConfigLayer::default()));
-        let plugin_manager = Box::leak(Box::new(
-            PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-        ));
-        let context = Box::leak(Box::new(RuntimeContext::new(None, TerminalKind::Cli, None)));
-
-        DoctorCommandContext {
-            config: config_cmd::ConfigReadContext {
-                context,
-                config: resolved,
-                ui,
-                themes,
-                config_overrides,
-                product_defaults,
-                runtime_load: RuntimeLoadOptions::defaults_only(),
-            },
-            plugins: plugins_cmd::PluginsCommandContext {
-                context,
-                config: resolved,
-                config_state: None,
-                auth,
-                clients: None,
-                plugin_manager,
-                product_defaults,
-                runtime_load: RuntimeLoadOptions::defaults_only(),
-            },
-            ui,
-            auth,
-            themes,
-            last_failure: None,
-        }
+        let resolved = resolver
+            .resolve(ResolveOptions::default().with_terminal("cli"))
+            .expect("test config should resolve");
+        let mut builder = crate::app::AppStateBuilder::new(
+            RuntimeContext::new(None, TerminalKind::Cli, None),
+            resolved,
+            ui_state(format, 0),
+        );
+        builder.themes = Some(ThemeCatalog::default());
+        builder.launch = crate::app::LaunchContext::default()
+            .with_runtime_load(RuntimeLoadOptions::defaults_only());
+        builder
+            .with_plugins(
+                PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            )
+            .build()
     }
 
     #[test]
@@ -519,8 +475,12 @@ mod tests {
 
     #[test]
     fn doctor_commands_respect_visibility_output_shapes_and_subcommand_defs_unit() {
+        let state = doctor_context(OutputFormat::Json, Some("config,plugins,theme"));
         let visible = run_doctor_command(
-            doctor_context(OutputFormat::Json, Some("config,plugins,theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::All),
             },
@@ -533,8 +493,12 @@ mod tests {
         assert!(json.get("plugins").is_some());
         assert!(json.get("theme").is_some());
 
+        let state = doctor_context(OutputFormat::Table, Some("theme"));
         let theme = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::Theme),
             },
@@ -544,7 +508,10 @@ mod tests {
         assert!(theme.messages.is_empty());
 
         let table = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("config,theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::All),
             },

@@ -5,7 +5,7 @@ use miette::{Result, miette};
 
 use crate::app;
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession};
+use crate::app::{AppRuntime, AppSession};
 use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
 use crate::cli::{Commands, ConfigCommands, ParsedCommandLine, PluginsCommands, ThemeCommands};
@@ -314,9 +314,7 @@ pub(super) fn execute_repl_command_dispatch(
     parse_finished: Instant,
 ) -> Result<super::ExecutedReplLine> {
     let super::ReplExecutionContext {
-        runtime,
-        session,
-        clients,
+        state,
         history,
         sink,
         accepted,
@@ -329,7 +327,13 @@ pub(super) fn execute_repl_command_dispatch(
         } => {
             *accepted = true;
             let rendered = render_repl_command_output(
-                runtime, session, line, &stages, *result, &effective, sink,
+                &state.runtime,
+                &mut state.session,
+                line,
+                &stages,
+                *result,
+                &effective,
+                sink,
             )?;
             Ok(super::ExecutedReplLine::parse_only(
                 ReplResult::Print(rendered),
@@ -344,9 +348,7 @@ pub(super) fn execute_repl_command_dispatch(
                 side_effects,
             } = *invocation;
             let output = run_repl_command_with_progress(
-                runtime,
-                session,
-                clients,
+                state,
                 history,
                 ReplRunInput {
                     command,
@@ -359,7 +361,13 @@ pub(super) fn execute_repl_command_dispatch(
             let execute_finished = Instant::now();
             let exit_code = output.exit_code;
             let rendered = render_repl_command_output(
-                runtime, session, line, &stages, output, &effective, sink,
+                &state.runtime,
+                &mut state.session,
+                line,
+                &stages,
+                output,
+                &effective,
+                sink,
             )?;
             Ok(super::ExecutedReplLine::invocation(
                 finalize_repl_command(
@@ -385,17 +393,13 @@ struct ReplRunInput<'invocation, 'sink, 'accepted> {
 }
 
 fn run_repl_command_with_progress(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     input: ReplRunInput<'_, '_, '_>,
 ) -> Result<crate::app::CommandOutput> {
     let result = match input.command {
         Commands::External(tokens) => run_repl_external_command_with_progress(
-            runtime,
-            clients,
-            session,
+            state,
             ParsedCommandLine {
                 tokens,
                 stages: input.stages.to_vec(),
@@ -407,9 +411,9 @@ fn run_repl_command_with_progress(
         builtin => {
             *input.accepted = true;
             app::run_repl_builtin_command(
-                runtime,
-                session,
-                clients,
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
                 history,
                 input.invocation,
                 builtin,
@@ -448,18 +452,14 @@ mod tests;
 
 #[cfg(test)]
 pub(super) fn run_repl_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: Commands,
     invocation: &ResolvedInvocation,
     history: &SharedHistory,
 ) -> Result<crate::app::CommandOutput> {
     let mut accepted = false;
     run_repl_command_with_progress(
-        runtime,
-        session,
-        clients,
+        state,
         history,
         ReplRunInput {
             command,
@@ -472,16 +472,12 @@ pub(super) fn run_repl_command(
 }
 
 pub(super) fn run_repl_external_command(
-    runtime: &mut AppRuntime,
-    clients: &AppClients,
-    session: &mut AppSession,
+    state: &mut crate::app::AppState,
     tokens: Vec<String>,
     invocation: &ResolvedInvocation,
 ) -> Result<crate::app::CommandOutput> {
     app::run_external_command_with_help_renderer(
-        runtime,
-        session,
-        clients,
+        state,
         &tokens,
         invocation,
         Document::from_help_text,
@@ -490,18 +486,14 @@ pub(super) fn run_repl_external_command(
 }
 
 fn run_repl_external_command_with_progress(
-    runtime: &mut AppRuntime,
-    clients: &AppClients,
-    session: &mut AppSession,
+    state: &mut crate::app::AppState,
     command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
 ) -> Result<crate::app::CommandOutput> {
     app::external::run_external_command_for_repl(
-        runtime,
-        session,
-        clients,
+        state,
         command,
         invocation,
         Document::from_help_text,

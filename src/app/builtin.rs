@@ -101,45 +101,32 @@ impl<'a> BuiltinExecutor<'a> {
     ) -> Result<Option<CommandOutput>> {
         command.validate_dispatch_surface(matches!(surface, BuiltinSurface::Repl { .. }))?;
         match command {
-            Commands::Plugins(args) => plugins_cmd::run_plugins_command(
-                plugins_cmd::PluginsCommandContext::from_parts(self.runtime, self.clients),
-                args,
-            )
-            .map(Some),
+            Commands::Plugins(args) => {
+                plugins_cmd::run_plugins_command(self.runtime, self.clients, args).map(Some)
+            }
             Commands::Doctor(args) => doctor_cmd::run_doctor_command(
-                doctor_cmd::DoctorCommandContext::from_parts(
-                    self.runtime,
-                    self.session,
-                    self.clients,
-                    surface.ui(),
-                ),
+                self.runtime,
+                self.session,
+                self.clients,
+                surface.ui(),
                 args,
             )
             .map(Some),
             Commands::Theme(args) => theme_cmd::run_theme_command(
                 &mut self.session.config_overrides,
-                theme_cmd::ThemeCommandContext::from_parts(self.runtime, surface.ui()),
+                self.runtime,
+                surface.ui(),
                 args,
             )
             .map(Some),
-            Commands::Config(args) => config_cmd::run_config_command(
-                config_cmd::ConfigCommandContext::from_parts(
-                    self.runtime,
-                    self.session,
-                    surface.ui(),
-                ),
-                args,
-            )
-            .map(Some),
-            Commands::Alias(args) => config_cmd::run_alias_command(
-                config_cmd::ConfigCommandContext::from_parts(
-                    self.runtime,
-                    self.session,
-                    surface.ui(),
-                ),
-                args,
-            )
-            .map(Some),
+            Commands::Config(args) => {
+                config_cmd::run_config_command(self.runtime, self.session, surface.ui(), args)
+                    .map(Some)
+            }
+            Commands::Alias(args) => {
+                config_cmd::run_alias_command(self.runtime, self.session, surface.ui(), args)
+                    .map(Some)
+            }
             Commands::Notifications(_) => {
                 crate::repl::notices::request_foreground_bell(
                     self.runtime.config.resolved(),
@@ -181,15 +168,7 @@ impl<'a> BuiltinExecutor<'a> {
         surface: BuiltinSurface<'_>,
         args: IntroArgs,
     ) -> Result<CommandOutput> {
-        intro_cmd::run_intro_command(
-            intro_cmd::IntroCommandContext::from_parts(
-                self.runtime,
-                self.session,
-                self.clients,
-                surface.ui(),
-            ),
-            args,
-        )
+        intro_cmd::run_intro_command(self.runtime, self.session, self.clients, surface.ui(), args)
     }
 
     fn run_repl_debug_command(

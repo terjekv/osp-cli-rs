@@ -51,16 +51,10 @@ fn repl_flag_prefixed_help_records_prompt_timing_badge_unit() {
     let mut state = make_test_state(Vec::new());
     let history = make_test_history(&mut state);
 
-    let rendered = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "-ddd help config",
-        None,
-    )
-    .map(|executed| executed.result)
-    .expect("flag-prefixed help should render successfully");
+    let rendered =
+        repl_dispatch::execute_repl_plugin_line(&mut state, &history, "-ddd help config", None)
+            .map(|executed| executed.result)
+            .expect("flag-prefixed help should render successfully");
 
     match rendered {
         crate::repl::ReplResult::Print(text) => {

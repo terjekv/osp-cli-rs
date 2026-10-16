@@ -7,9 +7,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
     let original_debug = state.runtime.ui.debug_level;
 
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "-q config get missing.key", None,).map(|executed| executed.result)
     .expect("quiet config get should complete");
@@ -18,9 +16,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
     assert_eq!(state.runtime.ui.debug_level, original_debug);
 
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "-v doctor last", None,).map(|executed| executed.result)
     .expect("doctor last with verbosity override should complete");
@@ -35,9 +31,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
     let history = make_test_history(&mut state);
 
     let root_exit = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "exit", None,).map(|executed| executed.result)
     .expect("root exit should be handled by host dispatch");
@@ -45,9 +39,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
 
     state.session.scope.enter("orch");
     let shell_exit = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "exit", None,).map(|executed| executed.result)
     .expect("shell exit should leave the current shell");
@@ -71,9 +63,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "missing", Some(&mut sink),)
     .expect("failure should render through the sink");
@@ -89,31 +79,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
 
     state.runtime.ui.render_settings.format = OutputFormat::Json;
     let rendered = doctor_cmd::run_doctor_command(
-        doctor_cmd::DoctorCommandContext {
-            config: crate::cli::commands::config::ConfigReadContext {
-                context: &state.runtime.context,
-                config: state.runtime.config.resolved(),
-                ui: &state.runtime.ui,
-                themes: &state.runtime.themes,
-                config_overrides: &state.session.config_overrides,
-                product_defaults: state.runtime.product_defaults(),
-                runtime_load: state.runtime.launch.runtime_load,
-            },
-            plugins: crate::cli::commands::plugins::PluginsCommandContext {
-                context: &state.runtime.context,
-                config: state.runtime.config.resolved(),
-                config_state: Some(&state.runtime.config),
-                auth: &state.runtime.auth,
-                clients: Some(&state.clients),
-                plugin_manager: state.clients.plugins(),
-                product_defaults: state.runtime.product_defaults(),
-                runtime_load: state.runtime.launch.runtime_load,
-            },
-            ui: &state.runtime.ui,
-            auth: &state.runtime.auth,
-            themes: &state.runtime.themes,
-            last_failure: state.session.last_failure.as_ref(),
-        },
+        &state.runtime, &state.session, &state.clients, &state.runtime.ui,
         crate::cli::DoctorArgs {
             command: Some(crate::cli::DoctorCommands::Last),
         },
@@ -176,9 +142,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     let history = make_test_history(&mut state);
 
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "cache first", None,).map(|executed| executed.result)
     .expect("seed command should succeed");
@@ -187,9 +151,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         .expect("history lock should be available")
         .expect("history seed should save");
     let expanded = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "!!", None,).map(|executed| executed.result)
     .expect("bang expansion should succeed");
@@ -232,9 +194,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     let history = make_test_history(&mut state);
 
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "cache alpha", None,).map(|executed| executed.result)
     .expect("first seed command should succeed");
@@ -243,9 +203,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         .expect("history lock should be available")
         .expect("history seed should save");
     repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "cache beta", None,).map(|executed| executed.result)
     .expect("second seed command should succeed");
@@ -254,9 +212,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         .expect("history lock should be available")
         .expect("history seed should save");
     let expanded = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "!?alpha", None,).map(|executed| executed.result)
     .expect("contains bang expansion should succeed");
@@ -286,9 +242,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
         .expect("scoped history seed should save");
 
     let scoped_hit = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "!?status", None,).map(|executed| executed.result)
     .expect("scoped bang search should succeed");
@@ -298,9 +252,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
     }
 
     let scoped_miss = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
         "!?config", None,).map(|executed| executed.result)
     .expect("cross-shell bang miss should render feedback");

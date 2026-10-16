@@ -9,8 +9,8 @@ use std::cell::RefCell;
 
 use miette::{Result, WrapErr, miette};
 
-use crate::app::{AppClients, AppRuntime, AppSession};
-use crate::app::{RuntimeContext, TerminalKind, UiState};
+use crate::app::{AppRuntime, AppSession};
+use crate::app::{TerminalKind, UiState};
 use crate::cli::Commands;
 use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_command_tokens};
 use crate::cli::pipeline::{ParsedCommandLine, parse_command_tokens_with_aliases};
@@ -19,7 +19,6 @@ use crate::native::{
     InvocationElevation, NativeCommandContext, NativeCommandOutcome, NativeProgressEvent,
     NativeProgressSink, NativeSessionContext,
 };
-use crate::plugin::PluginManager;
 use crate::repl::completion;
 use crate::repl::is_repl_shellable_command;
 
@@ -34,26 +33,6 @@ use super::{
     plugin_dispatch_context_for, run_inline_builtin_command, run_progress_command_with_ui,
     runtime_hints_for_invocation,
 };
-
-pub(super) struct ExternalCommandRuntime<'a> {
-    pub(super) context: &'a RuntimeContext,
-    pub(super) config_state: &'a crate::app::ConfigState,
-    pub(super) ui: &'a UiState,
-    pub(super) clients: &'a AppClients,
-    pub(super) plugins: &'a PluginManager,
-}
-
-impl<'a> ExternalCommandRuntime<'a> {
-    pub(super) fn from_parts(runtime: &'a AppRuntime, clients: &'a AppClients) -> Self {
-        Self {
-            context: &runtime.context,
-            config_state: &runtime.config,
-            ui: &runtime.ui,
-            clients,
-            plugins: clients.plugins(),
-        }
-    }
-}
 
 struct ParsedExternalInvocation {
     tokens: Vec<String>,
@@ -75,19 +54,17 @@ impl ParsedExternalInvocation {
 
 enum ExternalParse {
     Handled(Box<CommandOutput>),
-    Invocation(ParsedExternalInvocation),
+    Invocation(Box<ParsedExternalInvocation>),
 }
 
 pub(super) fn run_external_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     tokens: &[String],
     options: &InvocationOptions,
     invocation: &mut ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
-    let expanded = expand_external_tokens(runtime, tokens);
+    let expanded = expand_external_tokens(&state.runtime, tokens);
     // Report expansion failures during dispatch, with the same command context
     // as the REPL. Invocation conflicts still fail before inline parsing.
     let scanned = match &expanded {
@@ -99,21 +76,28 @@ pub(super) fn run_external_command(
     {
         let mut options = options.clone();
         options.merge(scanned.invocation.clone())?;
-        *invocation =
-            super::resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
+        *invocation = super::resolve_invocation_ui(
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
+            &options,
+        );
     }
     let parsed = expanded
         .and_then(|(mut parsed, elevation)| {
             if let Some(scanned) = scanned {
                 parsed.tokens = scanned.tokens;
             }
-            plan_external_invocation(runtime, session, parsed, elevation, invocation)
+            plan_external_invocation(
+                &state.runtime,
+                &state.session,
+                parsed,
+                elevation,
+                invocation,
+            )
         })
         .wrap_err_with(|| external_parse_context(tokens))?;
     let result = dispatch_external_invocation(
-        runtime,
-        session,
-        clients,
+        state,
         parsed,
         invocation,
         |stdout| {
@@ -124,35 +108,28 @@ pub(super) fn run_external_command(
         Some(sink),
         None,
     )?;
-    super::run_cli_command(runtime.config.resolved(), &invocation.ui, &result, sink)
+    super::run_cli_command(
+        state.runtime.config.resolved(),
+        &invocation.ui,
+        &result,
+        sink,
+    )
 }
 
 pub(crate) fn run_external_command_with_help_renderer(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     tokens: &[String],
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
 ) -> Result<CommandOutput> {
-    let parsed = parse_external_invocation(runtime, session, tokens, invocation, &[])?;
-    dispatch_external_invocation(
-        runtime,
-        session,
-        clients,
-        parsed,
-        invocation,
-        guide_help,
-        progress_sink,
-        None,
-    )
+    let parsed =
+        parse_external_invocation(&state.runtime, &state.session, tokens, invocation, &[])?;
+    dispatch_external_invocation(state, parsed, invocation, guide_help, progress_sink, None)
 }
 
 pub(crate) fn run_external_command_for_repl(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> Document,
@@ -160,16 +137,14 @@ pub(crate) fn run_external_command_for_repl(
     accepted: &mut bool,
 ) -> Result<CommandOutput> {
     let parsed = parse_external_invocation(
-        runtime,
-        session,
+        &state.runtime,
+        &state.session,
         &command.tokens,
         invocation,
         &command.stages,
     )?;
     dispatch_external_invocation(
-        runtime,
-        session,
-        clients,
+        state,
         parsed,
         invocation,
         guide_help,
@@ -179,9 +154,7 @@ pub(crate) fn run_external_command_for_repl(
 }
 
 fn dispatch_external_invocation(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     parsed: ExternalParse,
     invocation: &ResolvedInvocation,
     guide_help: impl Fn(&str) -> Document,
@@ -211,9 +184,9 @@ fn dispatch_external_invocation(
             mark_repl_command_accepted(&mut accepted);
         }
         if let Some(result) = run_inline_builtin_command(
-            runtime,
-            session,
-            clients,
+            &mut state.runtime,
+            &mut state.session,
+            &state.clients,
             Some(invocation),
             command,
             &parsed.stages,
@@ -230,29 +203,34 @@ fn dispatch_external_invocation(
         .tokens
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
-    let command = canonical_external_command_name(&runtime.auth, clients, command)?;
+    let command = canonical_external_command_name(&state.runtime.auth, &state.clients, command)?;
     let result = match resolve_external_command_source(
-        &runtime.auth,
-        clients,
+        &state.runtime.auth,
+        &state.clients,
         &command,
         invocation.plugin_provider.as_deref(),
         &invocation.ui.render_settings.runtime.command_scope,
     )? {
         ExternalCommandSource::Native => {
-            let native_command = clients
+            let native_command = state
+                .clients
                 .native_commands()
                 .command(&command)
+                .cloned()
                 .ok_or_else(|| miette!("no native command provides `{command}`"))?;
             run_native_invocation(
                 native_command.as_ref(),
-                runtime,
-                session,
-                &command,
-                args,
-                &parsed,
-                invocation,
+                state,
+                NativeRunInput {
+                    args,
+                    action: None,
+                    stages: &parsed.stages,
+                    invocation,
+                    command_path: command.clone(),
+                    elevation: parsed.elevation,
+                    progress_sink,
+                },
                 guide_help,
-                progress_sink,
                 &mut accepted,
             )
         }
@@ -263,9 +241,7 @@ fn dispatch_external_invocation(
                 ));
             }
             run_external_plugin_command(
-                runtime,
-                session,
-                clients,
+                state,
                 &command,
                 &parsed,
                 invocation,
@@ -393,17 +369,15 @@ fn refresh_native_parse(
 
 fn run_native_invocation(
     command: &dyn crate::native::NativeCommand,
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    name: &str,
-    args: &[String],
-    invocation_args: &ParsedExternalInvocation,
-    invocation: &ResolvedInvocation,
+    state: &mut crate::app::AppState,
+    input: NativeRunInput<'_, '_, '_, '_>,
     guide_help: impl Fn(&str) -> Document,
-    progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CommandOutput> {
-    if invocation_args.elevation.is_elevated() && !command.supports_invocation_elevation() {
+    let name = input.command_path.as_str();
+    let args = input.args;
+    let invocation = input.invocation;
+    if input.elevation.is_elevated() && !command.supports_invocation_elevation() {
         return Err(miette!(
             "elevation prefix is unsupported for native command `{name}`"
         ));
@@ -411,21 +385,26 @@ fn run_native_invocation(
     let input_path = crate::command_policy::CommandPath::new(
         std::iter::once(name.to_string()).chain(args.iter().cloned()),
     );
-    before_external_dispatch(runtime, &input_path, "command")?;
+    before_external_dispatch(&mut state.runtime, &input_path, "command")?;
     let parsed = NativeParse::new(command, name, args)?;
     let intent = NativeIntent::from_parse(&parsed);
-    before_external_execution(runtime, &parsed.path, intent.requirement, "command")?;
+    before_external_execution(
+        &mut state.runtime,
+        &parsed.path,
+        intent.requirement,
+        "command",
+    )?;
     let parsed = refresh_native_parse(
         command,
-        &session.native_context,
+        &state.session.native_context,
         args,
-        runtime.config.resolved(),
+        state.runtime.config.resolved(),
         parsed,
         &intent,
         &invocation.ui.render_settings.runtime.command_scope,
     )?;
-    runtime.auth.refresh_native_auth(&command.describe());
-    ensure_external_access(runtime, &parsed.path, intent.requirement, "command")?;
+    state.runtime.auth.refresh_native_auth(&command.describe());
+    ensure_external_access(&state.runtime, &parsed.path, intent.requirement, "command")?;
 
     if intent.render_help || parsed.render_help {
         mark_repl_command_accepted(accepted);
@@ -438,7 +417,7 @@ fn run_native_invocation(
             .chain(parsed.args.iter().cloned())
             .collect::<Vec<_>>();
         let (document, _, _) = crate::cli::command_help_document(
-            runtime.auth.visible_help_command(parsed.grammar, &[]),
+            state.runtime.auth.visible_help_command(parsed.grammar, &[]),
             &tokens,
             &invocation.ui.render_settings.runtime.command_scope,
         );
@@ -463,16 +442,16 @@ fn run_native_invocation(
     mark_repl_command_accepted(accepted);
     run_native_command(
         command,
-        runtime,
-        session,
+        &mut state.runtime,
+        &mut state.session,
         NativeRunInput {
             args: &parsed.args,
             action: None,
-            stages: &invocation_args.stages,
+            stages: input.stages,
             invocation,
             command_path: parsed.path.as_slice().join(" "),
-            elevation: invocation_args.elevation,
-            progress_sink,
+            elevation: input.elevation,
+            progress_sink: input.progress_sink,
         },
         guide_help,
         accepted,
@@ -536,29 +515,28 @@ fn native_resolved_path(
 }
 
 pub(crate) fn run_repl_action(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     id: &str,
 ) -> Result<crate::repl::ReplResult> {
     let invocation = super::resolve_invocation_ui(
-        runtime.config.resolved(),
-        &runtime.ui,
+        state.runtime.config.resolved(),
+        &state.runtime.ui,
         &crate::cli::invocation::InvocationOptions::default(),
     );
-    for entry in clients.native_commands().catalog() {
-        if !runtime
+    for entry in state.clients.native_commands().catalog() {
+        if !state
+            .runtime
             .auth
             .external_command_access(&entry.name)
             .is_visible()
         {
             continue;
         }
-        let Some(command) = clients.native_commands().command(&entry.name) else {
+        let Some(command) = state.clients.native_commands().command(&entry.name) else {
             continue;
         };
         if command
-            .repl_actions(runtime.config.resolved())
+            .repl_actions(state.runtime.config.resolved())
             .map_err(|e| miette!("{e:#}"))?
             .iter()
             .any(|action| action.id == id && action.key.is_some())
@@ -566,8 +544,8 @@ pub(crate) fn run_repl_action(
             let mut sink = super::sink::StdIoUiSink;
             let result = run_native_command(
                 command.as_ref(),
-                runtime,
-                session,
+                &mut state.runtime,
+                &mut state.session,
                 NativeRunInput {
                     args: &[],
                     action: Some(id),
@@ -581,7 +559,7 @@ pub(crate) fn run_repl_action(
                 &mut None,
             )?;
             super::run_cli_command(
-                runtime.config.resolved(),
+                state.runtime.config.resolved(),
                 &invocation.ui,
                 &result,
                 &mut sink,
@@ -907,17 +885,19 @@ fn plan_external_invocation(
         }
     };
 
-    Ok(ExternalParse::Invocation(ParsedExternalInvocation {
-        tokens: rewrite_shellable_root_help_tokens(
-            parsed.tokens,
-            runtime.config.resolved(),
-            invocation.plugin_provider.as_deref(),
-        ),
-        stages: parsed.stages,
-        apply_output_stages,
-        inline_command,
-        elevation,
-    }))
+    Ok(ExternalParse::Invocation(Box::new(
+        ParsedExternalInvocation {
+            tokens: rewrite_shellable_root_help_tokens(
+                parsed.tokens,
+                runtime.config.resolved(),
+                invocation.plugin_provider.as_deref(),
+            ),
+            stages: parsed.stages,
+            apply_output_stages,
+            inline_command,
+            elevation,
+        },
+    )))
 }
 
 fn parse_invocation_elevation(tokens: &[String]) -> Result<(Vec<String>, InvocationElevation)> {
@@ -952,9 +932,7 @@ fn rewrite_shellable_root_help_tokens(
 }
 
 fn run_external_plugin_command(
-    runtime_state: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: &str,
     parsed: &ParsedExternalInvocation,
     invocation: &ResolvedInvocation,
@@ -965,7 +943,8 @@ fn run_external_plugin_command(
         .tokens
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
-    let (path, dispatch_auth, help_requested) = clients
+    let (path, dispatch_auth, help_requested) = state
+        .clients
         .plugins()
         .resolved_command_path_and_auth(command, args, invocation.plugin_provider.as_deref())
         .map_err(|error| miette!(error.to_string()))?;
@@ -975,11 +954,15 @@ fn run_external_plugin_command(
     } else {
         ExternalPathAccessRequirement::Runnable
     };
-    let passive_auth = runtime_state.auth.replace_command_auth(dispatch_auth);
+    let passive_auth = state.runtime.auth.replace_command_auth(dispatch_auth);
     let result = (|| {
-        before_external_run(runtime_state, &path, access_requirement, "plugin command")?;
-        ensure_external_access(runtime_state, &path, access_requirement, "plugin command")?;
-        let runtime = ExternalCommandRuntime::from_parts(runtime_state, clients);
+        before_external_run(
+            &mut state.runtime,
+            &path,
+            access_requirement,
+            "plugin command",
+        )?;
+        ensure_external_access(&state.runtime, &path, access_requirement, "plugin command")?;
 
         tracing::info!(
             command = %path.as_slice().join(" "),
@@ -987,14 +970,17 @@ fn run_external_plugin_command(
         );
 
         if access_requirement == ExternalPathAccessRequirement::Visible {
-            let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-            let raw = runtime
-                .plugins
+            let dispatch_context =
+                plugin_dispatch_context_for(&state.runtime, &state.clients, Some(invocation));
+            let raw = state
+                .clients
+                .plugins()
                 .dispatch_passthrough(command, args, &dispatch_context)
                 .map_err(enrich_dispatch_error)?;
             let mut result = if !raw.stdout.is_empty() {
                 let mut document = guide_help(&raw.stdout);
-                runtime_state
+                state
+                    .runtime
                     .auth
                     .filter_help_document(&mut document, path.as_slice());
                 CommandOutput::document(document)
@@ -1008,16 +994,19 @@ fn run_external_plugin_command(
             return Ok(result);
         }
 
-        let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-        let response = runtime
-            .plugins
+        let dispatch_context =
+            plugin_dispatch_context_for(&state.runtime, &state.clients, Some(invocation));
+        let response = state
+            .clients
+            .plugins()
             .dispatch(command, args, &dispatch_context)
             .map_err(enrich_dispatch_error)?;
 
         if response.ok
             && let Some(entries) = response.context.as_ref()
         {
-            let context = session
+            let context = state
+                .session
                 .native_context
                 .for_command(path.as_slice().join(" "));
             for (kind, value) in entries {
@@ -1027,7 +1016,7 @@ fn run_external_plugin_command(
 
         cli_result_from_plugin_response(response, &parsed.stages)
     })();
-    runtime_state.auth.replace_command_auth(passive_auth);
+    state.runtime.auth.replace_command_auth(passive_auth);
     result
 }
 
@@ -1255,7 +1244,7 @@ mod tests {
 
     fn make_test_state_with_registry(
         native_commands: NativeCommandRegistry,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    ) -> crate::app::AppState {
         make_test_state_with_parts(
             PluginManager::new(Vec::new())
                 .with_bundled_roots(false)
@@ -1267,7 +1256,7 @@ mod tests {
     fn make_test_state_with_parts(
         plugins: PluginManager,
         native_commands: NativeCommandRegistry,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    ) -> crate::app::AppState {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
@@ -1293,12 +1282,14 @@ mod tests {
         );
         let session = AppSession::default();
         let clients = AppClients::new(plugins, native_commands);
-        (runtime, session, clients)
+        crate::app::AppState {
+            runtime,
+            session,
+            clients,
+        }
     }
 
-    fn make_test_state_with_native(
-        kind: Option<NativeOutcomeKind>,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    fn make_test_state_with_native(kind: Option<NativeOutcomeKind>) -> crate::app::AppState {
         make_test_state_with_registry(
             kind.map(|kind| NativeCommandRegistry::new().with_command(TestNativeCommand { kind }))
                 .unwrap_or_default(),
@@ -1429,19 +1420,20 @@ JSON
 
     #[test]
     fn external_builtin_help_passthrough_is_handled_unit() {
-        let (runtime, session, _) = make_test_state_with_native(None);
+        let state = make_test_state_with_native(None);
         let tokens = ["config", "--help"]
             .into_iter()
             .map(str::to_string)
             .collect::<Vec<_>>();
 
         let invocation = crate::app::resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &Default::default(),
         );
-        let parsed = parse_external_invocation(&runtime, &session, &tokens, &invocation, &[])
-            .expect("help should parse");
+        let parsed =
+            parse_external_invocation(&state.runtime, &state.session, &tokens, &invocation, &[])
+                .expect("help should parse");
         assert!(matches!(
             parsed,
             ExternalParse::Handled(result) if matches!(*result, CommandOutput {
@@ -1522,16 +1514,14 @@ JSON
             NativeOutcomeKind::Response,
             NativeOutcomeKind::ResponseWithExit,
         ] {
-            let (mut runtime, mut session, clients) = make_test_state_with_native(Some(kind));
+            let mut state = make_test_state_with_native(Some(kind));
             let invocation = resolve_invocation_ui(
-                runtime.config.resolved(),
-                &runtime.ui,
+                state.runtime.config.resolved(),
+                &state.runtime.ui,
                 &InvocationOptions::default(),
             );
             let result = run_external_command_with_help_renderer(
-                &mut runtime,
-                &mut session,
-                &clients,
+                &mut state,
                 &["ldap".to_string(), "user".to_string()],
                 &invocation,
                 |text| Document::from_help_text(&format!("HELP::{text}")),
@@ -1567,20 +1557,18 @@ JSON
 
     #[test]
     fn external_native_progress_renders_to_stderr_without_corrupting_final_output_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(ProgressNativeCommand),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let mut sink = BufferedUiSink::default();
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["progress".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1596,19 +1584,18 @@ JSON
 
     #[test]
     fn external_native_command_receives_invocation_verbosity_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(VerbosityNativeCommand),
         );
         let options = InvocationOptions {
             verbose: 1,
             ..InvocationOptions::default()
         };
-        let invocation = resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
+        let invocation =
+            resolve_invocation_ui(state.runtime.config.resolved(), &state.runtime.ui, &options);
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["verbosity".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1628,17 +1615,14 @@ JSON
 
     #[test]
     fn external_bare_shellable_root_rewrites_to_help_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string()],
             &invocation,
             |text| Document::from_help_text(&format!("HELP::{text}")),
@@ -1656,17 +1640,14 @@ JSON
 
     #[test]
     fn external_dispatch_matches_native_commands_case_insensitively_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["LDAP".to_string()],
             &invocation,
             |text| Document::from_help_text(&format!("HELP::{text}")),
@@ -1684,17 +1665,14 @@ JSON
 
     #[test]
     fn external_dispatch_suggests_nearby_native_command_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["lpad".to_string(), "user".to_string(), "oistes".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1708,19 +1686,17 @@ JSON
 
     #[test]
     fn external_dispatch_enforces_nested_native_command_auth_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
 
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &[
                 "ldap".to_string(),
                 "--format".to_string(),
@@ -1741,19 +1717,17 @@ JSON
 
     #[test]
     fn native_path_uses_clap_canonical_subcommand_for_aliases_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(AliasedNestedAuthNativeCommand),
         );
 
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["lookup".to_string(), "u".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1767,19 +1741,17 @@ JSON
 
     #[test]
     fn external_native_help_requires_visibility_but_not_runnability_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string(), "help".to_string(), "user".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1790,9 +1762,7 @@ JSON
         assert!(!matches!(result.body, crate::app::CommandBody::None));
 
         let denied = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string(), "user".to_string(), "alice".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1816,19 +1786,19 @@ JSON
                 }
             }
         }
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
-        runtime.set_access_policy(Some(std::sync::Arc::new(ProductAccess)));
+        state
+            .runtime
+            .set_access_policy(Some(std::sync::Arc::new(ProductAccess)));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let error = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".into(), "user".into(), "--help".into()],
             &invocation,
             Document::from_help_text,
@@ -1847,22 +1817,20 @@ JSON
         fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
         write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
 
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
+        let mut state = make_test_state_with_parts(
             PluginManager::new(vec![plugins_dir]),
             NativeCommandRegistry::new().with_command(TestNativeCommand {
                 kind: NativeOutcomeKind::Response,
             }),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
 
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1884,20 +1852,18 @@ JSON
         write_provider_test_plugin(&plugins_dir, "alpha", "shared");
         write_provider_test_plugin(&plugins_dir, "beta", "shared");
 
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
+        let mut state = make_test_state_with_parts(
             PluginManager::new(vec![plugins_dir]),
             NativeCommandRegistry::default(),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
 
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["shared".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1918,15 +1884,15 @@ JSON
         fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
         write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
 
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
+        let mut state = make_test_state_with_parts(
             PluginManager::new(vec![plugins_dir]),
             NativeCommandRegistry::new().with_command(TestNativeCommand {
                 kind: NativeOutcomeKind::Response,
             }),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions {
                 plugin_provider: Some("alpha".to_string()),
                 ..InvocationOptions::default()
@@ -1934,9 +1900,7 @@ JSON
         );
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string()],
             &invocation,
             Document::from_help_text,
@@ -1963,20 +1927,18 @@ JSON
         fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
         write_provider_test_plugin(&plugins_dir, "alpha", "shared");
 
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
+        let mut state = make_test_state_with_parts(
             PluginManager::new(vec![plugins_dir]),
             NativeCommandRegistry::default(),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["SHARED".to_string()],
             &invocation,
             Document::from_help_text,

@@ -40,9 +40,7 @@ pub(crate) use super::dispatch::{
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
 pub(crate) use super::timing::{TimingSummary, format_timing_badge};
-pub(crate) use crate::plugin::config::{
-    PluginConfigEntry, PluginConfigScope, plugin_config_entries,
-};
+pub(crate) use crate::plugin::config::{PluginConfigEntry, PluginConfigScope};
 #[cfg(test)]
 pub(crate) use crate::plugin::config::{
     collect_plugin_config_env, config_value_to_plugin_env, plugin_config_env_name,
@@ -527,15 +525,9 @@ fn run(
                 state.runtime.ui = invocation_ui.ui.clone();
                 repl::run_plugin_repl(&mut state)
             }
-            RunAction::External(tokens) => run_external_command(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
-                &tokens,
-                &invocation,
-                &mut invocation_ui,
-                sink,
-            ),
+            RunAction::External(tokens) => {
+                run_external_command(&mut state, &tokens, &invocation, &mut invocation_ui, sink)
+            }
             RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
                 &mut state.runtime,
                 &mut state.session,

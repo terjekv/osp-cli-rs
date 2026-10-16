@@ -242,9 +242,7 @@ fn external_plugin_dispatch_warns_when_config_env_collides_unit() {
         &crate::cli::invocation::InvocationOptions::default(),
     );
     let result = crate::app::run_external_command_with_help_renderer(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &["cfg".to_string()],
         &invocation,
         crate::core::document::Document::from_help_text,

@@ -8,7 +8,7 @@ use crate::app::dispatch::{
     resolve_external_command_source,
 };
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession, CommandOutput};
+use crate::app::{AppRuntime, AppSession, CommandOutput};
 use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::scan_command_tokens;
 use crate::repl::{input, lifecycle, presentation};
@@ -64,9 +64,7 @@ pub(super) fn classify_repl_shortcut(
 }
 
 pub(super) fn execute_repl_shortcut(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     parsed: &input::ReplParsedLine,
     shortcut: ReplShortcutPlan,
     line: &str,
@@ -74,22 +72,15 @@ pub(super) fn execute_repl_shortcut(
 ) -> Result<ReplResult> {
     match shortcut {
         ReplShortcutPlan::Help { invocation } => {
-            repl_help_result(runtime, session, clients, parsed, &invocation, line, sink)
+            repl_help_result(state, parsed, &invocation, line, sink)
         }
         ReplShortcutPlan::CurrentShellHelp {
             command,
             invocation,
             warn_on_repeat,
         } => {
-            let mut rendered = render_repl_help_for_scope(
-                runtime,
-                session,
-                clients,
-                &invocation,
-                line,
-                &parsed.stages,
-                sink,
-            )?;
+            let mut rendered =
+                render_repl_help_for_scope(state, &invocation, line, &parsed.stages, sink)?;
             if warn_on_repeat {
                 rendered = format!("{}{}", repeated_shell_root_help_warning(&command), rendered);
             }
@@ -99,7 +90,7 @@ pub(super) fn execute_repl_shortcut(
             command,
             invocation,
         } => {
-            let entered = enter_repl_shell(runtime, session, clients, &command, &invocation, sink)?;
+            let entered = enter_repl_shell(state, &command, &invocation, sink)?;
             Ok(ReplResult::Restart {
                 output: entered,
                 reload: ReplReloadKind::Default,
@@ -165,18 +156,14 @@ If you meant help explicitly, use `help {command}` or `{command} --help`.\n\n"
 }
 
 fn repl_help_result(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     parsed: &input::ReplParsedLine,
     invocation: &ResolvedInvocation,
     line: &str,
     sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
     Ok(ReplResult::Print(render_repl_help_for_scope(
-        runtime,
-        session,
-        clients,
+        state,
         invocation,
         line,
         &parsed.stages,
@@ -217,34 +204,32 @@ fn render_repl_shell_leave_message(frame: &crate::app::ReplScopeFrame) -> String
 }
 
 pub(super) fn enter_repl_shell(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: &str,
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
     let path = crate::command_policy::CommandPath::new([command]);
     before_external_run(
-        runtime,
+        &mut state.runtime,
         &path,
         ExternalPathAccessRequirement::Runnable,
         "command",
     )?;
     ensure_external_access(
-        runtime,
+        &state.runtime,
         &path,
         ExternalPathAccessRequirement::Runnable,
         "command",
     )?;
     let catalog = app::authorized_command_catalog_for(
-        &runtime.auth,
-        clients,
-        clients.native_commands().catalog(),
+        &state.runtime.auth,
+        &state.clients,
+        state.clients.native_commands().catalog(),
     );
     resolve_external_command_source(
-        &runtime.auth,
-        clients,
+        &state.runtime.auth,
+        &state.clients,
         command,
         invocation.plugin_provider.as_deref(),
         &invocation.ui.render_settings.runtime.command_scope,
@@ -256,19 +241,18 @@ pub(super) fn enter_repl_shell(
     )?;
 
     // Shells are root commands: entering one switches from the current shell.
-    let mut out = session
+    let mut out = state
+        .session
         .scope
         .commands()
         .last()
         .map(|current| format!("Leaving {current} shell. "))
         .unwrap_or_default();
-    session.enter_repl_scope(command.to_string());
+    state.session.enter_repl_scope(command.to_string());
     out.push_str(&format!(
         "Entering {command} shell. Type `exit` to leave.\n"
     ));
-    if let Ok(help) =
-        render_repl_help_for_scope(runtime, session, clients, invocation, "", &[], sink)
-    {
+    if let Ok(help) = render_repl_help_for_scope(state, invocation, "", &[], sink) {
         out.push_str(&help);
     }
     Ok(out)
@@ -299,42 +283,43 @@ fn ensure_shell_entry_dispatchable(
 }
 
 pub(super) fn render_repl_help_for_scope(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     invocation: &ResolvedInvocation,
     line: &str,
     stages: &[String],
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    let result = repl_help_command_result_for_scope(runtime, session, clients, invocation)?;
+    let result = repl_help_command_result_for_scope(state, invocation)?;
     super::command::render_repl_command_output(
-        runtime, session, line, stages, result, invocation, sink,
+        &state.runtime,
+        &mut state.session,
+        line,
+        stages,
+        result,
+        invocation,
+        sink,
     )
 }
 
 #[cfg(test)]
 pub(super) fn repl_help_for_scope(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     invocation: &ResolvedInvocation,
 ) -> Result<String> {
     let mut sink = crate::app::sink::BufferedUiSink::default();
-    render_repl_help_for_scope(runtime, session, clients, invocation, "", &[], &mut sink)
+    render_repl_help_for_scope(state, invocation, "", &[], &mut sink)
 }
 
 fn repl_help_command_result_for_scope(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     invocation: &ResolvedInvocation,
 ) -> Result<CommandOutput> {
-    if session.scope.is_root() {
-        let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
+    if state.session.scope.is_root() {
+        let prepared =
+            lifecycle::prepare_repl_surface_state(&state.runtime, &state.session, &state.clients)?;
         let mut document =
             presentation::build_repl_help_view(&prepared.surface, invocation.help_level);
-        let actions = lifecycle::resolved_product_actions(runtime, clients)?;
+        let actions = lifecycle::resolved_product_actions(&state.runtime, &state.clients)?;
         for action in actions {
             if let Some(key) = action.key {
                 document
@@ -350,8 +335,8 @@ fn repl_help_command_result_for_scope(
         ));
     }
 
-    let tokens = session.scope.help_tokens();
-    run_repl_external_command(runtime, clients, session, tokens, invocation)
+    let tokens = state.session.scope.help_tokens();
+    run_repl_external_command(state, tokens, invocation)
 }
 
 #[cfg(test)]
@@ -455,9 +440,9 @@ mod tests {
 
         crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config: config,
+            config,
             launch: LaunchContext::default(),
-            native_commands: native_commands,
+            native_commands,
             ui: crate::app::UiState::new(
                 RenderSettings::test_plain(OutputFormat::Json),
                 MessageLevel::Success,
@@ -530,16 +515,8 @@ JSON
         let shortcut = classify_repl_shortcut(&state.runtime, &state.session, &parsed, &invocation)
             .expect("help shortcut should classify")
             .expect("help shortcut should exist");
-        let rendered = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &parsed,
-            shortcut,
-            line,
-            &mut sink,
-        )
-        .expect("help shortcut should succeed");
+        let rendered = execute_repl_shortcut(state, &parsed, shortcut, line, &mut sink)
+            .expect("help shortcut should succeed");
 
         match rendered {
             ReplResult::Print(text) => text,
@@ -558,15 +535,8 @@ JSON
         });
         let hint = |state: &mut AppState, line: &str| {
             let mut sink = BufferedUiSink::default();
-            crate::repl::dispatch::execute_repl_plugin_line(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
-                &history,
-                line,
-                Some(&mut sink),
-            )
-            .expect("dispatch should render the usage error");
+            crate::repl::dispatch::execute_repl_plugin_line(state, &history, line, Some(&mut sink))
+                .expect("dispatch should render the usage error");
             let output: serde_json::Value = serde_json::from_str(&sink.stdout).unwrap();
             output["error"]["message"].as_str().unwrap().to_string()
         };
@@ -579,13 +549,7 @@ JSON
     fn shell_helpers_cover_prefix_exit_and_root_help_unit() {
         let mut state = app_state();
         let invocation = base_repl_invocation(&state.runtime);
-        let help = repl_help_for_scope(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &invocation,
-        )
-        .expect("root help should render");
+        let help = repl_help_for_scope(&mut state, &invocation).expect("root help should render");
         assert!(help.contains("help") || help.contains("config"));
 
         assert_eq!(
@@ -626,9 +590,7 @@ JSON
         assert!(matches!(help_shortcut, ReplShortcutPlan::Help { .. }));
         assert!(matches!(
             execute_repl_shortcut(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &help,
                 help_shortcut,
                 "--help",
@@ -656,28 +618,14 @@ JSON
             shell_shortcut,
             ReplShortcutPlan::ShellEntry { .. }
         ));
-        let err = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &shell_entry,
-            shell_shortcut,
-            "ldap",
-            &mut sink,
-        )
-        .expect_err("missing plugin should reject shell entry");
+        let err =
+            execute_repl_shortcut(&mut state, &shell_entry, shell_shortcut, "ldap", &mut sink)
+                .expect_err("missing plugin should reject shell entry");
         assert!(err.to_string().contains("ldap"));
 
         let mut sink = BufferedUiSink::default();
-        let err = enter_repl_shell(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            "ldap",
-            &invocation,
-            &mut sink,
-        )
-        .expect_err("direct shell entry should also fail");
+        let err = enter_repl_shell(&mut state, "ldap", &invocation, &mut sink)
+            .expect_err("direct shell entry should also fail");
         assert!(err.to_string().contains("ldap"));
     }
 
@@ -688,25 +636,13 @@ JSON
         let invocation = base_repl_invocation(&state.runtime);
         let mut sink = BufferedUiSink::default();
 
-        let entered = enter_repl_shell(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            "ldap",
-            &invocation,
-            &mut sink,
-        )
-        .expect("native ldap shell should enter");
+        let entered = enter_repl_shell(&mut state, "ldap", &invocation, &mut sink)
+            .expect("native ldap shell should enter");
         assert!(entered.contains("Entering ldap shell"));
         assert!(state.session.scope.commands().last().is_some());
 
-        let scoped_help = repl_help_for_scope(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &invocation,
-        )
-        .expect("scoped help should render");
+        let scoped_help =
+            repl_help_for_scope(&mut state, &invocation).expect("scoped help should render");
         assert!(scoped_help.contains("Directory lookup"));
         assert!(scoped_help.contains("user"));
     }
@@ -723,16 +659,8 @@ JSON
             .expect("bare command should classify cleanly")
             .expect("bare shellable root should enter shell");
         let mut sink = BufferedUiSink::default();
-        let rendered = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &parsed,
-            shortcut,
-            "ldap",
-            &mut sink,
-        )
-        .expect("bare shellable root should enter shell");
+        let rendered = execute_repl_shortcut(&mut state, &parsed, shortcut, "ldap", &mut sink)
+            .expect("bare shellable root should enter shell");
 
         match rendered {
             ReplResult::Restart {
@@ -756,16 +684,8 @@ JSON
             .expect("repeated shell root should classify")
             .expect("repeated shell root should become help");
         let mut sink = BufferedUiSink::default();
-        let rendered = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &parsed,
-            shortcut,
-            "ldap",
-            &mut sink,
-        )
-        .expect("repeated shell root should render help");
+        let rendered = execute_repl_shortcut(&mut state, &parsed, shortcut, "ldap", &mut sink)
+            .expect("repeated shell root should render help");
 
         match rendered {
             ReplResult::Print(text) => {
@@ -789,16 +709,8 @@ JSON
             .expect("shell root should classify")
             .expect("shell root should remain available");
         let mut sink = BufferedUiSink::default();
-        let rendered = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &parsed,
-            shortcut,
-            "ldap",
-            &mut sink,
-        )
-        .expect("shell root should switch shells");
+        let rendered = execute_repl_shortcut(&mut state, &parsed, shortcut, "ldap", &mut sink)
+            .expect("shell root should switch shells");
 
         match rendered {
             ReplResult::Restart {
@@ -824,15 +736,8 @@ JSON
         let invocation = base_repl_invocation(&state.runtime);
         let mut sink = BufferedUiSink::default();
 
-        let err = enter_repl_shell(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            "hello",
-            &invocation,
-            &mut sink,
-        )
-        .expect_err("ambiguous plugin shell entry should fail");
+        let err = enter_repl_shell(&mut state, "hello", &invocation, &mut sink)
+            .expect_err("ambiguous plugin shell entry should fail");
         assert!(err.to_string().contains("requires provider selection"));
         assert!(state.session.scope.is_root());
 
@@ -853,15 +758,8 @@ JSON
         let invocation = base_repl_invocation(&state.runtime);
         let mut sink = BufferedUiSink::default();
 
-        let err = enter_repl_shell(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            "ldap",
-            &invocation,
-            &mut sink,
-        )
-        .expect_err("native/plugin collision should fail");
+        let err = enter_repl_shell(&mut state, "ldap", &invocation, &mut sink)
+            .expect_err("native/plugin collision should fail");
         assert!(err.to_string().contains("ambiguous across command sources"));
         assert!(state.session.scope.is_root());
 
@@ -878,16 +776,8 @@ JSON
         let shortcut = classify_repl_shortcut(&state.runtime, &state.session, &help, &invocation)
             .expect("staged help shortcut should classify")
             .expect("staged help shortcut should exist");
-        let rendered = execute_repl_shortcut(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &help,
-            shortcut,
-            "help | help",
-            &mut sink,
-        )
-        .expect("staged help shortcut should succeed");
+        let rendered = execute_repl_shortcut(&mut state, &help, shortcut, "help | help", &mut sink)
+            .expect("staged help shortcut should succeed");
 
         assert!(matches!(
             rendered,

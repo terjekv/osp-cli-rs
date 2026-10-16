@@ -28,7 +28,7 @@ fn make_state() -> AppState {
 
     crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config: config,
+        config,
         launch: LaunchContext::default(),
         native_commands: crate::native::NativeCommandRegistry::default(),
         ui: crate::app::UiState::new(

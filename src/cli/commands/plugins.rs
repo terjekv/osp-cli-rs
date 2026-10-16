@@ -5,54 +5,26 @@
 //! projection.
 
 use super::resolve_terminal_selector;
-use crate::app::{AppClients, AppRuntime, AuthState, ConfigState, RuntimeContext};
-use crate::app::{CommandOutput, PluginConfigScope, plugin_config_entries};
+use crate::app::{AppClients, AppRuntime};
+use crate::app::{CommandOutput, PluginConfigScope};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{PluginCommandStateArgs, PluginConfigArgs, PluginsArgs, PluginsCommands};
 use crate::config::{
-    ConfigLayer, ConfigValue, ResolvedConfig, RuntimeConfigPaths, Scope, TomlStoreEditOptions,
-    set_scoped_value_in_toml, unset_scoped_value_in_toml,
+    ConfigValue, RuntimeConfigPaths, Scope, TomlStoreEditOptions, set_scoped_value_in_toml,
+    unset_scoped_value_in_toml,
 };
 use crate::core::plugin::canonical_plugin_command_name;
 use crate::core::row::Row;
 use crate::plugin::config::plugin_config_value_for_display;
-use crate::plugin::{
-    CommandCatalogEntry, DoctorReport, PluginManager, PluginSummary, state::PluginCommandState,
-};
+use crate::plugin::{CommandCatalogEntry, DoctorReport, PluginSummary, state::PluginCommandState};
 use miette::{Result, WrapErr};
 
-#[derive(Clone, Copy)]
-pub(crate) struct PluginsCommandContext<'a> {
-    pub(crate) context: &'a RuntimeContext,
-    pub(crate) config: &'a ResolvedConfig,
-    pub(crate) config_state: Option<&'a ConfigState>,
-    pub(crate) auth: &'a AuthState,
-    pub(crate) clients: Option<&'a AppClients>,
-    pub(crate) plugin_manager: &'a PluginManager,
-    pub(crate) product_defaults: &'a ConfigLayer,
-    pub(crate) runtime_load: crate::config::RuntimeLoadOptions,
-}
-
-impl<'a> PluginsCommandContext<'a> {
-    pub(crate) fn from_parts(runtime: &'a AppRuntime, clients: &'a AppClients) -> Self {
-        Self {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            config_state: Some(&runtime.config),
-            auth: &runtime.auth,
-            clients: Some(clients),
-            plugin_manager: clients.plugins(),
-            product_defaults: runtime.product_defaults(),
-            runtime_load: runtime.launch.runtime_load,
-        }
-    }
-}
-
 pub(crate) fn run_plugins_command(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
+    clients: &AppClients,
     args: PluginsArgs,
 ) -> Result<CommandOutput> {
-    let plugin_manager = context.plugin_manager;
+    let plugin_manager = clients.plugins();
     match args.command {
         PluginsCommands::List => {
             let mut plugins = plugin_manager.list_plugins();
@@ -63,11 +35,11 @@ pub(crate) fn run_plugins_command(
             ))
         }
         PluginsCommands::Commands => {
-            let mut commands = context
-                .plugin_manager
+            let mut commands = clients
+                .plugins()
                 .command_catalog()
                 .into_iter()
-                .filter(|entry| context.auth.is_external_command_visible(&entry.name))
+                .filter(|entry| runtime.auth.is_external_command_visible(&entry.name))
                 .collect::<Vec<_>>();
             commands.sort_by(|a, b| a.name.cmp(&b.name));
             Ok(super::rows_with_empty_info(
@@ -78,7 +50,7 @@ pub(crate) fn run_plugins_command(
         PluginsCommands::Config(PluginConfigArgs { plugin_id }) => Ok(super::rows_with_empty_info(
             plugin_config_rows(
                 &plugin_id,
-                &projected_plugin_config_entries(context, &plugin_id),
+                &projected_plugin_config_entries(runtime, clients, &plugin_id),
             ),
             "No app-owned plugin config is projected for this plugin.",
         )),
@@ -91,24 +63,32 @@ pub(crate) fn run_plugins_command(
         PluginsCommands::Doctor => {
             let report = plugin_manager.doctor();
             Ok(CommandOutput::output(
-                rows_to_output_result(plugin_doctor_rows(context, &report)),
+                rows_to_output_result(plugin_doctor_rows(runtime, clients, &report)),
                 None,
             ))
         }
-        PluginsCommands::Enable(args) => {
-            set_command_state(context, &args, PluginCommandState::Enabled, "enabled")
-        }
-        PluginsCommands::Disable(args) => {
-            set_command_state(context, &args, PluginCommandState::Disabled, "disabled")
-        }
+        PluginsCommands::Enable(args) => set_command_state(
+            runtime,
+            clients,
+            &args,
+            PluginCommandState::Enabled,
+            "enabled",
+        ),
+        PluginsCommands::Disable(args) => set_command_state(
+            runtime,
+            clients,
+            &args,
+            PluginCommandState::Disabled,
+            "disabled",
+        ),
         PluginsCommands::ClearState(args) => {
-            let command = validated_state_command(context, &args.target.command)?;
+            let command = validated_state_command(clients, &args.target.command)?;
             let removed = clear_command_state(
-                context,
+                runtime,
                 command.as_str(),
-                plugin_scope(context, &args.target.scope),
+                plugin_scope(runtime, &args.target.scope),
             )?;
-            sync_current_command_preferences(context)?;
+            sync_current_command_preferences(runtime, clients)?;
             let mut result = CommandOutput::exit(0);
             if removed {
                 result
@@ -134,12 +114,12 @@ pub(crate) fn run_plugins_command(
                     )
                 })?;
             persist_provider_selection(
-                context,
+                runtime,
                 &command,
                 &args.plugin_id,
-                plugin_scope(context, &args.target.scope),
+                plugin_scope(runtime, &args.target.scope),
             )?;
-            sync_current_command_preferences(context)?;
+            sync_current_command_preferences(runtime, clients)?;
             let mut result = CommandOutput::exit(0);
             result.messages.success(format!(
                 "selected provider for command `{command}`: {}",
@@ -150,11 +130,11 @@ pub(crate) fn run_plugins_command(
         PluginsCommands::ClearProvider(args) => {
             let command = normalize_command_name(&args.target.command)?;
             let removed = clear_provider_selection(
-                context,
+                runtime,
                 &command,
-                plugin_scope(context, &args.target.scope),
+                plugin_scope(runtime, &args.target.scope),
             )?;
-            sync_current_command_preferences(context)?;
+            sync_current_command_preferences(runtime, clients)?;
             let mut result = CommandOutput::exit(0);
             if removed {
                 result.messages.success(format!(
@@ -170,10 +150,10 @@ pub(crate) fn run_plugins_command(
     }
 }
 
-fn validated_state_command(context: PluginsCommandContext<'_>, command: &str) -> Result<String> {
+fn validated_state_command(clients: &AppClients, command: &str) -> Result<String> {
     let command = normalize_command_name(command)?;
-    context
-        .plugin_manager
+    clients
+        .plugins()
         .validate_command(&command)
         .map_err(|err| {
             crate::app::report_anyhow_with_context(
@@ -187,19 +167,20 @@ fn validated_state_command(context: PluginsCommandContext<'_>, command: &str) ->
 }
 
 fn set_command_state(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
+    clients: &AppClients,
     args: &PluginCommandStateArgs,
     state: PluginCommandState,
     verb: &str,
 ) -> Result<CommandOutput> {
-    let command = validated_state_command(context, &args.target.command)?;
+    let command = validated_state_command(clients, &args.target.command)?;
     persist_command_state(
-        context,
+        runtime,
         command.as_str(),
         state,
-        plugin_scope(context, &args.target.scope),
+        plugin_scope(runtime, &args.target.scope),
     )?;
-    sync_current_command_preferences(context)?;
+    sync_current_command_preferences(runtime, clients)?;
     let mut result = CommandOutput::exit(0);
     result
         .messages
@@ -208,12 +189,12 @@ fn set_command_state(
 }
 
 fn persist_command_state(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
     command: &str,
     state: PluginCommandState,
     scope: Scope,
 ) -> Result<()> {
-    let config_path = plugin_config_path(context)?;
+    let config_path = plugin_config_path(runtime)?;
     let value = ConfigValue::String(state.as_str().to_string());
     set_scoped_value_in_toml(
         &config_path,
@@ -226,12 +207,8 @@ fn persist_command_state(
     Ok(())
 }
 
-fn clear_command_state(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    scope: Scope,
-) -> Result<bool> {
-    let config_path = plugin_config_path(context)?;
+fn clear_command_state(runtime: &AppRuntime, command: &str, scope: Scope) -> Result<bool> {
+    let config_path = plugin_config_path(runtime)?;
     let edit_result = unset_scoped_value_in_toml(
         &config_path,
         &plugin_state_key(command),
@@ -243,12 +220,12 @@ fn clear_command_state(
 }
 
 fn persist_provider_selection(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
     command: &str,
     plugin_id: &str,
     scope: Scope,
 ) -> Result<()> {
-    let config_path = plugin_config_path(context)?;
+    let config_path = plugin_config_path(runtime)?;
     set_scoped_value_in_toml(
         &config_path,
         &plugin_provider_key(command),
@@ -260,12 +237,8 @@ fn persist_provider_selection(
     Ok(())
 }
 
-fn clear_provider_selection(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    scope: Scope,
-) -> Result<bool> {
-    let config_path = plugin_config_path(context)?;
+fn clear_provider_selection(runtime: &AppRuntime, command: &str, scope: Scope) -> Result<bool> {
+    let config_path = plugin_config_path(runtime)?;
     let edit_result = unset_scoped_value_in_toml(
         &config_path,
         &plugin_provider_key(command),
@@ -276,8 +249,8 @@ fn clear_provider_selection(
     Ok(edit_result.previous.is_some())
 }
 
-fn plugin_config_path(context: PluginsCommandContext<'_>) -> Result<std::path::PathBuf> {
-    if !context.runtime_load.include_config_file {
+fn plugin_config_path(runtime: &AppRuntime) -> Result<std::path::PathBuf> {
+    if !runtime.launch.runtime_load.include_config_file {
         return Err(miette::miette!(
             "config file writes are disabled for this session"
         ));
@@ -287,9 +260,9 @@ fn plugin_config_path(context: PluginsCommandContext<'_>) -> Result<std::path::P
         .ok_or_else(|| miette::miette!("failed to resolve config.toml path for plugin config"))
 }
 
-fn plugin_scope(context: PluginsCommandContext<'_>, args: &crate::cli::PluginScopeArgs) -> Scope {
+fn plugin_scope(runtime: &AppRuntime, args: &crate::cli::PluginScopeArgs) -> Scope {
     let terminal = resolve_terminal_selector(
-        context.context.terminal_kind().as_config_terminal(),
+        runtime.context.terminal_kind().as_config_terminal(),
         args.terminal.as_deref(),
     );
     if args.global {
@@ -303,7 +276,7 @@ fn plugin_scope(context: PluginsCommandContext<'_>, args: &crate::cli::PluginSco
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| context.config.active_profile());
+        .unwrap_or_else(|| runtime.config.resolved().active_profile());
 
     terminal.as_deref().map_or_else(
         || Scope::profile(profile),
@@ -318,17 +291,17 @@ fn normalize_command_name(command: &str) -> Result<String> {
     canonical_plugin_command_name(command).map_err(|err| miette::miette!("{err}"))
 }
 
-fn sync_current_command_preferences(context: PluginsCommandContext<'_>) -> Result<()> {
+fn sync_current_command_preferences(runtime: &AppRuntime, clients: &AppClients) -> Result<()> {
     let resolved = crate::app::resolve_runtime_config(
         crate::app::RuntimeConfigRequest::new(
-            context.context.profile_override().map(ToOwned::to_owned),
-            Some(context.context.terminal_kind().as_config_terminal()),
+            runtime.context.profile_override().map(ToOwned::to_owned),
+            Some(runtime.context.terminal_kind().as_config_terminal()),
         )
-        .with_runtime_load(context.runtime_load)
-        .with_product_defaults(context.product_defaults.clone()),
+        .with_runtime_load(runtime.launch.runtime_load)
+        .with_product_defaults(runtime.product_defaults().clone()),
     )
     .wrap_err("failed to refresh plugin command preferences from runtime config")?;
-    context.plugin_manager.replace_command_preferences(
+    clients.plugins().replace_command_preferences(
         crate::plugin::state::PluginCommandPreferences::from_resolved(&resolved),
     );
     Ok(())
@@ -343,13 +316,11 @@ fn plugin_provider_key(command: &str) -> String {
 }
 
 fn projected_plugin_config_entries(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
+    clients: &AppClients,
     plugin_id: &str,
 ) -> Vec<crate::app::PluginConfigEntry> {
-    if let (Some(config_state), Some(clients)) = (context.config_state, context.clients) {
-        return clients.plugin_config_entries(config_state, plugin_id);
-    }
-    plugin_config_entries(context.config, plugin_id)
+    clients.plugin_config_entries(&runtime.config, plugin_id)
 }
 
 fn plugin_list_rows(plugins: &[PluginSummary]) -> Vec<Row> {
@@ -532,11 +503,13 @@ pub(crate) fn doctor_rows(report: &DoctorReport) -> Vec<Row> {
     rows
 }
 
-fn plugin_doctor_rows(context: PluginsCommandContext<'_>, report: &DoctorReport) -> Vec<Row> {
+fn plugin_doctor_rows(
+    runtime: &AppRuntime,
+    clients: &AppClients,
+    report: &DoctorReport,
+) -> Vec<Row> {
     let mut rows = doctor_rows(report);
-    let (Some(config_state), Some(clients)) = (context.config_state, context.clients) else {
-        return rows;
-    };
+    let config_state = &runtime.config;
     let config_env = clients.plugin_config_env(config_state);
     let mut plugin_ids = config_env.by_plugin_id.keys().cloned().collect::<Vec<_>>();
     plugin_ids.sort();

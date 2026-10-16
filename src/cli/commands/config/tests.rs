@@ -1,10 +1,9 @@
 use super::{
-    ConfigCommandContext, ConfigReadContext, ConfigScopeTarget, ConfigStore, ConfigStoreTarget,
-    ConfigWriteTarget, config_diagnostics_rows, config_get_rows, config_store_name,
-    resolve_config_scopes, resolve_config_store, resolve_scope_target, resolve_store_target,
-    resolve_terminal_selector, run_config_get, run_config_set, run_config_unset,
-    secrets_permissions_diagnostic, session_scoped_value, validate_store_key,
-    validate_write_scopes,
+    ConfigScopeTarget, ConfigStore, ConfigStoreTarget, ConfigWriteTarget, config_diagnostics_rows,
+    config_get_rows, config_store_name, resolve_config_scopes, resolve_config_store,
+    resolve_scope_target, resolve_store_target, resolve_terminal_selector, run_config_get,
+    run_config_set, run_config_unset, secrets_permissions_diagnostic, session_scoped_value,
+    validate_store_key, validate_write_scopes,
 };
 use crate::app::{RuntimeContext, TerminalKind, UiState};
 use crate::cli::{ConfigScopeArgs, ConfigSetArgs, ConfigStoreArgs, ConfigUnsetArgs};
@@ -38,13 +37,9 @@ fn test_ui_state(format: OutputFormat) -> UiState {
 }
 
 struct ConfigTestFixture {
-    context: RuntimeContext,
-    config: ResolvedConfig,
+    runtime: crate::app::AppRuntime,
+    session: crate::app::AppSession,
     ui: UiState,
-    themes: ThemeCatalog,
-    config_overrides: ConfigLayer,
-    product_defaults: ConfigLayer,
-    runtime_load: RuntimeLoadOptions,
 }
 
 impl ConfigTestFixture {
@@ -67,38 +62,19 @@ impl ConfigTestFixture {
         defaults: ConfigLayer,
         format: OutputFormat,
     ) -> Self {
+        let mut builder = crate::app::AppStateBuilder::new(
+            RuntimeContext::new(None, terminal, None),
+            build_resolved_config(defaults, terminal),
+            test_ui_state(format),
+        );
+        builder.themes = Some(ThemeCatalog::default());
+        builder.launch = crate::app::LaunchContext::default()
+            .with_runtime_load(RuntimeLoadOptions::defaults_only());
+        let state = builder.build();
         Self {
-            context: RuntimeContext::new(None, terminal, None),
-            config: build_resolved_config(defaults, terminal),
+            runtime: state.runtime,
+            session: state.session,
             ui: test_ui_state(format),
-            themes: ThemeCatalog::default(),
-            config_overrides: ConfigLayer::default(),
-            product_defaults: ConfigLayer::default(),
-            runtime_load: RuntimeLoadOptions::defaults_only(),
-        }
-    }
-
-    fn read(&self) -> ConfigReadContext<'_> {
-        ConfigReadContext {
-            context: &self.context,
-            config: &self.config,
-            ui: &self.ui,
-            themes: &self.themes,
-            config_overrides: &self.config_overrides,
-            product_defaults: &self.product_defaults,
-            runtime_load: self.runtime_load,
-        }
-    }
-
-    fn command(&mut self) -> ConfigCommandContext<'_> {
-        ConfigCommandContext {
-            context: &self.context,
-            config: &self.config,
-            ui: &self.ui,
-            themes: &self.themes,
-            config_overrides: &mut self.config_overrides,
-            product_defaults: &self.product_defaults,
-            runtime_load: self.runtime_load,
         }
     }
 }
@@ -142,7 +118,9 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     let mut fixture = ConfigTestFixture::with_defaults(TerminalKind::Repl, defaults);
 
     let listed = super::run_alias_command(
-        fixture.command(),
+        &fixture.runtime,
+        &mut fixture.session,
+        &fixture.ui,
         crate::cli::AliasArgs {
             command: crate::cli::AliasCommands::List(crate::cli::AliasListArgs { sources: true }),
         },
@@ -159,7 +137,9 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     assert_eq!(rows[0]["source"], "defaults");
 
     let invalid = super::run_alias_command(
-        fixture.command(),
+        &fixture.runtime,
+        &mut fixture.session,
+        &fixture.ui,
         crate::cli::AliasArgs {
             command: crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs {
                 name: "broken".to_string(),
@@ -178,7 +158,9 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     );
 
     super::run_alias_command(
-        fixture.command(),
+        &fixture.runtime,
+        &mut fixture.session,
+        &fixture.ui,
         crate::cli::AliasArgs {
             command: crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs {
                 name: "lsng".to_string(),
@@ -195,6 +177,7 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     .expect("valid alias should use config set");
     assert!(
         fixture
+            .session
             .config_overrides
             .entries()
             .iter()
@@ -202,7 +185,9 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
     );
 
     super::run_alias_command(
-        fixture.command(),
+        &fixture.runtime,
+        &mut fixture.session,
+        &fixture.ui,
         crate::cli::AliasArgs {
             command: crate::cli::AliasCommands::Remove(crate::cli::AliasRemoveArgs {
                 name: "lsng".to_string(),
@@ -216,7 +201,7 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
         },
     )
     .expect("alias remove should use config unset");
-    assert!(fixture.config_overrides.entries().is_empty());
+    assert!(fixture.session.config_overrides.entries().is_empty());
 }
 
 fn env_lock() -> &'static Mutex<()> {
@@ -250,22 +235,24 @@ fn with_temp_config_paths<T>(callback: impl FnOnce(PathBuf, PathBuf) -> T) -> T 
 
 #[test]
 fn resolve_config_store_and_names_cover_defaults_and_explicit_targets_unit() {
+    let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
+    let temp_repl = ConfigTestFixture::new(TerminalKind::Repl);
     let args = write_target(ConfigScopeTarget::ActiveProfile);
 
     assert!(matches!(
-        resolve_config_store(ConfigTestFixture::new(TerminalKind::Repl).read(), &args),
+        resolve_config_store(&temp_repl.runtime, &args),
         ConfigStore::Session
     ));
     assert!(matches!(
-        resolve_config_store(ConfigTestFixture::new(TerminalKind::Cli).read(), &args),
+        resolve_config_store(&temp_cli.runtime, &args),
         ConfigStore::Config
     ));
 
     let fixture = ConfigTestFixture::new(TerminalKind::Repl);
-    let repl = fixture.read();
+    let repl = &fixture;
     assert!(matches!(
         resolve_config_store(
-            repl,
+            &repl.runtime,
             &ConfigWriteTarget {
                 scope: ConfigScopeTarget::ActiveProfile,
                 terminal: None,
@@ -276,7 +263,7 @@ fn resolve_config_store_and_names_cover_defaults_and_explicit_targets_unit() {
     ));
     assert!(matches!(
         resolve_config_store(
-            repl,
+            &repl.runtime,
             &ConfigWriteTarget {
                 scope: ConfigScopeTarget::ActiveProfile,
                 terminal: None,
@@ -287,7 +274,7 @@ fn resolve_config_store_and_names_cover_defaults_and_explicit_targets_unit() {
     ));
     assert!(matches!(
         resolve_config_store(
-            repl,
+            &repl.runtime,
             &ConfigWriteTarget {
                 scope: ConfigScopeTarget::ActiveProfile,
                 terminal: None,
@@ -304,8 +291,8 @@ fn resolve_config_store_and_names_cover_defaults_and_explicit_targets_unit() {
 #[test]
 fn resolve_scope_target_store_target_and_terminal_selector_cover_precedence_helpers_unit() {
     let fixture = ConfigTestFixture::new(TerminalKind::Repl);
-    let repl = fixture.read();
-    let terminal = repl.context.terminal_kind().as_config_terminal();
+    let repl = &fixture;
+    let terminal = repl.runtime.context.terminal_kind().as_config_terminal();
     assert_eq!(
         resolve_terminal_selector(terminal, Some(crate::app::CURRENT_TERMINAL_SENTINEL)),
         Some("repl".to_string())
@@ -357,11 +344,12 @@ fn resolve_scope_target_store_target_and_terminal_selector_cover_precedence_help
 
 #[test]
 fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_variants_unit() {
+    let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
     let cli_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-    let cli = cli_fixture.read();
+    let cli = &cli_fixture;
 
     let global_scopes = resolve_config_scopes(
-        cli,
+        &cli.runtime,
         &ConfigWriteTarget {
             scope: ConfigScopeTarget::Global,
             terminal: Some("cli".to_string()),
@@ -372,7 +360,7 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
     assert_eq!(global_scopes, vec![Scope::terminal("cli")]);
 
     let all_profile_scopes = resolve_config_scopes(
-        cli,
+        &cli.runtime,
         &ConfigWriteTarget {
             scope: ConfigScopeTarget::AllProfiles,
             terminal: Some("cli".to_string()),
@@ -386,7 +374,7 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
     );
 
     let scopes = resolve_config_scopes(
-        ConfigTestFixture::new(TerminalKind::Cli).read(),
+        &temp_cli.runtime,
         &ConfigWriteTarget {
             scope: ConfigScopeTarget::Profile("Work".to_string()),
             terminal: None,
@@ -409,10 +397,10 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
         Scope::profile("dev"),
     );
     let fixture = ConfigTestFixture::with_defaults(TerminalKind::Cli, defaults);
-    let context = fixture.read();
+    let context = &fixture;
 
     let all_profiles = resolve_config_scopes(
-        context,
+        &context.runtime,
         &ConfigWriteTarget {
             scope: ConfigScopeTarget::AllProfiles,
             terminal: None,
@@ -426,7 +414,7 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
     );
 
     let active_profile_terminal = resolve_config_scopes(
-        context,
+        &context.runtime,
         &ConfigWriteTarget {
             scope: ConfigScopeTarget::ActiveProfile,
             terminal: Some("cli".to_string()),
@@ -442,9 +430,11 @@ fn resolve_config_scopes_cover_global_profile_known_profiles_and_terminal_varian
 
 #[test]
 fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_unit() {
+    let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
     let mut messages = MessageBuffer::default();
     let rows = config_get_rows(
-        ConfigTestFixture::new(TerminalKind::Cli).read(),
+        &temp_cli.runtime,
+        &temp_cli.session,
         &crate::cli::ConfigGetArgs {
             key: "profile.default".to_string(),
             output: crate::cli::ConfigReadOutputArgs {
@@ -472,10 +462,11 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
     defaults.set("profile.default", "ops");
     defaults.set("alias.lookup", "ldap user");
     let fixture = ConfigTestFixture::with_defaults(TerminalKind::Cli, defaults);
-    let context = fixture.read();
+    let context = &fixture;
 
     let alias_result = run_config_get(
-        context,
+        &context.runtime,
+        &context.session,
         crate::cli::ConfigGetArgs {
             key: "lookup".to_string(),
             output: crate::cli::ConfigReadOutputArgs {
@@ -489,7 +480,8 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
     assert!(!matches!(alias_result.body, crate::app::CommandBody::None));
 
     let missing_result = run_config_get(
-        context,
+        &context.runtime,
+        &context.session,
         crate::cli::ConfigGetArgs {
             key: "missing.key".to_string(),
             output: crate::cli::ConfigReadOutputArgs {
@@ -539,8 +531,13 @@ fn validate_write_scopes_and_session_lookup_cover_invalid_and_present_paths_unit
 #[test]
 fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     let mut set_fixture = ConfigTestFixture::new(TerminalKind::Repl);
-    let set_result = run_config_set(set_fixture.command(), config_set_args("ui.format", "json"))
-        .expect("session config set should succeed");
+    let set_result = run_config_set(
+        &set_fixture.runtime,
+        &mut set_fixture.session,
+        &set_fixture.ui,
+        config_set_args("ui.format", "json"),
+    )
+    .expect("session config set should succeed");
 
     assert_eq!(set_result.exit_code, 0);
     assert!(!matches!(set_result.body, crate::app::CommandBody::None));
@@ -556,15 +553,24 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     );
 
     let mut unset_fixture = ConfigTestFixture::new(TerminalKind::Repl);
-    let unset_context = unset_fixture.command();
-    let active_profile = unset_context.config.active_profile().to_string();
-    unset_context.config_overrides.insert(
+    let unset_context = &mut unset_fixture;
+    let active_profile = unset_context
+        .runtime
+        .config
+        .resolved()
+        .active_profile()
+        .to_string();
+    unset_context.session.config_overrides.insert(
         "ui.format".to_string(),
         crate::config::ConfigValue::from("json"),
         Scope::profile(&active_profile),
     );
-    let unset_result = run_config_unset(unset_context, config_unset_args("ui.format"))
-        .expect("session config unset should succeed");
+    let unset_result = run_config_unset(
+        &unset_context.runtime,
+        &mut unset_context.session,
+        config_unset_args("ui.format"),
+    )
+    .expect("session config unset should succeed");
 
     assert!(!matches!(unset_result.body, crate::app::CommandBody::None));
     assert!(
@@ -582,8 +588,13 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     explain_args.explain = true;
     let mut explain_fixture =
         ConfigTestFixture::with_format(TerminalKind::Repl, OutputFormat::Json);
-    let result = run_config_set(explain_fixture.command(), explain_args)
-        .expect("session config set explain should succeed");
+    let result = run_config_set(
+        &explain_fixture.runtime,
+        &mut explain_fixture.session,
+        &explain_fixture.ui,
+        explain_args,
+    )
+    .expect("session config set explain should succeed");
     assert!(matches!(result.body, crate::app::CommandBody::Json(_)));
     assert!(!matches!(result.body, crate::app::CommandBody::None));
 }
@@ -593,15 +604,24 @@ fn run_config_set_and_unset_reject_derived_profile_active_unit() {
     let mut set_args = config_set_args("profile.active", "ops");
     set_args.scope.global = true;
     let mut set_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-    let set_err = run_config_set(set_fixture.command(), set_args)
-        .expect_err("profile.active set should be rejected");
+    let set_err = run_config_set(
+        &set_fixture.runtime,
+        &mut set_fixture.session,
+        &set_fixture.ui,
+        set_args,
+    )
+    .expect_err("profile.active set should be rejected");
     assert!(set_err.to_string().contains("read-only"));
 
     let mut unset_args = config_unset_args("profile.active");
     unset_args.scope.global = true;
     let mut unset_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-    let unset_err = run_config_unset(unset_fixture.command(), unset_args)
-        .expect_err("profile.active unset should be rejected");
+    let unset_err = run_config_unset(
+        &unset_fixture.runtime,
+        &mut unset_fixture.session,
+        unset_args,
+    )
+    .expect_err("profile.active unset should be rejected");
     assert!(unset_err.to_string().contains("read-only"));
 }
 
@@ -609,14 +629,19 @@ fn run_config_set_and_unset_reject_derived_profile_active_unit() {
 fn run_config_set_rejects_non_positive_operational_limit_unit() {
     let mut fixture = ConfigTestFixture::new(TerminalKind::Repl);
 
-    let error = run_config_set(fixture.command(), config_set_args("ui.width", "0"))
-        .expect_err("config set must reject a non-positive render width");
+    let error = run_config_set(
+        &fixture.runtime,
+        &mut fixture.session,
+        &fixture.ui,
+        config_set_args("ui.width", "0"),
+    )
+    .expect_err("config set must reject a non-positive render width");
 
     assert!(
         error.to_string().contains("invalid value for key"),
         "unexpected config set error: {error:?}"
     );
-    assert!(fixture.config_overrides.entries().is_empty());
+    assert!(fixture.session.config_overrides.entries().is_empty());
 }
 
 #[test]
@@ -624,8 +649,13 @@ fn persistent_config_writes_are_rejected_when_file_loading_is_disabled_unit() {
     let mut set_args = config_set_args("ui.format", "json");
     set_args.store.config_store = true;
     let mut set_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-    let set_err = run_config_set(set_fixture.command(), set_args)
-        .expect_err("a sealed session must not discover an ambient write path");
+    let set_err = run_config_set(
+        &set_fixture.runtime,
+        &mut set_fixture.session,
+        &set_fixture.ui,
+        set_args,
+    )
+    .expect_err("a sealed session must not discover an ambient write path");
     assert!(
         set_err
             .to_string()
@@ -635,8 +665,12 @@ fn persistent_config_writes_are_rejected_when_file_loading_is_disabled_unit() {
     let mut unset_args = config_unset_args("ui.format");
     unset_args.store.secrets = true;
     let mut unset_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-    let unset_err = run_config_unset(unset_fixture.command(), unset_args)
-        .expect_err("a sealed session must not discover an ambient secrets path");
+    let unset_err = run_config_unset(
+        &unset_fixture.runtime,
+        &mut unset_fixture.session,
+        unset_args,
+    )
+    .expect_err("a sealed session must not discover an ambient secrets path");
     assert!(
         unset_err
             .to_string()
@@ -651,9 +685,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let mut config_args = config_set_args("ui.format", "json");
         config_args.store.config_store = true;
         let mut config_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-        config_fixture.runtime_load = RuntimeLoadOptions::default();
-        let config_set = run_config_set(config_fixture.command(), config_args)
-            .expect("persistent config set should succeed");
+        config_fixture.runtime.launch.runtime_load = RuntimeLoadOptions::default();
+        let config_set = run_config_set(
+            &config_fixture.runtime,
+            &mut config_fixture.session,
+            &config_fixture.ui,
+            config_args,
+        )
+        .expect("persistent config set should succeed");
         assert!(config_path.exists());
         let config_payload =
             std::fs::read_to_string(&config_path).expect("config file should be readable");
@@ -691,9 +730,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let mut secrets_args = config_set_args("ui.format", "table");
         secrets_args.store.secrets = true;
         let mut secrets_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-        secrets_fixture.runtime_load = RuntimeLoadOptions::default();
-        let secrets_set = run_config_set(secrets_fixture.command(), secrets_args)
-            .expect("persistent secrets set should succeed");
+        secrets_fixture.runtime.launch.runtime_load = RuntimeLoadOptions::default();
+        let secrets_set = run_config_set(
+            &secrets_fixture.runtime,
+            &mut secrets_fixture.session,
+            &secrets_fixture.ui,
+            secrets_args,
+        )
+        .expect("persistent secrets set should succeed");
         assert!(secrets_path.exists());
         let secrets_payload =
             std::fs::read_to_string(&secrets_path).expect("secrets file should be readable");
@@ -731,9 +775,13 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let mut unset_args = config_unset_args("ui.format");
         unset_args.store.secrets = true;
         let mut unset_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-        unset_fixture.runtime_load = RuntimeLoadOptions::default();
-        let secrets_unset = run_config_unset(unset_fixture.command(), unset_args)
-            .expect("persistent secrets unset should succeed");
+        unset_fixture.runtime.launch.runtime_load = RuntimeLoadOptions::default();
+        let secrets_unset = run_config_unset(
+            &unset_fixture.runtime,
+            &mut unset_fixture.session,
+            unset_args,
+        )
+        .expect("persistent secrets unset should succeed");
         assert!(
             crate::ui::render_messages(
                 &secrets_unset.messages,
@@ -761,9 +809,13 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let mut missing_args = config_unset_args("ui.margin");
         missing_args.store.config_store = true;
         let mut missing_fixture = ConfigTestFixture::new(TerminalKind::Cli);
-        missing_fixture.runtime_load = RuntimeLoadOptions::default();
-        let missing_unset = run_config_unset(missing_fixture.command(), missing_args)
-            .expect("missing persistent unset should still succeed");
+        missing_fixture.runtime.launch.runtime_load = RuntimeLoadOptions::default();
+        let missing_unset = run_config_unset(
+            &missing_fixture.runtime,
+            &mut missing_fixture.session,
+            missing_args,
+        )
+        .expect("missing persistent unset should still succeed");
         assert!(
             crate::ui::render_messages(
                 &missing_unset.messages,
@@ -829,7 +881,8 @@ fn secrets_permissions_diagnostic_covers_missing_ok_warning_and_issue_unit() {
 #[cfg_attr(miri, ignore = "config diagnostics inspects host-backed secrets paths")]
 #[test]
 fn config_diagnostics_rows_include_secrets_status_unit() {
-    let rows = config_diagnostics_rows(ConfigTestFixture::new(TerminalKind::Cli).read());
+    let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
+    let rows = config_diagnostics_rows(&temp_cli.runtime, &temp_cli.session, &temp_cli.ui);
     assert_eq!(rows.len(), 1);
     assert!(rows[0].contains_key("secrets_backend"));
     assert!(rows[0].contains_key("secrets_index_file"));

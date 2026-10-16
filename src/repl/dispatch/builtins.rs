@@ -6,7 +6,7 @@ use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, WrapErr, miette};
 
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession};
+use crate::app::{AppRuntime, AppSession};
 use crate::app::{CMD_HELP, EXIT_CODE_WAITING_APPROVAL};
 use crate::normalize::expand_home;
 
@@ -36,33 +36,34 @@ pub(super) struct SourceCommand {
 }
 
 pub(super) fn execute_repl_builtin(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     raw: &str,
     builtin: ReplBuiltin,
     sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
     match builtin {
-        ReplBuiltin::Help => Ok(ReplResult::Print(render_repl_help_for_scope(
-            runtime,
-            session,
-            clients,
-            &super::base_repl_invocation(runtime),
-            raw,
-            &[],
-            sink,
-        )?)),
-        ReplBuiltin::Exit => Ok(handle_repl_exit_request(session)),
-        ReplBuiltin::Last => execute_last_result_builtin(runtime, session, raw),
+        ReplBuiltin::Help => {
+            let invocation = super::base_repl_invocation(&state.runtime);
+            Ok(ReplResult::Print(render_repl_help_for_scope(
+                state,
+                &invocation,
+                raw,
+                &[],
+                sink,
+            )?))
+        }
+        ReplBuiltin::Exit => Ok(handle_repl_exit_request(&mut state.session)),
+        ReplBuiltin::Last => {
+            execute_last_result_builtin(&mut state.runtime, &mut state.session, raw)
+        }
         ReplBuiltin::Pagination(direction) => {
-            execute_pagination_builtin(runtime, session, clients, history, direction, sink)
+            execute_pagination_builtin(state, history, direction, sink)
         }
-        ReplBuiltin::Source(command) => {
-            execute_source_command(runtime, session, clients, history, command, sink)
+        ReplBuiltin::Source(command) => execute_source_command(state, history, command, sink),
+        ReplBuiltin::Bang(command) => {
+            execute_bang_command(&mut state.session, history, raw, command)
         }
-        ReplBuiltin::Bang(command) => execute_bang_command(session, history, raw, command),
     }
 }
 
@@ -134,9 +135,7 @@ fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
 }
 
 fn execute_source_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     command: SourceCommand,
     sink: &mut dyn UiSink,
@@ -163,7 +162,7 @@ fn execute_source_command(
                 continue;
             }
             let location = format!("{}:{}", path.display(), index + 1);
-            match execute_source_line(runtime, session, clients, history, line, &location, sink) {
+            match execute_source_line(state, history, line, &location, sink) {
                 Ok(None) => {}
                 Ok(Some(stop)) => return Ok(stop),
                 Err(err) if command.ignore_errors => {
@@ -180,9 +179,7 @@ fn execute_source_command(
 
 /// Runs one sourced line, returning the result that stops the batch, if any.
 fn execute_source_line(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     line: &str,
     location: &str,
@@ -196,8 +193,7 @@ fn execute_source_line(
     {
         return Err(miette!("nested `source` commands are not supported"));
     }
-    let executed =
-        super::execute_repl_plugin_line(runtime, session, clients, history, line, Some(sink))?;
+    let executed = super::execute_repl_plugin_line(state, history, line, Some(sink))?;
     match executed.result {
         ReplResult::Continue => {}
         ReplResult::Print(rendered) => sink.write_stdout(&rendered),
@@ -225,20 +221,18 @@ fn execute_source_line(
 }
 
 fn execute_pagination_builtin(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     direction: PaginationDirection,
     sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
-    if session.native_context.pagination().is_none() {
+    if state.session.native_context.pagination().is_none() {
         return Ok(ReplResult::Print(
             "No paginated result to continue. Run a paginated list command first.\n".to_string(),
         ));
     }
     let forward = matches!(direction, PaginationDirection::Next);
-    let Some(command) = session.native_context.step_page(forward) else {
+    let Some(command) = state.session.native_context.step_page(forward) else {
         let message = if forward {
             "Already at the last page.\n"
         } else {
@@ -255,9 +249,8 @@ fn execute_pagination_builtin(
         .map(|argument| crate::core::shell_words::escape_for_shell(argument))
         .collect::<Vec<_>>()
         .join(" ");
-    let executed =
-        super::execute_repl_plugin_line(runtime, session, clients, history, &line, Some(sink));
-    session.native_context.finish_page_step();
+    let executed = super::execute_repl_plugin_line(state, history, &line, Some(sink));
+    state.session.native_context.finish_page_step();
     Ok(executed?.result)
 }
 
@@ -445,9 +438,9 @@ mod tests {
 
         crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config: config,
+            config,
             launch: LaunchContext::default(),
-            native_commands: native_commands,
+            native_commands,
             ui: crate::app::UiState::new(
                 RenderSettings::test_plain(OutputFormat::Json),
                 MessageLevel::Success,
@@ -543,9 +536,7 @@ mod tests {
 
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "exit",
                 parse_repl_builtin("exit")
@@ -561,9 +552,7 @@ mod tests {
         let mut sink = crate::app::sink::BufferedUiSink::default();
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "help",
                 parse_repl_builtin("help")
@@ -582,9 +571,7 @@ mod tests {
         );
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last",
                 parse_repl_builtin("last")
@@ -609,9 +596,7 @@ mod tests {
         );
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last",
                 parse_repl_builtin("last")
@@ -624,9 +609,7 @@ mod tests {
         ));
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last --raw",
                 parse_repl_builtin("last --raw")
@@ -646,9 +629,7 @@ mod tests {
         let mut sink = crate::app::sink::BufferedUiSink::default();
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")
@@ -670,9 +651,7 @@ mod tests {
                 next: None,
             });
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "prev",
             parse_repl_builtin("prev")
@@ -687,9 +666,7 @@ mod tests {
         ));
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")
@@ -720,9 +697,7 @@ mod tests {
             });
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")

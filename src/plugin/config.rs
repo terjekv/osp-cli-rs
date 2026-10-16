@@ -189,6 +189,7 @@ pub(crate) fn collect_plugin_config_env(config: &ResolvedConfig) -> PluginConfig
     }
 }
 
+#[cfg(test)]
 pub(crate) fn plugin_config_entries(
     config: &ResolvedConfig,
     plugin_id: &str,
