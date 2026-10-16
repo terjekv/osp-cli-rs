@@ -1016,9 +1016,6 @@ fn run_external_plugin_command(
     let raw = crate::plugin::run::run(&plugin, args, &context, capture)?;
     let elapsed_ms = started.elapsed().as_millis();
     let bytes = raw.stdout.as_ref().map(Vec::len);
-    if raw.wrote_stderr && invocation.ui.debug_level >= 2 {
-        tracing::debug!(target: "osp::diagnostic", "debug: Plugin {} wrote to stderr; unverified text withheld.", plugin.name);
-    }
     let mut result = if let Some(bytes) = raw.stdout {
         match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(value) if value.get("protocol_version").is_some() => {

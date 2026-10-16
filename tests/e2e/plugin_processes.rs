@@ -61,7 +61,7 @@ fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
     );
     let stderr = stderr_utf8(output.stderr);
     assert!(stderr.contains("Plugin boom crashed (exit status 7)"));
-    assert!(!stderr.contains("backend exploded"));
+    assert!(stderr.contains("backend exploded"));
 }
 
 #[cfg(unix)]

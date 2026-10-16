@@ -22,7 +22,7 @@ fn external_plugin_help_keeps_raw_stderr_contract() {
     let home = make_temp_dir("plugins-help-stderr");
     let dir = home.join("plugins");
     write_plugin(&dir, "hello", None, "print('hello help'); print('help note', file=sys.stderr)\n");
-    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout("hello help\n").stderr("");
+    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout("hello help\n").stderr("help note\n");
 }
 
 #[test]

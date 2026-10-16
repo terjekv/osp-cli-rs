@@ -20,9 +20,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Keep a disabled REPL introduction disabled when verbosity increases. Host
   progress measures rendered height rather than asking native commands to
   estimate it. Retained failure command labels omit arguments.
-- Restrict diagnostic logging to reviewed host/service events and withhold
-  arbitrary plugin stderr, including help output. Preserve structured plugin UI
-  text with terminal sanitization and redaction of injected secrets.
+- Restrict diagnostic logging to host/service events. Inherit plugin terminal
+  stdin and stderr so prompts, errors and help remain visible. Preserve structured
+  plugin UI text with terminal sanitization and redaction of injected secrets.
 
 - REPL `help --all` emits pipeable rows for every visible command path.
 

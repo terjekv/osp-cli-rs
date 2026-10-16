@@ -162,7 +162,7 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
     assert_eq!(output.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Plugin boom crashed (exit status 7)"));
-    assert!(!stderr.contains("boom-from-stderr"));
+    assert!(stderr.contains("boom-from-stderr"));
     assert!(!stderr.contains("Stack backtrace"));
 }
 

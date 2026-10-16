@@ -12,7 +12,6 @@ const MAX_STDOUT: u64 = 64 * 1024 * 1024;
 pub(crate) struct RunOutput {
     pub(crate) status: i32,
     pub(crate) stdout: Option<Vec<u8>>,
-    pub(crate) wrote_stderr: bool,
 }
 
 pub(crate) fn run(
@@ -25,7 +24,7 @@ pub(crate) fn run(
     command
         .args(args)
         .stdin(Stdio::inherit())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .stdout(if capture {
             Stdio::piped()
         } else {
@@ -43,19 +42,6 @@ pub(crate) fn run(
     #[cfg(unix)]
     let _signal = IgnoreInterrupt::new(&mut command)?;
     let mut child = spawn(&mut command, plugin)?;
-    let stderr = child.stderr.take().map(|mut stream| {
-        std::thread::spawn(move || {
-            let mut wrote = false;
-            let mut buffer = [0; 8192];
-            loop {
-                match stream.read(&mut buffer) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => wrote = true,
-                }
-            }
-            wrote
-        })
-    });
     let stdout = if let Some(stdout) = child.stdout.take() {
         match read_stdout(stdout) {
             Ok(bytes) => Some(bytes),
@@ -79,7 +65,6 @@ pub(crate) fn run(
     #[cfg(not(unix))]
     let code = status.code().unwrap_or(1);
     Ok(RunOutput {
-        wrote_stderr: stderr.is_some_and(|reader| reader.join().unwrap_or(false)),
         status: code,
         stdout,
     })
