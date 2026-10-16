@@ -15,6 +15,7 @@ use crate::plugin::CommandCatalogEntry;
 
 pub(crate) enum RunAction {
     Repl,
+    ProductAction(String),
     Builtin(Commands),
     External(Vec<String>),
 }
@@ -41,6 +42,7 @@ impl RunAction {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             RunAction::Repl => "repl",
+            RunAction::ProductAction(_) => "product action",
             RunAction::Builtin(_) => "builtin",
             RunAction::External(_) => "external",
         }
@@ -63,7 +65,9 @@ impl RunAction {
             RunAction::Repl | RunAction::Builtin(Commands::Repl(_) | Commands::Intro(_)) => {
                 TerminalKind::Repl
             }
-            RunAction::Builtin(_) | RunAction::External(_) => TerminalKind::Cli,
+            RunAction::Builtin(_) | RunAction::External(_) | RunAction::ProductAction(_) => {
+                TerminalKind::Cli
+            }
         }
     }
 }
@@ -88,6 +92,12 @@ impl DispatchPlan {
 
 pub(crate) fn build_dispatch_plan(cli: &mut Cli) -> Result<DispatchPlan> {
     let explicit_profile = normalize_cli_profile(cli);
+    if let Some(action) = cli.product_action.take() {
+        return Ok(DispatchPlan::new(
+            RunAction::ProductAction(action),
+            explicit_profile,
+        ));
+    }
     let command = cli.command.take();
 
     if let Some(command) = &command {

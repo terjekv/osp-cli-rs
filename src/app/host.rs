@@ -323,11 +323,31 @@ pub(crate) fn run_scanned_with_sink_and_app(
                     .conflicts_with_all(conflicts),
             );
         }
+        for flag in &app.action_flags {
+            let mut arg = clap::Arg::new(flag.name).long(flag.name).help(flag.help);
+            arg = if let Some(value) = flag.optional_value {
+                arg.value_name(value.value_name)
+                    .num_args(0..=1)
+                    .default_missing_value("")
+            } else {
+                arg.action(clap::ArgAction::SetTrue)
+            };
+            command = command.arg(arg);
+        }
         let parsed = command
             .try_get_matches_from_mut(scanned.argv.iter().cloned())
             .and_then(|matches| {
                 let mut cli = Cli::from_arg_matches(&matches)?;
                 cli.product_overrides = product_config_overrides(app, &matches);
+                for flag in &app.action_flags {
+                    if matches.value_source(flag.name) == Some(clap::parser::ValueSource::CommandLine) {
+                        if cli.product_action.is_some() || cli.command.is_some() {
+                            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                                "product action flags cannot be combined with commands or other actions"));
+                        }
+                        cli.product_action = Some(flag.name.to_string());
+                    }
+                }
                 Ok(cli)
             });
         (parsed, command)
@@ -366,6 +386,15 @@ fn product_config_overrides(
     for &(name, _, key, value) in &app.config_flags {
         if matches.get_flag(name) {
             overrides.set(key, value);
+        }
+    }
+    for flag in &app.action_flags {
+        if let Some(argument) = flag.optional_value
+            && let Some(value) = matches
+                .get_one::<String>(flag.name)
+                .filter(|v| !v.is_empty())
+        {
+            overrides.set(argument.config_key, value.clone());
         }
     }
     overrides
@@ -475,7 +504,12 @@ fn run(
         sink.write_stdout(&help);
         return Ok(0);
     }
-    if !stages.is_empty() && matches!(dispatch.action, RunAction::Repl) {
+    if !stages.is_empty()
+        && matches!(
+            dispatch.action,
+            RunAction::Repl | RunAction::ProductAction(_)
+        )
+    {
         return Err(miette!("a pipeline requires a command"));
     }
 
@@ -486,6 +520,19 @@ fn run(
         let _phase = (!is_repl)
             .then(|| tracing::info_span!(target: "osp_startup", "command execution").entered());
         match action {
+            RunAction::ProductAction(name) => {
+                let flag = app
+                    .action_flags
+                    .iter()
+                    .find(|flag| flag.name == name)
+                    .ok_or_else(|| miette!("unknown product action: {name}"))?;
+                (flag.run)(&mut state.runtime).map(|message| {
+                    if !message.is_empty() {
+                        sink.write_stdout(&format!("{message}\n"));
+                    }
+                    0
+                })
+            }
             RunAction::Repl => {
                 state.runtime.ui = invocation_ui.ui.clone();
                 repl::run_plugin_repl(&mut state)

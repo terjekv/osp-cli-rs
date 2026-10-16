@@ -92,6 +92,8 @@ impl From<PresentationArg> for UiPresentation {
 pub struct Cli {
     #[arg(skip)]
     pub(crate) product_overrides: ConfigLayer,
+    #[arg(skip)]
+    pub(crate) product_action: Option<String>,
     /// Override the effective user name for this invocation.
     #[arg(short = 'u', long = "user")]
     pub user: Option<String>,
@@ -816,7 +818,6 @@ pub struct ConfigUnsetArgs {
 
 impl Cli {
     pub(crate) fn append_static_session_overrides(&self, layer: &mut ConfigLayer) {
-        layer.extend_from_layer(&self.product_overrides);
         if let Some(user) = self
             .user
             .as_deref()
@@ -825,6 +826,7 @@ impl Cli {
         {
             layer.set("user.name", user);
         }
+        layer.extend_from_layer(&self.product_overrides);
         if self.incognito {
             layer.set("repl.history.enabled", false);
         }

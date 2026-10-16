@@ -122,11 +122,31 @@ pub use session::{
 };
 pub use sink::{BufferedUiSink, StdIoUiSink, StderrSpinner, UiSink};
 
+type ProductAction = dyn Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync;
+
+/// Optional action-flag argument placed in the invocation configuration layer.
+#[derive(Clone, Copy)]
+pub struct ActionFlagValue {
+    /// Argument name displayed in help.
+    pub value_name: &'static str,
+    /// Configuration key receiving a supplied argument.
+    pub config_key: &'static str,
+}
+
+#[derive(Clone)]
+struct ProductActionFlag {
+    name: &'static str,
+    help: &'static str,
+    optional_value: Option<ActionFlagValue>,
+    run: Arc<ProductAction>,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct AppDefinition {
     native_commands: NativeCommandRegistry,
     product_defaults: ConfigLayer,
     product_help_options: Vec<(String, String)>,
+    action_flags: Vec<ProductActionFlag>,
     config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
     access_policy: Option<Arc<dyn AccessPolicy>>,
 }
@@ -252,6 +272,30 @@ impl App {
         help: impl Into<String>,
     ) -> Self {
         self.definition = self.definition.with_product_help_option(syntax, help);
+        self
+    }
+
+    /// Registers an exclusive product action that exits after returning its message.
+    ///
+    /// An optional [`ActionFlagValue`] accepts zero or one value and places
+    /// a supplied value in the invocation's config layer before policy startup.
+    /// The action receives the assembled CLI runtime; it never enters the REPL.
+    pub fn with_action_flag<F>(
+        mut self,
+        name: &'static str,
+        help: &'static str,
+        optional_value: Option<ActionFlagValue>,
+        run: F,
+    ) -> Self
+    where
+        F: Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync + 'static,
+    {
+        self.definition.action_flags.push(ProductActionFlag {
+            name,
+            help,
+            optional_value,
+            run: Arc::new(run),
+        });
         self
     }
 
@@ -615,6 +659,30 @@ impl AppBuilder {
         help: impl Into<String>,
     ) -> Self {
         self.definition = self.definition.with_product_help_option(syntax, help);
+        self
+    }
+
+    /// Registers an exclusive product action that exits after returning its message.
+    ///
+    /// An optional [`ActionFlagValue`] accepts zero or one value and places
+    /// a supplied value in the invocation's config layer before policy startup.
+    /// The action receives the assembled CLI runtime; it never enters the REPL.
+    pub fn with_action_flag<F>(
+        mut self,
+        name: &'static str,
+        help: &'static str,
+        optional_value: Option<ActionFlagValue>,
+        run: F,
+    ) -> Self
+    where
+        F: Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync + 'static,
+    {
+        self.definition.action_flags.push(ProductActionFlag {
+            name,
+            help,
+            optional_value,
+            run: Arc::new(run),
+        });
         self
     }
 
