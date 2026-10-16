@@ -754,6 +754,12 @@ impl NativeProgressRenderer<'_, '_> {
 }
 
 impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
+    fn emit_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
+        self.flush()?;
+        self.draw(event, self.stages)?;
+        Ok(self.sink.borrow().can_replace())
+    }
+
     fn present(&self, document: NativeProgressEvent) -> anyhow::Result<()> {
         self.flush()?;
         self.draw(document, &[])

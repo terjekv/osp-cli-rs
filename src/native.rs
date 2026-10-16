@@ -182,6 +182,14 @@ impl<'a> NativeCommandContext<'a> {
         }
     }
 
+    /// Draws a preliminary document and reports whether the host can replace it.
+    pub fn emit_progress_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        match self.progress {
+            Some(sink) => sink.emit_measured(event),
+            None => Ok(false),
+        }
+    }
+
     /// Submits one structured transient progress document to the host.
     ///
     /// The host may coalesce terminal replacement updates before displaying them.
@@ -237,6 +245,12 @@ impl NativeProgressEvent {
 pub trait NativeProgressSink {
     /// Renders or records one progress document before command execution resumes.
     fn emit(&self, event: NativeProgressEvent) -> Result<()>;
+
+    /// Draws immediately and reports whether terminal replacement is available.
+    fn emit_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        self.emit(event)?;
+        Ok(false)
+    }
 
     /// Render a notice or confirmation without applying result-stream filters.
     fn present(&self, document: NativeProgressEvent) -> Result<()> {

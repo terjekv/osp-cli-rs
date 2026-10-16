@@ -286,6 +286,10 @@ impl<'a> ProgressUiSink<'a> {
         }
     }
 
+    pub(crate) fn can_replace(&self) -> bool {
+        self.previous_lines > 0 || self.spinner.is_some()
+    }
+
     fn display_width(text: &str) -> usize {
         crate::ui::display_width(text)
     }
