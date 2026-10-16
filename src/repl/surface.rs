@@ -160,7 +160,11 @@ pub(crate) fn build_repl_surface(
     order_root_words(&mut root_words, help_layout);
     let intro_commands = root_words
         .iter()
-        .filter(|word| root_word_can_appear_in_intro(word))
+        .filter(|word| {
+            root_word_can_appear_in_intro(word)
+                && (specs.iter().any(|spec| &spec.name == *word)
+                    || aliases.iter().any(|alias| &alias.name == *word))
+        })
         .take(4)
         .cloned()
         .collect();

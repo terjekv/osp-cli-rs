@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- Minimal REPL intros list visible command roots and aliases instead of
+  subcommands and theme completion words.
+
 - **Breaking:** Rename `ui.message.verbosity` to `ui.verbosity` (environment:
   `OSP__UI__VERBOSITY`); old configs fail as unknown keys. Rename public
   `UiState::{message_verbosity, debug_verbosity}` to `{verbosity, debug_level}`
