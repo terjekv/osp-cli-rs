@@ -41,6 +41,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 
+- **Breaking:** Command errors can carry recovery actions and request IDs as data. Legacy
+  text hints remain accepted during downstream migration through one adapter;
+  `Try:`, `try:` and `tip:` actions now populate JSON `error.details.action`
+  consistently with `hint:`.
+
 - **Breaking:** Native and inline commands share help/version/missing-subcommand handling.
   Missing subcommands show help successfully, including direct native LDAP
   execution.

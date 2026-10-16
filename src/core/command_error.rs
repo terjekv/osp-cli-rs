@@ -1,0 +1,64 @@
+//! Structured recovery advice shared by native commands and host renderers.
+
+/// A command failure with optional recovery advice and a service request ID.
+/// Display contains only the message; renderers retain advice as data.
+#[derive(Debug, Clone)]
+pub struct CommandError {
+    /// Human-readable failure summary.
+    pub message: String,
+    /// Suggested recovery action, without a `hint:` prefix.
+    pub action: Option<String>,
+    /// Service request identifier for support.
+    pub request_id: Option<String>,
+}
+
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CommandError {}
+
+impl miette::Diagnostic for CommandError {
+    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        self.action
+            .as_ref()
+            .map(|action| Box::new(action) as Box<dyn std::fmt::Display>)
+    }
+}
+
+// Downstream still emits text hints; remove this adapter when those callers migrate.
+pub(crate) fn legacy_text_hint(message: &str) -> CommandError {
+    let mut error = CommandError {
+        message: message.to_string(),
+        action: None,
+        request_id: None,
+    };
+    let mut offset = 0;
+    for (index, raw) in message.split_inclusive('\n').enumerate() {
+        let start = offset;
+        offset += raw.len();
+        if index == 0 {
+            continue;
+        }
+        let line = raw.trim();
+        if let Some(action) = line
+            .strip_prefix("hint:")
+            .or_else(|| line.strip_prefix("Try:"))
+            .or_else(|| line.strip_prefix("try:"))
+            .or_else(|| line.strip_prefix("tip:"))
+        {
+            if error.action.is_none() {
+                error.action = Some(action.trim().to_string());
+                error.message = message[..start]
+                    .strip_suffix('\n')
+                    .unwrap_or(&message[..start])
+                    .to_string();
+            }
+        } else if let Some(id) = line.strip_prefix("request-id:") {
+            error.request_id = Some(id.trim().to_string());
+        }
+    }
+    error
+}

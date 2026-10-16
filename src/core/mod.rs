@@ -29,6 +29,8 @@
 //!   higher-level modules like `app`, `repl`, or `ui`
 
 pub(crate) mod clap_metadata;
+pub(crate) mod command_error;
+pub use command_error::CommandError;
 /// Reader-relative command suggestions.
 pub mod command_scope;
 pub use command_scope::{CommandHint, CommandScope};

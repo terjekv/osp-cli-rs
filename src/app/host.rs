@@ -786,7 +786,10 @@ pub fn render_report_message(
     use crate::core::MessageLevel;
     let known = KnownErrorChain::inspect(err);
     let detailed = level >= MessageLevel::Info;
-    let mut rendered = if let Some(clap) = known.clap {
+    let structured = find_error_in_chain::<crate::core::CommandError>(err);
+    let mut rendered = if let Some(error) = structured {
+        error.message.clone()
+    } else if let Some(clap) = known.clap {
         if let Some(name) = clap
             .to_string()
             .split("unrecognized subcommand '")
@@ -813,9 +816,19 @@ pub fn render_report_message(
     } else {
         base_error_message(err, &known)
     };
+    if let Some(error) = structured {
+        if let Some(id) = &error.request_id {
+            rendered.push_str(&format!("\nrequest-id: {id}"));
+        }
+        if let Some(action) = &error.action {
+            rendered.push_str(&format!("\nhint: {action}"));
+        }
+    }
     if !detailed {
         if let Some(hint) = known_error_hint(&known, &settings.runtime.command_scope)
-            && !rendered.contains("\nhint:")
+            && crate::core::command_error::legacy_text_hint(&rendered)
+                .action
+                .is_none()
             && !rendered.contains(&hint)
         {
             rendered.push_str("\nhint: ");

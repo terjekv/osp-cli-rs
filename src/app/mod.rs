@@ -647,28 +647,24 @@ pub(crate) fn render_process_error(
         );
     }
 
-    let mut lines = message.lines();
-    let first = lines
+    let legacy;
+    let error = if let Some(error) = host::find_error_in_chain::<crate::core::CommandError>(err) {
+        error
+    } else {
+        legacy = crate::core::command_error::legacy_text_hint(&message);
+        &legacy
+    };
+    let first = error
+        .message
+        .lines()
         .next()
         .unwrap_or("Command failed.")
         .trim_start_matches("error: ");
     let mut rendered = format!("error: {first}\n");
-    let mut hint = None;
-    for line in lines {
-        let line = line.trim();
-        if let Some(action) = line
-            .strip_prefix("hint: ")
-            .or_else(|| line.strip_prefix("Try: "))
-            .or_else(|| line.strip_prefix("try: "))
-            .or_else(|| line.strip_prefix("tip: "))
-        {
-            hint.get_or_insert(action);
-        } else if line.starts_with("request-id:") {
-            rendered.push_str(line);
-            rendered.push('\n');
-        }
+    if let Some(id) = &error.request_id {
+        rendered.push_str(&format!("request-id: {id}\n"));
     }
-    if let Some(action) = hint {
+    if let Some(action) = &error.action {
         rendered.push_str(&format!("hint: {action}\n"));
     }
     rendered

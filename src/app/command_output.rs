@@ -291,13 +291,20 @@ pub(crate) fn json_failure_error(
         report.and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
     {
         serde_json::json!(backend.error)
+    } else if let Some(error) =
+        report.and_then(super::host::find_error_in_chain::<crate::core::CommandError>)
+    {
+        let mut details = serde_json::Map::new();
+        if let Some(action) = &error.action {
+            details.insert("action".into(), serde_json::json!(action));
+        }
+        if let Some(id) = &error.request_id {
+            details.insert("request_id".into(), serde_json::json!(id));
+        }
+        serde_json::json!({"code": code, "message": error.message, "details": details})
     } else {
-        let (summary, action) = message
-            .split_once("\nhint:")
-            .map_or((message.as_str(), None), |(summary, action)| {
-                (summary, Some(action.trim()))
-            });
-        serde_json::json!({"code": code, "message": summary, "details": action.map(|action| serde_json::json!({"action": action}))})
+        let error = crate::core::command_error::legacy_text_hint(&message);
+        serde_json::json!({"code": code, "message": error.message, "details": error.action.map(|action| serde_json::json!({"action": action}))})
     }
 }
 
@@ -620,17 +627,13 @@ pub(crate) fn cli_result_from_plugin_response(
     let mut result = CommandOutput::from_data(response.data, &response.meta, &messages, stages);
     if !response.ok {
         let report = if let Some(error) = response.error {
-            let mut message = error.message.clone();
-            if let Some(id) = error.details.get("request_id").and_then(Value::as_str) {
-                message.push_str(&format!(
-                    "\nrequest-id: {}",
-                    crate::diagnostics::safe_text(id)
-                ));
-            }
-            if let Some(action) = error.details.get("action").and_then(Value::as_str) {
-                message.push_str(&format!("\nhint: {action}"));
-            }
-            let report = miette!("{message}");
+            let action = error.details.get("action").and_then(Value::as_str);
+            let request_id = error.details.get("request_id").and_then(Value::as_str);
+            let report = miette::Report::new(crate::core::CommandError {
+                message: error.message.clone(),
+                action: action.map(str::to_owned),
+                request_id: request_id.map(crate::diagnostics::safe_text),
+            });
             miette::Report::new(CommandBackendDetails {
                 error,
                 source: report,
