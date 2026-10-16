@@ -109,13 +109,6 @@ pub struct OutputMeta {
     pub document_long_help: bool,
     /// Preferred renderer for this result, when known.
     pub render_recommendation: Option<RenderRecommendation>,
-    /// Human-only complete lines supplied by a producer for presentation.
-    /// Pipeline stages clear this override before rendering transformed rows.
-    pub presentation_lines: Vec<String>,
-    /// Human-only progress lines used when a progress block is appended.
-    pub progress_append: Vec<String>,
-    /// Whether a transient progress block should replace the previous block.
-    pub progress_replace: bool,
     /// Human-only cap on rows shown; pipeline stages clear it because they
     /// work on, and show, every row.
     pub display_limit: Option<usize>,

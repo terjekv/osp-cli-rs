@@ -36,24 +36,36 @@ pub(crate) enum ReplCommandOutput {
 impl ReplCommandOutput {
     /// Owns pipeline input conversion and producer hints across host surfaces.
     fn into_staged(self, stages: &[String]) -> Result<StructuredCommandOutput> {
-        let (output, format_hint, source_document) = match self {
+        let (output, format_hint, source_document, presentation) = match self {
             Self::Output(structured) => {
                 let StructuredCommandOutput {
                     output,
                     format_hint,
                     source_document,
+                    presentation,
                 } = *structured;
-                (output, format_hint, source_document)
+                (output, format_hint, source_document, presentation)
             }
-            Self::Text(text) => (text_output_to_rows(&text), Some(OutputFormat::Value), None),
+            Self::Text(text) => (
+                text_output_to_rows(&text),
+                Some(OutputFormat::Value),
+                None,
+                CommandPresentation::default(),
+            ),
             Self::Json(payload) => (
                 rows_to_output_result(rows_from_value(payload)),
                 Some(OutputFormat::Value),
                 None,
+                CommandPresentation::default(),
             ),
         };
         let (output, format_hint) = apply_output_stages(output, stages, format_hint)?;
         Ok(StructuredCommandOutput {
+            presentation: if stages.is_empty() {
+                presentation
+            } else {
+                CommandPresentation::default()
+            },
             source_document: if stages.is_empty() {
                 source_document
             } else {
@@ -65,8 +77,16 @@ impl ReplCommandOutput {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct CommandPresentation {
+    pub(crate) lines: Vec<String>,
+    pub(crate) progress_append: Vec<String>,
+    pub(crate) progress_replace: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StructuredCommandOutput {
+    pub(crate) presentation: CommandPresentation,
     pub(crate) source_document: Option<Document>,
     pub(crate) output: OutputResult,
     pub(crate) format_hint: Option<OutputFormat>,
@@ -82,6 +102,7 @@ pub(crate) struct CliCommandResult {
 }
 
 pub(crate) struct PreparedPluginOutput {
+    pub(crate) presentation: CommandPresentation,
     pub(crate) messages: MessageBuffer,
     pub(crate) output: OutputResult,
     pub(crate) format_hint: Option<OutputFormat>,
@@ -103,6 +124,11 @@ impl PreparedPluginOutput {
         }
         Self {
             messages,
+            presentation: CommandPresentation {
+                lines: meta.presentation_lines.clone(),
+                progress_append: meta.progress_append.clone(),
+                progress_replace: meta.progress_replace,
+            },
             output: plugin_data_to_output_result(data, Some(meta)),
             format_hint: meta.format_hint.as_deref().and_then(OutputFormat::parse),
         }
@@ -156,6 +182,7 @@ impl CliCommandResult {
         Self {
             output: Some(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
+                    presentation: CommandPresentation::default(),
                     source_document: None,
                     output,
                     format_hint,
@@ -370,6 +397,7 @@ pub(crate) fn run_progress_command_with_ui(
     sink: &mut dyn UiSink,
 ) -> Result<()> {
     let PreparedPluginOutput {
+        presentation,
         messages,
         output,
         format_hint,
@@ -379,7 +407,7 @@ pub(crate) fn run_progress_command_with_ui(
         == OutputFormat::Json;
     // A redrawn frame owns its messages: written separately, they would stay
     // above every redraw and go stale.
-    let framed = output.meta.progress_replace
+    let framed = presentation.progress_replace
         && !json_output
         && sink.stderr_is_terminal()
         && !progress_output_is_empty(&output);
@@ -391,10 +419,17 @@ pub(crate) fn run_progress_command_with_ui(
     }
 
     let append_lines = !sink.stderr_is_terminal() || json_output;
-    let mut rendered = if append_lines && !output.meta.progress_append.is_empty() {
-        render_progress_lines_with_runtime(&runtime, &output.meta.progress_append, sink)
+    let mut rendered = if append_lines && !presentation.progress_append.is_empty() {
+        render_progress_lines_with_runtime(&runtime, &presentation.progress_append, sink)
     } else {
-        render_progress_output_with_runtime(&runtime, &output, format_hint, json_output, sink)
+        render_progress_output_with_runtime(
+            &runtime,
+            &output,
+            &presentation,
+            format_hint,
+            json_output,
+            sink,
+        )
     };
     if framed && !messages.is_empty() {
         rendered.insert_str(
@@ -408,7 +443,7 @@ pub(crate) fn run_progress_command_with_ui(
         );
     }
     if !rendered.is_empty() {
-        let replace = output.meta.progress_replace && !json_output;
+        let replace = presentation.progress_replace && !json_output;
         sink.write_progress(&rendered, replace);
     }
     Ok(())
@@ -449,6 +484,7 @@ fn progress_output_is_empty(output: &OutputResult) -> bool {
 fn render_progress_output_with_runtime(
     runtime: &CommandRenderRuntime<'_>,
     output: &OutputResult,
+    presentation: &CommandPresentation,
     format_hint: Option<OutputFormat>,
     json_output: bool,
     sink: &dyn UiSink,
@@ -463,6 +499,7 @@ fn render_progress_output_with_runtime(
             runtime.config(),
             &settings,
             output,
+            presentation,
             format_hint,
             None,
         );
@@ -473,7 +510,14 @@ fn render_progress_output_with_runtime(
     settings.mode = crate::core::output::RenderMode::Plain;
     settings.color = crate::core::output::ColorMode::Never;
     settings.unicode = crate::core::output::UnicodeMode::Never;
-    render_structured_repl_output(runtime.config(), &settings, output, None, None)
+    render_structured_repl_output(
+        runtime.config(),
+        &settings,
+        output,
+        presentation,
+        None,
+        None,
+    )
 }
 
 /// Applies trailing DSL stages to an already-produced builtin command result.
@@ -572,6 +616,9 @@ pub(crate) fn cli_result_from_plugin_response(
         PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages);
     let mut result = CliCommandResult::output(prepared.output, prepared.format_hint);
     result.messages = prepared.messages;
+    if let Some(ReplCommandOutput::Output(structured)) = result.output.as_mut() {
+        structured.presentation = prepared.presentation;
+    }
     if !response.ok {
         let report = if let Some(error) = response.error {
             result
@@ -611,9 +658,6 @@ pub(crate) fn apply_output_stages(
         output = apply_output_pipeline(output, stages).map_err(|err| {
             crate::app::report_anyhow_with_context(err, "failed to apply DSL output pipeline")
         })?;
-        output.meta.presentation_lines.clear();
-        output.meta.progress_append.clear();
-        output.meta.progress_replace = false;
         output.meta.display_limit = None;
         // Once a DSL pipeline runs, producer-side format hints stop being an
         // out-of-band override. Any surviving recommendation now lives on the
@@ -702,6 +746,7 @@ pub(crate) fn render_repl_output_with_runtime(
             runtime.config(),
             &runtime.ui().render_settings,
             &structured.output,
+            &structured.presentation,
             structured.format_hint,
             structured.source_document.as_ref(),
         ),
@@ -725,6 +770,7 @@ pub(crate) fn render_saved_repl_output_with_runtime(
         ReplCommandOutput::Output(_) => {
             let StructuredCommandOutput {
                 source_document,
+                presentation,
                 output,
                 format_hint,
             } = output
@@ -738,6 +784,7 @@ pub(crate) fn render_saved_repl_output_with_runtime(
                     runtime.config(),
                     &render_settings,
                     &output,
+                    &presentation,
                     format_hint,
                     source_document.as_ref(),
                 )
@@ -836,10 +883,17 @@ pub(crate) fn render_structured_repl_output(
     config: &ResolvedConfig,
     render_settings: &crate::ui::RenderSettings,
     output: &OutputResult,
+    presentation: &CommandPresentation,
     format_hint: Option<OutputFormat>,
     source_document: Option<&Document>,
 ) -> String {
     let effective = resolve_render_settings_with_hint(render_settings, format_hint);
+    if !presentation.lines.is_empty()
+        && crate::ui::plan_output(output, &effective, crate::ui::RenderProfile::Normal).format
+            != OutputFormat::Json
+    {
+        return crate::ui::render_presentation_lines(&presentation.lines, &effective);
+    }
     render_structured_output_with_source_document(
         output,
         source_document,
@@ -856,6 +910,7 @@ fn render_repl_structured_command(
 ) -> Result<String> {
     let StructuredCommandOutput {
         source_document,
+        presentation,
         output,
         format_hint,
     } = ReplCommandOutput::Output(structured)
@@ -868,6 +923,7 @@ fn render_repl_structured_command(
             runtime.config(),
             &render_settings,
             &output,
+            &presentation,
             format_hint,
             source_document.as_ref(),
         )

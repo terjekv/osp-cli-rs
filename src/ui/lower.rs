@@ -33,10 +33,6 @@ use crate::core::output_model::{
 use crate::core::row::Row;
 
 pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
-    if plan.format != OutputFormat::Json && !output.meta.presentation_lines.is_empty() {
-        return lower_presentation_lines(&output.meta.presentation_lines, plan.settings.width);
-    }
-
     let is_empty = match &output.items {
         OutputItems::Rows(rows) => rows.is_empty() || rows.iter().all(Row::is_empty),
         OutputItems::Groups(groups) => groups.is_empty(),
@@ -149,7 +145,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     doc
 }
 
-fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
+pub(crate) fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
     let lines = lines
         .iter()
         .map(|line| sanitize_human_text(&visible_inline_text(line)))

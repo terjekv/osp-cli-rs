@@ -261,6 +261,7 @@ fn run_config_get(context: ConfigReadContext<'_>, args: ConfigGetArgs) -> Result
             messages,
             output: Some(ReplCommandOutput::Output(Box::new(
                 crate::app::StructuredCommandOutput {
+                    presentation: Default::default(),
                     source_document: None,
                     output: rows_to_output_result(rows),
                     format_hint: None,
@@ -627,6 +628,7 @@ fn run_config_set(
         }
     } else {
         ReplCommandOutput::Output(Box::new(crate::app::StructuredCommandOutput {
+            presentation: Default::default(),
             source_document: None,
             output: rows_to_output_result(rows),
             format_hint: None,
@@ -740,6 +742,7 @@ fn run_config_unset(
         messages,
         output: Some(ReplCommandOutput::Output(Box::new(
             crate::app::StructuredCommandOutput {
+                presentation: Default::default(),
                 source_document: None,
                 output: rows_to_output_result(rows),
                 format_hint: None,

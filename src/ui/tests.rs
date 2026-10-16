@@ -470,9 +470,6 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
             document_entry_gap: None,
             document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };
@@ -511,9 +508,6 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
             document_entry_gap: None,
             document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };
@@ -801,9 +795,6 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
             document_entry_gap: None,
             document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };

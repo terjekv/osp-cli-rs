@@ -61,13 +61,6 @@ pub(crate) fn plugin_data_to_output_result(
             document_entry_gap: None,
             document_long_help: false,
             render_recommendation: None,
-            presentation_lines: meta
-                .map(|meta| meta.presentation_lines.clone())
-                .unwrap_or_default(),
-            progress_append: meta
-                .map(|meta| meta.progress_append.clone())
-                .unwrap_or_default(),
-            progress_replace: meta.is_some_and(|meta| meta.progress_replace),
             display_limit: meta.and_then(|meta| meta.display_limit),
         },
     }
@@ -438,9 +431,6 @@ mod tests {
                 document_entry_gap: None,
                 document_long_help: false,
                 render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
                 display_limit: None,
             },
         };

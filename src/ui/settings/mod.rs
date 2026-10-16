@@ -941,9 +941,6 @@ mod tests {
                 document_entry_gap: None,
                 document_long_help: false,
                 render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
                 display_limit: None,
             },
         };

@@ -595,6 +595,7 @@ mod tests {
         state.session.record_success_output(
             "ldap user alice | P name",
             &ReplCommandOutput::Output(Box::new(StructuredCommandOutput {
+                presentation: Default::default(),
                 source_document: None,
                 output: rows_to_output_result(vec![crate::row! {
                     "name" => "alice",

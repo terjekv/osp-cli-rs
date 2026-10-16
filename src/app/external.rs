@@ -644,6 +644,9 @@ impl NativeProgressRenderer<'_, '_> {
         (result.output, result.format_hint) =
             apply_output_stages(result.output, stages, result.format_hint)
                 .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
+        if !stages.is_empty() {
+            result.presentation = Default::default();
+        }
         let mut sink = self.sink.borrow_mut();
         run_progress_command_with_ui(self.config, self.ui, result, &mut *sink)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))?;

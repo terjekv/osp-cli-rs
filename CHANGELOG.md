@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Move progress and presentation signals from `OutputMeta` to
+  command presentation state, independent of canonical output data.
+
 - **Breaking:** Carry typed `OutputDocument::{Semantic, Json}` payloads instead
   of a kind and an internal JSON encoding of semantic documents.
 

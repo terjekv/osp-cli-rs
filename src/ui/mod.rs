@@ -310,9 +310,16 @@ pub fn render_document(document: &Document, settings: &RenderSettings) -> String
 }
 
 pub(crate) fn render_presentation_lines(lines: &[String], settings: &RenderSettings) -> String {
-    let mut output = OutputResult::from_rows(Vec::new());
-    output.meta.presentation_lines = lines.to_vec();
-    render_output(&output, settings)
+    let plan = plan_output(
+        &OutputResult::from_rows(Vec::new()),
+        settings,
+        RenderProfile::Normal,
+    );
+    emit::emit_doc(
+        &lower::lower_presentation_lines(lines, plan.settings.width),
+        plan.format,
+        &plan.settings,
+    )
 }
 
 /// Renders output using the copy-safe profile.

@@ -149,6 +149,7 @@ pub(crate) fn run_history_repl_command(
             output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
             Ok(ReplCommandOutput::Output(Box::new(
                 StructuredCommandOutput {
+                    presentation: Default::default(),
                     source_document: None,
                     output,
                     format_hint: None,
