@@ -104,6 +104,24 @@ fn run_repl_cycle(
     run_repl(cycle.run_config, |event, history| {
         let line = match event {
             crate::repl::ReplEvent::Line(line) => line,
+            crate::repl::ReplEvent::RootLine(line) => {
+                history
+                    .with(|store| store.finalize_execution(line, line, false))
+                    .map_err(anyhow::Error::msg)??;
+                let scope = std::mem::take(&mut state.session.scope);
+                state.session.sync_history_shell_context();
+                let result = (|| {
+                    history
+                        .with(|store| store.stage_command_line(line))
+                        .map_err(anyhow::Error::msg)??;
+                    dispatch::execute_repl_plugin_line(state, history, line, None)
+                        .map(|executed| executed.result)
+                        .map_err(|err| anyhow::Error::from_boxed(err.into()))
+                })();
+                state.session.scope = scope;
+                state.session.sync_history_shell_context();
+                return result;
+            }
             crate::repl::ReplEvent::Action("hint.insert") => {
                 crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
                 return Ok(state.session.repl_feedback.hint().map_or(

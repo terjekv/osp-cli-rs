@@ -7,6 +7,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- In a shell, Ctrl-R inside history search widens to all entries in the same
+  identity/profile file, preserving the query. Prompts distinguish the shell
+  from `all`. Global selections run outside the shell for that line; Tab keeps
+  that scope while editing. Ctrl-R at root keeps its scope.
+- **Breaking:** Embedders receive `ReplEvent::RootLine` for global history selections.
+
 - History bang words are valid in the REPL highlighter; `!!` and `sudo !!`
   show their expansion as a muted hint without an unknown-command status.
 

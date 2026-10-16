@@ -49,7 +49,7 @@
 //!
 //! let _result = run_repl(config, |line, _history| -> Result<ReplResult> {
 //!     match line {
-//!         osp_cli::repl::ReplEvent::Line(line) => match line.trim() {
+//!         osp_cli::repl::ReplEvent::Line(line) | osp_cli::repl::ReplEvent::RootLine(line) => match line.trim() {
 //!         "exit" | "quit" => Ok(ReplResult::Exit(0)),
 //!         _ => Ok(ReplResult::Continue),
 //!         },

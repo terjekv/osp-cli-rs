@@ -180,7 +180,8 @@ The REPL provides:
 - command and flag completion
 - scoped completion inside shells
 - history navigation: Up after typing searches by prefix; Ctrl-R opens fuzzy
-  history search, where Enter runs, Tab edits, and Escape restores the draft
+  history search, where Enter runs, Tab edits, and Escape restores the draft.
+  Inside a shell, Ctrl-R again widens to the full identity/profile history
 - `!!` repeats the last accepted command, including one that failed during
   execution; `sudo !!` repeats it with elevation. Tab expands these into the
   editor without running; Enter expands and runs them. Unknown commands and

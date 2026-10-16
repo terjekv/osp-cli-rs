@@ -5,6 +5,8 @@
 pub enum ReplEvent<'a> {
     /// A user-submitted line, with ordinary history and shell semantics.
     Line(&'a str),
+    /// A line selected from global history, executed outside the current shell.
+    RootLine(&'a str),
     /// A registered action, outside user history and the current shell scope.
     ///
     /// Print/continue resumes the draft. The built-in hint action may replace

@@ -50,8 +50,8 @@ impl SkimItem for HistoryPickerItem {
 }
 
 pub(crate) enum HistorySelection {
-    Run(String),
-    Edit(String),
+    Run { command: String, root: bool },
+    Edit { command: String, root: bool },
 }
 
 pub(crate) fn launch_history_picker(
@@ -59,23 +59,30 @@ pub(crate) fn launch_history_picker(
     appearance: &ReplAppearance,
     current_line: &str,
 ) -> Result<Option<HistorySelection>> {
-    let items = history_picker_items(history);
-    if items.is_empty() {
-        return Ok(None);
-    }
-
-    let options = build_history_picker_options(appearance, current_line.trim())?;
+    let shell_prefix = history
+        .with(|store| store.shell_prefix())
+        .unwrap_or_default();
+    let mut scope = shell_prefix.as_deref();
+    let mut query = current_line.trim().to_string();
 
     #[cfg(miri)]
     {
         let _ = appearance;
         let _ = current_line;
-        let _ = options;
+        let _ = (&mut scope, &mut query);
         return Ok(None);
     }
 
     #[cfg(not(miri))]
-    {
+    loop {
+        let items = history_picker_items_for(history, scope);
+        if items.is_empty() && shell_prefix.is_none() {
+            return Ok(None);
+        }
+        let mut options = build_history_picker_options(appearance, &query)?;
+        if shell_prefix.is_some() {
+            options.prompt = format!("history ({})> ", scope.map(str::trim).unwrap_or("all"));
+        }
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = skim_unbounded();
         let payload = items
             .into_iter()
@@ -84,8 +91,13 @@ pub(crate) fn launch_history_picker(
         let _ = tx.send(payload);
         drop(tx);
 
-        let output = Skim::run_with(build_skim_options(options)?, Some(rx))
+        let output = Skim::run_with(build_skim_options(options, scope.is_some())?, Some(rx))
             .map_err(|err| anyhow::anyhow!("failed to launch REPL history picker: {err}"))?;
+        if skim::binds::parse_key("ctrl-r").ok() == Some(output.final_key) {
+            scope = None;
+            query = output.query;
+            continue;
+        }
         if output.is_abort {
             return Ok(None);
         }
@@ -94,27 +106,44 @@ pub(crate) fn launch_history_picker(
         // so a plain Enter accepts the active history item even if nothing was
         // toggled.
         let edit = skim::binds::parse_key("tab").ok() == Some(output.final_key);
-        Ok(output
+        return Ok(output
             .selected_items
             .first()
             .map(|item| item.output().into_owned())
             .or_else(|| output.current.map(|item| item.output().into_owned()))
             .map(|command| {
                 if edit {
-                    HistorySelection::Edit(command)
+                    HistorySelection::Edit {
+                        command,
+                        root: scope.is_none() && shell_prefix.is_some(),
+                    }
                 } else {
-                    HistorySelection::Run(command)
+                    HistorySelection::Run {
+                        command,
+                        root: scope.is_none() && shell_prefix.is_some(),
+                    }
                 }
-            }))
+            }));
     }
 }
 
+#[cfg(test)]
 pub(crate) fn history_picker_items(history: &SharedHistory) -> Vec<HistoryPickerItem> {
+    let scope = history
+        .with(|store| store.shell_prefix())
+        .unwrap_or_default();
+    history_picker_items_for(history, scope.as_deref())
+}
+
+fn history_picker_items_for(
+    history: &SharedHistory,
+    scope: Option<&str>,
+) -> Vec<HistoryPickerItem> {
     let mut seen = BTreeSet::new();
     let mut entries = Vec::new();
 
     for entry in history
-        .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+        .with(|store| store.list_entries_for(scope))
         .unwrap_or_default()
         .into_iter()
         .rev()
@@ -171,7 +200,7 @@ pub(crate) fn build_history_picker_options(
 }
 
 #[cfg(not(miri))]
-fn build_skim_options(options: HistoryPickerOptions) -> Result<skim::SkimOptions> {
+fn build_skim_options(options: HistoryPickerOptions, scoped: bool) -> Result<skim::SkimOptions> {
     let mut builder = SkimOptionsBuilder::default();
     builder
         .height(options.height)
@@ -183,11 +212,14 @@ fn build_skim_options(options: HistoryPickerOptions) -> Result<skim::SkimOptions
         .prompt(options.prompt)
         .query(options.query.unwrap_or_default())
         .scheme(MatchScheme::History)
-        // `Ctrl-R` inside the picker should stay within skim's history mode,
-        // not recursively re-enter the REPL host command path.
         .bind(vec![
             "tab:accept".to_string(),
-            "ctrl-r:toggle-sort".to_string(),
+            if scoped {
+                "ctrl-r:accept"
+            } else {
+                "ctrl-r:ignore"
+            }
+            .to_string(),
         ]);
 
     if let Some(color) = options.color {

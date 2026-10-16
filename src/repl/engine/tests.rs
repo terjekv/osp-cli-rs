@@ -131,6 +131,7 @@ fn submission_delegates_help_and_exit_to_host() {
         })
     };
     let mut submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut execute,
     };
@@ -456,6 +457,7 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
         })
     };
     let mut submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut restart_execute,
     };
@@ -473,6 +475,7 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
             Err(anyhow::anyhow!("submit failed"))
         };
     let mut failing_submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut failing_execute,
     };
@@ -483,6 +486,7 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
         Ok(ReplResult::Print("ignored".to_string()))
     };
     let mut noop_submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut noop_execute,
     };
@@ -657,6 +661,7 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
         let mut execute =
             |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
         let mut submission = SubmissionContext {
+            root_input: false,
             history_store: &history,
             execute: &mut execute,
         };
@@ -786,6 +791,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     let mut fallback_execute =
         |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut fallback_submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut fallback_execute,
     };
@@ -813,6 +819,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         Ok(ReplResult::Continue)
     };
     let mut submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut execute,
     };
@@ -846,6 +853,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     let mut error_execute =
         |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut error_submission = SubmissionContext {
+        root_input: false,
         history_store: &history,
         execute: &mut error_execute,
     };

@@ -34,6 +34,7 @@ pub(crate) struct InteractiveLoopConfig<'a> {
 
 pub(crate) struct SubmissionContext<'a, F> {
     pub(crate) history_store: &'a SharedHistory,
+    pub(crate) root_input: bool,
     pub(crate) execute: &'a mut F,
 }
 
@@ -48,7 +49,12 @@ where
     if raw.trim().is_empty() {
         return ReplResult::Continue;
     }
-    match (ctx.execute)(crate::repl::ReplEvent::Line(raw), ctx.history_store) {
+    let event = if std::mem::take(&mut ctx.root_input) {
+        crate::repl::ReplEvent::RootLine(raw)
+    } else {
+        crate::repl::ReplEvent::Line(raw)
+    };
+    match (ctx.execute)(event, ctx.history_store) {
         Ok(result) => result,
         Err(err) => {
             eprintln!("{err}");
@@ -384,7 +390,8 @@ where
                 }
             };
             match selected {
-                Some(HistorySelection::Run(command)) => {
+                Some(HistorySelection::Run { command, root }) => {
+                    submission.root_input = root;
                     eprintln!("{command}");
                     history_store
                         .with(|store| store.stage_command_line(&command))
@@ -398,7 +405,8 @@ where
                         submission,
                     );
                 }
-                Some(HistorySelection::Edit(command)) => {
+                Some(HistorySelection::Edit { command, root }) => {
+                    submission.root_input = root;
                     editor.run_edit_commands(&[
                         EditCommand::Clear,
                         EditCommand::InsertString(command),
@@ -432,7 +440,10 @@ where
             Some(editor),
         )),
         Signal::CtrlD => Ok(Some(ReplResult::Exit(0))),
-        Signal::CtrlC => Ok(None),
+        Signal::CtrlC => {
+            submission.root_input = false;
+            Ok(None)
+        }
     }
 }
 
@@ -566,6 +577,7 @@ mod tests {
             Ok(ReplResult::Continue)
         };
         let mut submission = SubmissionContext {
+            root_input: false,
             history_store: &history,
             execute: &mut execute,
         };
