@@ -42,6 +42,15 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Declare builtin config schema, defaults, documentation, and bootstrap rules
   together.
 
+- REPL completion now includes every invocation alias, including `--no-color`.
+  The verbose overview consistently lists each flag with all its aliases.
+- `--format` help and completion list its values in the same order as the
+  config schema: `auto|json|table|md|mreg|value`.
+- Startup diagnostics now use the same invocation options and verbosity as
+  dispatch. Only complete `-vqd` clusters count; option values, unknown short
+  flags and later DSL stages no longer contribute verbosity or render overrides.
+  Conflicting Unicode flags follow argument order when rendering their error.
+
 - **Breaking:** Remove the unused `Cli::bootstrap_from` preflight parser.
 
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry

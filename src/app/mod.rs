@@ -484,7 +484,11 @@ impl App {
             let _phase = crate::startup_trace::phase("process argv collection");
             args.into_iter().map(Into::into).collect::<Vec<OsString>>()
         };
-        let code = match host::run_from_with_sink_and_app(&args, sink, &self.definition) {
+        let pipe = args.iter().position(|arg| arg == "|").unwrap_or(args.len());
+        let mut scan = crate::cli::invocation::scan_cli_argv(&args[..pipe]);
+        let result =
+            host::run_scanned_with_sink_and_app(&args[pipe..], &mut scan, sink, &self.definition);
+        let code = match result {
             Ok(code) => code,
             Err(err) => {
                 let (error_detail, message_verbosity, error_render_settings) = {
@@ -496,12 +500,12 @@ impl App {
                             ui.render_settings.clone(),
                         )
                     } else {
-                        let (verbose, quiet, _) = bootstrap_verbosity_counts(&args);
+                        let (verbose, quiet) = (scan.invocation.verbose, scan.invocation.quiet);
                         let error_detail = adjust_error_detail(ErrorDetail::Terse, verbose, quiet);
                         let message_verbosity =
                             adjust_verbosity(MessageLevel::Success, verbose, quiet);
-                        let error_render_settings = help::render_settings_for_help(
-                            &args,
+                        let error_render_settings = help::render_settings_for_help_with_scan(
+                            &scan,
                             &self.definition.product_defaults,
                             &crate::config::ConfigLayer::default(),
                         )

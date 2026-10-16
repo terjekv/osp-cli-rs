@@ -19,7 +19,8 @@ fn cli_scan_and_runtime_load_options_strip_invocation_flags_unit() {
         OsString::from("show"),
     ];
 
-    let scanned = scan_cli_argv(&argv).expect("argv scan should succeed");
+    let scanned = scan_cli_argv(&argv);
+    assert!(scanned.error.is_none());
 
     assert_eq!(
         scanned.argv,

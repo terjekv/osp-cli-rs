@@ -373,7 +373,7 @@ fn execute_last_result_builtin(
                 .action(clap::ArgAction::SetTrue)
                 .help("Start from the saved result before its original pipeline"),
         )
-        .after_help(crate::cli::invocation::INVOCATION_HELP_SECTION);
+        .after_help(crate::cli::invocation::invocation_help_text());
     let matches = match command.try_get_matches_from(scanned.tokens) {
         Ok(matches) => matches,
         Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {

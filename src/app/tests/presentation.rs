@@ -124,23 +124,22 @@ fn help_render_overrides_parse_supported_and_edge_flags_unit() {
         "supported flags"
     );
     assert_eq!(
-        parsed.mode,
+        parsed.invocation.mode,
         Some(crate::core::output::RenderMode::Plain),
         "supported flags"
     );
     assert_eq!(
-        parsed.color,
+        parsed.invocation.color,
         Some(crate::core::output::ColorMode::Always),
         "supported flags"
     );
     assert_eq!(
-        parsed.unicode,
+        parsed.invocation.unicode,
         Some(crate::core::output::UnicodeMode::Never),
         "supported flags"
     );
     assert!(parsed.no_env);
     assert!(parsed.no_config_file);
-    assert!(parsed.ascii_legacy);
 
     let alias_args = vec![OsString::from("osp"), OsString::from("--gammel-og-bitter")];
     let alias = parse_help_render_overrides(&alias_args);
@@ -153,8 +152,8 @@ fn help_render_overrides_parse_supported_and_edge_flags_unit() {
         OsString::from("tsd"),
     ];
     let edge = parse_help_render_overrides(&edge_args);
-    assert_eq!(edge.mode, None);
-    assert_eq!(edge.profile.as_deref(), Some("tsd"));
+    assert_eq!(edge.invocation.mode, None);
+    assert_eq!(edge.profile, None);
 }
 
 #[test]

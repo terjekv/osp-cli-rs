@@ -23,10 +23,12 @@ use std::time::Instant;
 
 use super::help;
 use super::help::help_level;
-use crate::app::logging::{bootstrap_logging_config, init_developer_logging};
+use crate::app::logging::{DeveloperLoggingConfig, init_developer_logging};
 use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppClients, AppState, AuthState, UiState};
-use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_cli_argv};
+use crate::cli::invocation::{
+    InvocationOptions, ScannedCliArgs, extend_with_invocation_help, scan_cli_argv,
+};
 use crate::cli::{Cli, Commands};
 use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
 
@@ -280,23 +282,35 @@ where
         let _phase = crate::startup_trace::phase("argv collection");
         args.into_iter().map(Into::into).collect::<Vec<OsString>>()
     };
+    let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
+    let mut scan = scan_cli_argv(&argv[..pipe]);
+    run_scanned_with_sink_and_app(&argv[pipe..], &mut scan, sink, app)
+}
+
+pub(crate) fn run_scanned_with_sink_and_app(
+    suffix: &[OsString],
+    scanned: &mut ScannedCliArgs,
+    sink: &mut dyn UiSink,
+    app: &super::AppDefinition,
+) -> Result<i32> {
     {
         let _phase = crate::startup_trace::phase("developer logging bootstrap");
-        init_developer_logging(bootstrap_logging_config(&argv));
+        init_developer_logging(DeveloperLoggingConfig::new(scanned.invocation.debug));
     }
-    let (pipe, scanned, suffix, stages) = {
+    let (suffix, stages) = {
         let _phase = crate::startup_trace::phase("argv/invocation scan");
-        let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
-        let suffix = argv[pipe..]
+        if let Some(error) = scanned.error.take() {
+            return Err(error);
+        }
+        let suffix = suffix
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        let scanned = scan_cli_argv(&argv[..pipe])?;
         let mut stage_tokens = vec!["command".to_string()];
         stage_tokens.extend(suffix.iter().cloned());
         let stages = crate::cli::pipeline::split_command_tokens(&stage_tokens).stages;
         crate::cli::validate_cli_dsl_stages(&stages)?;
-        (pipe, scanned, suffix, stages)
+        (suffix, stages)
     };
     let (parsed, help_command) = {
         let _phase = crate::startup_trace::phase("clap parse");
@@ -341,12 +355,12 @@ where
         Ok(mut cli) => {
             if let Some(Commands::External(tokens)) = cli.command.as_mut() {
                 tokens.extend(suffix);
-                run(cli, scanned.invocation, &[], sink, app)
+                run(cli, scanned.invocation.clone(), &[], sink, app)
             } else {
-                run(cli, scanned.invocation, &stages, sink, app)
+                run(cli, scanned.invocation.clone(), &stages, sink, app)
             }
         }
-        Err(err) => handle_clap_parse_error(&argv[..pipe], &help_command, err, &stages, sink, app),
+        Err(err) => handle_clap_parse_error(scanned, &help_command, err, &stages, sink, app),
     }
 }
 
@@ -364,7 +378,7 @@ fn product_config_overrides(
 }
 
 fn handle_clap_parse_error(
-    args: &[OsString],
+    scanned: &ScannedCliArgs,
     command: &clap::Command,
     err: clap::Error,
     stages: &[String],
@@ -375,7 +389,7 @@ fn handle_clap_parse_error(
         clap::error::ErrorKind::DisplayHelp
         | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
             let _phase = crate::startup_trace::phase("command execution");
-            let tokens = scan_cli_argv(args)?
+            let tokens = scanned
                 .argv
                 .iter()
                 .map(|arg| arg.to_string_lossy().into_owned())
@@ -384,8 +398,11 @@ fn handle_clap_parse_error(
                 .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
                 .map(|matches| product_config_overrides(app, &matches))
                 .unwrap_or_default();
-            let help_context =
-                help::render_settings_for_help(args, &app.product_defaults, &product_overrides);
+            let help_context = help::render_settings_for_help_with_scan(
+                scanned,
+                &app.product_defaults,
+                &product_overrides,
+            );
             if let Some(config) = &help_context.config {
                 let _phase = crate::startup_trace::phase("native command configure");
                 app.native_commands.configure(config);
@@ -454,7 +471,7 @@ fn handle_clap_parse_error(
             err,
             "failed to parse CLI arguments",
             command.clone(),
-            scan_cli_argv(args)?.argv,
+            scanned.argv.clone(),
         )),
     }
 }

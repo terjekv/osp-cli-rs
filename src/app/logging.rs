@@ -16,6 +16,7 @@
 //! - [`DeveloperLoggingConfig::new`] creates the exact runtime baseline and
 //!   `with_*` setters refine optional outputs
 
+#[cfg(test)]
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{IsTerminal, Write};
@@ -72,8 +73,9 @@ impl DeveloperLoggingConfig {
 }
 
 /// Derives the initial developer logging configuration from raw CLI arguments.
-pub fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
-    DeveloperLoggingConfig::new(super::bootstrap_verbosity_counts(args).2)
+#[cfg(test)]
+fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
+    DeveloperLoggingConfig::new(crate::cli::invocation::scan_cli_argv(args).invocation.debug)
 }
 
 /// Initializes or reloads the process-global developer logging subscriber.

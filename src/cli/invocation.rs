@@ -1,45 +1,224 @@
-//! Per-invocation flag scanning.
-//!
-//! Some flags affect only the current command invocation and may appear before
-//! the real command path. This module peels those flags off argv/token input
-//! so the rest of the CLI grammar can parse the actual command while the host
-//! still receives the invocation-scoped render/debug/provider options.
+//! Invocation flags shared by argv scanning, help and REPL completion.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 
-use crate::core::document::{Document, HelpLevel};
+use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use miette::{Result, miette};
 
-pub(crate) const INVOCATION_HELP_SECTION: &str = r#"Common Invocation Options:
-  --format <auto|json|table|mreg|value|md>
-                                            Format this invocation only
-  --json | --table | --mreg | --value | --md
-                                            Convenience aliases for --format
-  --render-mode <auto|plain|rich>           Render mode for this invocation
-  --plain | --rich                          Convenience aliases for --render-mode
-  --color <auto|always|never>               Color policy for this invocation
-  --no-color                                Alias for --color never
-  --unicode <auto|always|never>             Unicode policy for this invocation
-  --ascii                                   Alias for --unicode never
-  -v, --verbose                             Increase message verbosity
-  -q, --quiet                               Decrease message verbosity
-  -d, --debug                               Increase developer log verbosity
-  --plugin-provider <PLUGIN_ID>             Select provider for this invocation
+const INVOCATION_HELP_NOTE: &str =
+    "These flags may appear anywhere before `--` and affect only the current command.";
 
-These flags may appear anywhere before `--` and affect only the current command.
-"#;
+pub(crate) struct InvocationFlag {
+    pub(crate) long: &'static str,
+    short: Option<char>,
+    pub(crate) value_name: Option<&'static str>,
+    pub(crate) choices: fn() -> Vec<&'static str>,
+    pub(crate) aliases: &'static [InvocationAlias],
+    pub(crate) help: &'static str,
+    pub(crate) completion_help: Option<&'static str>,
+    set: fn(&mut InvocationOptions, &str, &str) -> Result<()>,
+    is_set: fn(&InvocationOptions) -> bool,
+}
 
-const FORMAT_ALIASES: &[(&str, OutputFormat)] = &[
-    ("--json", OutputFormat::Json),
-    ("--table", OutputFormat::Table),
-    ("--mreg", OutputFormat::Mreg),
-    ("--value", OutputFormat::Value),
-    ("--md", OutputFormat::Markdown),
+pub(crate) struct InvocationAlias {
+    pub(crate) long: &'static str,
+    value: &'static str,
+}
+
+impl InvocationAlias {
+    pub(crate) fn tooltip(&self, flag: &InvocationFlag) -> String {
+        format!("Alias for {} {}", flag.long, self.value)
+    }
+}
+
+pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
+    InvocationFlag {
+        long: "--format",
+        short: None,
+        value_name: Some("FORMAT"),
+        choices: || {
+            OutputFormat::ALL
+                .into_iter()
+                .map(OutputFormat::as_str)
+                .collect()
+        },
+        aliases: &[
+            InvocationAlias {
+                long: "--json",
+                value: "json",
+            },
+            InvocationAlias {
+                long: "--table",
+                value: "table",
+            },
+            InvocationAlias {
+                long: "--mreg",
+                value: "mreg",
+            },
+            InvocationAlias {
+                long: "--value",
+                value: "value",
+            },
+            InvocationAlias {
+                long: "--md",
+                value: "md",
+            },
+        ],
+        help: "Format this invocation only",
+        completion_help: None,
+        set: |o, v, source| {
+            parse_option(
+                &mut o.format,
+                v,
+                source,
+                "output format",
+                OutputFormat::parse,
+                OutputFormat::as_str,
+            )
+        },
+        is_set: |o| o.format.is_some(),
+    },
+    InvocationFlag {
+        long: "--render-mode",
+        short: None,
+        value_name: Some("MODE"),
+        choices: || {
+            RenderMode::ALL
+                .into_iter()
+                .map(RenderMode::as_str)
+                .collect()
+        },
+        aliases: &[
+            InvocationAlias {
+                long: "--plain",
+                value: "plain",
+            },
+            InvocationAlias {
+                long: "--rich",
+                value: "rich",
+            },
+        ],
+        help: "Render mode for this invocation",
+        completion_help: None,
+        set: |o, v, source| {
+            parse_option(
+                &mut o.mode,
+                v,
+                source,
+                "render mode",
+                RenderMode::parse,
+                RenderMode::as_str,
+            )
+        },
+        is_set: |o| o.mode.is_some(),
+    },
+    InvocationFlag {
+        long: "--color",
+        short: None,
+        value_name: Some("COLOR"),
+        choices: || ColorMode::ALL.into_iter().map(ColorMode::as_str).collect(),
+        aliases: &[InvocationAlias {
+            long: "--no-color",
+            value: "never",
+        }],
+        help: "Color policy for this invocation",
+        completion_help: None,
+        set: |o, v, source| {
+            parse_option(
+                &mut o.color,
+                v,
+                source,
+                "color mode",
+                ColorMode::parse,
+                ColorMode::as_str,
+            )
+        },
+        is_set: |o| o.color.is_some(),
+    },
+    InvocationFlag {
+        long: "--unicode",
+        short: None,
+        value_name: Some("UNICODE"),
+        choices: || {
+            UnicodeMode::ALL
+                .into_iter()
+                .map(UnicodeMode::as_str)
+                .collect()
+        },
+        aliases: &[InvocationAlias {
+            long: "--ascii",
+            value: "never",
+        }],
+        help: "Unicode policy for this invocation",
+        completion_help: None,
+        set: |o, v, source| {
+            parse_option(
+                &mut o.unicode,
+                v,
+                source,
+                "unicode mode",
+                UnicodeMode::parse,
+                UnicodeMode::as_str,
+            )
+        },
+        is_set: |o| o.unicode.is_some(),
+    },
+    InvocationFlag {
+        long: "--verbose",
+        short: Some('v'),
+        value_name: None,
+        choices: Vec::new,
+        aliases: &[],
+        help: "Increase message verbosity",
+        completion_help: None,
+        set: |o, _, _| {
+            o.verbose = o.verbose.saturating_add(1);
+            Ok(())
+        },
+        is_set: |_| false,
+    },
+    InvocationFlag {
+        long: "--quiet",
+        short: Some('q'),
+        value_name: None,
+        choices: Vec::new,
+        aliases: &[],
+        help: "Decrease message verbosity",
+        completion_help: None,
+        set: |o, _, _| {
+            o.quiet = o.quiet.saturating_add(1);
+            Ok(())
+        },
+        is_set: |_| false,
+    },
+    InvocationFlag {
+        long: "--debug",
+        short: Some('d'),
+        value_name: None,
+        choices: Vec::new,
+        aliases: &[],
+        help: "Increase developer log verbosity",
+        completion_help: None,
+        set: |o, _, _| {
+            o.debug = o.debug.saturating_add(1);
+            Ok(())
+        },
+        is_set: |_| false,
+    },
+    InvocationFlag {
+        long: "--plugin-provider",
+        short: None,
+        value_name: Some("PLUGIN_ID"),
+        choices: Vec::new,
+        aliases: &[],
+        help: "Select provider for this invocation",
+        completion_help: Some("Select plugin provider for this invocation"),
+        set: |o, v, source| set_plugin_provider(&mut o.plugin_provider, v, source),
+        is_set: |o| o.plugin_provider.is_some(),
+    },
 ];
-const MODE_ALIASES: &[(&str, RenderMode)] =
-    &[("--plain", RenderMode::Plain), ("--rich", RenderMode::Rich)];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct InvocationOptions {
@@ -53,43 +232,60 @@ pub(crate) struct InvocationOptions {
     pub(crate) plugin_provider: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScannedCliArgs {
     pub(crate) argv: Vec<OsString>,
     pub(crate) invocation: InvocationOptions,
+    pub(crate) error: Option<miette::Report>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ScannedCommandTokens {
     pub(crate) tokens: Vec<String>,
     pub(crate) invocation: InvocationOptions,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ScannedCommandTokenTrace {
-    pub(crate) tokens: Vec<String>,
-    pub(crate) invocation: InvocationOptions,
     pub(crate) kept_indices: Vec<usize>,
 }
 
 impl InvocationOptions {
-    /// Adds flags found in a second scan, such as an expanded alias, using
-    /// the same conflict rules as a single scan.
+    /// Merges alias-expanded options using the scanner's conflict rules.
     pub(crate) fn merge(&mut self, other: InvocationOptions) -> Result<()> {
-        if let Some(format) = other.format {
-            set_format(self, format, &format!("--format {}", format.as_str()))?;
+        if let Some(value) = other.format {
+            set_once(&mut self.format, value, |existing| {
+                format!(
+                    "conflicting output format flags: existing `{}` and `--format {}`",
+                    existing.as_str(),
+                    value.as_str()
+                )
+            })?;
         }
-        if let Some(mode) = other.mode {
-            set_mode(self, mode, &format!("--render-mode {}", mode.as_str()))?;
+        if let Some(value) = other.mode {
+            set_once(&mut self.mode, value, |existing| {
+                format!(
+                    "conflicting render mode flags: existing `{}` and `--render-mode {}`",
+                    existing.as_str(),
+                    value.as_str()
+                )
+            })?;
         }
-        if let Some(color) = other.color {
-            set_color(self, color, &format!("--color {}", color.as_str()))?;
+        if let Some(value) = other.color {
+            set_once(&mut self.color, value, |existing| {
+                format!(
+                    "conflicting color mode flags: existing `{}` and `--color {}`",
+                    existing.as_str(),
+                    value.as_str()
+                )
+            })?;
         }
-        if let Some(unicode) = other.unicode {
-            set_unicode(self, unicode, &format!("--unicode {}", unicode.as_str()))?;
+        if let Some(value) = other.unicode {
+            set_once(&mut self.unicode, value, |existing| {
+                format!(
+                    "conflicting unicode mode flags: existing `{}` and `--unicode {}`",
+                    existing.as_str(),
+                    value.as_str()
+                )
+            })?;
         }
-        if let Some(provider) = other.plugin_provider {
-            set_plugin_provider(self, &provider, "--plugin-provider")?;
+        if let Some(value) = other.plugin_provider {
+            set_plugin_provider(&mut self.plugin_provider, &value, "--plugin-provider")?;
         }
         self.verbose = self.verbose.saturating_add(other.verbose);
         self.quiet = self.quiet.saturating_add(other.quiet);
@@ -98,176 +294,225 @@ impl InvocationOptions {
     }
 }
 
-pub(crate) fn scan_cli_argv(argv: &[OsString]) -> Result<ScannedCliArgs> {
-    if argv.is_empty() {
-        return Ok(ScannedCliArgs {
-            argv: Vec::new(),
-            invocation: InvocationOptions::default(),
-        });
+pub(crate) fn scan_cli_argv(argv: &[OsString]) -> ScannedCliArgs {
+    let mut invocation = InvocationOptions::default();
+    let tail = argv.get(1..).unwrap_or_default();
+    let (kept_indices, error) = scan_tokens(tail, &mut invocation);
+    ScannedCliArgs {
+        argv: argv
+            .first()
+            .cloned()
+            .into_iter()
+            .chain(kept_indices.iter().map(|&index| tail[index].clone()))
+            .collect(),
+        invocation,
+        error,
     }
-
-    let tail = &argv[1..];
-    let lossy = tail
-        .iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let scanned = scan_command_tokens_with_trace(&lossy)?;
-    // Kept tokens are verbatim, so forward the native values (e.g. paths).
-    let mut cleaned = Vec::with_capacity(scanned.kept_indices.len() + 1);
-    cleaned.push(argv[0].clone());
-    cleaned.extend(
-        scanned
-            .kept_indices
-            .iter()
-            .map(|&index| tail[index].clone()),
-    );
-
-    Ok(ScannedCliArgs {
-        argv: cleaned,
-        invocation: scanned.invocation,
-    })
 }
 
 pub(crate) fn scan_command_tokens(tokens: &[String]) -> Result<ScannedCommandTokens> {
-    let traced = scan_command_tokens_with_trace(tokens)?;
-    Ok(ScannedCommandTokens {
-        tokens: traced.tokens,
-        invocation: traced.invocation,
-    })
-}
-
-pub(crate) fn scan_command_tokens_with_trace(
-    tokens: &[String],
-) -> Result<ScannedCommandTokenTrace> {
-    let mut cleaned = Vec::with_capacity(tokens.len());
-    let mut kept_indices = Vec::with_capacity(tokens.len());
     let mut invocation = InvocationOptions::default();
-    let mut index = 0usize;
-    let mut passthrough = false;
-
-    while index < tokens.len() {
-        let token = &tokens[index];
-        if passthrough {
-            cleaned.push(token.clone());
-            kept_indices.push(index);
-            index += 1;
-            continue;
-        }
-
-        if token == "--" {
-            passthrough = true;
-            cleaned.push(token.clone());
-            kept_indices.push(index);
-            index += 1;
-            continue;
-        }
-
-        if let Some((_, format)) = FORMAT_ALIASES.iter().find(|(flag, _)| token == flag) {
-            set_format(&mut invocation, *format, token)?;
-            index += 1;
-            continue;
-        }
-
-        if let Some((_, mode)) = MODE_ALIASES.iter().find(|(flag, _)| token == flag) {
-            set_mode(&mut invocation, *mode, token)?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--ascii" {
-            set_unicode(&mut invocation, UnicodeMode::Never, token)?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--no-color" {
-            set_color(&mut invocation, ColorMode::Never, token)?;
-            index += 1;
-            continue;
-        }
-
-        if token == "--verbose" {
-            invocation.verbose = invocation.verbose.saturating_add(1);
-            index += 1;
-            continue;
-        }
-
-        if token == "--quiet" {
-            invocation.quiet = invocation.quiet.saturating_add(1);
-            index += 1;
-            continue;
-        }
-
-        if token == "--debug" {
-            invocation.debug = invocation.debug.saturating_add(1);
-            index += 1;
-            continue;
-        }
-
-        if is_short_count_cluster(token) {
-            for ch in token.chars().skip(1) {
-                match ch {
-                    'v' => invocation.verbose = invocation.verbose.saturating_add(1),
-                    'q' => invocation.quiet = invocation.quiet.saturating_add(1),
-                    'd' => invocation.debug = invocation.debug.saturating_add(1),
-                    _ => {}
-                }
-            }
-            index += 1;
-            continue;
-        }
-
-        let (flag, inline_value) = token
-            .split_once('=')
-            .map_or((token.as_str(), None), |(flag, value)| (flag, Some(value)));
-        if matches!(
-            flag,
-            "--format" | "--render-mode" | "--color" | "--unicode" | "--plugin-provider"
-        ) {
-            let value = inline_value
-                .or_else(|| tokens.get(index + 1).map(String::as_str))
-                .ok_or_else(|| miette!("`{flag}` expects a value"))?;
-            match flag {
-                "--format" => {
-                    let format = OutputFormat::parse(value)
-                        .ok_or_else(|| miette!("unknown output format: {value}"))?;
-                    set_format(&mut invocation, format, flag)?;
-                }
-                "--render-mode" => {
-                    let mode = RenderMode::parse(value)
-                        .ok_or_else(|| miette!("unknown render mode: {value}"))?;
-                    set_mode(&mut invocation, mode, flag)?;
-                }
-                "--color" => {
-                    let color = ColorMode::parse(value)
-                        .ok_or_else(|| miette!("unknown color mode: {value}"))?;
-                    set_color(&mut invocation, color, flag)?;
-                }
-                "--unicode" => {
-                    let unicode = UnicodeMode::parse(value)
-                        .ok_or_else(|| miette!("unknown unicode mode: {value}"))?;
-                    set_unicode(&mut invocation, unicode, flag)?;
-                }
-                _ => set_plugin_provider(&mut invocation, value, flag)?,
-            }
-            index += if inline_value.is_some() { 1 } else { 2 };
-            continue;
-        }
-
-        cleaned.push(token.clone());
-        kept_indices.push(index);
-        index += 1;
+    let (kept_indices, error) = scan_tokens(tokens, &mut invocation);
+    if let Some(error) = error {
+        return Err(error);
     }
-
-    Ok(ScannedCommandTokenTrace {
-        tokens: cleaned,
+    Ok(ScannedCommandTokens {
+        tokens: kept_indices
+            .iter()
+            .map(|&index| tokens[index].clone())
+            .collect(),
         invocation,
         kept_indices,
     })
 }
 
+// Finish the same scan after an error so startup diagnostics can use its
+// verbosity and render options without a separate interpretation of argv.
+fn scan_tokens<T: AsRef<OsStr>>(
+    tokens: &[T],
+    invocation: &mut InvocationOptions,
+) -> (Vec<usize>, Option<miette::Report>) {
+    let mut kept = Vec::new();
+    let mut error = None;
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = tokens[index].as_ref().to_string_lossy();
+        if token == "--" {
+            kept.extend(index..tokens.len());
+            break;
+        }
+        if token.starts_with('-')
+            && !token.starts_with("--")
+            && token.len() > 1
+            && token.chars().skip(1).all(|ch| short_flag(ch).is_some())
+        {
+            for flag in token.chars().skip(1).filter_map(short_flag) {
+                if let Err(err) = (flag.set)(invocation, "", &token) {
+                    error.get_or_insert(err);
+                }
+            }
+            index += 1;
+            continue;
+        }
+        let (name, inline) = token
+            .split_once('=')
+            .map_or((token.as_ref(), None), |(name, v)| (name, Some(v)));
+        let found = INVOCATION_FLAGS.iter().find_map(|flag| {
+            if name == flag.long && (inline.is_none() || flag.value_name.is_some()) {
+                Some((flag, None))
+            } else {
+                flag.aliases
+                    .iter()
+                    .find(|alias| token == alias.long)
+                    .map(|alias| (flag, Some(alias.value)))
+            }
+        });
+        if let Some((flag, alias)) = found {
+            let takes_value = alias.is_none() && flag.value_name.is_some();
+            let next = tokens.get(index + 1).map(|v| v.as_ref().to_string_lossy());
+            let value = if takes_value {
+                inline
+                    .or(next.as_deref())
+                    .ok_or_else(|| miette!("`{name}` expects a value"))
+            } else {
+                Ok(alias.unwrap_or(""))
+            };
+            if let Err(err) = value.and_then(|value| (flag.set)(invocation, value, name)) {
+                error.get_or_insert(err);
+            }
+            index += if takes_value && inline.is_none() && next.is_some() {
+                2
+            } else {
+                1
+            };
+        } else {
+            kept.push(index);
+            index += 1;
+        }
+    }
+    (kept, error)
+}
+
+fn short_flag(ch: char) -> Option<&'static InvocationFlag> {
+    INVOCATION_FLAGS.iter().find(|flag| flag.short == Some(ch))
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T, describe: impl Fn(&T) -> String) -> Result<()> {
+    if let Some(existing) = slot.as_ref() {
+        return Err(miette!(describe(existing)));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+fn parse_option<T: Copy>(
+    slot: &mut Option<T>,
+    raw: &str,
+    source: &str,
+    kind: &str,
+    parse: fn(&str) -> Option<T>,
+    label: fn(T) -> &'static str,
+) -> Result<()> {
+    let parsed = parse(raw);
+    let value = parsed.ok_or_else(|| miette!("unknown {kind}: {raw}"));
+    let result = value.and_then(|value| {
+        set_once(slot, value, |existing| {
+            format!(
+                "conflicting {kind} flags: existing `{}` and `{source}`",
+                label(*existing)
+            )
+        })
+    });
+    // After a conflict, the first error wins and the last render value is used
+    // only to display that error, as in the former help fallback parser.
+    *slot = parsed;
+    result
+}
+
+fn set_plugin_provider(slot: &mut Option<String>, value: &str, source: &str) -> Result<()> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(miette!("{source} expects a non-empty value"));
+    }
+    set_once(slot, value.to_string(), |_| {
+        format!("`{source}` specified more than once")
+    })
+}
+
+fn invocation_help_entries() -> Vec<DocumentEntry> {
+    let mut entries = Vec::new();
+    for flag in INVOCATION_FLAGS {
+        let choices = (flag.choices)();
+        let name = match (flag.short, flag.value_name) {
+            (Some(short), _) => format!("-{short}, {}", flag.long),
+            (_, Some(value_name)) => format!(
+                "{} <{}>",
+                flag.long,
+                if choices.is_empty() {
+                    value_name.to_string()
+                } else {
+                    choices.join("|")
+                }
+            ),
+            _ => flag.long.to_string(),
+        };
+        entries.push(DocumentEntry {
+            name,
+            description: flag.help.to_string(),
+        });
+        if !flag.aliases.is_empty() {
+            entries.push(DocumentEntry {
+                name: flag
+                    .aliases
+                    .iter()
+                    .map(|alias| alias.long)
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                description: if flag.aliases.len() == 1 {
+                    flag.aliases[0].tooltip(flag)
+                } else {
+                    format!("Convenience aliases for {}", flag.long)
+                },
+            });
+        }
+    }
+    entries
+}
+
 pub(crate) fn invocation_help_view() -> Document {
-    Document::from_help_text(INVOCATION_HELP_SECTION)
+    Document {
+        blocks: vec![
+            DocBlock::section(
+                "Common Invocation Options",
+                vec![DocBlock::Entries {
+                    entries: invocation_help_entries(),
+                }],
+            ),
+            DocBlock::Paragraph {
+                text: INVOCATION_HELP_NOTE.to_string(),
+            },
+        ],
+    }
+}
+
+// `last --help` crosses a raw Clap boundary; structured help uses entries directly.
+pub(crate) fn invocation_help_text() -> &'static str {
+    static TEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    TEXT.get_or_init(|| {
+        let mut text = "Common Invocation Options:\n".to_string();
+        for entry in invocation_help_entries() {
+            if entry.name.len() > 32 {
+                text.push_str(&format!(
+                    "  {}\n{:44}{}\n",
+                    entry.name, "", entry.description
+                ));
+            } else {
+                text.push_str(&format!("  {:42}{}\n", entry.name, entry.description));
+            }
+        }
+        text.push_str(&format!("\n{INVOCATION_HELP_NOTE}\n"));
+        text
+    })
 }
 
 pub(crate) fn extend_with_invocation_help(view: &mut Document, level: HelpLevel) {
@@ -283,104 +528,37 @@ pub(crate) fn should_show_invocation_help(invocation: &InvocationOptions) -> boo
 pub(crate) fn hidden_invocation_completion_flags(
     invocation: &InvocationOptions,
 ) -> BTreeSet<String> {
-    let hide_all = !should_show_invocation_help(invocation);
-    let mut hidden = BTreeSet::new();
-    if hide_all || invocation.format.is_some() {
-        hidden.insert("--format".to_string());
-        hidden.extend(FORMAT_ALIASES.iter().map(|(flag, _)| (*flag).to_string()));
-    }
-    if hide_all || invocation.mode.is_some() {
-        hidden.insert("--render-mode".to_string());
-        hidden.extend(MODE_ALIASES.iter().map(|(flag, _)| (*flag).to_string()));
-    }
-    if hide_all || invocation.color.is_some() {
-        hidden.insert("--color".to_string());
-        hidden.insert("--no-color".to_string());
-    }
-    if hide_all || invocation.unicode.is_some() {
-        hidden.extend(["--unicode", "--ascii"].map(str::to_string));
-    }
-    if hide_all || invocation.plugin_provider.is_some() {
-        hidden.insert("--plugin-provider".to_string());
-    }
-    if hide_all {
-        hidden.extend(["--verbose", "--quiet", "--debug"].map(str::to_string));
-    }
-    hidden
+    INVOCATION_FLAGS
+        .iter()
+        .filter(|flag| !should_show_invocation_help(invocation) || (flag.is_set)(invocation))
+        .flat_map(|flag| {
+            std::iter::once(flag.long).chain(flag.aliases.iter().map(|alias| alias.long))
+        })
+        .map(str::to_string)
+        .collect()
 }
 
-fn is_short_count_cluster(token: &str) -> bool {
-    token.starts_with('-')
-        && !token.starts_with("--")
-        && token.len() > 1
-        && token
-            .chars()
-            .skip(1)
-            .all(|ch| matches!(ch, 'v' | 'q' | 'd'))
-}
-
-fn set_format(options: &mut InvocationOptions, format: OutputFormat, source: &str) -> Result<()> {
-    if let Some(existing) = options.format {
-        return Err(miette!(
-            "conflicting output format flags: existing `{}` and `{source}`",
-            existing.as_str()
-        ));
-    }
-    options.format = Some(format);
-    Ok(())
-}
-
-fn set_mode(options: &mut InvocationOptions, mode: RenderMode, source: &str) -> Result<()> {
-    if let Some(existing) = options.mode {
-        return Err(miette!(
-            "conflicting render mode flags: existing `{}` and `{source}`",
-            existing.as_str()
-        ));
-    }
-    options.mode = Some(mode);
-    Ok(())
-}
-
-fn set_color(options: &mut InvocationOptions, color: ColorMode, source: &str) -> Result<()> {
-    if let Some(existing) = options.color {
-        return Err(miette!(
-            "conflicting color mode flags: existing `{}` and `{source}`",
-            existing.as_str()
-        ));
-    }
-    options.color = Some(color);
-    Ok(())
-}
-
-fn set_unicode(options: &mut InvocationOptions, unicode: UnicodeMode, source: &str) -> Result<()> {
-    if let Some(existing) = options.unicode {
-        return Err(miette!(
-            "conflicting unicode mode flags: existing `{}` and `{source}`",
-            existing.as_str()
-        ));
-    }
-    options.unicode = Some(unicode);
-    Ok(())
-}
-
-fn set_plugin_provider(options: &mut InvocationOptions, value: &str, source: &str) -> Result<()> {
-    let normalized = value.trim();
-    if normalized.is_empty() {
-        return Err(miette!("{source} expects a non-empty value"));
-    }
-    if options.plugin_provider.is_some() {
-        return Err(miette!("`{source}` specified more than once"));
-    }
-    options.plugin_provider = Some(normalized.to_string());
-    Ok(())
+pub(crate) fn invocation_overview_summary() -> String {
+    let groups = INVOCATION_FLAGS
+        .iter()
+        .map(|flag| {
+            std::iter::once(flag.short.map_or_else(
+                || flag.long.to_string(),
+                |short| format!("-{short}/{}", flag.long),
+            ))
+            .chain(flag.aliases.iter().map(|alias| alias.long.to_string()))
+            .collect::<Vec<_>>()
+            .join("/")
+        })
+        .collect::<Vec<_>>();
+    format!("per invocation: {}", groups.join(", "))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        INVOCATION_HELP_SECTION, InvocationOptions, extend_with_invocation_help,
-        hidden_invocation_completion_flags, invocation_help_view, scan_cli_argv,
-        scan_command_tokens, scan_command_tokens_with_trace, should_show_invocation_help,
+        InvocationOptions, extend_with_invocation_help, hidden_invocation_completion_flags,
+        invocation_help_view, scan_cli_argv, scan_command_tokens, should_show_invocation_help,
     };
     use crate::core::document::Document;
     use crate::core::document::HelpLevel;
@@ -443,7 +621,7 @@ mod tests {
         assert_eq!(non_host_short.tokens, vec!["ldap", "-x", "alice"]);
         assert_eq!(non_host_short.invocation.format, Some(OutputFormat::Json));
 
-        let traced = scan_command_tokens_with_trace(
+        let traced = scan_command_tokens(
             &["ldap", "--json", "user", "alice"]
                 .iter()
                 .map(|value| (*value).to_string())
@@ -539,8 +717,11 @@ mod tests {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|name| name.contains("--json"))
         }));
-        assert!(!INVOCATION_HELP_SECTION.contains("--guide"));
-        assert!(INVOCATION_HELP_SECTION.contains("auto|json|table"));
+        assert!(rendered.iter().any(|row| {
+            row.get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| name.contains("auto|json|table"))
+        }));
 
         assert!(!should_show_invocation_help(&InvocationOptions::default()));
         assert!(should_show_invocation_help(&InvocationOptions {
@@ -598,8 +779,8 @@ mod tests {
             OsString::from("--json"),
             OsString::from("config"),
             OsString::from("show"),
-        ])
-        .expect("cli argv scan should succeed");
+        ]);
+        assert!(scanned.error.is_none());
         assert_eq!(
             scanned.argv,
             vec![
@@ -610,7 +791,8 @@ mod tests {
         );
         assert_eq!(scanned.invocation.format, Some(OutputFormat::Json));
 
-        let empty = scan_cli_argv(&[]).expect("empty argv should scan");
+        let empty = scan_cli_argv(&[]);
+        assert!(empty.error.is_none());
         assert!(empty.argv.is_empty());
         assert_eq!(empty.invocation, InvocationOptions::default());
 
@@ -618,8 +800,8 @@ mod tests {
             OsString::from("osp"),
             OsString::from("--json"),
             OsString::from("-vv"),
-        ])
-        .expect("cli argv scan should succeed");
+        ]);
+        assert!(only_flags.error.is_none());
         assert_eq!(only_flags.argv, vec![OsString::from("osp")]);
         assert_eq!(only_flags.invocation.format, Some(OutputFormat::Json));
         assert_eq!(only_flags.invocation.verbose, 2);

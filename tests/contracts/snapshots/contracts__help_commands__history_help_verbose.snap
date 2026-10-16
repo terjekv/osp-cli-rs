@@ -36,7 +36,7 @@ Usage: osp history [OPTIONS] <COMMAND>
           Print help (see a summary with '-h')
 
 - Common Invocation Options --------------------------------------------
-  --format <auto|json|table|mreg|value|md>
+  --format <auto|json|table|md|mreg|value>
                                             Format this invocation only
   --json | --table | --mreg | --value | --md
                                             Convenience aliases for --format

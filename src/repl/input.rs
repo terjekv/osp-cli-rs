@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::app::CMD_HELP;
 use crate::app::ReplScopeStack;
-use crate::cli::invocation::{hidden_invocation_completion_flags, scan_command_tokens_with_trace};
+use crate::cli::invocation::{hidden_invocation_completion_flags, scan_command_tokens};
 use crate::cli::pipeline::{ParsedCommandLine, parse_command_text_with_aliases};
 
 // These commands keep their root meaning inside every integration shell.
@@ -180,7 +180,7 @@ pub(crate) fn project_repl_ui_line(line: &str, config: &ResolvedConfig) -> Resul
         .iter()
         .map(|span| span.value.clone())
         .collect::<Vec<_>>();
-    let scanned = scan_command_tokens_with_trace(&tokens)?;
+    let scanned = scan_command_tokens(&tokens)?;
     let mut projected = line.as_bytes().to_vec();
 
     for (index, span) in spans.iter().enumerate() {

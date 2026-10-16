@@ -716,7 +716,8 @@ fn bootstrap_message_verbosity_handles_non_utf8_short_flags_and_double_dash_unit
         OsString::from("--quiet"),
     ]);
 
-    let (verbose, quiet, debug) = super::bootstrap_verbosity_counts(&args);
+    let counts = crate::cli::invocation::scan_cli_argv(&args).invocation;
+    let (verbose, quiet, debug) = (counts.verbose, counts.quiet, counts.debug);
     assert_eq!((verbose, quiet, debug), (2, 1, 0));
     assert_eq!(
         crate::ui::messages::adjust_verbosity(MessageLevel::Success, verbose, quiet),
@@ -742,7 +743,8 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
         OsString::from("--quiet"),
     ]);
 
-    let (verbose, quiet, debug) = super::bootstrap_verbosity_counts(&args);
+    let counts = crate::cli::invocation::scan_cli_argv(&args).invocation;
+    let (verbose, quiet, debug) = (counts.verbose, counts.quiet, counts.debug);
     assert_eq!((verbose, quiet, debug), (2, 1, 0));
     assert_eq!(
         crate::app::adjust_error_detail(ErrorDetail::Terse, verbose, quiet),

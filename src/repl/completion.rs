@@ -370,117 +370,23 @@ fn repl_host_command_without_invocation_flags(name: &str) -> bool {
 }
 
 fn invocation_flag_nodes() -> Vec<(String, FlagNode)> {
-    let format_values = ["auto", "json", "table", "mreg", "value", "md"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let mode_values = ["auto", "plain", "rich"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let color_values = ["auto", "always", "never"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let unicode_values = ["auto", "always", "never"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-
-    vec![
-        (
-            "--format".to_string(),
-            FlagNode::new()
-                .tooltip("Format this invocation only")
-                .suggestions(format_values),
-        ),
-        (
-            "--json".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format json"),
-        ),
-        (
-            "--table".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format table"),
-        ),
-        (
-            "--mreg".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format mreg"),
-        ),
-        (
-            "--value".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format value"),
-        ),
-        (
-            "--md".to_string(),
-            FlagNode::new().flag_only().tooltip("Alias for --format md"),
-        ),
-        (
-            "--render-mode".to_string(),
-            FlagNode::new()
-                .tooltip("Render mode for this invocation")
-                .suggestions(mode_values),
-        ),
-        (
-            "--plain".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --render-mode plain"),
-        ),
-        (
-            "--rich".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --render-mode rich"),
-        ),
-        (
-            "--color".to_string(),
-            FlagNode::new()
-                .tooltip("Color policy for this invocation")
-                .suggestions(color_values),
-        ),
-        (
-            "--unicode".to_string(),
-            FlagNode::new()
-                .tooltip("Unicode policy for this invocation")
-                .suggestions(unicode_values),
-        ),
-        (
-            "--ascii".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --unicode never"),
-        ),
-        (
-            "--verbose".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Increase message verbosity"),
-        ),
-        (
-            "--quiet".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Decrease message verbosity"),
-        ),
-        (
-            "--debug".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Increase developer log verbosity"),
-        ),
-        (
-            "--plugin-provider".to_string(),
-            FlagNode::new().tooltip("Select plugin provider for this invocation"),
-        ),
-    ]
+    crate::cli::invocation::INVOCATION_FLAGS
+        .iter()
+        .flat_map(|flag| {
+            let mut node = FlagNode::new().tooltip(flag.completion_help.unwrap_or(flag.help));
+            if flag.value_name.is_some() {
+                node = node.suggestions((flag.choices)().into_iter().map(SuggestionEntry::value));
+            } else {
+                node = node.flag_only();
+            }
+            std::iter::once((flag.long.to_string(), node)).chain(flag.aliases.iter().map(|alias| {
+                (
+                    alias.long.to_string(),
+                    FlagNode::new().flag_only().tooltip(alias.tooltip(flag)),
+                )
+            }))
+        })
+        .collect()
 }
 
 fn mark_context_only_flags(node: &mut CompletionNode) {
@@ -692,7 +598,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.value.as_str())
                 .collect::<Vec<_>>(),
-            vec!["auto", "json", "table", "mreg", "value", "md"]
+            vec!["auto", "json", "table", "md", "mreg", "value"]
         );
     }
 

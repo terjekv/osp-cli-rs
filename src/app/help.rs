@@ -5,11 +5,11 @@
 //! sane render settings for `--help` and related guide surfaces without
 //! forcing the rest of the app to special-case that path.
 
+#[cfg(test)]
 use std::ffi::OsString;
 
 use crate::config::{ConfigLayer, RuntimeLoadOptions};
 use crate::core::document::HelpLevel;
-use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::ui::RenderSettings;
 use crate::ui::{HelpLayout, help_layout_from_config};
 
@@ -26,17 +26,11 @@ pub(crate) struct HelpRenderOverrides {
     pub(crate) profile: Option<String>,
     pub(crate) theme: Option<String>,
     pub(crate) presentation: Option<UiPresentation>,
-    pub(crate) format: Option<OutputFormat>,
-    pub(crate) mode: Option<RenderMode>,
-    pub(crate) color: Option<ColorMode>,
-    pub(crate) unicode: Option<UnicodeMode>,
-    pub(crate) ascii_legacy: bool,
+    pub(crate) invocation: crate::cli::invocation::InvocationOptions,
     pub(crate) gammel_og_bitter: bool,
     pub(crate) no_env: bool,
     pub(crate) no_config_file: bool,
     pub(crate) defaults_only: bool,
-    pub(crate) verbose: u8,
-    pub(crate) quiet: u8,
 }
 
 impl HelpRenderOverrides {
@@ -79,12 +73,22 @@ pub(crate) fn derived_help_level(verbose: u8, quiet: u8) -> HelpLevel {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn render_settings_for_help(
     args: &[OsString],
     product_defaults: &ConfigLayer,
     product_overrides: &ConfigLayer,
 ) -> HelpRenderContext {
-    let overrides = parse_help_render_overrides(args);
+    let scanned = crate::cli::invocation::scan_cli_argv(args);
+    render_settings_for_help_with_scan(&scanned, product_defaults, product_overrides)
+}
+
+pub(crate) fn render_settings_for_help_with_scan(
+    scanned: &crate::cli::invocation::ScannedCliArgs,
+    product_defaults: &ConfigLayer,
+    product_overrides: &ConfigLayer,
+) -> HelpRenderContext {
+    let overrides = parse_help_render_overrides_with_scan(scanned);
     let profile_override = normalize_profile_override(overrides.profile.clone());
     let mut help_override_layer = product_overrides.clone();
     help_override_layer.extend_from_layer(&build_help_override_layer(&overrides));
@@ -113,11 +117,16 @@ pub(crate) fn render_settings_for_help(
             None,
         );
         layout = help_layout_from_config(config);
-        effective_help_level = help_level(config, overrides.verbose, overrides.quiet);
+        effective_help_level = help_level(
+            config,
+            overrides.invocation.verbose,
+            overrides.invocation.quiet,
+        );
     } else {
-        effective_help_level = derived_help_level(overrides.verbose, overrides.quiet);
+        effective_help_level =
+            derived_help_level(overrides.invocation.verbose, overrides.invocation.quiet);
     }
-    if let Some(format) = overrides.format {
+    if let Some(format) = overrides.invocation.format {
         settings.format = format;
         settings.format_explicit = true;
     }
@@ -142,34 +151,35 @@ fn build_help_override_layer(overrides: &HelpRenderOverrides) -> ConfigLayer {
         },
     );
 
-    if let Some(mode) = overrides.mode {
+    if let Some(mode) = overrides.invocation.mode {
         layer.set("ui.mode", mode.as_str());
     }
 
-    if let Some(color) = overrides.color {
+    if let Some(color) = overrides.invocation.color {
         layer.set("ui.color.mode", color.as_str());
     }
 
-    if overrides.ascii_legacy {
-        layer.set("ui.unicode.mode", "never");
-    } else if let Some(unicode) = overrides.unicode {
+    if let Some(unicode) = overrides.invocation.unicode {
         layer.set("ui.unicode.mode", unicode.as_str());
     }
 
     layer
 }
 
+#[cfg(test)]
 pub(crate) fn parse_help_render_overrides(args: &[OsString]) -> HelpRenderOverrides {
-    let mut out = HelpRenderOverrides::default();
-    let scanned = crate::cli::invocation::scan_cli_argv(args).ok();
-    if let Some(scanned) = scanned.as_ref() {
-        apply_invocation_overrides(&mut out, &scanned.invocation);
-    }
+    let scanned = crate::cli::invocation::scan_cli_argv(args);
+    parse_help_render_overrides_with_scan(&scanned)
+}
 
-    let fallback_invocation_parse = scanned.is_none();
-    let source = scanned
-        .as_ref()
-        .map_or(args, |scanned| scanned.argv.as_slice());
+fn parse_help_render_overrides_with_scan(
+    scanned: &crate::cli::invocation::ScannedCliArgs,
+) -> HelpRenderOverrides {
+    let mut out = HelpRenderOverrides {
+        invocation: scanned.invocation.clone(),
+        ..HelpRenderOverrides::default()
+    };
+    let source = &scanned.argv;
     let mut iter = source
         .iter()
         .skip(1)
@@ -177,71 +187,6 @@ pub(crate) fn parse_help_render_overrides(args: &[OsString]) -> HelpRenderOverri
         .peekable();
 
     while let Some(token) = iter.next() {
-        if fallback_invocation_parse {
-            match token {
-                "--verbose" => {
-                    out.verbose = out.verbose.saturating_add(1);
-                    continue;
-                }
-                "--quiet" => {
-                    out.quiet = out.quiet.saturating_add(1);
-                    continue;
-                }
-                "--json" => {
-                    out.format = Some(OutputFormat::Json);
-                    continue;
-                }
-                "--table" => {
-                    out.format = Some(OutputFormat::Table);
-                    continue;
-                }
-                "--mreg" => {
-                    out.format = Some(OutputFormat::Mreg);
-                    continue;
-                }
-                "--value" => {
-                    out.format = Some(OutputFormat::Value);
-                    continue;
-                }
-                "--md" => {
-                    out.format = Some(OutputFormat::Markdown);
-                    continue;
-                }
-                token
-                    if token.starts_with('-')
-                        && !token.starts_with("--")
-                        && token.chars().skip(1).all(|ch| matches!(ch, 'v' | 'q')) =>
-                {
-                    for ch in token.chars().skip(1) {
-                        match ch {
-                            'v' => out.verbose = out.verbose.saturating_add(1),
-                            'q' => out.quiet = out.quiet.saturating_add(1),
-                            _ => {}
-                        }
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-
-            if let Some(value) = token.strip_prefix("--format=") {
-                out.format = OutputFormat::parse(value);
-                continue;
-            }
-            if let Some(value) = token.strip_prefix("--render-mode=") {
-                out.mode = RenderMode::parse(value);
-                continue;
-            }
-            if let Some(value) = token.strip_prefix("--color=") {
-                out.color = ColorMode::parse(value);
-                continue;
-            }
-            if let Some(value) = token.strip_prefix("--unicode=") {
-                out.unicode = UnicodeMode::parse(value);
-                continue;
-            }
-        }
-
         if let Some(value) = token.strip_prefix("--profile=") {
             if !value.trim().is_empty() {
                 out.profile = Some(value.trim().to_string());
@@ -285,64 +230,15 @@ pub(crate) fn parse_help_render_overrides(args: &[OsString]) -> HelpRenderOverri
                     iter.next();
                 }
             }
-            "--format" if fallback_invocation_parse => {
-                if let Some(value) = iter.peek().copied()
-                    && !value.starts_with('-')
-                    && let Some(parsed) = OutputFormat::parse(value)
-                {
-                    out.format = Some(parsed);
-                    iter.next();
-                }
-            }
-            "--render-mode" if fallback_invocation_parse => {
-                if let Some(value) = iter.peek().copied()
-                    && !value.starts_with('-')
-                    && let Some(parsed) = RenderMode::parse(value)
-                {
-                    out.mode = Some(parsed);
-                    iter.next();
-                }
-            }
-            "--color" if fallback_invocation_parse => {
-                if let Some(value) = iter.peek().copied()
-                    && !value.starts_with('-')
-                    && let Some(parsed) = ColorMode::parse(value)
-                {
-                    out.color = Some(parsed);
-                    iter.next();
-                }
-            }
-            "--unicode" if fallback_invocation_parse => {
-                if let Some(value) = iter.peek().copied()
-                    && !value.starts_with('-')
-                    && let Some(parsed) = UnicodeMode::parse(value)
-                {
-                    out.unicode = Some(parsed);
-                    iter.next();
-                }
-            }
             "--no-env" => out.no_env = true,
             "--no-config" | "--no-config-file" => out.no_config_file = true,
             "--defaults-only" => out.defaults_only = true,
-            "--ascii" => out.ascii_legacy = true,
             "--gammel-og-bitter" => out.gammel_og_bitter = true,
             _ => {}
         }
     }
 
     out
-}
-
-fn apply_invocation_overrides(
-    out: &mut HelpRenderOverrides,
-    invocation: &crate::cli::invocation::InvocationOptions,
-) {
-    out.format = invocation.format;
-    out.mode = invocation.mode;
-    out.color = invocation.color;
-    out.unicode = invocation.unicode;
-    out.verbose = invocation.verbose;
-    out.quiet = invocation.quiet;
 }
 
 #[cfg(test)]
@@ -489,9 +385,9 @@ mod tests {
             parsed.presentation,
             Some(crate::ui::UiPresentation::Compact)
         );
-        assert_eq!(parsed.mode, Some(RenderMode::Plain));
-        assert_eq!(parsed.color, Some(ColorMode::Always));
-        assert_eq!(parsed.unicode, Some(UnicodeMode::Never));
+        assert_eq!(parsed.invocation.mode, Some(RenderMode::Plain));
+        assert_eq!(parsed.invocation.color, Some(ColorMode::Always));
+        assert_eq!(parsed.invocation.unicode, Some(UnicodeMode::Never));
 
         let parsed = parse_help_render_overrides(&[
             OsString::from("osp"),
@@ -506,9 +402,9 @@ mod tests {
         ]);
 
         assert_eq!(parsed.presentation, None);
-        assert_eq!(parsed.mode, None);
-        assert_eq!(parsed.color, None);
-        assert_eq!(parsed.unicode, None);
+        assert_eq!(parsed.invocation.mode, None);
+        assert_eq!(parsed.invocation.color, None);
+        assert_eq!(parsed.invocation.unicode, None);
         assert_eq!(parsed.profile.as_deref(), Some("dev"));
 
         let parsed = parse_help_render_overrides(&help_args(&[
@@ -528,12 +424,12 @@ mod tests {
             "--no-config",
             "--defaults-only",
         ]));
-        assert_eq!(parsed.format, Some(OutputFormat::Auto));
-        assert_eq!(parsed.mode, Some(RenderMode::Rich));
-        assert_eq!(parsed.color, Some(ColorMode::Always));
-        assert_eq!(parsed.verbose, 2);
-        assert_eq!(parsed.quiet, 2);
-        assert!(parsed.ascii_legacy);
+        assert_eq!(parsed.invocation.format, Some(OutputFormat::Auto));
+        assert_eq!(parsed.invocation.mode, Some(RenderMode::Rich));
+        assert_eq!(parsed.invocation.color, Some(ColorMode::Always));
+        assert_eq!(parsed.invocation.verbose, 2);
+        assert_eq!(parsed.invocation.quiet, 2);
+        assert_eq!(parsed.invocation.unicode, Some(UnicodeMode::Never));
         assert!(parsed.no_env);
         assert!(parsed.no_config_file);
         assert!(parsed.defaults_only);
