@@ -1,5 +1,5 @@
 use osp_cli::core::document::{DocBlock, Document, DocumentEntry};
-use osp_cli::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
+use osp_cli::core::output::OutputFormat;
 use osp_cli::core::output_model::{
     OutputDocument, OutputDocumentKind, OutputMeta, OutputResult, output_items_from_value,
 };
@@ -8,27 +8,21 @@ use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow
 use serde_json::{Value, json};
 
 fn export_settings(format: OutputFormat) -> RenderSettings {
-    RenderSettings::builder()
-        .with_format(format)
-        .with_format_explicit(true)
-        .with_mode(RenderMode::Plain)
-        .with_color(ColorMode::Never)
-        .with_unicode(UnicodeMode::Never)
-        .with_width(100)
-        .with_width_max(100)
-        .with_margin(2)
-        .with_table_overflow(TableOverflow::None)
-        .with_table_border(TableBorderStyle::None)
-        .with_runtime(
-            RenderRuntime::builder()
-                .with_stdout_is_tty(false)
-                .with_terminal("dumb")
-                .with_no_color(true)
-                .with_width(100)
-                .with_locale_utf8(true)
-                .build(),
-        )
-        .build()
+    let mut settings = RenderSettings::test_plain(format);
+    settings.format_explicit = true;
+    settings.width = Some(100);
+    settings.width_max = 100;
+    settings.margin = 2;
+    settings.table_overflow = TableOverflow::None;
+    settings.table_border = TableBorderStyle::None;
+    settings.runtime = RenderRuntime {
+        stdout_is_tty: false,
+        terminal: Some("dumb".into()),
+        no_color: true,
+        width: Some(100),
+        locale_utf8: Some(true),
+    };
+    settings
 }
 
 #[test]

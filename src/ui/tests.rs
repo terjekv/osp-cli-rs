@@ -585,9 +585,10 @@ fn ui2_json_block_preserves_an_explicit_json_document_unit() {
 
 #[test]
 fn ui2_resolves_theme_catalog_from_caller_theme_name_unit() {
-    let settings = RenderSettings::builder()
-        .with_theme_name(" Rose_Pine Moon ")
-        .build();
+    let settings = RenderSettings {
+        theme_name: " Rose_Pine Moon ".into(),
+        ..RenderSettings::default()
+    };
 
     let resolved = resolve_settings(&settings, RenderProfile::Normal);
     assert_eq!(resolved.theme_name, "rose-pine-moon");

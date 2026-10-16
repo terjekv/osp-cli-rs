@@ -175,50 +175,6 @@ pub struct RenderRuntime {
     pub locale_utf8: Option<bool>,
 }
 
-impl RenderRuntime {
-    /// Starts a builder for caller-supplied runtime facts.
-    pub fn builder() -> RenderRuntimeBuilder {
-        RenderRuntimeBuilder::default()
-    }
-}
-
-/// Guided construction for [`RenderRuntime`].
-#[derive(Debug, Clone, Default)]
-pub struct RenderRuntimeBuilder {
-    runtime: RenderRuntime,
-}
-
-impl RenderRuntimeBuilder {
-    pub fn with_stdout_is_tty(mut self, stdout_is_tty: bool) -> Self {
-        self.runtime.stdout_is_tty = stdout_is_tty;
-        self
-    }
-
-    pub fn with_terminal(mut self, terminal: impl Into<String>) -> Self {
-        self.runtime.terminal = Some(terminal.into());
-        self
-    }
-
-    pub fn with_no_color(mut self, no_color: bool) -> Self {
-        self.runtime.no_color = no_color;
-        self
-    }
-
-    pub fn with_width(mut self, width: usize) -> Self {
-        self.runtime.width = Some(width);
-        self
-    }
-
-    pub fn with_locale_utf8(mut self, locale_utf8: bool) -> Self {
-        self.runtime.locale_utf8 = Some(locale_utf8);
-        self
-    }
-
-    pub fn build(self) -> RenderRuntime {
-        self.runtime
-    }
-}
-
 /// Caller-facing render preferences for the canonical UI pipeline.
 ///
 /// This is the main "what do I want?" settings surface. Auto decisions still
@@ -280,12 +236,14 @@ impl Default for RenderSettings {
 }
 
 impl RenderSettings {
-    pub fn builder() -> RenderSettingsBuilder {
-        RenderSettingsBuilder::default()
-    }
-
     pub fn test_plain(format: OutputFormat) -> Self {
-        RenderSettingsBuilder::plain(format).build()
+        Self {
+            format,
+            mode: RenderMode::Plain,
+            color: ColorMode::Never,
+            unicode: UnicodeMode::Never,
+            ..Self::default()
+        }
     }
 }
 
@@ -550,99 +508,6 @@ fn config_usize_override(config: &ResolvedConfig, key: &str) -> Option<usize> {
     }
 }
 
-/// Guided construction for [`RenderSettings`].
-///
-/// Use [`RenderSettings::builder`] for ordinary caller-controlled rendering, or
-/// [`RenderSettingsBuilder::plain`] when the desired result is explicitly
-/// plain-safe output for scripts, logs, or copy paths.
-#[derive(Debug, Clone, Default)]
-pub struct RenderSettingsBuilder {
-    settings: RenderSettings,
-}
-
-impl RenderSettingsBuilder {
-    /// Starts a builder biased toward plain, copy-safe rendering.
-    ///
-    /// This is the right entrypoint for clipboard, logging, and other paths
-    /// where styling and terminal affordances would be a liability.
-    pub fn plain(format: OutputFormat) -> Self {
-        Self {
-            settings: RenderSettings {
-                format,
-                format_explicit: false,
-                mode: RenderMode::Plain,
-                color: ColorMode::Never,
-                unicode: UnicodeMode::Never,
-                ..RenderSettings::default()
-            },
-        }
-    }
-
-    pub fn with_format(mut self, format: OutputFormat) -> Self {
-        self.settings.format = format;
-        self
-    }
-
-    pub fn with_format_explicit(mut self, format_explicit: bool) -> Self {
-        self.settings.format_explicit = format_explicit;
-        self
-    }
-
-    pub fn with_mode(mut self, mode: RenderMode) -> Self {
-        self.settings.mode = mode;
-        self
-    }
-
-    pub fn with_color(mut self, color: ColorMode) -> Self {
-        self.settings.color = color;
-        self
-    }
-
-    pub fn with_unicode(mut self, unicode: UnicodeMode) -> Self {
-        self.settings.unicode = unicode;
-        self
-    }
-
-    pub fn with_width(mut self, width: usize) -> Self {
-        self.settings.width = Some(width);
-        self
-    }
-
-    pub fn with_width_max(mut self, width_max: usize) -> Self {
-        self.settings.width_max = width_max;
-        self
-    }
-
-    pub fn with_margin(mut self, margin: usize) -> Self {
-        self.settings.margin = margin;
-        self
-    }
-
-    pub fn with_table_overflow(mut self, table_overflow: TableOverflow) -> Self {
-        self.settings.table_overflow = table_overflow;
-        self
-    }
-
-    pub fn with_table_border(mut self, table_border: TableBorderStyle) -> Self {
-        self.settings.table_border = table_border;
-        self
-    }
-
-    pub fn with_theme_name(mut self, theme_name: impl Into<String>) -> Self {
-        self.settings.theme_name = theme_name.into();
-        self
-    }
-
-    pub fn with_runtime(mut self, runtime: RenderRuntime) -> Self {
-        self.settings.runtime = runtime;
-        self
-    }
-
-    pub fn build(self) -> RenderSettings {
-        self.settings
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderProfile {
     Normal,
@@ -811,10 +676,9 @@ pub fn resolve_settings(
 #[cfg(test)]
 mod tests {
     use super::{
-        HelpLayout, RenderBackend, RenderProfile, RenderRuntime, RenderSettingsBuilder,
-        TableBorderOverride, TableBorderStyle, TableOverflow, UiPresentation,
-        apply_render_config_overrides, config_int, explain_presentation_effect,
-        help_layout_from_config,
+        HelpLayout, RenderBackend, RenderProfile, RenderRuntime, TableBorderOverride,
+        TableBorderStyle, TableOverflow, UiPresentation, apply_render_config_overrides, config_int,
+        explain_presentation_effect, help_layout_from_config,
     };
     use crate::config::{
         ConfigLayer, ConfigResolver, ConfigSource, ConfigValue, LoadedLayers, ResolveOptions,
@@ -993,33 +857,33 @@ mod tests {
         assert_eq!(defaults.theme_name, super::DEFAULT_THEME_NAME);
         assert_eq!(defaults.table_border, TableBorderStyle::Square);
 
-        let plain_settings = RenderSettingsBuilder::default()
-            .with_runtime(
-                RenderRuntime::builder()
-                    .with_stdout_is_tty(false)
-                    .with_width(72)
-                    .build(),
-            )
-            .build();
+        let plain_settings = RenderSettings {
+            runtime: RenderRuntime {
+                stdout_is_tty: false,
+                width: Some(72),
+                ..RenderRuntime::default()
+            },
+            ..RenderSettings::default()
+        };
         let plain = plain_settings.resolve_render_settings();
         assert_eq!(plain.backend, RenderBackend::Plain);
         assert!(!plain.color);
         assert!(!plain.unicode);
         assert_eq!(plain.width, Some(72));
 
-        let rich_settings = RenderSettingsBuilder::default()
-            .with_mode(RenderMode::Auto)
-            .with_color(ColorMode::Always)
-            .with_unicode(UnicodeMode::Always)
-            .with_runtime(
-                RenderRuntime::builder()
-                    .with_stdout_is_tty(true)
-                    .with_terminal("xterm-256color")
-                    .with_locale_utf8(true)
-                    .with_width(88)
-                    .build(),
-            )
-            .build();
+        let rich_settings = RenderSettings {
+            mode: RenderMode::Auto,
+            color: ColorMode::Always,
+            unicode: UnicodeMode::Always,
+            runtime: RenderRuntime {
+                stdout_is_tty: true,
+                terminal: Some("xterm-256color".into()),
+                locale_utf8: Some(true),
+                width: Some(88),
+                ..RenderRuntime::default()
+            },
+            ..RenderSettings::default()
+        };
         let rich = rich_settings.resolve_render_settings();
         assert_eq!(rich.backend, RenderBackend::Rich);
         assert!(rich.color);

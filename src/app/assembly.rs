@@ -37,9 +37,10 @@ impl RenderSettingsSeed {
     fn into_settings(self, context: &RuntimeContext) -> RenderSettings {
         match self {
             Self::DefaultAuto => {
-                let mut settings = crate::ui::RenderSettings::builder()
-                    .with_format(crate::core::output::OutputFormat::Auto)
-                    .build();
+                let mut settings = RenderSettings {
+                    format: crate::core::output::OutputFormat::Auto,
+                    ..RenderSettings::default()
+                };
                 settings.runtime = build_render_runtime(context.terminal_env());
                 settings
             }

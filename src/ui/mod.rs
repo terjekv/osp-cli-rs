@@ -75,9 +75,9 @@ pub(crate) use plan::plan_output;
 pub use settings::RenderBackend;
 #[allow(unused_imports)]
 pub use settings::{
-    HelpLayout, PresentationEffect, RenderProfile, RenderRuntime, RenderRuntimeBuilder,
-    RenderSettings, RenderSettingsBuilder, ResolvedRenderSettings, TableBorderOverride,
-    TableBorderStyle, TableOverflow, UiPresentation, help_layout_from_config, resolve_settings,
+    HelpLayout, PresentationEffect, RenderProfile, RenderRuntime, RenderSettings,
+    ResolvedRenderSettings, TableBorderOverride, TableBorderStyle, TableOverflow, UiPresentation,
+    help_layout_from_config, resolve_settings,
 };
 pub(crate) use settings::{build_presentation_defaults_layer, explain_presentation_effect};
 pub use style::{StyleOverrides, StyleToken, ThemeStyler};

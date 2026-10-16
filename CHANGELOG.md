@@ -19,6 +19,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   `CommandLineParser::{analyze,compute_stub_quote}`,
   `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
 
+- **Breaking:** Remove render settings/runtime builders. Construct render
+  settings and runtime facts directly.
+
 - **Breaking:** Remove test-only config resolver, layer, schema, and loader
   mutation methods. Resolve prepared `LoadedLayers` with an explicit schema.
 
