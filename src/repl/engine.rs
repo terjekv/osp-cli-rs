@@ -129,7 +129,8 @@ where
     };
     let prompt = OspPrompt::new(prompt.left, prompt.indicator, prompt_right);
     let basic_reason = {
-        let _phase = crate::startup_trace::phase("terminal capability/cursor probe");
+        let _phase = tracing::info_span!(target: "osp_startup", "terminal capability/cursor probe")
+            .entered();
         basic_input_reason(input_mode)
     };
 

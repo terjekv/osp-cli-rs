@@ -88,6 +88,11 @@ pub fn init_developer_logging(config: DeveloperLoggingConfig) {
     }
 }
 
+/// Installs the default subscriber only if logging has not already been configured.
+pub(crate) fn initialize_developer_logging() {
+    LOGGING_STATE.get_or_init(|| LoggingState::initialize(&DeveloperLoggingConfig::new(0)));
+}
+
 /// Parses a textual log level into a `tracing_subscriber` filter.
 ///
 /// Accepts canonical names such as `error`, `warn`, `info`, `debug`, and `trace`.
@@ -150,7 +155,12 @@ impl LoggingState {
             .compact()
             .with_filter(file_filter);
 
-        if let Err(err) = registry().with(stderr_layer).with(file_layer).try_init() {
+        if let Err(err) = registry()
+            .with(crate::startup_trace::layer())
+            .with(stderr_layer)
+            .with(file_layer)
+            .try_init()
+        {
             if config.debug_count >= 2 {
                 eprintln!("logging already initialized: {err}");
             }

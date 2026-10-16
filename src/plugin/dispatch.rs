@@ -273,7 +273,7 @@ pub(super) fn describe_plugin(path: &std::path::Path, timeout: Duration) -> Resu
 
 pub(super) fn capture_describe(path: &std::path::Path, timeout: Duration) -> DescribeOutput {
     let _phase =
-        crate::startup_trace::phase_with_name(|| format!("plugin --describe {}", path.display()));
+        tracing::info_span!(target: "osp_startup", "plugin --describe", name = %format_args!("plugin --describe {}", path.display())).entered();
     let mut command = Command::new(path);
     configure_plugin_environment(&mut command);
     command.arg("--describe");

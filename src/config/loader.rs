@@ -640,7 +640,7 @@ impl LoaderPipeline {
     /// assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
     /// ```
     pub fn resolve(&self, options: ResolveOptions) -> Result<ResolvedConfig, ConfigError> {
-        let _phase = crate::startup_trace::phase("config resolution");
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
         self.resolver()?.resolve(options)
     }
 }
@@ -659,7 +659,7 @@ fn load_layer(
     name: &'static str,
     load: impl FnOnce() -> Result<ConfigLayer, ConfigError>,
 ) -> Result<ConfigLayer, ConfigError> {
-    let _phase = crate::startup_trace::phase_with_name(|| format!("config layer {name}"));
+    let _phase = tracing::info_span!(target: "osp_startup", "config layer", name = %format_args!("config layer {name}")).entered();
     load()
 }
 

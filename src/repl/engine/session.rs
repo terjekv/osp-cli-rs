@@ -90,7 +90,7 @@ where
     } = config;
 
     let mut editor = {
-        let _phase = crate::startup_trace::phase("editor construction");
+        let _phase = tracing::info_span!(target: "osp_startup", "editor construction").entered();
         build_interactive_editor(
             completion_tree,
             &appearance,

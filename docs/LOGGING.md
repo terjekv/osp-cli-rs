@@ -66,8 +66,9 @@ Higher debug levels may show more detailed timing breakdowns.
 
 Set `OSP_TRACE_STARTUP=1` to write a human-readable phase tree to `stderr`, or
 set it to `json` for one JSON document. The setting is read once when the
-process starts; it is off by default. Startup tracing is separate from `-d`
-developer logs and does not change their format.
+process starts; it is off by default. The timing report is separate from `-d`
+developer logs and does not change their format. Startup phases are tracing spans
+and also provide context in developer logs.
 
 Each phase reports its start offset, elapsed duration, nesting depth, parent,
 and share of the total. Phase durations are inclusive, so nested phase shares

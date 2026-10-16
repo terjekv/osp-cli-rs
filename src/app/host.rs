@@ -274,7 +274,7 @@ where
 {
     crate::startup_trace::initialize();
     let argv = {
-        let _phase = crate::startup_trace::phase("argv collection");
+        let _phase = tracing::info_span!(target: "osp_startup", "argv collection").entered();
         args.into_iter().map(Into::into).collect::<Vec<OsString>>()
     };
     let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
@@ -289,11 +289,12 @@ pub(crate) fn run_scanned_with_sink_and_app(
     app: &super::AppDefinition,
 ) -> Result<i32> {
     {
-        let _phase = crate::startup_trace::phase("developer logging bootstrap");
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "developer logging bootstrap").entered();
         init_developer_logging(DeveloperLoggingConfig::new(scanned.invocation.debug));
     }
     let (suffix, stages) = {
-        let _phase = crate::startup_trace::phase("argv/invocation scan");
+        let _phase = tracing::info_span!(target: "osp_startup", "argv/invocation scan").entered();
         if let Some(error) = scanned.error.take() {
             return Err(error);
         }
@@ -308,7 +309,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
         (suffix, stages)
     };
     let (parsed, help_command) = {
-        let _phase = crate::startup_trace::phase("clap parse");
+        let _phase = tracing::info_span!(target: "osp_startup", "clap parse").entered();
         let mut command = Cli::command();
         for &(name, help, key, _) in &app.config_flags {
             let conflicts = app
@@ -343,7 +344,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
                     "shell completion scripts do not support DSL pipeline stages"
                 ));
             }
-            let _phase = crate::startup_trace::phase("command execution");
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
             sink.write_stdout(&crate::cli::render_shell_completions(args));
             Ok(0)
         }
@@ -383,7 +384,7 @@ fn handle_clap_parse_error(
     match err.kind() {
         clap::error::ErrorKind::DisplayHelp
         | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
-            let _phase = crate::startup_trace::phase("command execution");
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
             let tokens = scanned
                 .argv
                 .iter()
@@ -399,7 +400,8 @@ fn handle_clap_parse_error(
                 &product_overrides,
             );
             if let Some(config) = &help_context.config {
-                let _phase = crate::startup_trace::phase("native command configure");
+                let _phase = tracing::info_span!(target: "osp_startup", "native command configure")
+                    .entered();
                 app.native_commands.configure(config);
             }
             let (mut body, root_help, long_help) =
@@ -458,7 +460,7 @@ fn handle_clap_parse_error(
             if !stages.is_empty() {
                 return Err(miette!("version text does not support DSL pipeline stages"));
             }
-            let _phase = crate::startup_trace::phase("command execution");
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
             sink.write_stdout(&err.to_string());
             Ok(0)
         }
@@ -486,7 +488,7 @@ fn run(
         dispatch,
         mut invocation_ui,
     } = {
-        let _phase = crate::startup_trace::phase("host startup");
+        let _phase = tracing::info_span!(target: "osp_startup", "host startup").entered();
         prepare_host_run(&mut cli, &invocation, app, run_started)?
     };
 
@@ -505,7 +507,8 @@ fn run(
     let is_repl = matches!(dispatch.action, RunAction::Repl);
     let action = dispatch.action;
     let result = {
-        let _phase = (!is_repl).then(|| crate::startup_trace::phase("command execution"));
+        let _phase = (!is_repl)
+            .then(|| tracing::info_span!(target: "osp_startup", "command execution").entered());
         match action {
             RunAction::Repl => {
                 state.runtime.ui = invocation_ui.ui.clone();
@@ -573,7 +576,7 @@ fn prepare_host_run(
     run_started: Instant,
 ) -> Result<PreparedHostRun> {
     let dispatch = {
-        let _phase = crate::startup_trace::phase("dispatch planning");
+        let _phase = tracing::info_span!(target: "osp_startup", "dispatch planning").entered();
         build_dispatch_plan(cli)?
     };
     tracing::debug!(
@@ -584,7 +587,8 @@ fn prepare_host_run(
 
     let terminal_kind = dispatch.action.terminal_kind();
     let prepared = {
-        let _phase = crate::startup_trace::phase("runtime config and host inputs");
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "runtime config and host inputs").entered();
         prepare_startup_host(
             cli,
             &dispatch.action,
@@ -595,7 +599,7 @@ fn prepare_host_run(
         )?
     };
     let mut state = {
-        let _phase = crate::startup_trace::phase("host state assembly");
+        let _phase = tracing::info_span!(target: "osp_startup", "host state assembly").entered();
         crate::app::AppStateBuilder::from_host_inputs(
             prepared.runtime_context,
             prepared.config,
@@ -609,11 +613,12 @@ fn prepare_host_run(
         .runtime
         .set_product_defaults(app.product_defaults.clone());
     {
-        let _phase = crate::startup_trace::phase("auth policy context setup");
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "auth policy context setup").entered();
         state.runtime.set_access_policy(app.access_policy.clone());
     }
     {
-        let _phase = crate::startup_trace::phase("startup hook");
+        let _phase = tracing::info_span!(target: "osp_startup", "startup hook").entered();
         if let Some(policy) = &app.access_policy {
             policy.startup(&mut state.runtime)?;
         }

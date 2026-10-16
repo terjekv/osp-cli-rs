@@ -125,7 +125,9 @@ impl<'a> DescribeCacheSession<'a> {
     ) -> Self {
         Self {
             file: {
-                let _phase = crate::startup_trace::phase("plugin describe cache load");
+                let _phase =
+                    tracing::info_span!(target: "osp_startup", "plugin describe cache load")
+                        .entered();
                 manager.load_describe_cache_or_warn()
             },
             seen_paths: HashSet::new(),
@@ -137,7 +139,8 @@ impl<'a> DescribeCacheSession<'a> {
     fn finish(mut self, manager: &PluginManager) -> bool {
         self.dirty |= prune_stale_describe_cache_entries(&mut self.file, &self.seen_paths);
         if self.dirty {
-            let _phase = crate::startup_trace::phase("plugin describe cache save");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "plugin describe cache save").entered();
             manager.save_describe_cache_or_warn(&self.file);
         }
         self.dirty
@@ -226,9 +229,11 @@ impl PluginManager {
         policy: DiscoveryPolicy,
         failed_describes: &mut HashMap<(String, (u64, u64, u32)), String>,
     ) -> (Vec<DiscoveredPlugin>, bool) {
-        let _phase = crate::startup_trace::phase("plugin discovery");
+        let _phase = tracing::info_span!(target: "osp_startup", "plugin discovery").entered();
         let roots = {
-            let _phase = crate::startup_trace::phase("plugin search root resolution");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "plugin search root resolution")
+                    .entered();
             self.search_roots()
         };
         let mut plugins: Vec<DiscoveredPlugin> = Vec::new();
@@ -237,13 +242,9 @@ impl PluginManager {
 
         for root in &roots {
             let discovered = {
-                let _phase = crate::startup_trace::phase_with_name(|| {
-                    format!(
-                        "plugin discovery root {} ({})",
-                        root.path.display(),
-                        root.source
-                    )
-                });
+                let _phase = tracing::info_span!(target: "osp_startup", "plugin discovery root",
+                    name = %format_args!("plugin discovery root {} ({})", root.path.display(), root.source)
+                ).entered();
                 discover_plugins_in_root(
                     root,
                     &mut seen_paths,

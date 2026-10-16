@@ -557,7 +557,8 @@ pub(crate) struct AppStateParts {
 impl AppStateParts {
     fn from_init(init: AppStateInit, session_override: Option<AppSession>) -> Self {
         {
-            let _phase = crate::startup_trace::phase("native command configure");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "native command configure").entered();
             init.native_commands.configure(&init.config);
         }
         let clients = AppClients::new(init.plugins, init.native_commands);
@@ -569,7 +570,8 @@ impl AppStateParts {
         )
         .with_error_detail(init.error_detail);
         let auth = {
-            let _phase = crate::startup_trace::phase("auth policy catalog setup");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "auth policy catalog setup").entered();
             crate::app::AuthState::from_commands(clients.plugins(), clients.native_commands())
         };
         let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);

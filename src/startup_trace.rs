@@ -1,23 +1,20 @@
-//! Opt-in process startup timing, independent from developer logging.
+//! Opt-in startup timing recorded from the host's tracing spans.
 
-use std::cell::RefCell;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 use serde::Serialize;
-
-const TRACE_ENV: &str = "OSP_TRACE_STARTUP";
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id};
+use tracing::{Span, Subscriber};
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{Layer, filter::filter_fn};
 
 static TRACE_STATE: OnceLock<Mutex<TraceState>> = OnceLock::new();
-static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
-static FIRST_PROMPT: Mutex<Option<PhaseGuard>> = Mutex::new(None);
-
-thread_local! {
-    static PHASE_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
-}
+static FIRST_PROMPT: Mutex<Option<Span>> = Mutex::new(None);
 
 #[derive(Clone, Copy)]
 enum TraceFormat {
@@ -28,21 +25,14 @@ enum TraceFormat {
 struct TraceState {
     format: Option<TraceFormat>,
     started: Instant,
-    phases: Vec<PhaseRecord>,
+    phases: Vec<TracePhase>,
     finished: bool,
 }
 
-struct PhaseRecord {
-    name: String,
-    started: Instant,
-    ended: Option<Instant>,
-    parent: Option<usize>,
-}
-
 #[derive(Serialize)]
-struct TraceDocument {
+struct TraceDocument<'a> {
     total_ms: f64,
-    phases: Vec<TracePhase>,
+    phases: &'a [TracePhase],
 }
 
 #[derive(Serialize)]
@@ -53,107 +43,27 @@ struct TracePhase {
     depth: usize,
     parent: Option<usize>,
     share_percent: f64,
+    #[serde(skip)]
+    started: Instant,
+    #[serde(skip)]
+    ended: bool,
 }
 
-/// Captures the environment setting once, before startup work begins.
+/// Installs the subscriber before the first startup span, without resetting
+/// logging settings when the host or editor is initialized again.
 pub(crate) fn initialize() {
     let _ = trace_state();
-}
-
-/// Starts a named phase only when startup tracing is enabled.
-pub(crate) fn phase(name: &'static str) -> PhaseGuard {
-    if !TRACE_ENABLED.load(Ordering::Relaxed) {
-        return PhaseGuard::disabled();
-    }
-    begin_phase(name.to_string())
-}
-
-/// Starts a dynamically named phase without formatting its name when disabled.
-pub(crate) fn phase_with_name(name: impl FnOnce() -> String) -> PhaseGuard {
-    if !TRACE_ENABLED.load(Ordering::Relaxed) {
-        return PhaseGuard::disabled();
-    }
-    begin_phase(name())
-}
-
-/// Finishes and prints the process trace once. REPL startup finishes it from
-/// the first prompt-render callback; one-shot wrappers call it as they return.
-pub(crate) fn finish() {
-    if let Some(output) = take_output() {
-        write_output(&output);
-    }
-}
-
-fn take_output() -> Option<String> {
-    if !TRACE_ENABLED.load(Ordering::Relaxed) {
-        return None;
-    }
-
-    let state = TRACE_STATE.get()?;
-    let (format, document) = {
-        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
-        if state.finished {
-            return None;
-        }
-        state.finished = true;
-        TRACE_ENABLED.store(false, Ordering::Relaxed);
-        let finished_at = Instant::now();
-        let total = finished_at.saturating_duration_since(state.started);
-        let total_seconds = total.as_secs_f64();
-        let phases = state
-            .phases
-            .iter()
-            .enumerate()
-            .map(|(index, phase)| {
-                let phase_end = phase.ended.unwrap_or(finished_at);
-                let duration = phase_end.saturating_duration_since(phase.started);
-                let depth = phase_depth(&state.phases, index);
-                TracePhase {
-                    name: phase.name.clone(),
-                    start_offset_ms: phase
-                        .started
-                        .saturating_duration_since(state.started)
-                        .as_secs_f64()
-                        * 1_000.0,
-                    duration_ms: duration.as_secs_f64() * 1_000.0,
-                    depth,
-                    parent: phase.parent,
-                    share_percent: if total_seconds > 0.0 {
-                        duration.as_secs_f64() / total_seconds * 100.0
-                    } else {
-                        0.0
-                    },
-                }
-            })
-            .collect();
-        (
-            state.format,
-            TraceDocument {
-                total_ms: total.as_secs_f64() * 1_000.0,
-                phases,
-            },
-        )
-    };
-
-    match format {
-        Some(TraceFormat::Json) => serde_json::to_string(&document).ok().map(|mut output| {
-            output.push('\n');
-            output
-        }),
-        Some(TraceFormat::Human) => Some(render_human_trace(&document)),
-        None => None,
-    }
+    crate::app::logging::initialize_developer_logging();
 }
 
 fn trace_state() -> &'static Mutex<TraceState> {
     TRACE_STATE.get_or_init(|| {
         let started = Instant::now();
-        let format = match std::env::var_os(TRACE_ENV).and_then(|value| value.into_string().ok()) {
+        let format = match std::env::var("OSP_TRACE_STARTUP").ok() {
             Some(value) if value == "1" => Some(TraceFormat::Human),
             Some(value) if value.eq_ignore_ascii_case("json") => Some(TraceFormat::Json),
             _ => None,
         };
-        TRACE_ENABLED.store(format.is_some(), Ordering::Relaxed);
         Mutex::new(TraceState {
             format,
             started,
@@ -163,69 +73,129 @@ fn trace_state() -> &'static Mutex<TraceState> {
     })
 }
 
-fn begin_phase(name: String) -> PhaseGuard {
-    let Some(state) = TRACE_STATE.get() else {
-        return PhaseGuard::disabled();
-    };
-    let parent = PHASE_STACK.with(|stack| stack.borrow().last().copied());
-    let index = {
-        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+fn enabled() -> bool {
+    let state = trace_state().lock().unwrap_or_else(PoisonError::into_inner);
+    state.format.is_some() && !state.finished
+}
+
+/// Collects only startup spans; the normal logging layers retain their own filters.
+pub(crate) fn layer<S>() -> impl Layer<S>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    StartupTraceLayer.with_filter(filter_fn(|metadata| {
+        metadata.target() == "osp_startup" && enabled()
+    }))
+}
+
+struct StartupTraceLayer;
+struct PhaseIndex(usize);
+
+impl<S> Layer<S> for StartupTraceLayer
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        let Some(span) = ctx.span(id) else { return };
+        let parent = span
+            .scope()
+            .skip(1)
+            .find_map(|parent| parent.extensions().get::<PhaseIndex>().map(|index| index.0));
+        let mut name = PhaseName(attrs.metadata().name().to_string());
+        attrs.record(&mut name);
+        let mut state = trace_state().lock().unwrap_or_else(PoisonError::into_inner);
         if state.finished {
-            return PhaseGuard::disabled();
+            return;
         }
+        let started = Instant::now();
         let index = state.phases.len();
-        state.phases.push(PhaseRecord {
-            name,
-            started: Instant::now(),
-            ended: None,
+        let depth = parent.map_or(0, |index| state.phases[index].depth + 1);
+        let start_offset_ms = started.duration_since(state.started).as_secs_f64() * 1_000.0;
+        state.phases.push(TracePhase {
+            name: name.0,
+            start_offset_ms,
+            duration_ms: 0.0,
+            depth,
             parent,
+            share_percent: 0.0,
+            started,
+            ended: false,
         });
-        index
+        span.extensions_mut().insert(PhaseIndex(index));
+    }
+
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
+        let Some(span) = ctx.span(&id) else { return };
+        let extensions = span.extensions();
+        let Some(index) = extensions.get::<PhaseIndex>() else {
+            return;
+        };
+        let mut state = trace_state().lock().unwrap_or_else(PoisonError::into_inner);
+        if !state.finished {
+            let phase = &mut state.phases[index.0];
+            phase.duration_ms = phase.started.elapsed().as_secs_f64() * 1_000.0;
+            phase.ended = true;
+        }
+    }
+}
+
+struct PhaseName(String);
+
+impl Visit for PhaseName {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "name" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
+/// Prints the trace once. Open phases end here, including a one-shot command
+/// that returns before all of its span handles have been dropped.
+pub(crate) fn finish() {
+    let output = {
+        let mut state = trace_state().lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(format) = state.format else { return };
+        if state.finished {
+            return;
+        }
+        state.finished = true;
+        let finished_at = Instant::now();
+        let total_ms = finished_at.duration_since(state.started).as_secs_f64() * 1_000.0;
+        for phase in &mut state.phases {
+            if !phase.ended {
+                phase.duration_ms =
+                    finished_at.duration_since(phase.started).as_secs_f64() * 1_000.0;
+            }
+            phase.share_percent = if total_ms > 0.0 {
+                phase.duration_ms / total_ms * 100.0
+            } else {
+                0.0
+            };
+        }
+        let document = TraceDocument {
+            total_ms,
+            phases: &state.phases,
+        };
+        match format {
+            TraceFormat::Json => serde_json::to_string(&document).ok().map(|mut output| {
+                output.push('\n');
+                output
+            }),
+            TraceFormat::Human => Some(render_human_trace(&document)),
+        }
     };
-    PHASE_STACK.with(|stack| stack.borrow_mut().push(index));
-    PhaseGuard { index: Some(index) }
-}
-
-fn end_phase(index: usize) {
-    if let Some(state) = TRACE_STATE.get() {
-        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(phase) = state.phases.get_mut(index)
-            && phase.ended.is_none()
-        {
-            phase.ended = Some(Instant::now());
-        }
+    if let Some(output) = output {
+        let stderr = io::stderr();
+        let mut stderr = stderr.lock();
+        let _ = stderr.write_all(output.as_bytes());
+        let _ = stderr.flush();
     }
-    PHASE_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        if stack.last() == Some(&index) {
-            stack.pop();
-        } else if let Some(position) = stack.iter().rposition(|active| *active == index) {
-            stack.remove(position);
-        }
-    });
 }
 
-fn phase_depth(phases: &[PhaseRecord], index: usize) -> usize {
-    let mut depth = 0;
-    let mut parent = phases.get(index).and_then(|phase| phase.parent);
-    while let Some(parent_index) = parent {
-        depth += 1;
-        parent = phases.get(parent_index).and_then(|phase| phase.parent);
-    }
-    depth
-}
-
-fn write_output(output: &str) {
-    let stderr = io::stderr();
-    let mut stderr = stderr.lock();
-    let _ = stderr.write_all(output.as_bytes());
-    let _ = stderr.flush();
-}
-
-fn render_human_trace(document: &TraceDocument) -> String {
+fn render_human_trace(document: &TraceDocument<'_>) -> String {
     let mut output = String::new();
     let _ = writeln!(output, "Startup trace total={:.3}ms", document.total_ms);
-    for phase in &document.phases {
+    for phase in document.phases {
         let indentation = "  ".repeat(phase.depth);
         let _ = writeln!(
             output,
@@ -236,54 +206,25 @@ fn render_human_trace(document: &TraceDocument) -> String {
     output
 }
 
-pub(crate) struct PhaseGuard {
-    index: Option<usize>,
-}
-
-impl PhaseGuard {
-    fn disabled() -> Self {
-        Self { index: None }
-    }
-
-    fn finish(mut self) {
-        self.stop();
-    }
-
-    fn stop(&mut self) {
-        if let Some(index) = self.index.take() {
-            end_phase(index);
-        }
-    }
-}
-
-impl Drop for PhaseGuard {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-/// Opens the phase that ends when the first REPL prompt is rendered.
+/// Holds the paint span across editor callbacks until the first prompt appears.
 pub(crate) fn begin_first_prompt() {
-    if !TRACE_ENABLED.load(Ordering::Relaxed) {
+    if !enabled() {
         return;
     }
     let mut first_prompt = FIRST_PROMPT.lock().unwrap_or_else(PoisonError::into_inner);
     if first_prompt.is_none() {
-        *first_prompt = Some(phase("first prompt paint"));
+        *first_prompt = Some(tracing::info_span!(target: "osp_startup", "first prompt paint"));
     }
 }
 
-/// Closes the first-prompt phase and prints the trace. Later prompts are no-ops.
+/// Closes the first-prompt span and prints the trace. Later prompts are no-ops.
 pub(crate) fn first_prompt_rendered() {
-    if !TRACE_ENABLED.load(Ordering::Relaxed) {
-        return;
-    }
     let phase = FIRST_PROMPT
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .take();
-    if let Some(phase) = phase {
-        phase.finish();
+    if phase.is_some() {
+        drop(phase);
         finish();
     }
 }

@@ -71,7 +71,7 @@ struct ThemePathSelection {
 }
 
 pub(crate) fn load_theme_catalog(config: &ResolvedConfig) -> ThemeCatalog {
-    let _phase = crate::startup_trace::phase("theme catalog load");
+    let _phase = tracing::info_span!(target: "osp_startup", "theme catalog load").entered();
     let custom = load_custom_themes(config);
     let mut entries: BTreeMap<String, ThemeEntry> = BTreeMap::new();
     for theme in builtin_themes() {

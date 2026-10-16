@@ -435,7 +435,8 @@ impl App {
     {
         crate::startup_trace::initialize();
         let args = {
-            let _phase = crate::startup_trace::phase("process argv collection");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "process argv collection").entered();
             args.into_iter().map(Into::into).collect::<Vec<OsString>>()
         };
         let pipe = args.iter().position(|arg| arg == "|").unwrap_or(args.len());
@@ -446,7 +447,7 @@ impl App {
             Ok(code) => code,
             Err(err) => {
                 let (error_detail, message_verbosity, error_render_settings) = {
-                    let _phase = crate::startup_trace::phase("process error display preparation");
+                    let _phase = tracing::info_span!(target: "osp_startup", "process error display preparation").entered();
                     if let Some(ui) = host::error_display_settings(&err) {
                         (
                             ui.error_detail,

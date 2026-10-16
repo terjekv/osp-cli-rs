@@ -117,7 +117,8 @@ impl ReplCycle {
         include_help_text: bool,
     ) -> Result<Self> {
         let prepared = {
-            let _phase = crate::startup_trace::phase("REPL completion surface");
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "REPL completion surface").entered();
             prepare_repl_surface_state(runtime, session, clients)?
         };
         let view = ReplViewContext::from_parts(runtime, session);

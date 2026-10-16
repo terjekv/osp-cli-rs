@@ -172,7 +172,7 @@ Help: `| H` or `| H <verb>` e.g. `| H F`
 {{ help }}"#;
 
 pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface) -> String {
-    let _phase = crate::startup_trace::phase("REPL intro rendering");
+    let _phase = tracing::info_span!(target: "osp_startup", "REPL intro rendering").entered();
     let intro_style =
         intro_style_with_verbosity(intro_style(view.config), view.ui.message_verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));

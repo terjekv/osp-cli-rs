@@ -84,7 +84,7 @@ pub(crate) struct PreparedStartupHost {
 
 impl PreparedRuntimeConfig {
     pub(crate) fn resolve(self) -> std::result::Result<ResolvedConfig, ConfigError> {
-        let _phase = crate::startup_trace::phase("config resolution");
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
         self.resolver.resolve(self.options)
     }
 
@@ -115,12 +115,12 @@ pub(crate) fn prepare_runtime_config(
     raw: bool,
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
     let paths = {
-        let _phase = crate::startup_trace::phase("config path discovery");
+        let _phase = tracing::info_span!(target: "osp_startup", "config path discovery").entered();
         RuntimeConfigPaths::discover_with(request.runtime_load)
     };
     let options = runtime_resolve_options(&request);
     let (mut layers, base_resolved) = {
-        let _phase = crate::startup_trace::phase("config resolution");
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
         let layers = build_runtime_pipeline(
             runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
             None,
@@ -259,7 +259,7 @@ pub(crate) fn debug_verbosity_from_config(config: &ResolvedConfig) -> u8 {
 }
 
 pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<ResolvedConfig> {
-    let _phase = crate::startup_trace::phase("runtime config resolution");
+    let _phase = tracing::info_span!(target: "osp_startup", "runtime config resolution").entered();
     let has_session_layer = request.session_layer.is_some();
     tracing::debug!(
         profile_override = ?request.profile_override,
