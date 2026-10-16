@@ -50,7 +50,6 @@ cutover. The unpublished UiO companion uses the sibling path dependency.
 | `auth_mut().set_policy_context(...)` | `set_policy_context(...)`, preserving the resolved profile |
 | `config_state_mut()` / `ui_mut()` | Change configuration through host configuration/rebuild paths |
 | `AppStateBuilder::new(...)` | `AppStateBuilder::from_resolved_config(...)` |
-| Wrapper-owned bootstrap scanning | `Cli::bootstrap_from(...)` with product root options |
 
 Native commands can implement `configure(&ResolvedConfig)` to select their
 local session before help, completion, policy, or execution reads it. Remote

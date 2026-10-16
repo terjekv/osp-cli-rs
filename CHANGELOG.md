@@ -42,6 +42,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Declare builtin config schema, defaults, documentation, and bootstrap rules
   together.
 
+- **Breaking:** Remove the unused `Cli::bootstrap_from` preflight parser.
+
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide
   restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use
