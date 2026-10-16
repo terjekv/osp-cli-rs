@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(plain.backend, RenderBackend::Plain);
         assert!(!plain.color);
         assert!(!plain.unicode);
-        assert_eq!(plain.width, Some(72));
+        assert_eq!(plain.width, None);
 
         let rich_settings = RenderSettings {
             mode: RenderMode::Auto,
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(rich.backend, RenderBackend::Rich);
         assert!(rich.color);
         assert!(rich.unicode);
-        assert_eq!(rich.width, Some(88));
+        assert_eq!(rich.width, None);
 
         let copy = rich_settings.plain_copy_settings();
         let resolved_copy = super::resolve_settings(&rich_settings, RenderProfile::CopySafe);

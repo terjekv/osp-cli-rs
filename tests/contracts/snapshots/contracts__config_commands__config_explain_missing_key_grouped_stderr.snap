@@ -2,9 +2,8 @@
 source: tests/contracts/config_commands/explain.rs
 expression: sanitized
 ---
-- Unknown configuration key --------------------------------------------
+- Unknown configuration key 
   config key not found: ui.m
-- Warning --------------------------------------------------------------
-  did you mean: ui.margin, ui.message.verbosity, ui.messages.layout,
-  ui.mode
-------------------------------------------------------------------------
+- Warning --------------
+  did you mean: ui.margin, ui.message.verbosity, ui.messages.layout, ui.mode
+------------------------
