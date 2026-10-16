@@ -43,7 +43,6 @@ use crate::core::plugin::{
 use crate::core::runtime::RuntimeHints;
 use anyhow::{Result, anyhow};
 use std::collections::{BTreeSet, HashMap};
-use std::error::Error as StdError;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -476,14 +475,16 @@ impl PluginDispatchContext {
 ///
 /// Variants that list `providers` use provider labels as rendered in help and
 /// diagnostics, not bare plugin ids.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PluginDispatchError {
     /// No plugin provides the requested command.
+    #[error("no plugin provides command: {command}")]
     CommandNotFound {
         /// Command name requested by the caller.
         command: String,
     },
     /// More than one plugin provides the requested command.
+    #[error("command `{command}` is provided by multiple plugins: {}", .providers.join(", "))]
     CommandAmbiguous {
         /// Command name requested by the caller.
         command: String,
@@ -491,6 +492,7 @@ pub enum PluginDispatchError {
         providers: Vec<String>,
     },
     /// The requested provider exists, but not for the requested command.
+    #[error("plugin `{requested_provider}` does not provide command `{command}`; available providers: {}", .providers.join(", "))]
     ProviderNotFound {
         /// Command name requested by the caller.
         command: String,
@@ -500,6 +502,7 @@ pub enum PluginDispatchError {
         providers: Vec<String>,
     },
     /// The caller explicitly requested a provider that failed discovery.
+    #[error("plugin `{requested_provider}` is unhealthy: {issue}")]
     ProviderUnhealthy {
         /// Provider identifier requested by the caller.
         requested_provider: String,
@@ -507,6 +510,7 @@ pub enum PluginDispatchError {
         issue: String,
     },
     /// Plugin environment configuration is internally inconsistent.
+    #[error("plugin {plugin_id} has invalid injected environment config: {}", .issues.join("; "))]
     InvalidEnvironment {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -514,6 +518,7 @@ pub enum PluginDispatchError {
         issues: Vec<String>,
     },
     /// Spawning or waiting for the plugin process failed.
+    #[error("failed to execute plugin {plugin_id}: {source}")]
     ExecuteFailed {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -521,6 +526,7 @@ pub enum PluginDispatchError {
         source: std::io::Error,
     },
     /// The plugin process exceeded the configured timeout.
+    #[error("plugin {plugin_id} timed out after {} ms{}", .timeout.as_millis(), stderr_suffix(.stderr))]
     TimedOut {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -530,6 +536,7 @@ pub enum PluginDispatchError {
         stderr: String,
     },
     /// The plugin produced more output than the host will retain.
+    #[error("plugin {plugin_id} exceeded the {limit}-byte {stream} limit")]
     OutputTooLarge {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -539,6 +546,7 @@ pub enum PluginDispatchError {
         limit: usize,
     },
     /// The plugin process exited with a non-zero status code.
+    #[error("plugin {plugin_id} exited with status {status_code}{}", stderr_suffix(.stderr))]
     NonZeroExit {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -548,6 +556,7 @@ pub enum PluginDispatchError {
         stderr: String,
     },
     /// The plugin returned malformed JSON.
+    #[error("invalid JSON response from plugin {plugin_id}: {source}")]
     InvalidJsonResponse {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -555,6 +564,7 @@ pub enum PluginDispatchError {
         source: serde_json::Error,
     },
     /// The plugin returned JSON that failed semantic validation.
+    #[error("invalid plugin response from {plugin_id}: {reason}")]
     InvalidResponsePayload {
         /// Plugin identifier being invoked.
         plugin_id: String,
@@ -563,112 +573,12 @@ pub enum PluginDispatchError {
     },
 }
 
-impl Display for PluginDispatchError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PluginDispatchError::CommandNotFound { command } => {
-                write!(f, "no plugin provides command: {command}")
-            }
-            PluginDispatchError::CommandAmbiguous { command, providers } => {
-                write!(
-                    f,
-                    "command `{command}` is provided by multiple plugins: {}",
-                    providers.join(", ")
-                )
-            }
-            PluginDispatchError::ProviderNotFound {
-                command,
-                requested_provider,
-                providers,
-            } => {
-                write!(
-                    f,
-                    "plugin `{requested_provider}` does not provide command `{command}`; available providers: {}",
-                    providers.join(", ")
-                )
-            }
-            PluginDispatchError::ProviderUnhealthy {
-                requested_provider,
-                issue,
-            } => write!(f, "plugin `{requested_provider}` is unhealthy: {issue}"),
-            PluginDispatchError::InvalidEnvironment { plugin_id, issues } => {
-                write!(
-                    f,
-                    "plugin {plugin_id} has invalid injected environment config: {}",
-                    issues.join("; ")
-                )
-            }
-            PluginDispatchError::ExecuteFailed { plugin_id, source } => {
-                write!(f, "failed to execute plugin {plugin_id}: {source}")
-            }
-            PluginDispatchError::TimedOut {
-                plugin_id,
-                timeout,
-                stderr,
-            } => {
-                if stderr.trim().is_empty() {
-                    write!(
-                        f,
-                        "plugin {plugin_id} timed out after {} ms",
-                        timeout.as_millis()
-                    )
-                } else {
-                    write!(
-                        f,
-                        "plugin {plugin_id} timed out after {} ms: {}",
-                        timeout.as_millis(),
-                        stderr.trim()
-                    )
-                }
-            }
-            PluginDispatchError::OutputTooLarge {
-                plugin_id,
-                stream,
-                limit,
-            } => write!(
-                f,
-                "plugin {plugin_id} exceeded the {limit}-byte {stream} limit"
-            ),
-            PluginDispatchError::NonZeroExit {
-                plugin_id,
-                status_code,
-                stderr,
-            } => {
-                if stderr.trim().is_empty() {
-                    write!(f, "plugin {plugin_id} exited with status {status_code}")
-                } else {
-                    write!(
-                        f,
-                        "plugin {plugin_id} exited with status {status_code}: {}",
-                        stderr.trim()
-                    )
-                }
-            }
-            PluginDispatchError::InvalidJsonResponse { plugin_id, source } => {
-                write!(f, "invalid JSON response from plugin {plugin_id}: {source}")
-            }
-            PluginDispatchError::InvalidResponsePayload { plugin_id, reason } => {
-                write!(f, "invalid plugin response from {plugin_id}: {reason}")
-            }
-        }
-    }
-}
-
-impl StdError for PluginDispatchError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            PluginDispatchError::ExecuteFailed { source, .. } => Some(source),
-            PluginDispatchError::InvalidJsonResponse { source, .. } => Some(source),
-            PluginDispatchError::CommandNotFound { .. }
-            | PluginDispatchError::CommandAmbiguous { .. }
-            | PluginDispatchError::ProviderNotFound { .. }
-            | PluginDispatchError::ProviderUnhealthy { .. }
-            | PluginDispatchError::InvalidEnvironment { .. }
-            | PluginDispatchError::TimedOut { .. }
-            | PluginDispatchError::OutputTooLarge { .. }
-            | PluginDispatchError::NonZeroExit { .. }
-            | PluginDispatchError::InvalidResponsePayload { .. } => None,
-        }
+fn stderr_suffix(stderr: &str) -> String {
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        String::new()
+    } else {
+        format!(": {stderr}")
     }
 }
 
