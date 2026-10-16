@@ -264,28 +264,29 @@ fn expand_intro_template<'a>(
     }
 }
 
+fn effective_user(view: ReplViewContext<'_>) -> &str {
+    view.context
+        .authenticated_subject()
+        .or_else(|| view.config.get_string("user.name"))
+        .unwrap_or("anonymous")
+}
+
 fn resolve_intro_placeholder(
     view: ReplViewContext<'_>,
     intro_commands: &[String],
     key: &str,
 ) -> String {
-    let effective_user = || {
-        view.context
-            .authenticated_subject()
-            .or_else(|| view.config.get_string("user.name"))
-            .unwrap_or("anonymous")
-    };
     match key {
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),
         "user" => {
-            return effective_user().to_string();
+            return effective_user(view).to_string();
         }
         "user.name" => {
-            return effective_user().to_string();
+            return effective_user(view).to_string();
         }
         "display_name" => {
-            let user = effective_user();
+            let user = effective_user(view);
             return view
                 .config
                 .get_string(&format!("user.display_names.{user}"))
@@ -303,7 +304,7 @@ fn resolve_intro_placeholder(
         }
         "session.user_value" => {
             return if view.auth.policy_context().authenticated {
-                effective_user()
+                effective_user(view)
             } else {
                 "Not authenticated"
             }
@@ -485,12 +486,7 @@ impl ReplPromptState {
         Self {
             simple: repl_simple_prompt(view.config),
             profile: view.config.active_profile().to_string(),
-            user: view
-                .context
-                .authenticated_subject()
-                .or_else(|| view.config.get_string("user.name"))
-                .unwrap_or("anonymous")
-                .to_string(),
+            user: effective_user(view).to_string(),
             domain: view
                 .config
                 .get_string("domain")
