@@ -6,6 +6,7 @@
 //! what command to run.
 
 use crate::config::ResolvedConfig;
+use crate::core::shell_words::quote_for_dsl;
 use crate::dsl::{
     model::{ParsedStage, ParsedStageKind},
     parse::pipeline::parse_stage,
@@ -287,7 +288,7 @@ pub(crate) fn split_command_tokens(tokens: &[String]) -> SplitCommandTokens {
             }
             segment
                 .into_iter()
-                .map(|token| quote_token(&token))
+                .map(|token| quote_for_dsl(&token))
                 .collect::<Vec<_>>()
                 .join(" ")
         })
@@ -431,7 +432,7 @@ fn resolve_alias_placeholder(
         }
         let joined = positional_args
             .iter()
-            .map(|arg| quote_token(arg))
+            .map(|arg| quote_for_dsl(arg))
             .collect::<Vec<String>>()
             .join(" ");
         return Ok(joined);
@@ -454,41 +455,6 @@ fn resolve_alias_placeholder(
     Err(miette!(
         "Alias '{alias_name}' requires value for placeholder '{key_part}'"
     ))
-}
-
-fn quote_token(token: &str) -> String {
-    if token.is_empty() {
-        return "''".to_string();
-    }
-    // Only protect characters the DSL lexer itself would re-interpret when
-    // the token is joined back into a stage string: whitespace (token
-    // boundary), quotes and backslash (lexer quoting/escapes), and the pipe
-    // (stage separator). Everything else — `>`, `<`, `!`, `?`, `*`, parens,
-    // brackets — is live DSL operator syntax; quoting it here silently turns
-    // `F vlan>100` into a literal term that matches nothing.
-    let needs_quotes = token.is_empty()
-        || token
-            .chars()
-            .any(|ch| ch.is_whitespace() || matches!(ch, '\'' | '"' | '\\' | '|'));
-    if !needs_quotes {
-        return token.to_string();
-    }
-
-    if !token.contains('\'') {
-        return format!("'{token}'");
-    }
-
-    let mut out = String::new();
-    out.push('\'');
-    for ch in token.chars() {
-        if ch == '\'' {
-            out.push_str("'\"'\"'");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
 }
 
 #[cfg(test)]

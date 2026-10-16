@@ -127,7 +127,7 @@ pub enum QuoteStyle {
 /// ```
 pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
     match style {
-        QuoteStyle::Single => quote_single(value),
+        QuoteStyle::Single => quote_single(value, "'\\''"),
         QuoteStyle::Double => quote_double(value),
     }
 }
@@ -150,7 +150,7 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
 /// ```
 pub fn escape_for_shell(value: &str) -> String {
     if value.is_empty() || value.contains('\n') || value.contains('\r') {
-        return quote_single(value);
+        return quote_single(value, "'\\''");
     }
 
     let mut out = String::with_capacity(value.len());
@@ -165,11 +165,31 @@ pub fn escape_for_shell(value: &str) -> String {
     out
 }
 
-fn quote_single(value: &str) -> String {
+/// Quotes a DSL word while leaving operators live unless shell quoting is needed.
+pub(crate) fn quote_for_dsl(token: &str) -> String {
+    // Only protect characters the DSL lexer itself would re-interpret when
+    // the token is joined back into a stage string: whitespace (token
+    // boundary), quotes and backslash (lexer quoting/escapes), and the pipe
+    // (stage separator). Everything else — `>`, `<`, `!`, `?`, `*`, parens,
+    // brackets — is live DSL operator syntax; quoting it here silently turns
+    // `F vlan>100` into a literal term that matches nothing.
+    let needs_quotes = token.is_empty()
+        || token
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '\'' | '"' | '\\' | '|'));
+    if !needs_quotes {
+        return token.to_string();
+    }
+
+    // Preserve the apostrophe spelling emitted in expanded alias text.
+    quote_single(token, "'\"'\"'")
+}
+
+fn quote_single(value: &str, apostrophe_escape: &str) -> String {
     let mut out = String::from("'");
     for ch in value.chars() {
         if ch == '\'' {
-            out.push_str("'\\''");
+            out.push_str(apostrophe_escape);
         } else {
             out.push(ch);
         }
