@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Rebuild native completion at safe prompt boundaries after background refresh
+  and cold discovery, including subsequent execution or rendering failures.
+
 - Add master-controlled terminal bell requests and `notifications preview` in
   rich human REPL sessions, with a ten-second limit.
 

@@ -361,11 +361,10 @@ pub(super) fn execute_repl_command_dispatch(
             let rendered = render_repl_command_output(
                 runtime, session, line, &stages, output, &effective, sink,
             )?;
-            let refresh_completion = session.native_context.take_completion_refresh_request();
             Ok(super::ExecutedReplLine::invocation(
                 finalize_repl_command(
                     rendered,
-                    side_effects.restart_repl || refresh_completion,
+                    side_effects.restart_repl,
                     side_effects.show_intro_on_reload,
                 ),
                 exit_code,

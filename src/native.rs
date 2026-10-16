@@ -741,6 +741,7 @@ pub trait NativeCommand: Send + Sync {
 #[must_use]
 pub struct NativeCommandRegistry {
     commands: Arc<BTreeMap<String, Arc<dyn NativeCommand>>>,
+    completion_refresh_requested: Arc<AtomicBool>,
 }
 
 impl NativeCommandRegistry {
@@ -827,6 +828,11 @@ impl NativeCommandRegistry {
         self.catalog_with_completion(true)
     }
 
+    pub(crate) fn take_completion_refresh_request(&self) -> bool {
+        self.completion_refresh_requested
+            .swap(false, Ordering::AcqRel)
+    }
+
     pub(crate) fn refresh_completion_in_background(&self, should_refresh: impl Fn(&str) -> bool) {
         for (name, command) in self.commands.iter() {
             if !should_refresh(name) {
@@ -834,12 +840,14 @@ impl NativeCommandRegistry {
             }
             let name = name.clone();
             let command = Arc::clone(command);
+            let completion_refresh_requested = Arc::clone(&self.completion_refresh_requested);
             if let Err(error) = std::thread::Builder::new()
                 .name(format!("osp-completion-{name}"))
                 .spawn(move || {
                     if let Err(error) = command.refresh_completion() {
                         tracing::debug!(command = %name, %error, "native completion refresh failed");
                     }
+                    completion_refresh_requested.store(true, Ordering::Release);
                 })
             {
                 tracing::warn!(%error, "failed to start native completion refresh");

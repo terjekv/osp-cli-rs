@@ -347,7 +347,7 @@ impl NativeIntent {
 
 fn refresh_native_parse(
     command: &dyn crate::native::NativeCommand,
-    name: &str,
+    session_context: &crate::native::NativeSessionContext,
     args: &[String],
     config: &crate::config::ResolvedConfig,
     parsed: NativeParse,
@@ -357,10 +357,14 @@ fn refresh_native_parse(
     if !intent.refresh_metadata {
         return Ok(parsed);
     }
+    let name = parsed.grammar.get_name().to_string();
     let refreshed = command.prepare_invocation_metadata(args, config, scope);
+    if matches!(refreshed, Ok(true)) {
+        session_context.request_completion_refresh();
+    }
     if intent.requirement == ExternalPathAccessRequirement::Visible {
         match refreshed {
-            Ok(true) => match NativeParse::new(command, name, args) {
+            Ok(true) => match NativeParse::new(command, &name, args) {
                 Ok(parsed) => return Ok(parsed),
                 Err(error) => {
                     tracing::debug!(command = %name, error = %error, "refreshed native help arguments could not be normalized; using cached help")
@@ -381,7 +385,7 @@ fn refresh_native_parse(
             ),
         )
     })? {
-        NativeParse::new(command, name, args)
+        NativeParse::new(command, &name, args)
     } else {
         Ok(parsed)
     }
@@ -413,7 +417,7 @@ fn run_native_invocation(
     before_external_execution(runtime, &parsed.path, intent.requirement, "command")?;
     let parsed = refresh_native_parse(
         command,
-        name,
+        &session.native_context,
         args,
         runtime.config.resolved(),
         parsed,

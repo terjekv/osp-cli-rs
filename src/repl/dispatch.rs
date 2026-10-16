@@ -227,8 +227,25 @@ pub(crate) fn execute_repl_plugin_line(
         let _ = history.with(|store| store.remember_command(&resolved));
     }
     session.finish_repl_line();
+    let refresh_completion = session.native_context.take_completion_refresh_request()
+        | clients.native_commands().take_completion_refresh_request();
     match execution {
-        Ok(executed) => {
+        Ok(mut executed) => {
+            if refresh_completion {
+                executed.result = match executed.result {
+                    ReplResult::Continue => {
+                        command::finalize_repl_command(String::new(), true, false)
+                    }
+                    ReplResult::Print(output) => {
+                        command::finalize_repl_command(output, true, false)
+                    }
+                    result @ ReplResult::ReplaceInput(_) => {
+                        session.native_context.request_completion_refresh();
+                        result
+                    }
+                    result => result,
+                };
+            }
             let debug = match executed.timing {
                 ReplTimingPlan::Flat { debug_level }
                 | ReplTimingPlan::ParseOnly { debug_level }
@@ -294,7 +311,12 @@ pub(crate) fn execute_repl_plugin_line(
             }
             let exit_code = crate::app::classify_exit_code(&err);
             tracing::info!(target: "osp", exit_code, elapsed_ms = started.elapsed().as_millis(), "finished");
-            let mut executed = ExecutedReplLine::flat(ReplResult::Continue, ui.debug_level);
+            let result = if refresh_completion {
+                command::finalize_repl_command(String::new(), true, false)
+            } else {
+                ReplResult::Continue
+            };
+            let mut executed = ExecutedReplLine::flat(result, ui.debug_level);
             executed.exit_code = exit_code;
             Ok(executed)
         }
