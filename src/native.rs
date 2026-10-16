@@ -83,6 +83,7 @@ pub struct NativeCommandContext<'a> {
     pub session_context: NativeSessionContext,
     command_scope: crate::core::CommandScope,
     progress: Option<&'a dyn NativeProgressSink>,
+    pub(crate) output_pipeline: bool,
 }
 
 impl<'a> NativeCommandContext<'a> {
@@ -95,6 +96,7 @@ impl<'a> NativeCommandContext<'a> {
             session_context: NativeSessionContext::default(),
             command_scope: Default::default(),
             progress: None,
+            output_pipeline: false,
         }
     }
 
@@ -112,6 +114,11 @@ impl<'a> NativeCommandContext<'a> {
     /// Renders a root-form command for the reader's current prompt.
     pub fn command(&self, line: &str) -> String {
         self.command_scope.command(line)
+    }
+
+    /// Whether this invocation transforms its result with output pipe stages.
+    pub fn has_output_pipeline(&self) -> bool {
+        self.output_pipeline
     }
 
     /// Attaches explicit elevation intent to this execution only.

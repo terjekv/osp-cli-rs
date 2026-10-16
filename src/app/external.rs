@@ -631,6 +631,7 @@ fn run_native_command(
         }
         .for_command(input.command_path.as_str()),
     );
+    context.output_pipeline = !input.stages.is_empty();
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
     }
