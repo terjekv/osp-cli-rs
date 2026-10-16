@@ -57,3 +57,24 @@ fn command_line_and_node_data_structs_preserve_internal_state_unit() {
     assert_eq!(node.prefilled_positionals, vec!["tenant-a".to_string()]);
     assert!(node.flag_hints.is_some());
 }
+
+#[test]
+fn internal_example_1() {
+    use crate::completion::model::MatchKind;
+
+    let labels = [
+        MatchKind::Pipe,
+        MatchKind::Flag,
+        MatchKind::Command,
+        MatchKind::Subcommand,
+        MatchKind::Value,
+    ]
+    .into_iter()
+    .map(MatchKind::as_str)
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        labels,
+        vec!["pipe", "flag", "command", "subcommand", "value"]
+    );
+}

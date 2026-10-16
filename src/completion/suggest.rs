@@ -49,7 +49,7 @@ struct PositionalRequest<'a> {
 
 /// Generates ranked completion suggestions from a completion tree and cursor analysis.
 #[derive(Debug, Clone)]
-pub struct SuggestionEngine {
+pub(crate) struct SuggestionEngine {
     tree: CompletionTree,
 }
 
@@ -67,7 +67,7 @@ impl SuggestionEngine {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::{
     ///     CommandLine, CompletionAnalysis, CompletionContext, CompletionNode,
     ///     CompletionRequest, CompletionTree, CursorState, ParsedLine,

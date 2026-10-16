@@ -43,11 +43,18 @@ mod tree;
 
 pub use engine::CompletionEngine;
 pub use model::{
-    ArgNode, CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
-    CompletionTree, ContextScope, CursorState, DynamicCompletion, FlagCompletions, FlagHints,
-    FlagNode, FlagOccurrence, MatchKind, ParsedLine, QuoteStyle, Suggestion, SuggestionEntry,
-    SuggestionOutput, TailItem, ValueCatalog, ValueType,
+    ArgNode, CommandLine, CompletionNode, CompletionTree, ContextScope, CursorState,
+    DynamicCompletion, FlagCompletions, FlagHints, FlagNode, FlagOccurrence, QuoteStyle,
+    Suggestion, SuggestionEntry, SuggestionOutput, TailItem, ValueCatalog, ValueType,
 };
-pub use parse::{CommandLineParser, ParsedCursorLine, TokenSpan};
-pub use suggest::{SuggestionEngine, closest_values};
-pub use tree::{CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};
+pub use parse::CommandLineParser;
+pub use suggest::closest_values;
+pub use tree::{CompletionTreeBuildError, CompletionTreeBuilder};
+
+pub(crate) use model::{CompletionAnalysis, CompletionRequest};
+pub(crate) use parse::TokenSpan;
+pub(crate) use tree::ConfigKeySpec;
+
+#[cfg(test)]
+#[path = "tests/integration.rs"]
+mod integration_tests;

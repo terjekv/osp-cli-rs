@@ -18,7 +18,7 @@ use crate::core::shell_words::{LexEvent, LexEventKind, LexState, scan_shell};
 
 /// Token value with byte offsets into the original input line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenSpan {
+pub(crate) struct TokenSpan {
     /// Unescaped token text.
     pub value: String,
     /// Inclusive start byte offset.
@@ -189,7 +189,7 @@ pub struct CommandLineParser;
 
 /// Parsed command-line state for the full line and the cursor position.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedCursorLine {
+pub(crate) struct ParsedCursorLine {
     /// Parsed tokens and command structure.
     pub parsed: ParsedLine,
     /// Cursor-local replacement information.
@@ -305,7 +305,7 @@ impl CommandLineParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::CommandLineParser;
     ///
     /// let spans = CommandLineParser.tokenize_with_spans("ldap user alice");
@@ -314,7 +314,7 @@ impl CommandLineParser {
     /// assert_eq!(spans[1].start, 5);
     /// assert_eq!(spans[2].end, 15);
     /// ```
-    pub fn tokenize_with_spans(&self, line: &str) -> Vec<TokenSpan> {
+    pub(crate) fn tokenize_with_spans(&self, line: &str) -> Vec<TokenSpan> {
         self.tokenize_with_spans_inner(line)
             .or_else(|| self.tokenize_with_spans_fallback(line))
             .unwrap_or_default()
@@ -330,7 +330,7 @@ impl CommandLineParser {
     /// boundary before the parser slices the line.
     ///
     #[cfg(test)]
-    pub fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
+    pub(crate) fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
         self.analyze_with_flag_arity(line, cursor, |_, _| None)
     }
 
@@ -476,7 +476,7 @@ impl CommandLineParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::CommandLineParser;
     ///
     /// let cursor = CommandLineParser.cursor_state("ldap user ali", 13);
@@ -484,7 +484,7 @@ impl CommandLineParser {
     /// assert_eq!(cursor.token_stub, "ali");
     /// assert_eq!(cursor.replace_range, 10..13);
     /// ```
-    pub fn cursor_state(&self, text_before_cursor: &str, safe_cursor: usize) -> CursorState {
+    pub(crate) fn cursor_state(&self, text_before_cursor: &str, safe_cursor: usize) -> CursorState {
         let safe_cursor = clamp_to_char_boundary(
             text_before_cursor,
             safe_cursor.min(text_before_cursor.len()),
@@ -577,7 +577,7 @@ impl CommandLineParser {
     /// Returns the active quote style for the token being edited, if any.
     ///
     #[cfg(test)]
-    pub fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
+    pub(crate) fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }
 
@@ -612,8 +612,11 @@ impl CommandLineParser {
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
+                        #[cfg(test)]
                         safe_cursor,
+                        #[cfg(test)]
                         full_tokens: tokenized.full_tokens,
+                        #[cfg(test)]
                         cursor_tokens: tokenized.cursor_tokens,
                         full_cmd,
                         cursor_cmd,
@@ -631,8 +634,11 @@ impl CommandLineParser {
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
+                        #[cfg(test)]
                         safe_cursor,
+                        #[cfg(test)]
                         full_tokens,
+                        #[cfg(test)]
                         cursor_tokens,
                         full_cmd,
                         cursor_cmd,
@@ -728,6 +734,28 @@ fn current_quote_state(text: &str) -> Option<QuoteStyle> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::completion::CommandLineParser;
+
+        let spans = CommandLineParser.tokenize_with_spans("ldap user alice");
+
+        assert_eq!(spans[0].value, "ldap");
+        assert_eq!(spans[1].start, 5);
+        assert_eq!(spans[2].end, 15);
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::completion::CommandLineParser;
+
+        let cursor = CommandLineParser.cursor_state("ldap user ali", 13);
+
+        assert_eq!(cursor.token_stub, "ali");
+        assert_eq!(cursor.replace_range, 10..13);
+    }
+
     use crate::completion::model::{FlagOccurrence, QuoteStyle};
 
     use super::CommandLineParser;

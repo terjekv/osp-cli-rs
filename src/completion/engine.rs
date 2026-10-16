@@ -48,8 +48,8 @@ impl CompletionEngine {
 
     /// Parses `line` at `cursor` and returns the cursor state with suggestions.
     ///
-    /// This is the canonical one-shot completion entrypoint when callers do
-    /// not need the intermediate [`CompletionAnalysis`].
+    /// This one-shot completion entrypoint returns the cursor state and ranked
+    /// suggestions.
     ///
     /// # Examples
     ///
@@ -78,7 +78,10 @@ impl CompletionEngine {
     }
 
     /// Generates suggestions for a previously computed completion analysis.
-    pub fn suggestions_for_analysis(&self, analysis: &CompletionAnalysis) -> Vec<SuggestionOutput> {
+    pub(crate) fn suggestions_for_analysis(
+        &self,
+        analysis: &CompletionAnalysis,
+    ) -> Vec<SuggestionOutput> {
         self.suggester.generate(analysis)
     }
 
@@ -86,7 +89,7 @@ impl CompletionEngine {
     ///
     /// `cursor` is clamped to the line length and to a valid UTF-8 character
     /// boundary before parsing.
-    pub fn analyze(&self, line: &str, cursor: usize) -> CompletionAnalysis {
+    pub(crate) fn analyze(&self, line: &str, cursor: usize) -> CompletionAnalysis {
         let parsed = self
             .parser
             .analyze_with_flag_arity(line, cursor, |path, flag| self.flag_arity(path, flag));
@@ -104,7 +107,7 @@ impl CompletionEngine {
     /// This is mainly useful for tests or callers that already have split
     /// command state for the full line and the cursor-local prefix.
     #[cfg(test)]
-    pub fn analyze_command(
+    pub(crate) fn analyze_command(
         &self,
         full_cmd: CommandLine,
         cursor_cmd: CommandLine,
@@ -144,12 +147,12 @@ impl CompletionEngine {
 
     /// Returns how many leading tokens resolve to a command path in the tree.
     #[cfg(test)]
-    pub fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
+    pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
         TreeResolver::new(self.suggester.tree()).matched_command_len_tokens(tokens)
     }
 
     /// Classifies a candidate value relative to the current completion analysis.
-    pub fn classify_match(&self, analysis: &CompletionAnalysis, value: &str) -> MatchKind {
+    pub(crate) fn classify_match(&self, analysis: &CompletionAnalysis, value: &str) -> MatchKind {
         if analysis.parsed.cursor_cmd.has_pipe() {
             return MatchKind::Pipe;
         }

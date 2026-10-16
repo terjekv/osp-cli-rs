@@ -447,3 +447,50 @@ fn suggestions_match_unicode_case_insensitively() {
     let values = values(generate(&engine, cmd, "å"));
     assert_eq!(values, vec!["Ålesund".to_string()]);
 }
+
+#[test]
+fn internal_example_1() {
+    use super::SuggestionEngine;
+    use crate::completion::model::{
+        CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
+        CompletionTree, CursorState, ParsedLine, SuggestionOutput,
+    };
+    use std::collections::BTreeMap;
+
+    let tree = CompletionTree {
+        root: CompletionNode {
+            children: BTreeMap::from([("ldap".into(), CompletionNode::default())]),
+            ..CompletionNode::default()
+        },
+        pipe_verbs: BTreeMap::new(),
+    };
+    let analysis = CompletionAnalysis {
+        parsed: ParsedLine {
+            safe_cursor: 2,
+            full_tokens: vec!["ld".to_string()],
+            cursor_tokens: vec!["ld".to_string()],
+            full_cmd: CommandLine::default(),
+            cursor_cmd: CommandLine::default(),
+        },
+        cursor: CursorState::new("ld", "ld", 0..2, None),
+        context: CompletionContext {
+            matched_path: Vec::new(),
+            flag_scope_path: Vec::new(),
+            subcommand_context: true,
+        },
+        request: CompletionRequest::Positionals {
+            context_path: Vec::new(),
+            flag_scope_path: Vec::new(),
+            arg_index: 0,
+            show_subcommands: true,
+            show_flag_names: false,
+        },
+    };
+
+    let suggestions = SuggestionEngine::new(tree).generate(&analysis);
+
+    assert!(matches!(
+        suggestions.first(),
+        Some(SuggestionOutput::Item(item)) if item.text == "ldap"
+    ));
+}

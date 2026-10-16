@@ -7,9 +7,6 @@ mod temp_support;
 #[path = "integration/app/mod.rs"]
 mod app;
 
-#[path = "integration/completion.rs"]
-mod completion;
-
 #[path = "integration/config/mod.rs"]
 mod config;
 

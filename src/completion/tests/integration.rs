@@ -1,4 +1,4 @@
-use osp_cli::completion::{
+use crate::completion::{
     ArgNode, CompletionEngine, CompletionNode, CompletionTreeBuilder, ContextScope,
     DynamicCompletion, FlagCompletions, FlagNode, SuggestionEntry, SuggestionOutput,
 };
@@ -18,7 +18,7 @@ fn provider_cursor(line: &str) -> usize {
     line.find("--provider").expect("provider flag in test line") - 1
 }
 
-fn completion_tree(context_scope: ContextScope) -> osp_cli::completion::CompletionTree {
+fn completion_tree(context_scope: ContextScope) -> crate::completion::CompletionTree {
     let mut tree = CompletionTreeBuilder
         .build_from_specs(
             &[
@@ -75,7 +75,7 @@ fn completion_tree(context_scope: ContextScope) -> osp_cli::completion::Completi
 
 #[test]
 fn completion_engine_merges_global_context_flags_from_later_tokens() {
-    let catalogue = osp_cli::completion::ValueCatalog::default();
+    let catalogue = crate::completion::ValueCatalog::default();
     let mut tree = completion_tree(ContextScope::Global);
     tree.root
         .children

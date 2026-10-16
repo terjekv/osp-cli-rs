@@ -696,12 +696,15 @@ impl CommandLine {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 /// Parser output for the full line and the cursor-local prefix.
-pub struct ParsedLine {
+pub(crate) struct ParsedLine {
     /// Cursor offset clamped to a valid UTF-8 boundary.
+    #[cfg(test)]
     pub safe_cursor: usize,
     /// Tokens parsed from the full line.
+    #[cfg(test)]
     pub full_tokens: Vec<String>,
     /// Tokens parsed from the line prefix before the cursor.
+    #[cfg(test)]
     pub cursor_tokens: Vec<String>,
     /// Parsed command-line structure for the full line.
     pub full_cmd: CommandLine,
@@ -711,7 +714,7 @@ pub struct ParsedLine {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Explicit request kind for the current cursor position.
-pub enum CompletionRequest {
+pub(crate) enum CompletionRequest {
     /// Completing a DSL pipe verb.
     Pipe,
     /// Completing a flag spelling in the current flag scope.
@@ -741,8 +744,9 @@ pub enum CompletionRequest {
     },
 }
 
+#[cfg(test)]
 impl CompletionRequest {
-    /// Returns the stable request-kind label used by tests and debug surfaces.
+    /// Returns the stable request-kind label used by tests.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Pipe => "pipe",
@@ -759,7 +763,7 @@ impl CompletionRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Full completion analysis derived from parsing and context resolution.
-pub struct CompletionAnalysis {
+pub(crate) struct CompletionAnalysis {
     /// Full parser output plus the cursor-local context derived from it.
     pub parsed: ParsedLine,
     /// Replacement details for the active token.
@@ -777,7 +781,7 @@ pub struct CompletionAnalysis {
 /// which command path matched, which node contributes visible flags, and
 /// whether the cursor is still in subcommand-selection mode.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CompletionContext {
+pub(crate) struct CompletionContext {
     /// Command path matched before the cursor.
     pub matched_path: Vec<String>,
     /// Command path that contributes visible flags.
@@ -788,7 +792,7 @@ pub struct CompletionContext {
 
 /// High-level classification for a completion candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchKind {
+pub(crate) enum MatchKind {
     /// Candidate belongs to pipe-mode completion.
     Pipe,
     /// Candidate is a flag spelling.
@@ -806,7 +810,7 @@ impl MatchKind {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::MatchKind;
     ///
     /// let labels = [

@@ -169,7 +169,7 @@ impl CompletionTreeBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::{CompletionNode, CompletionTreeBuilder, ConfigKeySpec};
     ///
     /// let mut tree = CompletionTreeBuilder.build_from_specs(
@@ -191,7 +191,7 @@ impl CompletionTreeBuilder {
     /// assert!(set_node.children.contains_key("log.level"));
     /// assert!(set_node.children["ui.format"].value_key);
     /// ```
-    pub fn apply_config_set_keys(
+    pub(crate) fn apply_config_set_keys(
         &self,
         tree: &mut CompletionTree,
         keys: impl IntoIterator<Item = ConfigKeySpec>,
@@ -430,7 +430,7 @@ fn suggestion_from_describe(value: &DescribeSuggestionV1) -> SuggestionEntry {
 /// Declarative `config set` key metadata used for completion nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[must_use]
-pub struct ConfigKeySpec {
+pub(crate) struct ConfigKeySpec {
     /// Config key name completed below `config set`.
     pub key: String,
     /// Optional description shown for the key.
@@ -470,6 +470,33 @@ impl ConfigKeySpec {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::completion::{CompletionNode, CompletionTreeBuilder, ConfigKeySpec};
+
+        let mut tree = CompletionTreeBuilder
+            .build_from_specs(
+                &[CompletionNode::new("config").subcommand(CompletionNode::new("set"))],
+                [],
+            )
+            .expect("tree should build");
+        CompletionTreeBuilder
+            .apply_config_set_keys(
+                &mut tree,
+                [
+                    ConfigKeySpec::new("ui.format"),
+                    ConfigKeySpec::new("log.level"),
+                ],
+            )
+            .expect("config keys should inject");
+
+        let set_node = &tree.root.children["config"].children["set"];
+        assert!(set_node.children.contains_key("ui.format"));
+        assert!(set_node.children.contains_key("log.level"));
+        assert!(set_node.children["ui.format"].value_key);
+    }
+
     use crate::completion::model::CompletionTree;
 
     use super::{CompletionNode, CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};
