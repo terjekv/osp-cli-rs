@@ -62,6 +62,20 @@ pub(crate) fn attach(printer: &ExternalPrinter<String>) {
         .attach(printer);
 }
 
+/// Flush queued notices when terminal capabilities require the basic reader.
+pub(crate) fn attach_basic() {
+    let mut notices = NOTICES.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some(printer) = notices.printer.take() {
+        while let Some(line) = printer.get_line() {
+            eprintln!("{line}");
+        }
+    }
+    for line in notices.pending.drain(..) {
+        eprintln!("{line}");
+    }
+    notices.basic = true;
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ExternalPrinter, Notices};
@@ -81,18 +95,4 @@ mod tests {
         assert_eq!(printer.get_line().as_deref(), Some("late"));
         assert_eq!(printer.get_line(), None);
     }
-}
-
-/// Flush queued notices when terminal capabilities require the basic reader.
-pub(crate) fn attach_basic() {
-    let mut notices = NOTICES.lock().unwrap_or_else(|err| err.into_inner());
-    if let Some(printer) = notices.printer.take() {
-        while let Some(line) = printer.get_line() {
-            eprintln!("{line}");
-        }
-    }
-    for line in notices.pending.drain(..) {
-        eprintln!("{line}");
-    }
-    notices.basic = true;
 }

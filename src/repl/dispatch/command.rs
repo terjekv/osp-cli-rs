@@ -59,7 +59,7 @@ pub(super) fn parse_repl_invocation(
     });
     // Elevation wraps the resolved command; it must not discard shell scope.
     // Keep bare sudo untouched so the ordinary missing-command error applies.
-    let scoped = !absolute_command && !(elevated && command_tokens.is_empty());
+    let scoped = !(absolute_command || elevated && command_tokens.is_empty());
     if scoped {
         let prefixed = session.scope.prefixed_tokens(command_tokens);
         scanned.tokens.splice(prefix_len.., prefixed);

@@ -30,7 +30,7 @@ pub(crate) struct CommandPresentation {
 #[derive(Debug, Clone)]
 pub(crate) enum CommandBody {
     None,
-    Output(OutputResult),
+    Output(Box<OutputResult>),
     Text(String),
     Json(Value),
 }
@@ -39,7 +39,7 @@ impl CommandBody {
     fn into_output(self) -> Option<OutputResult> {
         match self {
             Self::None => None,
-            Self::Output(output) => Some(output),
+            Self::Output(output) => Some(*output),
             Self::Text(text) => Some(text_output_to_rows(&text)),
             Self::Json(value) => Some(OutputResult::from_rows(
                 crate::core::output_model::rows_from_value(value),
@@ -84,7 +84,7 @@ impl CommandOutput {
 
     pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
         Self {
-            body: CommandBody::Output(output),
+            body: CommandBody::Output(Box::new(output)),
             format_hint,
             ..Self::exit(0)
         }
@@ -168,7 +168,7 @@ impl CommandOutput {
             return Ok(());
         };
         let (output, format_hint) = apply_output_stages(output, stages, self.format_hint)?;
-        self.body = CommandBody::Output(output);
+        self.body = CommandBody::Output(Box::new(output));
         self.format_hint = format_hint;
         self.presentation = CommandPresentation::default();
         Ok(())
@@ -179,7 +179,7 @@ impl CommandOutput {
         let output = match &self.body {
             CommandBody::None => return String::new(),
             CommandBody::Text(text) => return text.clone(),
-            CommandBody::Output(output) => std::borrow::Cow::Borrowed(output),
+            CommandBody::Output(output) => std::borrow::Cow::Borrowed(output.as_ref()),
             CommandBody::Json(payload) => {
                 effective.format = OutputFormat::Json;
                 effective.format_explicit = true;
@@ -612,7 +612,7 @@ pub(crate) fn render_saved_repl_output(
         CommandBody::None | CommandBody::Output(_) => "failed to replay staged structured output",
     };
     staged.body = match staged.body.into_output() {
-        Some(output) => CommandBody::Output(output),
+        Some(output) => CommandBody::Output(Box::new(output)),
         None => CommandBody::None,
     };
     staged.apply_stages(stages).wrap_err(context)?;

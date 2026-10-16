@@ -425,7 +425,9 @@ fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
         Ok(document) => {
             for row in document.rows() {
                 let name = row["name"].as_str().unwrap_or_default();
-                let info = verb_info(name).expect("DSL document contains registered verbs");
+                let Some(info) = verb_info(name) else {
+                    continue;
+                };
                 if target.is_empty() {
                     lines.push(format!("  {:<5} {}", name, info.summary));
                 } else {

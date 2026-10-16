@@ -998,6 +998,10 @@ pub(crate) fn repl_only_commands() -> [clap::Command; 5] {
     ]
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "all callers name built-ins declared by InlineCommandCli"
+)]
 pub(crate) fn builtin_command(name: &str) -> clap::Command {
     InlineCommandCli::command()
         .find_subcommand(name)

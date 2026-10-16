@@ -104,8 +104,9 @@ pub fn read_line(answer: &mut String) -> io::Result<usize> {
     while let Some(start) = rest.find("\x1b[") {
         answer.push_str(&rest[..start]);
         rest = &rest[start..];
-        if parse_cursor_position_report(rest.as_bytes()).is_some() {
-            let end = rest.find('R').expect("validated cursor report");
+        if let Some(end) =
+            parse_cursor_position_report(rest.as_bytes()).and_then(|_| rest.find('R'))
+        {
             rest = &rest[end + 1..];
         } else {
             answer.push('\x1b');
