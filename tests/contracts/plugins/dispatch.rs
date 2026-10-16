@@ -4,7 +4,6 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
     use clap::{Arg, ArgAction, builder::PossibleValue};
     use osp_cli::app::BufferedUiSink;
     use osp_cli::completion::SuggestionEntry;
-    use osp_cli::core::command_def::CommandDef;
     use osp_cli::core::command_policy::{CredentialState, SessionFacts};
     use osp_cli::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, DescribeV1, PLUGIN_PROTOCOL_V1};
     use osp_cli::plugin::{PluginDispatchContext, PluginManager, PluginSource};
@@ -14,7 +13,7 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
         "visible_session": {"auth_strength": "basic", "credentials": [{"state": "present", "service": "audit"}]},
         "run_session": {"auth_strength": "basic", "credentials": [{"state": "valid", "service": "directory"}, {"state": "fresh", "service": "osp", "min_ttl_seconds": 300}]}
     })).unwrap();
-    let mut command = CommandDef::from_clap(
+    let mut command = DescribeCommandV1::from_clap(
         clap::Command::new("sdk-directory")
             .about("Inspect directory records")
             .subcommand(
@@ -53,7 +52,7 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
         plugin_id: "sdk".to_string(),
         plugin_version: "0.1.0".to_string(),
         min_osp_version: Some("0.1.0".to_string()),
-        commands: vec![DescribeCommandV1::from(&command)],
+        commands: vec![command],
     };
     describe.validate_v1().expect("SDK metadata should be valid");
     let wire = serde_json::to_value(&describe).expect("metadata should serialize");
@@ -108,7 +107,7 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
     assert_eq!(entry.source.plugin_source(), Some(PluginSource::Explicit));
     assert_eq!(entry.subcommands, vec!["inspect".to_string()]);
     assert_eq!(serde_json::to_value(&entry.auth).unwrap(), wire["commands"][0]["auth"]);
-    let inspect = &entry.completion.subcommands[0];
+    let inspect = &entry.completion.children["inspect"];
     assert_eq!(inspect.name, "inspect");
     assert_eq!(inspect.tooltip.as_deref(), Some("Read selected record collections"));
     assert_eq!(inspect.args[0].name.as_deref(), Some("COLLECTION"));

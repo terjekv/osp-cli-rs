@@ -16,7 +16,6 @@ one feature. `core` is not a place for helpers without a home.
 | `document.rs` | Ordered semantic blocks shared by help, intro, and UI rendering |
 | `output_model.rs` | `OutputResult`, JSON/row conversion, group context and render hints |
 | `output.rs` | Output format and mode enums shared by flags, config and UI |
-| `command_def.rs` | `CommandDef`, `FlagDef`, `ArgDef`: commands as data for help, completion and catalogs |
 | `command_policy.rs` | Whether a command is visible or allowed in the current context |
 | `plugin.rs` | Plugin protocol DTOs (`DescribeV1`, `ResponseV1`) and validation |
 | `runtime.rs` | Runtime hints passed to native and plugin commands |
@@ -27,9 +26,10 @@ one feature. `core` is not a place for helpers without a home.
 - **Protocol change:** `plugin.rs` together with `docs/PLUGIN_PROTOCOL.md`.
   Additive fields with defaults keep old plugins working; anything else needs
   a protocol version bump.
-- **New command metadata (e.g. a flag property):** add it to `command_def.rs`,
-  then carry it through `completion/tree.rs` and `document.rs` as needed.
-  Clap-built commands get it from the clap conversion in the same file.
+- **New command metadata (e.g. a flag property):** declare it in clap for
+  native commands and builtins. Update the direct projections in
+  `completion/tree.rs` and `document.rs`; protocol metadata belongs in
+  `plugin.rs` at the plugin boundary.
 
 `Document` is the semantic help/intro model. Its clap metadata adapter, external
 text parser, and Markdown template parser produce ordered blocks. Its row

@@ -1,7 +1,3 @@
-use super::conversion::{
-    direct_subcommand_names, to_arg_node, to_command_spec, to_flag_node, to_suggestion_entry,
-    to_value_type,
-};
 use super::discovery::{
     DescribeCacheEntry, DescribeCacheFile, ManifestPlugin, ManifestState, SearchRoot,
     ValidatedBundledManifest, assemble_discovered_plugin, bundled_manifest_path,

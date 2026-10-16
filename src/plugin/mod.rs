@@ -69,7 +69,6 @@
 pub(crate) mod active;
 pub(crate) mod catalog;
 pub(crate) mod config;
-pub(crate) mod conversion;
 pub(crate) mod discovery;
 pub(crate) mod dispatch;
 pub mod manager;

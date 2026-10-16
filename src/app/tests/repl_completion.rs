@@ -60,40 +60,8 @@ struct ProjectedCommandSurface {
     flags: Vec<String>,
 }
 
-fn command_def_surface(
-    command: &crate::core::command_def::CommandDef,
-    parent: &str,
-    out: &mut Vec<ProjectedCommandSurface>,
-) {
-    let path = if parent.is_empty() {
-        command.name.clone()
-    } else {
-        format!("{parent} {}", command.name)
-    };
-    let mut flags = command
-        .flags
-        .iter()
-        .flat_map(|flag| {
-            flag.long
-                .iter()
-                .map(|long| format!("--{long}"))
-                .chain(flag.short.iter().map(|short| format!("-{short}")))
-                .chain(flag.aliases.iter().cloned())
-        })
-        .collect::<Vec<_>>();
-    flags.sort();
-    out.push(ProjectedCommandSurface {
-        path: path.clone(),
-        summary: command.about.clone(),
-        flags,
-    });
-    for child in &command.subcommands {
-        command_def_surface(child, &path, out);
-    }
-}
-
 fn command_spec_surface(
-    command: &crate::completion::CommandSpec,
+    command: &crate::completion::CompletionNode,
     parent: &str,
     out: &mut Vec<ProjectedCommandSurface>,
 ) {
@@ -107,7 +75,7 @@ fn command_spec_surface(
         summary: command.tooltip.clone(),
         flags: command.flags.keys().cloned().collect(),
     });
-    for child in &command.subcommands {
+    for child in command.children.values() {
         command_spec_surface(child, &path, out);
     }
 }
@@ -120,9 +88,9 @@ fn doctor_clap_projection_and_repl_surface_have_path_flag_and_help_parity_unit()
         .find_subcommand("doctor")
         .expect("inline clap grammar should contain doctor")
         .clone();
-    let doctor_def = crate::core::command_def::CommandDef::from_clap(doctor_clap);
+    let doctor_def = crate::completion::CompletionNode::from_clap(&doctor_clap);
     let mut clap_surface = Vec::new();
-    command_def_surface(&doctor_def, "", &mut clap_surface);
+    command_spec_surface(&doctor_def, "", &mut clap_surface);
 
     let state = make_completion_state();
     let surface =
@@ -652,7 +620,7 @@ fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
                 ..crate::core::plugin::DescribeCommandAuthV1::default()
             }),
             subcommands: vec!["approval".to_string()],
-            completion: crate::completion::CommandSpec::new("orch"),
+            completion: crate::completion::CompletionNode::new("orch"),
             provider: Some("orch".to_string()),
             providers: vec!["orch (explicit)".to_string()],
             conflicted: false,

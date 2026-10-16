@@ -667,8 +667,8 @@ pub(crate) fn authorized_command_catalog_for(
             entry.subcommands.retain(|name| {
                 entry
                     .completion
-                    .subcommands
-                    .iter()
+                    .children
+                    .values()
                     .any(|child| child.name == *name)
             });
             entry

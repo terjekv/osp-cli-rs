@@ -1,4 +1,3 @@
-use osp_cli::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
 use osp_cli::core::document::{DocBlock, Document};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
@@ -67,155 +66,7 @@ fn guide_payload_value_extraction_degrades_and_renders_as_plain_values() {
 }
 
 #[test]
-fn command_metadata_builders_flow_into_generated_guide_and_rendering_contracts() {
-    let profile_choice = ValueChoice::new("prod")
-        .help("Production profile")
-        .display("Production")
-        .sort("010");
-    let stage_choice = ValueChoice::new("stage")
-        .help("Staging profile")
-        .display("Staging")
-        .sort("020");
-    let format_choice = ValueChoice::new("json")
-        .help("Machine output")
-        .display("JSON")
-        .sort("010");
-    let text_choice = ValueChoice::new("text")
-        .help("Human output")
-        .display("Text")
-        .sort("020");
-    let authored = CommandDef::new("deploy")
-        .about("Deploy pending changes")
-        .long_about("Long deploy help")
-        .usage("osp deploy [OPTIONS] PROFILE [id] <COMMAND>")
-        .before_help("Before line 1\nBefore line 2")
-        .after_help("After line 1\nAfter line 2")
-        .alias("ship")
-        .aliases(["rollout", "push"])
-        .sort("020")
-        .arg(
-            ArgDef::new("profile")
-                .value_name("PROFILE")
-                .help("Target profile")
-                .required()
-                .multi()
-                .value_kind(ValueKind::Enum)
-                .choices([profile_choice.clone(), stage_choice.clone()])
-                .defaults(["default", "prod"]),
-        )
-        .args([ArgDef::new("id")
-            .help("Optional deployment id")
-            .value_kind(ValueKind::FreeText)
-            .defaults(["latest"])])
-        .flag(
-            FlagDef::new("format")
-                .short('f')
-                .long("format")
-                .alias("fmt")
-                .aliases(["output-format"])
-                .help("Select output format")
-                .takes_value("FORMAT")
-                .required()
-                .multi()
-                .value_kind(ValueKind::Enum)
-                .choices([format_choice.clone(), text_choice.clone()])
-                .defaults(["json"]),
-        )
-        .flags([
-            FlagDef::new("config")
-                .long("config")
-                .help("Path to config")
-                .takes_value("PATH")
-                .value_kind(ValueKind::Path)
-                .defaults(["./osp.toml"]),
-            FlagDef::new("quiet")
-                .short('q')
-                .long("quiet")
-                .help("Reduce output")
-                .takes_value("IGNORED")
-                .takes_no_value()
-                .hidden(),
-        ])
-        .subcommand(CommandDef::new("apply").about("Apply pending changes"))
-        .subcommands([
-            CommandDef::new("status").about("Show deployment status"),
-            CommandDef::new("secret").about("Hidden command").hidden(),
-        ]);
-
-    assert_eq!(authored.aliases, vec!["ship", "rollout", "push"]);
-    assert_eq!(authored.long_about.as_deref(), Some("Long deploy help"));
-    assert_eq!(authored.sort_key.as_deref(), Some("020"));
-    assert_eq!(authored.args[0].defaults, vec!["default", "prod"]);
-    let format_flag = authored
-        .flags
-        .iter()
-        .find(|flag| flag.id == "format")
-        .expect("format flag should exist");
-    assert_eq!(format_flag.aliases, vec!["fmt", "output-format"]);
-    assert_eq!(format_flag.choices.len(), 2);
-    let quiet_flag = authored
-        .flags
-        .iter()
-        .find(|flag| flag.id == "quiet")
-        .expect("quiet flag should exist");
-    assert_eq!(quiet_flag.value_name, None);
-    assert!(!quiet_flag.takes_value);
-    assert!(quiet_flag.hidden);
-    assert_eq!(profile_choice.display.as_deref(), Some("Production"));
-    assert_eq!(text_choice.sort_key.as_deref(), Some("020"));
-
-    let mut generated = authored.clone();
-    generated.usage = None;
-
-    let guide = Document::from_command_def(&generated);
-    let rows = guide.rows();
-    assert_eq!(rows[0]["text"], "Before line 1");
-    assert_eq!(rows[1]["text"], "Before line 2");
-    assert_eq!(rows.last().unwrap()["text"], "After line 2");
-    assert!(rows.iter().any(|row| {
-        row.get("text")
-            .is_some_and(|value| value == "deploy [OPTIONS] PROFILE [id] <COMMAND>")
-    }));
-    let names = |section: &str| {
-        rows.iter()
-            .filter(|row| row["section"] == section)
-            .map(|row| row["name"].as_str().unwrap())
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(names("Commands"), ["apply", "status"]);
-    assert_eq!(names("Arguments"), ["PROFILE", "id"]);
-    assert!(rows.iter().any(|row| {
-        row.get("name")
-            .is_some_and(|value| value == "-f, --format <FORMAT>")
-            && row["description"] == "Select output format"
-    }));
-    assert!(rows.iter().any(|row| {
-        row.get("name")
-            .is_some_and(|value| value == "--config <PATH>")
-            && row["description"] == "Path to config"
-    }));
-    assert!(!names("Options").iter().any(|name| name.contains("quiet")));
-
-    let output = guide.to_output_result();
-    let restored: Document =
-        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
-    assert_eq!(restored, guide);
-
-    let markdown =
-        osp_cli::ui::render_document(&guide, &RenderSettings::test_plain(OutputFormat::Markdown));
-    assert!(markdown.contains("Usage"));
-    assert!(markdown.contains("deploy [OPTIONS] PROFILE [id] <COMMAND>"));
-    assert!(markdown.contains("Apply pending changes"));
-    assert!(markdown.contains("After line 2"));
-
-    let rendered_values = render_output(&output, &RenderSettings::test_plain(OutputFormat::Value));
-    assert!(rendered_values.contains("Before line 1"));
-    assert!(rendered_values.contains("Select output format"));
-    assert!(rendered_values.contains("After line 2"));
-}
-
-#[test]
-fn clap_command_metadata_projects_into_command_defs_and_guides() {
+fn clap_command_metadata_projects_into_guides() {
     use clap::{Arg, ArgAction, Command, ValueHint, builder::PossibleValue};
 
     let command = Command::new("plugins")
@@ -259,32 +110,7 @@ fn clap_command_metadata_projects_into_command_defs_and_guides() {
         .subcommand(Command::new("list").about("List plugins"))
         .subcommand(Command::new("doctor").about("Hidden doctor").hide(true));
 
-    let def = CommandDef::from_clap(command);
-    assert_eq!(def.aliases, vec!["ext".to_string()]);
-    assert_eq!(def.before_help.as_deref(), Some("Plugin preamble"));
-    assert_eq!(def.after_help.as_deref(), Some("Plugin epilogue"));
-    assert_eq!(
-        def.long_about.as_deref(),
-        Some("Long plugin management help")
-    );
-    assert_eq!(def.args.len(), 1);
-    assert_eq!(def.args[0].help_heading.as_deref(), Some("Input"));
-    assert_eq!(def.args[0].value_name.as_deref(), Some("ROOT"));
-    assert!(def.args[0].multi);
-    assert_eq!(def.args[0].value_kind, Some(ValueKind::Path));
-    assert_eq!(def.args[0].choices.len(), 2);
-    assert_eq!(def.args[0].defaults, vec!["./plugins"]);
-    assert_eq!(def.flags.len(), 1);
-    assert_eq!(def.flags[0].help_heading.as_deref(), Some("Output"));
-    assert!(def.flags[0].multi);
-    assert_eq!(def.flags[0].defaults, vec!["json"]);
-    assert!(def.flags[0].aliases.contains(&"--fmt".to_string()));
-    assert!(def.flags[0].aliases.contains(&"-o".to_string()));
-    assert_eq!(def.flags[0].choices.len(), 2);
-    assert_eq!(def.subcommands.len(), 1);
-    assert_eq!(def.subcommands[0].name, "list");
-
-    let guide = Document::from_command_def(&def);
+    let guide = Document::from_clap_command(&command, true);
     let rows = guide.rows();
     assert_eq!(rows[0]["text"], "Plugin preamble");
     assert_eq!(rows.last().unwrap()["text"], "Plugin epilogue");
@@ -294,7 +120,7 @@ fn clap_command_metadata_projects_into_command_defs_and_guides() {
     );
     assert!(
         rows.iter()
-            .any(|row| row.get("name").is_some_and(|value| value == "ROOT"))
+            .any(|row| row.get("name").is_some_and(|value| value == "[ROOT]..."))
     );
     assert!(
         rows.iter().any(|row| row

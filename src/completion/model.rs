@@ -193,11 +193,11 @@ impl DynamicCompletion {
     ///
     /// ```
     /// use osp_cli::completion::{
-    ///     CommandSpec, DynamicCompletion, FlagCompletions, FlagNode, SuggestionEntry,
+    ///     CompletionNode, DynamicCompletion, FlagCompletions, FlagNode, SuggestionEntry,
     /// };
     /// use std::collections::BTreeMap;
     ///
-    /// let mut command = CommandSpec::new("deploy")
+    /// let mut command = CompletionNode::new("deploy")
     ///     .flag("--region", FlagNode::new())
     ///     .flag("--image", FlagNode::new());
     /// command.dynamic = Some(DynamicCompletion::new(|line| {
@@ -474,6 +474,8 @@ impl FlagNode {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[must_use]
 pub struct CompletionNode {
+    /// Command name used during construction; empty for synthetic value nodes.
+    pub name: String,
     /// Optional description shown alongside the node.
     pub tooltip: Option<String>,
     /// Optional suggestion-order hint for command/subcommand completion.
@@ -502,7 +504,6 @@ pub struct CompletionNode {
 
 impl CompletionNode {
     /// Sets the hidden sort key for this node.
-    #[cfg(test)]
     pub fn sort(mut self, sort: impl Into<String>) -> Self {
         self.sort = Some(sort.into());
         self

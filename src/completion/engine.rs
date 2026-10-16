@@ -55,11 +55,11 @@ impl CompletionEngine {
     ///
     /// ```
     /// use osp_cli::completion::{
-    ///     CommandSpec, CompletionEngine, CompletionTreeBuilder, SuggestionOutput,
+    ///     CompletionNode, CompletionEngine, CompletionTreeBuilder, SuggestionOutput,
     /// };
     ///
     /// let tree = CompletionTreeBuilder
-    ///     .build_from_specs(&[CommandSpec::new("ldap")], [])
+    ///     .build_from_specs(&[CompletionNode::new("ldap")], [])
     ///     .expect("tree should build");
     /// let engine = CompletionEngine::new(tree);
     ///

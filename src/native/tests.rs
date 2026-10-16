@@ -21,7 +21,7 @@ impl NativeCommand for CompletionAugmentingCommand {
         Command::new("deploy").arg(clap::Arg::new("provider").long("provider"))
     }
 
-    fn augment_completion(&self, completion: &mut crate::completion::CommandSpec) {
+    fn augment_completion(&self, completion: &mut crate::completion::CompletionNode) {
         completion.flags.insert(
             "--flavor".to_string(),
             crate::completion::FlagNode::new()
@@ -257,8 +257,8 @@ fn registry_catalog_and_policy_projection_cover_lookup_completion_and_root_auth_
     assert!(
         catalog[0]
             .completion
-            .subcommands
-            .iter()
+            .children
+            .values()
             .any(|child| child.name == "user")
     );
 

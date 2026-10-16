@@ -19,7 +19,6 @@ REPL stay outside.
 | `state.rs` | Persisted per-command preferences (enabled, selected provider) |
 | `dispatch.rs` | Running a plugin command and validating its `ResponseV1` |
 | `config.rs` | Projecting config into a plugin's environment |
-| `conversion.rs` | `DescribeCommandV1` into a completion `CommandSpec` |
 
 ## Boundaries
 

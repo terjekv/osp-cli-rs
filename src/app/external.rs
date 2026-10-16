@@ -5,6 +5,7 @@
 //! external command surface. It sits after top-level host setup but before the
 //! final native/plugin execution paths.
 
+use crate::repl::ReplViewContext;
 use std::cell::RefCell;
 
 use miette::{Result, WrapErr, miette};
@@ -20,7 +21,6 @@ use crate::native::{
     NativeProgressSink, NativeSessionContext,
 };
 use crate::plugin::PluginManager;
-use crate::repl::ReplViewContext;
 use crate::repl::completion;
 use crate::repl::is_repl_shellable_command;
 

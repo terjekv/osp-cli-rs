@@ -4,7 +4,6 @@
 //! This module pulls together config, plugin, theme, and recent-failure views
 //! into one operator-facing troubleshooting entrypoint.
 
-use clap::CommandFactory;
 use miette::Result;
 
 use crate::app::CliCommandResult;
@@ -13,8 +12,7 @@ use crate::app::{
     AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
 };
 use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{DoctorArgs, DoctorCommands, InlineCommandCli, PluginsArgs, PluginsCommands};
-use crate::core::command_def::CommandDef;
+use crate::cli::{DoctorArgs, DoctorCommands, PluginsArgs, PluginsCommands};
 use crate::core::command_policy::CredentialState;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
@@ -85,17 +83,12 @@ pub(crate) fn run_doctor_command(
     }
 }
 
-pub(crate) fn doctor_command_def(sort_key: impl Into<String>) -> Option<CommandDef> {
-    let inline = InlineCommandCli::command();
-    let command = inline
-        .get_subcommands()
-        .find(|command| command.get_name() == "doctor")?
-        .clone();
-    let mut definition = CommandDef::from_clap(command).sort(sort_key);
-    for (offset, subcommand) in definition.subcommands.iter_mut().enumerate() {
-        subcommand.sort_key = Some((offset + 10).to_string());
+pub(crate) fn doctor_command() -> clap::Command {
+    let mut command = crate::cli::builtin_command("doctor");
+    for (offset, child) in command.get_subcommands_mut().enumerate() {
+        *child = child.clone().display_order(offset + 10);
     }
-    Some(definition)
+    command
 }
 
 #[derive(Serialize)]
@@ -351,8 +344,8 @@ fn next_failure_detail_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        DoctorCommandContext, LastFailureDiagnostics, doctor_command_def,
-        render_last_failure_document, run_doctor_command, theme_doctor_rows,
+        DoctorCommandContext, LastFailureDiagnostics, doctor_command, render_last_failure_document,
+        run_doctor_command, theme_doctor_rows,
     };
     use crate::app::ReplCommandOutput;
     use crate::app::{AuthState, ErrorDetail, LastFailure, RuntimeContext, TerminalKind, UiState};
@@ -592,15 +585,13 @@ mod tests {
         assert!(rows[0].get("config").is_some());
         assert!(rows[0].get("theme").is_some());
 
-        let def = doctor_command_def("30").expect("doctor clap grammar should project");
+        let def = doctor_command();
         let names = def
-            .subcommands
-            .iter()
-            .map(|child| child.name.as_str())
+            .get_subcommands()
+            .map(|child| child.get_name())
             .collect::<Vec<_>>();
 
-        assert_eq!(def.name, "doctor");
-        assert_eq!(def.sort_key.as_deref(), Some("30"));
+        assert_eq!(def.get_name(), "doctor");
         assert_eq!(names, vec!["all", "config", "last", "plugins", "theme"]);
     }
 }

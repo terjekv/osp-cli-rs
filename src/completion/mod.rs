@@ -23,7 +23,7 @@
 //!
 //! - `tree` exposes builder/factory-style entrypoints such as
 //!   [`crate::completion::CompletionTreeBuilder`] and
-//!   [`crate::completion::CommandSpec`]
+//!   [`crate::completion::CompletionNode`]
 //! - `model` stays mostly plain semantic data so parsers, suggesters, and
 //!   embedders can exchange completion state without hauling builder objects
 //!   around
@@ -50,4 +50,4 @@ pub use model::{
 };
 pub use parse::{CommandLineParser, ParsedCursorLine, TokenSpan};
 pub use suggest::{SuggestionEngine, closest_values};
-pub use tree::{CommandSpec, CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};
+pub use tree::{CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};

@@ -40,10 +40,10 @@ fn describe_command_helpers_preserve_nested_completion_metadata_unit() {
         }],
     };
 
-    let spec = to_command_spec(&command);
+    let spec = crate::completion::CompletionNode::from_describe(&command);
     assert_eq!(spec.name, "ldap");
     assert_eq!(spec.tooltip.as_deref(), Some("lookup users"));
-    assert_eq!(direct_subcommand_names(&spec), vec!["user".to_string()]);
+    assert_eq!(spec.children.keys().cloned().collect::<Vec<_>>(), vec!["user".to_string()]);
     assert_eq!(
         spec.flag_hints
             .as_ref()
@@ -52,22 +52,19 @@ fn describe_command_helpers_preserve_nested_completion_metadata_unit() {
         ["--format"]
     );
 
-    let arg = to_arg_node(&command.args[0]);
+    let arg = &spec.args[0];
     assert_eq!(arg.name.as_deref(), Some("uid"));
     assert_eq!(arg.tooltip.as_deref(), Some("user id"));
     assert!(arg.multi);
     assert_eq!(arg.value_type, Some(crate::completion::ValueType::Path));
 
-    let flag = to_flag_node(command.flags.get("--format").expect("flag"));
+    let flag = &spec.flags["--format"];
     assert_eq!(flag.tooltip.as_deref(), Some("output format"));
     assert!(flag.multi);
     assert_eq!(flag.value_type, Some(crate::completion::ValueType::Path));
 
-    let entry = to_suggestion_entry(&suggestion);
+    let entry = &flag.suggestions[0];
     assert_eq!(entry.value, "json");
     assert_eq!(entry.display.as_deref(), Some("JSON"));
-    assert_eq!(
-        to_value_type(crate::core::plugin::DescribeValueTypeV1::Path),
-        Some(crate::completion::ValueType::Path)
-    );
+
 }

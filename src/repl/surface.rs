@@ -5,13 +5,9 @@
 //! alias hints. This module builds that derived surface from auth, config,
 //! command definitions, and plugin catalog state.
 
-use crate::cli::{AliasArgs, ConfigArgs, ContextArgs, PluginsArgs};
-use crate::completion::tree::command_spec_from_command_def;
-use crate::completion::{ArgNode, CommandSpec, FlagNode, SuggestionEntry, ValueType};
+use crate::completion::{CompletionNode, SuggestionEntry, ValueType};
 use crate::config::{ConfigSchema, SchemaValueType};
-use crate::core::command_def::CommandDef;
 use crate::core::document::HelpLevel;
-use clap::Args;
 use std::collections::BTreeSet;
 
 use crate::app::help::help_level;
@@ -43,7 +39,7 @@ pub(crate) struct ReplAliasEntry {
 pub(crate) struct ReplSurface {
     pub(crate) root_words: Vec<String>,
     pub(crate) intro_commands: Vec<String>,
-    pub(crate) specs: Vec<CommandSpec>,
+    pub(crate) specs: Vec<CompletionNode>,
     pub(crate) aliases: Vec<ReplAliasEntry>,
     pub(crate) overview_entries: Vec<ReplOverviewEntry>,
 }
@@ -59,41 +55,10 @@ pub(crate) fn build_repl_surface(
 
     let mut root_words = catalog_completion_words(catalog);
     root_words.push("source".to_string());
-    let mut specs = vec![
-        CommandSpec::new("help")
-            .tooltip("Show REPL help")
-            .sort(command_sort_key("help", help_layout)),
-        CommandSpec::new("last")
-            .tooltip("Replay the last successful result")
-            .sort(command_sort_key("last", help_layout))
-            .flag(
-                "--raw",
-                FlagNode::new()
-                    .flag_only()
-                    .tooltip("Show the pre-pipeline result"),
-            ),
-        CommandSpec::new("source")
-            .tooltip("Run commands from files")
-            .sort(command_sort_key("source", help_layout))
-            .arg(
-                ArgNode::named("FILE")
-                    .tooltip("Command file")
-                    .multi()
-                    .value_type(ValueType::Path),
-            )
-            .flag(
-                "--ignore-errors",
-                FlagNode::new()
-                    .flag_only()
-                    .tooltip("Continue after a command fails"),
-            ),
-        CommandSpec::new("exit")
-            .tooltip("Exit REPL")
-            .sort(command_sort_key("exit", help_layout)),
-        CommandSpec::new("quit")
-            .tooltip("Exit REPL")
-            .sort(command_sort_key("quit", help_layout)),
-    ];
+    let mut specs = crate::cli::repl_only_commands()
+        .iter()
+        .map(|command| clap_command_spec(command, help_layout))
+        .collect::<Vec<_>>();
     let mut overview_entries = vec![
         ReplOverviewEntry {
             name: "exit".to_string(),
@@ -133,20 +98,21 @@ pub(crate) fn build_repl_surface(
         summary: "Inspect and manage plugin providers".to_string(),
     });
 
-    if let Some(def) = doctor_cmd::doctor_command_def(command_sort_key(CMD_DOCTOR, help_layout)) {
-        root_words.push(CMD_DOCTOR.to_string());
-        specs.push(command_spec_from_command_def(&def));
-        overview_entries.push(overview_entry_from_command_def(&def));
-    }
+    let def = doctor_cmd::doctor_command();
+    root_words.push(CMD_DOCTOR.to_string());
+    specs.push(clap_command_spec(&def, help_layout));
+    overview_entries.push(overview_entry_from_clap(&def));
     root_words.extend([
         CMD_THEME.to_string(),
         CMD_LIST.to_string(),
         CMD_SHOW.to_string(),
         CMD_USE.to_string(),
     ]);
-    let def = theme_cmd::theme_command_def(view.themes, command_sort_key(CMD_THEME, help_layout));
-    specs.push(command_spec_from_command_def(&def));
-    overview_entries.push(overview_entry_from_command_def(&def));
+    let def = theme_cmd::theme_command();
+    let mut spec = clap_command_spec(&def, help_layout);
+    theme_cmd::augment_theme_completion(&mut spec, view.themes);
+    specs.push(spec);
+    overview_entries.push(overview_entry_from_clap(&def));
 
     root_words.extend([
         CMD_CONFIG.to_string(),
@@ -177,9 +143,11 @@ pub(crate) fn build_repl_surface(
             "prune".to_string(),
             "clear".to_string(),
         ]);
-        let def = history::history_command_def(command_sort_key(CMD_HISTORY, help_layout));
-        specs.push(command_spec_from_command_def(&def));
-        overview_entries.push(overview_entry_from_command_def(&def));
+        let def = history::history_command();
+        let mut spec = clap_command_spec(&def, help_layout);
+        history::augment_history_completion(&mut spec);
+        specs.push(spec);
+        overview_entries.push(overview_entry_from_clap(&def));
     }
     root_words.push(CMD_CONTEXT.to_string());
     specs.push(context_command_spec(help_layout));
@@ -301,11 +269,8 @@ fn compact_command_priority(name: &str) -> (u8, u8) {
     }
 }
 
-fn context_command_spec(help_layout: HelpLayout) -> CommandSpec {
-    builtin_command_spec(
-        ContextArgs::augment_args(clap::Command::new(CMD_CONTEXT)),
-        help_layout,
-    )
+fn context_command_spec(help_layout: HelpLayout) -> CompletionNode {
+    builtin_command_spec(crate::cli::builtin_command(CMD_CONTEXT), help_layout)
 }
 
 pub(crate) fn catalog_completion_words(catalog: &[CommandCatalogEntry]) -> Vec<String> {
@@ -347,7 +312,7 @@ pub(crate) fn collect_alias_entries(config: &crate::config::ResolvedConfig) -> V
     out
 }
 
-fn command_spec_from_catalog(entry: &CommandCatalogEntry) -> Option<CommandSpec> {
+fn command_spec_from_catalog(entry: &CommandCatalogEntry) -> Option<CompletionNode> {
     if matches!(
         entry.name.as_str(),
         "help" | "last" | "exit" | "quit" | CMD_PLUGINS | CMD_THEME | CMD_CONFIG | CMD_HISTORY
@@ -420,33 +385,46 @@ fn provider_selection_summary(entry: &CommandCatalogEntry, base: Option<&str>) -
     }
 }
 
-fn overview_entry_from_command_def(def: &CommandDef) -> ReplOverviewEntry {
-    let summary = def
-        .about
+fn overview_entry_from_clap(command: &clap::Command) -> ReplOverviewEntry {
+    let about = command.get_about().map(ToString::to_string);
+    let summary = about
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("Command")
         .to_string();
-
     ReplOverviewEntry {
-        name: def.name.clone(),
+        name: command.get_name().to_string(),
         summary,
     }
 }
 
-fn spec_completion_words(spec: &CommandSpec) -> Vec<String> {
+fn clap_command_spec(command: &clap::Command, help_layout: HelpLayout) -> CompletionNode {
+    let mut spec =
+        CompletionNode::from_clap(command).sort(command_sort_key(command.get_name(), help_layout));
+    for child in spec.children.values_mut() {
+        if let Some(grammar) = command.find_subcommand(&child.name) {
+            child.sort = Some(grammar.get_display_order().to_string());
+        }
+    }
+    spec
+}
+
+fn spec_completion_words(spec: &CompletionNode) -> Vec<String> {
     let mut words = vec![spec.name.clone()];
     for flag in spec.flags.keys() {
         words.push(flag.clone());
     }
-    for subcommand in &spec.subcommands {
+    for subcommand in spec.children.values() {
         words.extend(spec_completion_words(subcommand));
     }
     words
 }
 
-fn plugins_command_spec(catalog: &[CommandCatalogEntry], help_layout: HelpLayout) -> CommandSpec {
+fn plugins_command_spec(
+    catalog: &[CommandCatalogEntry],
+    help_layout: HelpLayout,
+) -> CompletionNode {
     let plugin_ids = catalog
         .iter()
         .flat_map(|entry| {
@@ -470,11 +448,8 @@ fn plugins_command_spec(catalog: &[CommandCatalogEntry], help_layout: HelpLayout
         .map(|entry| SuggestionEntry::value(entry.name.clone()))
         .collect::<Vec<_>>();
 
-    let mut spec = builtin_command_spec(
-        PluginsArgs::augment_args(clap::Command::new(CMD_PLUGINS)),
-        help_layout,
-    );
-    for child in &mut spec.subcommands {
+    let mut spec = builtin_command_spec(crate::cli::builtin_command(CMD_PLUGINS), help_layout);
+    for child in spec.children.values_mut() {
         // Plugin mutations intentionally expose only their target arguments.
         child.flags.clear();
         for arg in &mut child.args {
@@ -491,13 +466,13 @@ fn plugins_command_spec(catalog: &[CommandCatalogEntry], help_layout: HelpLayout
     spec
 }
 
-fn config_command_spec(view: ReplViewContext<'_>) -> CommandSpec {
+fn config_command_spec(view: ReplViewContext<'_>) -> CompletionNode {
     let mut spec = builtin_command_spec(
-        ConfigArgs::augment_args(clap::Command::new(CMD_CONFIG)),
+        crate::cli::builtin_command(CMD_CONFIG),
         help_layout_from_config(view.config),
     );
     config_write_suggestions(&mut spec, view.config);
-    for child in &mut spec.subcommands {
+    for child in spec.children.values_mut() {
         if child.name == "set" {
             // Config keys and their values are injected as a schema-derived tree.
             child.args.clear();
@@ -512,13 +487,13 @@ fn config_command_spec(view: ReplViewContext<'_>) -> CommandSpec {
     spec
 }
 
-fn alias_command_spec(view: ReplViewContext<'_>, aliases: &[ReplAliasEntry]) -> CommandSpec {
+fn alias_command_spec(view: ReplViewContext<'_>, aliases: &[ReplAliasEntry]) -> CompletionNode {
     let mut spec = builtin_command_spec(
-        AliasArgs::augment_args(clap::Command::new("alias")),
+        crate::cli::builtin_command("alias"),
         help_layout_from_config(view.config),
     );
     config_write_suggestions(&mut spec, view.config);
-    for child in &mut spec.subcommands {
+    for child in spec.children.values_mut() {
         if child.name == "remove" {
             for arg in &mut child.args {
                 arg.suggestions = aliases
@@ -536,8 +511,8 @@ fn alias_command_spec(view: ReplViewContext<'_>, aliases: &[ReplAliasEntry]) -> 
     spec
 }
 
-fn config_write_suggestions(spec: &mut CommandSpec, config: &crate::config::ResolvedConfig) {
-    for child in &mut spec.subcommands {
+fn config_write_suggestions(spec: &mut CompletionNode, config: &crate::config::ResolvedConfig) {
+    for child in spec.children.values_mut() {
         if let Some(flag) = child.flags.get_mut("--profile") {
             flag.suggestions = config
                 .known_profiles()
@@ -554,7 +529,8 @@ fn config_write_suggestions(spec: &mut CommandSpec, config: &crate::config::Reso
     }
 }
 
-fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> CommandSpec {
+fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> CompletionNode {
+    let mut spec = clap_command_spec(&command, help_layout);
     // Preserve the REPL wording and historical menu order over clap structure.
     let (tooltip, children): (&str, &[(&str, &str)]) = match command.get_name() {
         CMD_CONTEXT => (
@@ -596,47 +572,45 @@ fn builtin_command_spec(command: clap::Command, help_layout: HelpLayout) -> Comm
             ],
         ),
     };
-    let mut def = CommandDef::from_clap(command);
-    def.about = Some(tooltip.to_string());
-    def.sort_key = Some(command_sort_key(&def.name, help_layout));
-    for child in &mut def.subcommands {
+    spec.tooltip = Some(tooltip.to_string());
+    for child in spec.children.values_mut() {
         if let Some((index, (_, tooltip))) = children
             .iter()
             .enumerate()
             .find(|(_, (name, _))| *name == child.name)
         {
-            child.about = Some((*tooltip).to_string());
-            child.sort_key = Some((index + 10).to_string());
+            child.tooltip = Some((*tooltip).to_string());
+            child.sort = Some((index + 10).to_string());
         }
+
         for arg in &mut child.args {
-            arg.value_name = None;
+            arg.name = arg.name.take().map(|name| name.to_ascii_lowercase());
             arg.required = false;
-            arg.help = None;
+            arg.tooltip = None;
         }
-        for flag in &mut child.flags {
-            flag.help = match flag.long.as_deref() {
-                Some("sources") => Some("Include source layers"),
-                Some("raw") => Some("Show raw values"),
-                Some("show-secrets") => Some("Reveal secret values"),
-                Some("global") => Some("Write to the global config store"),
-                Some("profile") => Some("Write to one named profile"),
-                Some("profile-all") => Some("Write to every known profile"),
-                Some("terminal") => Some("Write to one terminal context"),
-                Some("session") => Some("Change only this in-memory session"),
-                Some("config") => Some("Use the regular config store"),
-                Some("secrets") => Some("Use the secrets store"),
-                Some("permanent") | Some("save") => Some("Persist immediately after validation"),
-                Some("dry-run") => Some("Show the write plan without changing config"),
-                Some("yes") => Some("Skip interactive confirmation"),
-                Some("explain") => Some("Explain the resolved write targets"),
-                Some("from-file") => None,
-                _ => flag.help.as_deref(),
+        for (name, flag) in &mut child.flags {
+            flag.tooltip = match name.as_str() {
+                "--sources" => Some("Include source layers"),
+                "--raw" => Some("Show raw values"),
+                "--show-secrets" => Some("Reveal secret values"),
+                "--global" => Some("Write to the global config store"),
+                "--profile" => Some("Write to one named profile"),
+                "--profile-all" => Some("Write to every known profile"),
+                "--terminal" => Some("Write to one terminal context"),
+                "--session" => Some("Change only this in-memory session"),
+                "--config" => Some("Use the regular config store"),
+                "--secrets" => Some("Use the secrets store"),
+                "--permanent" | "--save" => Some("Persist immediately after validation"),
+                "--dry-run" => Some("Show the write plan without changing config"),
+                "--yes" => Some("Skip interactive confirmation"),
+                "--explain" => Some("Explain the resolved write targets"),
+                "--from-file" => None,
+                _ => flag.tooltip.as_deref(),
             }
             .map(str::to_string);
         }
     }
-    let mut spec = command_spec_from_command_def(&def);
-    for child in &mut spec.subcommands {
+    for child in spec.children.values_mut() {
         if let Some(flag) = child.flags.get_mut("--from-file") {
             // PathBuf's inferred parser does not supply a clap value hint.
             flag.value_type = Some(ValueType::Path);

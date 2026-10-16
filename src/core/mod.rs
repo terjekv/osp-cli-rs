@@ -9,8 +9,6 @@
 //!
 //! Rough map:
 //!
-//! - [`crate::core::command_def`] describes commands as semantic metadata for help and
-//!   catalogs
 //! - [`crate::core::command_policy`] answers whether a command should be visible or allowed
 //! - [`crate::core::output`] and [`crate::core::output_model`] define the crate's canonical output
 //!   shapes
@@ -30,8 +28,7 @@
 //! - `core` can be depended on widely, but it should avoid depending on
 //!   higher-level modules like `app`, `repl`, or `ui`
 
-/// Declarative command metadata used for help and policy resolution.
-pub mod command_def;
+pub(crate) mod clap_metadata;
 /// Visibility and access-policy evaluation for commands.
 pub mod command_policy;
 /// Ordered semantic document blocks shared by producers and renderers.

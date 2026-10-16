@@ -7,10 +7,10 @@
 use crate::config::{
     ConfigValue, DEFAULT_REPL_HISTORY_MAX_ENTRIES, ResolvedConfig, RuntimeDefaults,
 };
-use crate::core::command_def::{CommandDef, FlagDef};
 use crate::core::row::Row;
 use crate::repl::{HistoryConfig, HistoryEntry, SharedHistory};
 use crate::ui::theme::DEFAULT_THEME_NAME;
+use clap::Command;
 use miette::{Result, miette};
 use std::path::PathBuf;
 
@@ -42,37 +42,34 @@ impl HistoryScopeView {
     }
 }
 
-pub(crate) fn history_command_def(sort_key: impl Into<String>) -> CommandDef {
-    CommandDef::new(CMD_HISTORY)
+pub(crate) fn history_command() -> Command {
+    crate::cli::builtin_command(CMD_HISTORY)
         .about("Inspect or prune REPL history")
-        .sort(sort_key)
-        .subcommands([
-            CommandDef::new(CMD_LIST)
-                .about("List recent history")
-                .sort("10")
-                .flags([
-                    FlagDef::new("limit")
-                        .long("limit")
-                        .takes_value("COUNT")
-                        .help("Maximum recent matching entries to show (default: 20)"),
-                    FlagDef::new("since")
-                        .long("since")
-                        .takes_value("TIMESTAMP")
-                        .help(format!(
-                            "Inclusive lower timestamp; {HISTORY_TIMESTAMP_EXAMPLES}"
-                        )),
-                    FlagDef::new("until")
-                        .long("until")
-                        .takes_value("TIMESTAMP")
-                        .help(format!(
-                            "Inclusive upper timestamp; {HISTORY_TIMESTAMP_EXAMPLES}"
-                        )),
-                ]),
-            CommandDef::new("prune")
-                .about("Keep last N entries")
-                .sort("11"),
-            CommandDef::new("clear").about("Clear history").sort("12"),
-        ])
+        .mut_subcommand("list", |child| {
+            child.about("List recent history").display_order(10)
+        })
+        .mut_subcommand("prune", |child| {
+            child.about("Keep last N entries").display_order(11)
+        })
+        .mut_subcommand("clear", |child| {
+            child.about("Clear history").display_order(12)
+        })
+}
+
+pub(crate) fn augment_history_completion(node: &mut crate::completion::CompletionNode) {
+    if let Some(prune) = node.children.get_mut("prune") {
+        prune.args.clear();
+    }
+    if let Some(list) = node.children.get_mut(CMD_LIST) {
+        for (name, flag) in &mut list.flags {
+            flag.tooltip = Some(match name.as_str() {
+                "--limit" => "Maximum recent matching entries to show (default: 20)".to_string(),
+                "--since" => format!("Inclusive lower timestamp; {HISTORY_TIMESTAMP_EXAMPLES}"),
+                "--until" => format!("Inclusive upper timestamp; {HISTORY_TIMESTAMP_EXAMPLES}"),
+                _ => continue,
+            });
+        }
+    }
 }
 
 pub(crate) fn build_history_config(runtime: &AppRuntime, session: &AppSession) -> HistoryConfig {
@@ -290,7 +287,7 @@ fn default_repl_history_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        HistoryScopeView, build_history_config, history_command_def, repl_history_enabled,
+        HistoryScopeView, build_history_config, history_command, repl_history_enabled,
         repl_history_exclude_patterns, run_history_repl_command,
     };
     use crate::app::ReplCommandOutput;
@@ -375,15 +372,14 @@ mod tests {
     }
 
     #[test]
-    fn history_command_def_exposes_expected_subcommands_unit() {
-        let spec = history_command_def("20");
+    fn history_command_exposes_expected_subcommands_unit() {
+        let spec = history_command();
         let names = spec
-            .subcommands
-            .iter()
-            .map(|child| child.name.as_str())
+            .get_subcommands()
+            .map(|child| child.get_name())
             .collect::<Vec<_>>();
 
-        assert_eq!(spec.name, "history");
+        assert_eq!(spec.get_name(), "history");
         assert_eq!(names, vec!["list", "prune", "clear"]);
     }
 

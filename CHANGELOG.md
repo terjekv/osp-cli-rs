@@ -7,6 +7,14 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Remove `CommandDef`, `ArgDef`, `FlagDef`, `ValueKind`,
+  `ValueChoice`, their conversions, and `Document::from_command_def`. Native
+  and builtin metadata comes from clap; plugin metadata stays at the wire boundary.
+- **Breaking:** Fold `CommandSpec` into `CompletionNode`. Use `from_clap` or
+  `from_describe`, and augment the node's `children` map directly. Duplicate
+  child names are rejected during fluent construction rather than tree lowering;
+  `CompletionTreeBuildError::DuplicateSubcommand` is removed.
+
 - **Breaking:** Replace `ReplLineResult` and `ReplRunResult` with `ReplResult`.
   Use `Print(output)` to print and continue, or `Continue` for no output.
   `run_repl` returns only `Exit` or `Restart`.
@@ -17,17 +25,16 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - **Breaking:** Native catalogs return `CommandCatalogEntry`, whose `source`
   explicitly distinguishes native commands from plugins.
-
 - **Breaking:** Replace mutable discovered-plugin command vectors with one
   normalized command map.
 
 - **Breaking:** Replace provider and placement completion metadata with the
-  generic `DynamicCompletion` callback on `CommandSpec` and `CompletionNode`.
+  generic `DynamicCompletion` callback on `CompletionNode`.
   Remove `Planning*`, `OsVersions`, `RequestHints`, `RequestHintSet`,
   `ProviderNarrowing`, `narrow_provider_candidates`, and provider fields on
   `FlagNode` and `FlagHints`. Products now own their contextual completion rules.
 - **Breaking:** Remove test-only completion constructors and analysis helpers
-  from the public API, including `CompletionNode::{sort,with_child,with_flag}`,
+  from the public API, including `CompletionNode::{with_child,with_flag}`,
   `CursorState::synthetic`, `Suggestion::new`, `CommandLine::last_flag_occurrence`,
   `CompletionEngine::{analyze_command,matched_command_len_tokens}`, and
   `CommandLineParser::{analyze,compute_stub_quote}`,
@@ -73,8 +80,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   outcomes. The hook survives REPL rebuilds and runs before native metadata
   preparation; help, completion and builtins do not acquire credentials.
 - **Breaking:** Remove builtin-policy builders, policy contexts, registries,
-  overrides and the mirrored command-policy DSL. `CommandDef` carries wire auth
-  directly. `CommandAccess` is `Runnable`, `Denied(reason)` or `Hidden(reason)`.
+  overrides and the mirrored command-policy DSL. `CommandAccess` is `Runnable`, `Denied(reason)` or `Hidden(reason)`.
   Remove the unused `CredentialState::present()` constructor.
 - **Breaking:** Remove config keys `auth.visible.builtins` and
   `auth.visible.plugins`; configs that set them now fail as unknown keys.

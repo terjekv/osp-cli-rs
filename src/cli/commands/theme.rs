@@ -7,11 +7,12 @@ use crate::app::{AppRuntime, UiState};
 use crate::app::{CliCommandResult, resolve_known_theme_name};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs, ThemeUseArgs};
+use crate::completion::{CompletionNode, SuggestionEntry};
 use crate::config::{ConfigLayer, Scope};
-use crate::core::command_def::{ArgDef, CommandDef, ValueChoice};
 use crate::core::row::Row;
 use crate::ui::theme::{DEFAULT_THEME_NAME, normalize_theme_name};
 use crate::ui::theme_catalog::{ThemeCatalog, ThemeSource};
+use clap::Command;
 use miette::Result;
 use miette::miette;
 
@@ -66,40 +67,33 @@ pub(crate) fn run_theme_command(
     }
 }
 
-pub(crate) fn theme_command_def(themes: &ThemeCatalog, sort_key: impl Into<String>) -> CommandDef {
-    let theme_choices = themes
+pub(crate) fn theme_command() -> Command {
+    crate::cli::builtin_command("theme")
+        .about("Inspect and apply themes")
+        .mut_subcommand("list", |child| {
+            child.about("List available themes").display_order(10)
+        })
+        .mut_subcommand("show", |child| {
+            child.about("Show a theme definition").display_order(11)
+        })
+        .mut_subcommand("use", |child| {
+            child.about("Set active theme").display_order(12)
+        })
+}
+
+pub(crate) fn augment_theme_completion(spec: &mut CompletionNode, themes: &ThemeCatalog) {
+    let suggestions = themes
         .ids()
         .into_iter()
-        .map(ValueChoice::new)
+        .map(SuggestionEntry::value)
         .collect::<Vec<_>>();
-
-    CommandDef::new("theme")
-        .about("Inspect and apply themes")
-        .sort(sort_key)
-        .subcommands([
-            CommandDef::new("list")
-                .about("List available themes")
-                .sort("10"),
-            CommandDef::new("show")
-                .about("Show a theme definition")
-                .sort("11")
-                .arg(
-                    ArgDef::new("name")
-                        .value_name("name")
-                        .help("Theme name")
-                        .choices(theme_choices.clone()),
-                ),
-            CommandDef::new("use")
-                .about("Set active theme")
-                .sort("12")
-                .arg(
-                    ArgDef::new("name")
-                        .value_name("name")
-                        .help("Theme name")
-                        .required()
-                        .choices(theme_choices),
-                ),
-        ])
+    for child in spec.children.values_mut() {
+        for arg in &mut child.args {
+            arg.name = Some("name".to_string());
+            arg.tooltip = Some("Theme name".to_string());
+            arg.suggestions = suggestions.clone();
+        }
+    }
 }
 
 fn theme_list_rows(themes: &ThemeCatalog, active_theme: &str) -> Vec<Row> {
@@ -193,7 +187,8 @@ fn theme_show_rows(themes: &ThemeCatalog, name: &str) -> Result<Vec<Row>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ThemeCommandContext, run_theme_command, theme_command_def, theme_list_rows, theme_show_rows,
+        ThemeCommandContext, augment_theme_completion, run_theme_command, theme_command,
+        theme_list_rows, theme_show_rows,
     };
     use crate::app::CliCommandResult;
     use crate::app::ReplCommandOutput;
@@ -332,14 +327,14 @@ mod tests {
     fn theme_output_helpers_and_command_def_expose_runtime_choices_unit() {
         assert!(extract_output_rows(CliCommandResult::text("hello")).is_none());
 
-        let def = theme_command_def(&builtin_theme_catalog(), "20");
+        let mut def = crate::completion::CompletionNode::from_clap(&theme_command());
+        augment_theme_completion(&mut def, &builtin_theme_catalog());
         assert_eq!(def.name, "theme");
-        assert_eq!(def.sort_key.as_deref(), Some("20"));
         let show = def
-            .subcommands
-            .iter()
+            .children
+            .values()
             .find(|subcommand| subcommand.name == "show")
             .expect("show subcommand");
-        assert_eq!(show.args[0].choices[0].value, "nord");
+        assert_eq!(show.args[0].suggestions[0].value, "nord");
     }
 }

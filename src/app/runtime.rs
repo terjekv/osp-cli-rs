@@ -666,12 +666,12 @@ impl AuthState {
 
     pub(crate) fn filter_command_spec(
         &self,
-        command: &mut crate::completion::CommandSpec,
+        command: &mut crate::completion::CompletionNode,
         prefix: &[String],
     ) {
         let mut path = prefix.to_vec();
         path.push(command.name.clone());
-        command.subcommands.retain(|child| {
+        command.children.retain(|_, child| {
             let path = CommandPath::new(
                 path.iter()
                     .cloned()
@@ -679,7 +679,7 @@ impl AuthState {
             );
             self.external_command_path_access(&path).is_visible()
         });
-        for child in &mut command.subcommands {
+        for child in command.children.values_mut() {
             self.filter_command_spec(child, &path);
         }
     }

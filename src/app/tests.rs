@@ -235,14 +235,17 @@ fn sample_catalog() -> Vec<CommandCatalogEntry> {
         about: "Provision orchestrator resources".to_string(),
         auth: None,
         subcommands: vec!["provision".to_string(), "status".to_string()],
-        completion: crate::completion::CommandSpec {
+        completion: crate::completion::CompletionNode {
             name: "orch".to_string(),
             tooltip: Some("Provision orchestrator resources".to_string()),
-            subcommands: vec![
-                crate::completion::CommandSpec::new("provision"),
-                crate::completion::CommandSpec::new("status"),
-            ],
-            ..crate::completion::CommandSpec::default()
+            children: vec![
+                crate::completion::CompletionNode::new("provision"),
+                crate::completion::CompletionNode::new("status"),
+            ]
+            .into_iter()
+            .map(|child| (child.name.clone(), child))
+            .collect(),
+            ..crate::completion::CompletionNode::default()
         },
         provider: Some("mock-provider".to_string()),
         providers: vec!["mock-provider (explicit)".to_string()],
@@ -259,11 +262,11 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
         about: "Provision orchestrator resources".to_string(),
         auth: None,
         subcommands: vec!["provision".to_string(), "status".to_string()],
-        completion: crate::completion::CommandSpec {
+        completion: crate::completion::CompletionNode {
             name: "orch".to_string(),
             tooltip: Some("Provision orchestrator resources".to_string()),
-            subcommands: vec![
-                crate::completion::CommandSpec::new("provision")
+            children: vec![
+                crate::completion::CompletionNode::new("provision")
                     .arg(
                         crate::completion::ArgNode::named("guest")
                             .tooltip("Guest name for the provision request"),
@@ -293,9 +296,12 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
                             ..crate::completion::FlagNode::default()
                         },
                     ),
-                crate::completion::CommandSpec::new("status"),
-            ],
-            ..crate::completion::CommandSpec::default()
+                crate::completion::CompletionNode::new("status"),
+            ]
+            .into_iter()
+            .map(|child| (child.name.clone(), child))
+            .collect(),
+            ..crate::completion::CompletionNode::default()
         },
         provider: Some("mock-provider".to_string()),
         providers: vec!["mock-provider (explicit)".to_string()],
@@ -304,25 +310,29 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
         selected_explicitly: false,
         source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
     }];
-    catalog[0].completion.subcommands[0].dynamic =
-        Some(crate::completion::DynamicCompletion::new(|cmd| {
-            let values = match cmd
-                .flag_values("--provider")
-                .and_then(|values| values.first())
-                .map(String::as_str)
-            {
-                Some("alpha") => vec![crate::completion::SuggestionEntry::from("red")],
-                Some("beta") => vec![crate::completion::SuggestionEntry::from("blue")],
-                _ => vec![
-                    crate::completion::SuggestionEntry::from("red"),
-                    crate::completion::SuggestionEntry::from("blue"),
-                ],
-            };
-            crate::completion::FlagCompletions {
-                values: BTreeMap::from([("--image".into(), values)]),
-                ..Default::default()
-            }
-        }));
+    catalog[0]
+        .completion
+        .children
+        .get_mut("provision")
+        .unwrap()
+        .dynamic = Some(crate::completion::DynamicCompletion::new(|cmd| {
+        let values = match cmd
+            .flag_values("--provider")
+            .and_then(|values| values.first())
+            .map(String::as_str)
+        {
+            Some("alpha") => vec![crate::completion::SuggestionEntry::from("red")],
+            Some("beta") => vec![crate::completion::SuggestionEntry::from("blue")],
+            _ => vec![
+                crate::completion::SuggestionEntry::from("red"),
+                crate::completion::SuggestionEntry::from("blue"),
+            ],
+        };
+        crate::completion::FlagCompletions {
+            values: BTreeMap::from([("--image".into(), values)]),
+            ..Default::default()
+        }
+    }));
     catalog
 }
 
@@ -332,10 +342,10 @@ fn sample_conflicted_catalog() -> Vec<CommandCatalogEntry> {
         about: "hello plugin".to_string(),
         auth: None,
         subcommands: Vec::new(),
-        completion: crate::completion::CommandSpec {
+        completion: crate::completion::CompletionNode {
             name: "hello".to_string(),
             tooltip: Some("hello plugin".to_string()),
-            ..crate::completion::CommandSpec::default()
+            ..crate::completion::CompletionNode::default()
         },
         provider: None,
         providers: vec![

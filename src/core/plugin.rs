@@ -47,7 +47,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
+use crate::core::clap_metadata as clap_meta;
 use crate::core::command_policy::CommandPath;
 
 /// Current plugin wire protocol version understood by this crate.
@@ -599,8 +599,7 @@ impl DescribeV1 {
             min_osp_version,
             commands: commands
                 .into_iter()
-                .map(CommandDef::from_clap)
-                .map(|command| DescribeCommandV1::from(&command))
+                .map(DescribeCommandV1::from_clap)
                 .collect(),
         }
     }
@@ -986,149 +985,65 @@ impl DescribeCommandV1 {
     /// assert_eq!(command.subcommands[0].name, "user");
     /// ```
     pub fn from_clap(command: clap::Command) -> Self {
-        Self::from(&CommandDef::from_clap(command))
-    }
-}
-
-impl From<&CommandDef> for DescribeCommandV1 {
-    fn from(command: &CommandDef) -> Self {
         Self {
-            name: command.name.clone(),
-            about: command.about.clone().unwrap_or_default(),
-            auth: command.auth.clone(),
-            args: command.args.iter().map(DescribeArgV1::from).collect(),
+            name: command.get_name().to_string(),
+            about: clap_meta::plain(command.get_about()).unwrap_or_default(),
+            auth: None,
+            args: command
+                .get_positionals()
+                .filter(|arg| !arg.is_hide_set())
+                .map(|arg| DescribeArgV1 {
+                    name: Some(clap_meta::arg_name(arg)),
+                    about: clap_meta::arg_help(arg),
+                    required: arg.is_required_set(),
+                    multi: clap_meta::is_multi(arg),
+                    value_type: clap_meta::is_path(arg).then_some(DescribeValueTypeV1::Path),
+                    suggestions: clap_suggestions(arg),
+                })
+                .collect(),
             flags: command
-                .flags
-                .iter()
-                .flat_map(describe_flag_entries)
+                .get_arguments()
+                .filter(|arg| !arg.is_positional() && !arg.is_hide_set())
+                .flat_map(|arg| {
+                    let spellings = clap_meta::flag_spellings(arg);
+                    let preferred = spellings.first().cloned();
+                    spellings.into_iter().enumerate().map(move |(index, name)| {
+                        (
+                            name,
+                            DescribeFlagV1 {
+                                alias_of: (index > 0).then(|| preferred.clone()).flatten(),
+                                about: clap_meta::arg_help(arg),
+                                required: arg.is_required_set(),
+                                flag_only: !arg.get_action().takes_values(),
+                                multi: clap_meta::is_multi(arg),
+                                value_type: clap_meta::is_path(arg)
+                                    .then_some(DescribeValueTypeV1::Path),
+                                suggestions: clap_suggestions(arg),
+                            },
+                        )
+                    })
+                })
                 .collect(),
             subcommands: command
-                .subcommands
-                .iter()
-                .map(DescribeCommandV1::from)
+                .get_subcommands()
+                .filter(|child| !child.is_hide_set())
+                .map(|child| Self::from_clap(child.clone()))
                 .collect(),
         }
     }
 }
 
-impl From<&DescribeCommandV1> for CommandDef {
-    fn from(command: &DescribeCommandV1) -> Self {
-        Self {
-            name: command.name.clone(),
-            about: (!command.about.trim().is_empty()).then(|| command.about.clone()),
-            long_about: None,
-            usage: None,
-            before_help: None,
-            after_help: None,
-            aliases: Vec::new(),
-            hidden: matches!(
-                command.auth.as_ref().and_then(|auth| auth.visibility),
-                Some(DescribeVisibilityModeV1::Hidden)
-            ),
-            sort_key: None,
-            auth: command.auth.clone(),
-            args: command.args.iter().map(ArgDef::from).collect(),
-            flags: collect_describe_flags(&command.flags),
-            subcommands: command.subcommands.iter().map(CommandDef::from).collect(),
-        }
-    }
-}
-
-impl From<&ArgDef> for DescribeArgV1 {
-    fn from(arg: &ArgDef) -> Self {
-        Self {
-            name: arg.value_name.clone().or_else(|| Some(arg.id.clone())),
-            about: arg.help.clone(),
-            required: arg.required,
-            multi: arg.multi,
-            value_type: describe_value_type(arg.value_kind),
-            suggestions: arg.choices.iter().map(DescribeSuggestionV1::from).collect(),
-        }
-    }
-}
-
-impl From<&FlagDef> for DescribeFlagV1 {
-    fn from(flag: &FlagDef) -> Self {
-        Self {
-            alias_of: None,
-            about: flag.help.clone(),
-            required: flag.required,
-            flag_only: !flag.takes_value,
-            multi: flag.multi,
-            value_type: describe_value_type(flag.value_kind),
-            suggestions: flag
-                .choices
-                .iter()
-                .map(DescribeSuggestionV1::from)
-                .collect(),
-        }
-    }
-}
-
-impl From<&DescribeArgV1> for ArgDef {
-    fn from(arg: &DescribeArgV1) -> Self {
-        let mut def = ArgDef::new(arg.name.clone().unwrap_or_else(|| "value".to_string()));
-        if let Some(value_name) = &arg.name {
-            def = def.value_name(value_name.clone());
-        }
-        if let Some(help) = &arg.about {
-            def = def.help(help.clone());
-        }
-        if arg.required {
-            def = def.required();
-        }
-        if arg.multi {
-            def = def.multi();
-        }
-        if let Some(value_kind) = command_value_kind(arg.value_type) {
-            def = def.value_kind(value_kind);
-        }
-        def.choices(arg.suggestions.iter().map(ValueChoice::from))
-    }
-}
-
-impl From<&DescribeFlagV1> for FlagDef {
-    fn from(flag: &DescribeFlagV1) -> Self {
-        let mut def = FlagDef::new("flag");
-        if let Some(help) = &flag.about {
-            def = def.help(help.clone());
-        }
-        if flag.required {
-            def = def.required();
-        }
-        if !flag.flag_only {
-            def = def.takes_value("value");
-        }
-        if flag.multi {
-            def = def.multi();
-        }
-        if let Some(value_kind) = command_value_kind(flag.value_type) {
-            def = def.value_kind(value_kind);
-        }
-        def.choices(flag.suggestions.iter().map(ValueChoice::from))
-    }
-}
-
-impl From<&ValueChoice> for DescribeSuggestionV1 {
-    fn from(choice: &ValueChoice) -> Self {
-        Self {
-            value: choice.value.clone(),
-            meta: choice.help.clone(),
-            display: choice.display.clone(),
-            sort: choice.sort_key.clone(),
-        }
-    }
-}
-
-impl From<&DescribeSuggestionV1> for ValueChoice {
-    fn from(entry: &DescribeSuggestionV1) -> Self {
-        Self {
-            value: entry.value.clone(),
-            help: entry.meta.clone(),
-            display: entry.display.clone(),
-            sort_key: entry.sort.clone(),
-        }
-    }
+fn clap_suggestions(arg: &clap::Arg) -> Vec<DescribeSuggestionV1> {
+    arg.get_possible_values()
+        .into_iter()
+        .filter(|value| !value.is_hide_set())
+        .map(|value| DescribeSuggestionV1 {
+            value: value.get_name().to_string(),
+            meta: value.get_help().map(ToString::to_string),
+            display: None,
+            sort: None,
+        })
+        .collect()
 }
 
 fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
@@ -1187,82 +1102,6 @@ fn validate_session_requirements(
         ));
     }
     Ok(())
-}
-
-fn describe_flag_entries(flag: &FlagDef) -> Vec<(String, DescribeFlagV1)> {
-    let mut names = Vec::new();
-    if let Some(long) = flag.long.as_deref() {
-        names.push(format!("--{long}"));
-    }
-    if let Some(short) = flag.short {
-        names.push(format!("-{short}"));
-    }
-    names.extend(flag.aliases.iter().cloned());
-    let preferred = names.first().cloned();
-    names
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
-            let mut value = DescribeFlagV1::from(flag);
-            if index > 0 {
-                value.alias_of = preferred.clone();
-            }
-            (name, value)
-        })
-        .collect()
-}
-
-fn group_describe_flag((name, flag): (&String, &DescribeFlagV1)) -> Option<FlagDef> {
-    if !name.starts_with('-') {
-        return None;
-    }
-
-    let mut def = FlagDef::from(flag);
-    if let Some(long) = name.strip_prefix("--") {
-        def.long = Some(long.to_string());
-        def.id = long.to_string();
-    } else if let Some(short) = name.strip_prefix('-') {
-        def.short = short.chars().next();
-        def.id = short.to_string();
-    }
-    Some(def)
-}
-
-fn collect_describe_flags(flags: &BTreeMap<String, DescribeFlagV1>) -> Vec<FlagDef> {
-    let mut definitions = BTreeMap::<String, FlagDef>::new();
-    for (name, flag) in flags {
-        if flag.alias_of.is_none()
-            && let Some(definition) = group_describe_flag((name, flag))
-        {
-            definitions.insert(name.clone(), definition);
-        }
-    }
-
-    for (name, flag) in flags {
-        let Some(preferred) = flag.alias_of.as_deref() else {
-            continue;
-        };
-        let Some(definition) = definitions.get_mut(preferred) else {
-            if let Some(definition) = group_describe_flag((name, flag)) {
-                definitions.insert(name.clone(), definition);
-            }
-            continue;
-        };
-        definition.aliases.push(name.clone());
-    }
-
-    definitions.into_values().collect()
-}
-
-fn describe_value_type(value_kind: Option<ValueKind>) -> Option<DescribeValueTypeV1> {
-    match value_kind {
-        Some(ValueKind::Path) => Some(DescribeValueTypeV1::Path),
-        Some(ValueKind::Enum | ValueKind::FreeText) | None => None,
-    }
-}
-
-fn command_value_kind(value_type: Option<DescribeValueTypeV1>) -> Option<ValueKind> {
-    value_type.map(|_| ValueKind::Path)
 }
 
 #[cfg(test)]

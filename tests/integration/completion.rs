@@ -1,5 +1,5 @@
 use osp_cli::completion::{
-    CommandSpec, CompletionEngine, CompletionTreeBuilder, ContextScope, DynamicCompletion,
+    CompletionEngine, CompletionNode, CompletionTreeBuilder, ContextScope, DynamicCompletion,
     FlagCompletions, FlagNode, SuggestionEntry, SuggestionOutput,
 };
 use std::collections::BTreeMap;
@@ -22,7 +22,7 @@ fn completion_tree(context_scope: ContextScope) -> osp_cli::completion::Completi
     let mut tree = CompletionTreeBuilder
         .build_from_specs(
             &[
-                CommandSpec::new("service").subcommand(CommandSpec::new("deploy").flag(
+                CompletionNode::new("service").subcommand(CompletionNode::new("deploy").flag(
                     "--image",
                     FlagNode {
                         suggestions: vec![
@@ -32,7 +32,7 @@ fn completion_tree(context_scope: ContextScope) -> osp_cli::completion::Completi
                         ..FlagNode::default()
                     },
                 )),
-                CommandSpec::new("hidden").flag(
+                CompletionNode::new("hidden").flag(
                     "--provider",
                     FlagNode {
                         suggestions: vec![

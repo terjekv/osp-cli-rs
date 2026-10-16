@@ -36,7 +36,7 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use clap::Command;
 
-use crate::completion::CommandSpec;
+use crate::completion::CompletionNode;
 use crate::config::ResolvedConfig;
 use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{
@@ -581,12 +581,20 @@ pub trait NativeCommand: Send + Sync {
         describe
     }
 
+    /// Projects the command grammar and cached metadata into completion nodes.
+    ///
+    /// Override this when cached suggestions are also needed in noninteractive
+    /// catalogs. Interactive-only enrichment belongs in `augment_completion`.
+    fn completion(&self) -> CompletionNode {
+        CompletionNode::from_clap(&self.command())
+    }
+
     /// Adds runtime-owned suggestions to the otherwise static completion tree.
     ///
     /// The host calls this only while preparing an interactive completion
     /// surface. Implementations should cache any remote data they use so REPL
     /// editing never performs network I/O per keystroke.
-    fn augment_completion(&self, _completion: &mut CommandSpec) {}
+    fn augment_completion(&self, _completion: &mut CompletionNode) {}
 
     /// Refreshes runtime completion data on a host-owned background thread.
     ///
@@ -720,7 +728,7 @@ impl NativeCommandRegistry {
     pub fn register(&mut self, command: impl NativeCommand + 'static) {
         let mut next = (*self.commands).clone();
         let command = Arc::new(command) as Arc<dyn NativeCommand>;
-        let name = normalize_name(&command.describe().name);
+        let name = normalize_name(command.command().get_name());
         next.insert(name, command);
         self.commands = Arc::new(next);
     }
@@ -774,15 +782,21 @@ impl NativeCommandRegistry {
             .map(|command| {
                 let mut describe = command.describe();
                 describe.inherit_auth_from_parents();
-                let mut completion = crate::plugin::conversion::to_command_spec(&describe);
+                let mut completion = command.completion();
                 if augment_completion {
                     command.augment_completion(&mut completion);
                 }
                 CommandCatalogEntry {
-                    name: describe.name.clone(),
-                    about: describe.about.clone(),
+                    name: completion.name.clone(),
+                    about: crate::core::clap_metadata::plain(command.command().get_about())
+                        .unwrap_or_default(),
                     auth: describe.auth.clone(),
-                    subcommands: crate::plugin::conversion::direct_subcommand_names(&completion),
+                    subcommands: command
+                        .command()
+                        .get_subcommands()
+                        .filter(|child| !child.is_hide_set())
+                        .map(|child| child.get_name().to_string())
+                        .collect(),
                     completion,
                     provider: None,
                     providers: Vec::new(),

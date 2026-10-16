@@ -933,6 +933,45 @@ pub(crate) fn command_help_document(
     )
 }
 
+pub(crate) fn repl_only_commands() -> [clap::Command; 5] {
+    use clap::{Arg, ArgAction, Command, ValueHint};
+    [
+        Command::new("help").about("Show REPL help"),
+        Command::new("last")
+            .about("Replay the last successful result")
+            .arg(
+                Arg::new("raw")
+                    .long("raw")
+                    .action(ArgAction::SetTrue)
+                    .help("Show the pre-pipeline result"),
+            ),
+        Command::new("source")
+            .about("Run commands from files")
+            .arg(
+                Arg::new("file")
+                    .value_name("FILE")
+                    .help("Command file")
+                    .num_args(0..)
+                    .value_hint(ValueHint::FilePath),
+            )
+            .arg(
+                Arg::new("ignore-errors")
+                    .long("ignore-errors")
+                    .action(ArgAction::SetTrue)
+                    .help("Continue after a command fails"),
+            ),
+        Command::new("exit").about("Exit REPL"),
+        Command::new("quit").about("Exit REPL"),
+    ]
+}
+
+pub(crate) fn builtin_command(name: &str) -> clap::Command {
+    InlineCommandCli::command()
+        .find_subcommand(name)
+        .expect("known builtin command")
+        .clone()
+}
+
 pub(crate) fn inline_help_document(tokens: &[String]) -> (crate::core::document::Document, bool) {
     let (document, _, long) = command_help_document(InlineCommandCli::command(), tokens);
     (document, long)

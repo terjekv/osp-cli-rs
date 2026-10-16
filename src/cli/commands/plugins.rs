@@ -626,7 +626,7 @@ mod tests {
                 }),
                 ..DescribeCommandAuthV1::default()
             }),
-            completion: crate::completion::CommandSpec::new("shared"),
+            completion: crate::completion::CompletionNode::new("shared"),
             provider: Some("beta".to_string()),
             providers: vec!["alpha".to_string(), "beta".to_string()],
             conflicted: true,

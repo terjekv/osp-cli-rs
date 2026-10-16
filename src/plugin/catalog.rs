@@ -7,10 +7,9 @@
 //! host-facing summaries.
 
 use super::active::{ActivePluginView, ResolvedActiveCommand};
-use super::conversion::direct_subcommand_names;
 use super::manager::{CommandCatalogEntry, CommandConflict, DoctorReport, PluginSummary};
 use super::selection::{ProviderResolution, ProviderSelectionMode, plugin_enabled, plugin_label};
-use crate::completion::CommandSpec;
+use crate::completion::CompletionNode;
 use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1};
 use std::collections::BTreeMap;
@@ -54,7 +53,16 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                     name: resolved.command().to_string(),
                     about: completion.tooltip.clone().unwrap_or_default(),
                     auth: command.auth(),
-                    subcommands: direct_subcommand_names(&completion),
+                    subcommands: command
+                        .describe()
+                        .map(|command| {
+                            command
+                                .subcommands
+                                .iter()
+                                .map(|child| child.name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     completion,
                     provider: Some(selection.plugin.plugin_id.clone()),
                     providers: resolved.providers().to_vec(),
@@ -77,7 +85,7 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                     about,
                     auth: None,
                     subcommands: Vec::new(),
-                    completion: CommandSpec::new(resolved.command()),
+                    completion: CompletionNode::new(resolved.command()),
                     provider: None,
                     providers: resolved.providers().to_vec(),
                     conflicted: true,

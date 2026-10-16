@@ -29,13 +29,12 @@ use super::catalog::{
     build_command_auth, build_command_catalog, build_doctor_report, collect_command_auth,
     list_plugins, render_repl_help, selected_provider_label,
 };
-use super::conversion::to_command_spec;
 use super::discovery::DiscoveryCache;
 use super::selection::{ProviderResolution, ProviderResolutionError, provider_labels};
 use super::state::PluginCommandPreferences;
 #[cfg(test)]
 use super::state::PluginCommandState;
-use crate::completion::CommandSpec;
+use crate::completion::CompletionNode;
 use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, canonical_plugin_command_name,
@@ -119,12 +118,12 @@ pub struct DiscoveredPlugin {
 #[derive(Debug, Clone)]
 pub(crate) struct PluginCommand {
     order: usize,
-    completion: CommandSpec,
+    completion: CompletionNode,
     describe: Option<DescribeCommandV1>,
 }
 
 impl PluginCommand {
-    pub(crate) fn completion(&self) -> CommandSpec {
+    pub(crate) fn completion(&self) -> CompletionNode {
         self.completion.clone()
     }
 
@@ -149,7 +148,7 @@ impl DiscoveredPlugin {
                 .entry(name.clone())
                 .or_insert_with(|| PluginCommand {
                     order,
-                    completion: CommandSpec::new(name),
+                    completion: CompletionNode::new(name),
                     describe: None,
                 });
         }
@@ -165,7 +164,7 @@ impl DiscoveredPlugin {
                 .entry(describe.name.clone())
                 .or_insert_with(|| PluginCommand {
                     order,
-                    completion: to_command_spec(&describe),
+                    completion: CompletionNode::from_describe(&describe),
                     describe: Some(describe),
                 });
         }
@@ -263,7 +262,7 @@ pub struct CommandCatalogEntry {
     /// Immediate subcommand names beneath `name`.
     pub subcommands: Vec<String>,
     /// Shell completion metadata for this command.
-    pub completion: CommandSpec,
+    pub completion: CompletionNode,
     /// Selected provider identifier when dispatch has been resolved.
     pub provider: Option<String>,
     /// Provider labels for every provider that exports this command.
@@ -285,7 +284,7 @@ impl CommandCatalogEntry {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::completion::CommandSpec;
+    /// use osp_cli::completion::CompletionNode;
     /// use osp_cli::plugin::CommandCatalogEntry;
     /// use osp_cli::core::plugin::{DescribeCommandAuthV1, DescribeVisibilityModeV1};
     ///
@@ -299,7 +298,7 @@ impl CommandCatalogEntry {
     ///         ..DescribeCommandAuthV1::default()
     ///     }),
     ///     subcommands: Vec::new(),
-    ///     completion: CommandSpec::new("ldap"),
+    ///     completion: CompletionNode::new("ldap"),
     ///     provider: Some("ldap".to_string()),
     ///     providers: vec!["ldap".to_string()],
     ///     conflicted: false,

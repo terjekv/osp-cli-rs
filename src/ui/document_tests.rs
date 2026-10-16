@@ -1,7 +1,6 @@
 //! Public document contracts migrated from the removed guide model.
 
 use super::{RenderSettings, render_output};
-use crate::core::command_def::{ArgDef, CommandDef, FlagDef};
 use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
@@ -41,24 +40,6 @@ fn filtered_for_help_level_hides_verbose_sections_until_requested_unit() {
             .iter()
             .any(|row| row["section"] == "Common Invocation Options")
     );
-}
-
-#[test]
-fn document_from_command_def_builds_usage_arguments_and_options_unit() {
-    let document = Document::from_command_def(
-        &CommandDef::new("theme")
-            .about("Inspect and apply themes")
-            .flag(FlagDef::new("raw").long("raw").help("Show raw values"))
-            .arg(ArgDef::new("name").value_name("name"))
-            .subcommand(CommandDef::new("list").about("List themes")),
-    );
-    let rows = document.rows();
-    assert_eq!(rows[0]["text"], "theme [OPTIONS] [name] <COMMAND>");
-    assert_eq!(rows[1]["name"], "list");
-    assert_eq!(rows[1]["description"], "List themes");
-    assert_eq!(rows[2]["name"], "name");
-    assert_eq!(rows[3]["name"], "--raw");
-    assert_eq!(rows[3]["description"], "Show raw values");
 }
 
 #[test]
