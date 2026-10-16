@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- TOML failure summaries include line and column without requiring verbose
+  source annotations.
+
 - Minimal REPL intros list visible command roots and aliases instead of
   subcommands and theme completion words.
 

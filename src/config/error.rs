@@ -30,7 +30,9 @@ impl TomlParseDiagnostic {
         source_text: impl Into<String>,
         span: Option<Range<usize>>,
     ) -> Self {
-        self.source_code = Some(NamedSource::new(source_name.into(), source_text.into()));
+        let source_text = source_text.into();
+        self = self.with_location_from_source(&source_text, span.clone());
+        self.source_code = Some(NamedSource::new(source_name.into(), source_text));
         self.span = span.map(|range| (range.start, range.len()).into());
         self
     }
