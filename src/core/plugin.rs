@@ -17,7 +17,7 @@
 //! ```text
 //! plugin executable
 //!      │
-//!      ├── `describe` -> DescribeV1 / DescribeCommandV1
+//!      ├── `describe` -> PluginDescribe / DescribeCommandV1
 //!      │                host builds command catalog, completion, and policy
 //!      │
 //!      └── `run`      -> ResponseV1
@@ -31,7 +31,7 @@
 //!   command catalogs, policy registries, and rendered output
 //!
 //! Clap-backed convenience constructors such as
-//! [`crate::core::plugin::DescribeV1::from_clap_command`] translate command
+//! [`crate::core::plugin::DescribeCommandV1::from_clap`] translate command
 //! trees into the wire DTOs.
 //!
 //! Contract:
@@ -54,23 +54,35 @@ use crate::core::command_policy::CommandPath;
 /// Current plugin wire protocol version understood by this crate.
 pub const PLUGIN_PROTOCOL_V1: u32 = 1;
 
-/// `describe` payload emitted by a plugin that speaks protocol v1.
-///
-/// This is the host's browse-time contract with a plugin. The host uses it to
-/// build command catalogs, completion trees, and coarse auth/policy metadata
-/// before any real command execution happens.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DescribeV1 {
-    /// Protocol version declared by the plugin.
-    pub protocol_version: u32,
-    /// Stable plugin identifier.
-    pub plugin_id: String,
-    /// Plugin version string.
-    pub plugin_version: String,
-    /// Minimum `osp-cli` version required by the plugin, if any.
-    pub min_osp_version: Option<String>,
-    /// Top-level commands exported by the plugin.
-    pub commands: Vec<DescribeCommandV1>,
+/// Optional reply to `--osp-describe`; the executable filename supplies the name.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginDescribe {
+    /// Short help text.
+    #[serde(default)]
+    pub about: String,
+    /// Set to `json` to render stdout through the host by default.
+    #[serde(default)]
+    pub output: Option<String>,
+    /// Authorization metadata for this command.
+    #[serde(default)]
+    pub auth: Option<DescribeCommandAuthV1>,
+    /// Positional arguments.
+    #[serde(default)]
+    pub args: Vec<DescribeArgV1>,
+    /// Flags keyed by their spelling.
+    #[serde(default)]
+    pub flags: BTreeMap<String, DescribeFlagV1>,
+    /// Nested commands.
+    #[serde(default)]
+    pub subcommands: Vec<DescribeCommandV1>,
+}
+impl PluginDescribe {
+    pub(crate) fn command(self, name: &str) -> DescribeCommandV1 {
+        let mut command = DescribeCommandV1 { name: name.into(), about: self.about,
+            auth: self.auth, args: self.args, flags: self.flags, subcommands: self.subcommands };
+        command.inherit_auth_from_parents();
+        command
+    }
 }
 
 /// Recursive command description used in plugin metadata.
@@ -513,148 +525,6 @@ pub struct ResponseMessageV1 {
     pub level: MessageLevel,
     /// Human-readable message text.
     pub text: String,
-}
-
-impl DescribeV1 {
-    /// Builds a v1 describe payload from a single `clap` command tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use clap::Command;
-    /// use osp_cli::core::plugin::DescribeV1;
-    ///
-    /// let describe = DescribeV1::from_clap_command(
-    ///     "ldap",
-    ///     "0.1.0",
-    ///     None,
-    ///     Command::new("ldap").about("Directory lookups"),
-    /// );
-    ///
-    /// assert_eq!(describe.plugin_id, "ldap");
-    /// assert_eq!(describe.commands[0].name, "ldap");
-    /// ```
-    pub fn from_clap_command(
-        plugin_id: impl Into<String>,
-        plugin_version: impl Into<String>,
-        min_osp_version: Option<String>,
-        command: clap::Command,
-    ) -> Self {
-        Self::from_clap_commands(
-            plugin_id,
-            plugin_version,
-            min_osp_version,
-            std::iter::once(command),
-        )
-    }
-
-    /// Builds a v1 describe payload from multiple top-level `clap` commands.
-    ///
-    /// Use this when one plugin executable exposes multiple top-level command
-    /// roots.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use clap::Command;
-    /// use osp_cli::core::plugin::DescribeV1;
-    ///
-    /// let describe = DescribeV1::from_clap_commands(
-    ///     "directory-tools",
-    ///     "0.1.0",
-    ///     None,
-    ///     [
-    ///         Command::new("ldap").about("Directory lookups"),
-    ///         Command::new("groups").about("Group lookups"),
-    ///     ],
-    /// );
-    ///
-    /// assert_eq!(describe.plugin_id, "directory-tools");
-    /// assert_eq!(describe.commands.len(), 2);
-    /// assert_eq!(describe.commands[1].name, "groups");
-    /// ```
-    pub fn from_clap_commands(
-        plugin_id: impl Into<String>,
-        plugin_version: impl Into<String>,
-        min_osp_version: Option<String>,
-        commands: impl IntoIterator<Item = clap::Command>,
-    ) -> Self {
-        Self {
-            protocol_version: PLUGIN_PROTOCOL_V1,
-            plugin_id: plugin_id.into(),
-            plugin_version: plugin_version.into(),
-            min_osp_version,
-            commands: commands
-                .into_iter()
-                .map(DescribeCommandV1::from_clap)
-                .collect(),
-        }
-    }
-
-    /// Validates the describe payload and returns an error string on protocol
-    /// violations.
-    ///
-    /// Hosts should do this before trusting plugin describe data enough to turn
-    /// it into command catalogs, completion trees, or policy registries.
-    /// Validation errors are returned as plain strings because protocol
-    /// violations are currently treated as operator-facing diagnostics rather
-    /// than a machine-matchable error taxonomy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::plugin::{DescribeV1, PLUGIN_PROTOCOL_V1};
-    ///
-    /// let describe = DescribeV1 {
-    ///     protocol_version: PLUGIN_PROTOCOL_V1,
-    ///     plugin_id: "ldap".to_string(),
-    ///     plugin_version: "0.1.0".to_string(),
-    ///     min_osp_version: None,
-    ///     commands: Vec::new(),
-    /// };
-    ///
-    /// assert!(describe.validate_v1().is_ok());
-    ///
-    /// let invalid = DescribeV1 {
-    ///     plugin_id: "   ".to_string(),
-    ///     ..describe.clone()
-    /// };
-    /// assert_eq!(invalid.validate_v1().unwrap_err(), "plugin_id must not be empty");
-    /// ```
-    pub fn validate_v1(&self) -> Result<(), String> {
-        if self.protocol_version != PLUGIN_PROTOCOL_V1 {
-            return Err(format!(
-                "unsupported describe protocol version: {}",
-                self.protocol_version
-            ));
-        }
-        if canonical_plugin_id(&self.plugin_id)? != self.plugin_id {
-            return Err("plugin_id must not have leading or trailing whitespace".to_string());
-        }
-        for command in &self.commands {
-            validate_command(command)?;
-        }
-        Ok(())
-    }
-}
-
-pub(crate) fn canonical_plugin_id(plugin_id: &str) -> Result<String, String> {
-    let plugin_id = plugin_id.trim();
-    if plugin_id.is_empty() {
-        return Err("plugin_id must not be empty".to_string());
-    }
-    if plugin_id == "env" {
-        return Err("plugin_id `env` is reserved for shared plugin config".to_string());
-    }
-    if !plugin_id
-        .chars()
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
-    {
-        return Err(format!(
-            "plugin_id `{plugin_id}` must use lowercase ASCII letters, digits, `-`, or `_`"
-        ));
-    }
-    Ok(plugin_id.to_string())
 }
 
 pub(crate) fn canonical_plugin_command_name(command: &str) -> Result<String, String> {
