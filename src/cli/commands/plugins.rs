@@ -500,6 +500,16 @@ pub(crate) fn doctor_rows(report: &DoctorReport) -> Vec<Row> {
         "conflicts" => report.conflicts.len() as i64,
     });
 
+    for plugin in report.plugins.iter().filter(|plugin| plugin.healthy) {
+        if let Some(issue) = &plugin.issue {
+            rows.push(crate::row! {
+                "kind" => "warning",
+                "plugin_id" => plugin.plugin_id.clone(),
+                "issue" => issue.clone(),
+            });
+        }
+    }
+
     for conflict in &report.conflicts {
         let providers = serde_json::Value::Array(
             conflict

@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- `plugins doctor` warns about plugin flags consumed by the host; providers
+  remain runnable.
+
 - `-d` now records command dispatch and outcomes. CLI timing moves from the
   footer to the final log event; the REPL timing badge stays. Enabled file
   logs now default to `info` instead of `warn`.

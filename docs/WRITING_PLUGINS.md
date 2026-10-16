@@ -125,7 +125,7 @@ payload.
         }
       ],
       "flags": {
-        "--verbose": {
+        "--long": {
           "about": "Show extra detail",
           "flag_only": true
         },
@@ -185,8 +185,8 @@ payload.
 For normal command execution, the plugin receives:
 
 - **argv**: `<plugin-exe> <command> [args...]`
-  For example: `osp-my-plugin mycommand alice --verbose` arrives as
-  `argv = ["osp-my-plugin", "mycommand", "alice", "--verbose"]`
+  For example: `osp-my-plugin mycommand alice --long` arrives as
+  `argv = ["osp-my-plugin", "mycommand", "alice", "--long"]`
 - **stdin**: not used (reserved for future protocol extensions)
 - **stdout**: must write exactly one `ResponseV1` JSON object and nothing else
 - **stderr**: human diagnostics only
@@ -574,8 +574,10 @@ Test your plugin manually:
 ./osp-my-plugin mycommand alice | python3 -m json.tool
 ```
 
-Use `osp --debug` to see plugin invocation details (when
-instrumentation is enabled).
+Use `osp -d` to see plugin invocation details and successful plugin stderr.
+Host invocation flags such as `--verbose`, `-v`, `-q` and `-d` are consumed
+before `--`; use distinct plugin flag names. `plugins doctor` warns about
+collisions without disabling the provider.
 
 ## Timeout
 

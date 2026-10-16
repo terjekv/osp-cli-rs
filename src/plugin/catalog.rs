@@ -191,7 +191,17 @@ fn resolved_command<'a>(
 }
 
 pub(crate) fn build_doctor_report(view: &ActivePluginView<'_>) -> DoctorReport {
-    let plugins = list_plugins(view);
+    let mut plugins = list_plugins(view);
+    for summary in &mut plugins {
+        if let Some(plugin) = view
+            .discovered()
+            .iter()
+            .find(|plugin| plugin.plugin_id == summary.plugin_id)
+            && let Some(warning) = super::discovery::invocation_flag_issue(plugin)
+        {
+            super::state::merge_issue(&mut summary.issue, warning);
+        }
+    }
     let mut conflicts = view
         .provider_labels_by_command()
         .iter()

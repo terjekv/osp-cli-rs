@@ -22,6 +22,16 @@ pub(crate) struct InvocationFlag {
     is_set: fn(&InvocationOptions) -> bool,
 }
 
+impl InvocationFlag {
+    pub(crate) fn consumes(&self, spelling: &str) -> bool {
+        spelling == self.long
+            || self
+                .short
+                .is_some_and(|short| spelling == format!("-{short}"))
+            || self.aliases.iter().any(|alias| spelling == alias.long)
+    }
+}
+
 pub(crate) struct InvocationAlias {
     pub(crate) long: &'static str,
     value: &'static str,

@@ -795,6 +795,37 @@ fn apply_describe_metadata(
     }
 }
 
+pub(super) fn invocation_flag_issue(plugin: &DiscoveredPlugin) -> Option<String> {
+    fn collect(
+        command: &crate::core::plugin::DescribeCommandV1,
+        flags: &mut std::collections::BTreeSet<String>,
+    ) {
+        for spelling in command.flags.keys() {
+            if crate::cli::invocation::INVOCATION_FLAGS
+                .iter()
+                .any(|flag| flag.consumes(spelling))
+            {
+                flags.insert(spelling.clone());
+            }
+        }
+        for child in &command.subcommands {
+            collect(child, flags);
+        }
+    }
+    let mut flags = std::collections::BTreeSet::new();
+    for command in plugin
+        .commands
+        .values()
+        .filter_map(|command| command.describe())
+    {
+        collect(command, &mut flags);
+    }
+    (!flags.is_empty()).then(|| format!(
+        "declares {}; osp consumes these as invocation flags before `--`, so the plugin never receives them there",
+        flags.into_iter().collect::<Vec<_>>().join(", ")
+    ))
+}
+
 pub(super) fn min_osp_version_issue(describe: &DescribeV1) -> Option<String> {
     let min_required = describe
         .min_osp_version
