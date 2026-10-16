@@ -99,7 +99,7 @@ plugins commands -dd
 
 Useful config keys:
 
-- `ui.verbosity.level`
+- `ui.verbosity`
 - `debug.level`
 - `log.file.enabled`
 - `log.file.path`
@@ -113,7 +113,8 @@ shows the saved REPL report; `doctor last -dd` writes its backtrace to stderr.
 
 ## Plugin Runtime Hints
 
-`osp` passes logging-related hints to plugins:
+`osp` exports logging-related hints to plugins; it never reads these names
+as configuration inputs:
 
 - `OSP_UI_VERBOSITY`
 - `OSP_DEBUG_LEVEL`
@@ -128,3 +129,7 @@ stays on `stdout` and diagnostics stay on `stderr`.
 ```bash
 osp plugins commands --json -d 2>debug.log
 ```
+
+Configured `debug.level` applies from configuration resolution onward. Use
+`-d` to include earlier startup events. Counts add to the configured base and
+saturate at level 3. File logging is independent of command-local stderr.

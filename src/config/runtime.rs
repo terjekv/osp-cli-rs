@@ -750,7 +750,7 @@ mod tests {
             Some(&ConfigValue::String("grouped".to_string()))
         );
         assert_eq!(
-            find_value(&defaults, "ui.message.verbosity"),
+            find_value(&defaults, "ui.verbosity"),
             Some(&ConfigValue::String("success".to_string()))
         );
         assert_eq!(

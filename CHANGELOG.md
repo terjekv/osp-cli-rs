@@ -37,6 +37,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- **Breaking:** Rename `ui.message.verbosity` to `ui.verbosity` (environment:
+  `OSP__UI__VERBOSITY`); old configs fail as unknown keys. Rename public
+  `UiState::{message_verbosity, debug_verbosity}` to `{verbosity, debug_level}`
+  and `DeveloperLoggingConfig::debug_count` to `debug_level`.
+
 - Default help lists `-v`, `-q` and `-d`; detailed help keeps the full
   invocation-option table.
 

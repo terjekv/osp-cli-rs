@@ -496,14 +496,10 @@ impl App {
         let code = match result {
             Ok(code) => code,
             Err(err) => {
-                let (message_verbosity, debug_level, error_render_settings) = {
+                let (verbosity, debug_level, error_render_settings) = {
                     let _phase = tracing::info_span!(target: "osp_startup", "process error display preparation").entered();
                     if let Some(ui) = host::error_display_settings(&err) {
-                        (
-                            ui.message_verbosity,
-                            ui.debug_verbosity,
-                            ui.render_settings.clone(),
-                        )
+                        (ui.verbosity, ui.debug_level, ui.render_settings.clone())
                     } else {
                         let (verbose, quiet) = (scan.invocation.verbose, scan.invocation.quiet);
                         let context = help::render_settings_for_help_with_scan(
@@ -515,14 +511,14 @@ impl App {
                             context
                                 .config
                                 .as_ref()
-                                .map_or(MessageLevel::Success, bootstrap::message_verbosity_from_config),
+                                .map_or(MessageLevel::Success, bootstrap::verbosity_from_config),
                             verbose,
                             quiet,
                         );
                         let debug_level = context
                             .config
                             .as_ref()
-                            .map_or(0, bootstrap::debug_verbosity_from_config)
+                            .map_or(0, bootstrap::debug_level_from_config)
                             .saturating_add(scan.invocation.debug)
                             .min(3);
                         if let Some(config) = &context.config {
@@ -537,19 +533,18 @@ impl App {
                 let err = host::report_with_invocation(
                     err,
                     host::ErrorDisplaySettings {
-                        message_verbosity,
-                        debug_verbosity: debug_level,
+                        verbosity,
+                        debug_level,
                         render_settings: error_render_settings.clone(),
                     },
                 );
-                let rendered =
-                    render_process_error(&err, &error_render_settings, message_verbosity, false);
+                let rendered = render_process_error(&err, &error_render_settings, verbosity, false);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
-                    if message_verbosity >= MessageLevel::Info {
+                    if verbosity >= MessageLevel::Info {
                         sink.write_stderr(&format!(
                             "{}\n",
-                            render_report_message(&err, message_verbosity, &error_render_settings)
+                            render_report_message(&err, verbosity, &error_render_settings)
                                 .trim_end()
                         ));
                     }
@@ -844,13 +839,13 @@ where
 pub(crate) fn render_process_error(
     err: &miette::Report,
     settings: &crate::ui::RenderSettings,
-    message_verbosity: MessageLevel,
+    verbosity: MessageLevel,
     detail_hint: bool,
 ) -> String {
     let level = if settings.format == OutputFormat::Json {
         MessageLevel::Success
     } else {
-        message_verbosity
+        verbosity
     };
     let mut message = render_report_message(err, level, settings);
     if detail_hint && settings.format != OutputFormat::Json {
@@ -882,7 +877,7 @@ pub(crate) fn render_process_error(
         crate::ui::visible_inline_text(&message),
     );
     render_messages(&messages, &{
-        let mut request = MessageRequest::new(settings, message_verbosity);
+        let mut request = MessageRequest::new(settings, verbosity);
         request.settings.chrome_frame = crate::ui::section_chrome::SectionFrameStyle::TopBottom;
         request.ruled_policy = crate::ui::section_chrome::RuledSectionPolicy::Shared;
         request.settings.width = request.settings.width.or(Some(12));

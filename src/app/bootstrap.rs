@@ -237,7 +237,7 @@ pub(crate) fn prepare_startup_host(
 
 pub(crate) fn build_logging_config(
     config: &ResolvedConfig,
-    debug_verbosity: u8,
+    debug_level: u8,
 ) -> DeveloperLoggingConfig {
     let file = if config.get_bool("log.file.enabled").unwrap_or(false) {
         let level = config
@@ -255,17 +255,17 @@ pub(crate) fn build_logging_config(
         None
     };
 
-    DeveloperLoggingConfig::new(debug_verbosity).with_file(file)
+    DeveloperLoggingConfig::new(debug_level).with_file(file)
 }
 
-pub(crate) fn message_verbosity_from_config(config: &ResolvedConfig) -> MessageLevel {
+pub(crate) fn verbosity_from_config(config: &ResolvedConfig) -> MessageLevel {
     config
-        .get_string("ui.message.verbosity")
+        .get_string("ui.verbosity")
         .and_then(MessageLevel::parse)
         .unwrap_or(MessageLevel::Success)
 }
 
-pub(crate) fn debug_verbosity_from_config(config: &ResolvedConfig) -> u8 {
+pub(crate) fn debug_level_from_config(config: &ResolvedConfig) -> u8 {
     match config.get("debug.level").map(ConfigValue::reveal) {
         Some(ConfigValue::Integer(level)) => (*level).clamp(0, 3) as u8,
         Some(ConfigValue::String(raw)) => raw.trim().parse::<u8>().map_or(0, |level| level.min(3)),
@@ -301,7 +301,7 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
 
 #[cfg(test)]
 mod tests {
-    use super::{build_logging_config, debug_verbosity_from_config, message_verbosity_from_config};
+    use super::{build_logging_config, debug_level_from_config, verbosity_from_config};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::ui::messages::MessageLevel;
 
@@ -328,12 +328,12 @@ mod tests {
     }
 
     #[test]
-    fn debug_verbosity_from_config_clamps_string_and_integer_inputs_unit() {
+    fn debug_level_from_config_clamps_string_and_integer_inputs_unit() {
         let string_config = resolved(&[("debug.level", "9")]);
         let integer_config = resolved(&[("debug.level", "-2")]);
 
-        assert_eq!(debug_verbosity_from_config(&string_config), 3);
-        assert_eq!(debug_verbosity_from_config(&integer_config), 0);
+        assert_eq!(debug_level_from_config(&string_config), 3);
+        assert_eq!(debug_level_from_config(&integer_config), 0);
     }
 
     #[test]
@@ -342,15 +342,12 @@ mod tests {
             ("log.file.enabled", "true"),
             ("log.file.level", "debug"),
             ("log.file.path", "   "),
-            ("ui.message.verbosity", "warning"),
+            ("ui.verbosity", "warning"),
         ]);
 
         let logging = build_logging_config(&config, 2);
         assert!(logging.file.is_none());
-        assert_eq!(
-            message_verbosity_from_config(&config),
-            MessageLevel::Warning
-        );
-        assert_eq!(logging.debug_count, 2);
+        assert_eq!(verbosity_from_config(&config), MessageLevel::Warning);
+        assert_eq!(logging.debug_level, 2);
     }
 }

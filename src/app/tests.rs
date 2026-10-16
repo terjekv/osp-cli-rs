@@ -107,9 +107,9 @@ fn make_completion_state_with_entries_and_native(
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
         render_settings: settings,
-        message_verbosity: MessageLevel::Success,
+        verbosity: MessageLevel::Success,
 
-        debug_verbosity: 0,
+        debug_level: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)
             .with_default_roots(false),
@@ -432,9 +432,9 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
         render_settings: settings,
-        message_verbosity: MessageLevel::Success,
+        verbosity: MessageLevel::Success,
 
-        debug_verbosity: 0,
+        debug_level: 0,
         plugins: PluginManager::new(plugin_dirs)
             .with_roots(config_root, cache_root)
             .with_bundled_roots(!cfg!(miri))

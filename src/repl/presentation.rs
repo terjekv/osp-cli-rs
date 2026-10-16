@@ -144,8 +144,7 @@ Help: `| H` or `| H <verb>` e.g. `| H F`
 
 pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface) -> String {
     let _phase = tracing::info_span!(target: "osp_startup", "REPL intro rendering").entered();
-    let intro_style =
-        intro_style_with_verbosity(intro_style(view.config), view.ui.message_verbosity);
+    let intro_style = intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
     let mut rendered = render(
         &repl_document_output(&guide),
@@ -173,9 +172,8 @@ pub(crate) fn build_repl_intro_payload(
     override_style: Option<ReplIntroStyle>,
 ) -> Document {
     let config = view.config;
-    let intro_style = override_style.unwrap_or_else(|| {
-        intro_style_with_verbosity(intro_style(config), view.ui.message_verbosity)
-    });
+    let intro_style = override_style
+        .unwrap_or_else(|| intro_style_with_verbosity(intro_style(config), view.ui.verbosity));
 
     if matches!(intro_style, ReplIntroStyle::None) {
         return Document::default();

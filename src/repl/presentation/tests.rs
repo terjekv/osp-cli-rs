@@ -69,9 +69,9 @@ fn make_state(entries: &[(&str, &str)]) -> AppState {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
         render_settings: RenderSettings::test_plain(OutputFormat::Json),
-        message_verbosity: MessageLevel::Success,
+        verbosity: MessageLevel::Success,
 
-        debug_verbosity: 0,
+        debug_level: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)
             .with_default_roots(false),
@@ -211,7 +211,7 @@ mod shape_contracts {
             ColorMode::Always,
             UnicodeMode::Always,
         );
-        state.runtime.ui.message_verbosity = verbosity;
+        state.runtime.ui.verbosity = verbosity;
         output_support::strip_ansi(&render_repl_intro(
             repl_view(&state),
             &intro_surface_with_overview(&["help", "config", "theme", "plugins"]),
@@ -252,7 +252,7 @@ fn intro_payload_override_style_is_not_reinterpreted_by_verbosity_unit() {
         ColorMode::Always,
         UnicodeMode::Always,
     );
-    state.runtime.ui.message_verbosity = MessageLevel::Trace;
+    state.runtime.ui.verbosity = MessageLevel::Trace;
 
     let payload = build_repl_intro_payload(
         repl_view(&state),
@@ -853,9 +853,9 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
         render_settings: RenderSettings::test_plain(OutputFormat::Json),
-        message_verbosity: MessageLevel::Success,
+        verbosity: MessageLevel::Success,
 
-        debug_verbosity: 0,
+        debug_level: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)
             .with_default_roots(false),

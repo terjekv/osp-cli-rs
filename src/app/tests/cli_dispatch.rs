@@ -75,8 +75,8 @@ fn invocation_ui_and_format_hints_overlay_runtime_defaults_unit() {
     assert_eq!(resolved.ui.render_settings.mode, RenderMode::Rich);
     assert_eq!(resolved.ui.render_settings.color, ColorMode::Always);
     assert_eq!(resolved.ui.render_settings.unicode, UnicodeMode::Never);
-    assert_eq!(resolved.ui.message_verbosity, MessageLevel::Info);
-    assert_eq!(resolved.ui.debug_verbosity, 3);
+    assert_eq!(resolved.ui.verbosity, MessageLevel::Info);
+    assert_eq!(resolved.ui.debug_level, 3);
     assert_eq!(resolved.plugin_provider.as_deref(), Some("beta"));
 
     let base = RenderSettings::test_plain(OutputFormat::Auto);

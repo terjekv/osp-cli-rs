@@ -281,18 +281,14 @@ pub(crate) fn run_cli_command(
             data,
         ));
         if let Some(report) = &result.failure_report {
-            if ui.message_verbosity >= MessageLevel::Info {
+            if ui.verbosity >= MessageLevel::Info {
                 sink.write_stderr(&format!(
                     "{}\n",
-                    super::host::render_report_message(
-                        report,
-                        ui.message_verbosity,
-                        &ui.render_settings
-                    )
-                    .trim_end()
+                    super::host::render_report_message(report, ui.verbosity, &ui.render_settings)
+                        .trim_end()
                 ));
             }
-            if ui.debug_verbosity >= 2
+            if ui.debug_level >= 2
                 && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
             {
                 sink.write_stderr(&format!("{backtrace}\n"));
@@ -301,7 +297,7 @@ pub(crate) fn run_cli_command(
         return Ok(result.exit_code);
     }
     if !result.messages.is_empty() {
-        emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
     let has_error_message = result
         .messages
@@ -314,16 +310,15 @@ pub(crate) fn run_cli_command(
         sink.write_stderr(&super::render_process_error(
             report,
             &ui.render_settings,
-            ui.message_verbosity,
+            ui.verbosity,
             false,
         ));
     }
     if let Some(report) = &result.failure_report
         && has_error_message
-        && ui.message_verbosity >= MessageLevel::Info
+        && ui.verbosity >= MessageLevel::Info
     {
-        let detail =
-            super::host::render_report_message(report, ui.message_verbosity, &ui.render_settings);
+        let detail = super::host::render_report_message(report, ui.verbosity, &ui.render_settings);
         let summary =
             super::host::render_report_message(report, MessageLevel::Success, &ui.render_settings);
         let extra = detail
@@ -334,7 +329,7 @@ pub(crate) fn run_cli_command(
             sink.write_stderr(&format!("{extra}\n"));
         }
     }
-    let show_failure_data = ui.message_verbosity >= MessageLevel::Info
+    let show_failure_data = ui.verbosity >= MessageLevel::Info
         && result.failure_report.as_ref().is_some_and(|report| {
             let empty = match &result.body {
                 CommandBody::None => true,
@@ -382,7 +377,7 @@ pub(crate) fn run_cli_command(
             }
         }
     }
-    if ui.debug_verbosity >= 2
+    if ui.debug_level >= 2
         && let Some(report) = &result.failure_report
         && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
     {
@@ -412,7 +407,7 @@ pub(crate) fn run_progress_command_with_ui(
         && sink.stderr_is_terminal()
         && !progress_output_is_empty(output);
     if !result.messages.is_empty() && !framed {
-        emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
     if progress_output_is_empty(output) {
         return Ok(());
@@ -449,8 +444,7 @@ pub(crate) fn run_progress_command_with_ui(
         rendered.insert_str(
             0,
             &crate::ui::render_messages(&result.messages, &{
-                let mut request =
-                    crate::ui::MessageRequest::new(&ui.render_settings, ui.message_verbosity);
+                let mut request = crate::ui::MessageRequest::new(&ui.render_settings, ui.verbosity);
                 request.layout = crate::ui::messages::message_layout_from_config(config);
                 request
             }),
@@ -554,7 +548,7 @@ fn maybe_copy_output(
     {
         let mut messages = MessageBuffer::default();
         messages.warning(format!("clipboard copy failed: {err}"));
-        emit_messages_for_ui(config, ui, &messages, ui.message_verbosity, sink);
+        emit_messages_for_ui(config, ui, &messages, ui.verbosity, sink);
     }
 }
 
@@ -695,11 +689,7 @@ pub(crate) fn render_repl_command(
         run_cli_command(config, ui, &result, sink)?;
         if let Some(report) = result.failure_report.take() {
             if ui.render_settings.format != OutputFormat::Json
-                && super::host::has_report_detail(
-                    &report,
-                    ui.message_verbosity,
-                    &ui.render_settings,
-                )
+                && super::host::has_report_detail(&report, ui.verbosity, &ui.render_settings)
             {
                 sink.write_stderr("More: rerun with -v, or run `doctor last -v`\n");
             }
@@ -712,7 +702,7 @@ pub(crate) fn render_repl_command(
         return Ok(String::new());
     }
     if !result.messages.is_empty() {
-        emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
     let saved = result.saved();
     let context = match &result.body {

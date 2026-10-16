@@ -72,15 +72,15 @@ impl FileLoggingConfig {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DeveloperLoggingConfig {
-    pub debug_count: u8,
+    pub debug_level: u8,
     pub file: Option<FileLoggingConfig>,
 }
 
 impl DeveloperLoggingConfig {
     /// Creates developer logging settings with stderr verbosity only.
-    pub fn new(debug_count: u8) -> Self {
+    pub fn new(debug_level: u8) -> Self {
         Self {
-            debug_count,
+            debug_level,
             file: None,
         }
     }
@@ -190,13 +190,13 @@ impl LoggingState {
         };
 
         let use_ansi = std::io::stderr().is_terminal();
-        let stderr_level = Arc::new(AtomicU8::new(config.debug_count));
+        let stderr_level = Arc::new(AtomicU8::new(config.debug_level));
         let level = stderr_level.clone();
         let stderr_filter = tracing_subscriber::filter::filter_fn(move |metadata| {
             let current = STDERR_OVERRIDE
                 .get()
                 .unwrap_or_else(|| level.load(Ordering::Relaxed));
-            metadata.level() <= &map_debug_count(current)
+            metadata.level() <= &map_debug_level(current)
         })
         .with_max_level_hint(tracing::Level::TRACE);
         let stderr_layer = fmt::layer()
@@ -220,7 +220,7 @@ impl LoggingState {
             .with(file_layer)
             .try_init()
         {
-            if config.debug_count >= 2 {
+            if config.debug_level >= 2 {
                 eprintln!("logging already initialized: {err}");
             }
             return None;
@@ -235,7 +235,7 @@ impl LoggingState {
 
     fn apply(&self, config: &DeveloperLoggingConfig) {
         self.stderr_level
-            .store(config.debug_count, Ordering::Relaxed);
+            .store(config.debug_level, Ordering::Relaxed);
 
         let file_level = match self.file_writer.configure(config.file.as_ref()) {
             Ok(level) => level,
@@ -247,7 +247,7 @@ impl LoggingState {
         };
 
         if let Err(err) = self.file_handle.reload(file_level)
-            && config.debug_count >= 2
+            && config.debug_level >= 2
         {
             eprintln!("failed to reload file logging: {err}");
         }
@@ -336,8 +336,8 @@ fn split_file_path(path: &Path) -> Result<(PathBuf, String), String> {
     Ok((directory, file_name))
 }
 
-fn map_debug_count(debug_count: u8) -> LevelFilter {
-    match debug_count {
+fn map_debug_level(debug_level: u8) -> LevelFilter {
+    match debug_level {
         0 => LevelFilter::WARN,
         1 => LevelFilter::INFO,
         2 => LevelFilter::DEBUG,
@@ -348,7 +348,7 @@ fn map_debug_count(debug_count: u8) -> LevelFilter {
 #[cfg(test)]
 mod tests {
     use super::{
-        DynamicFileWriter, bootstrap_logging_config, map_debug_count, open_log_file,
+        DynamicFileWriter, bootstrap_logging_config, map_debug_level, open_log_file,
         parse_level_filter, split_file_path,
     };
     use std::ffi::OsString;
@@ -365,7 +365,7 @@ mod tests {
             (3, LevelFilter::TRACE),
             (9, LevelFilter::TRACE),
         ] {
-            assert_eq!(map_debug_count(count), expected);
+            assert_eq!(map_debug_level(count), expected);
         }
 
         for (value, expected) in [
@@ -387,7 +387,7 @@ mod tests {
             OsString::from("--debug"),
             OsString::from("list"),
         ]);
-        assert_eq!(counted.debug_count, 3);
+        assert_eq!(counted.debug_level, 3);
         assert!(counted.file.is_none());
 
         let stopped = bootstrap_logging_config(&[
@@ -397,14 +397,14 @@ mod tests {
             OsString::from("--debug"),
             OsString::from("-dd"),
         ]);
-        assert_eq!(stopped.debug_count, 1);
+        assert_eq!(stopped.debug_level, 1);
 
         let mixed = bootstrap_logging_config(&[
             OsString::from("osp"),
             OsString::from("-vqdd"),
             OsString::from("doctor"),
         ]);
-        assert_eq!(mixed.debug_count, 2);
+        assert_eq!(mixed.debug_level, 2);
     }
 
     #[cfg_attr(miri, ignore = "file logging filesystem integration test")]

@@ -190,8 +190,8 @@ fn plugin_env_issue_text(entry: &crate::plugin::config::PluginConfigEntry) -> Op
 
 fn runtime_hints(context: &RuntimeContext, active_profile: &str, ui: &UiState) -> RuntimeHints {
     RuntimeHints::new(
-        ui.message_verbosity,
-        ui.debug_verbosity.min(3),
+        ui.verbosity,
+        ui.debug_level.min(3),
         ui.render_settings.format,
         ui.render_settings.color,
         ui.render_settings.unicode,

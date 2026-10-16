@@ -21,8 +21,8 @@ use crate::ui::theme_catalog::ThemeCatalog;
 
 use super::{
     AppSession, LaunchContext, RuntimeContext, UiState, build_logging_config, build_render_runtime,
-    debug_verbosity_from_config, message_verbosity_from_config, plugin_path_discovery_enabled,
-    plugin_process_timeout, resolve_known_theme_name,
+    debug_level_from_config, plugin_path_discovery_enabled, plugin_process_timeout,
+    resolve_known_theme_name, verbosity_from_config,
 };
 
 /// Render-settings baseline to use when deriving host-facing UI state.
@@ -158,8 +158,8 @@ pub(crate) fn derive_ui_state(
 
     Ok(UiState::new(
         render_settings,
-        message_verbosity_from_config(config),
-        debug_verbosity_from_config(config),
+        verbosity_from_config(config),
+        debug_level_from_config(config),
     ))
 }
 
@@ -187,10 +187,10 @@ pub(crate) fn build_plugin_manager(
 /// Applies side effects associated with an already-derived runtime snapshot.
 pub(crate) fn apply_runtime_side_effects(
     config: &ResolvedConfig,
-    debug_verbosity: u8,
+    debug_level: u8,
     themes: &ThemeCatalog,
 ) {
-    super::logging::init_developer_logging(build_logging_config(config, debug_verbosity));
+    super::logging::init_developer_logging(build_logging_config(config, debug_level));
     crate::ui::theme_catalog::log_theme_issues(&themes.issues);
 }
 
@@ -284,7 +284,7 @@ mod tests {
         )
         .expect("host inputs should derive");
 
-        assert_eq!(derived.ui.debug_verbosity, 0);
+        assert_eq!(derived.ui.debug_level, 0);
         assert_eq!(derived.plugins.process_timeout().as_millis(), 42,);
         assert!(derived.default_session.history_enabled);
     }

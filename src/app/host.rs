@@ -85,16 +85,16 @@ struct PreparedHostRun {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ErrorDisplaySettings {
-    pub(crate) message_verbosity: crate::ui::messages::MessageLevel,
-    pub(crate) debug_verbosity: u8,
+    pub(crate) verbosity: crate::ui::messages::MessageLevel,
+    pub(crate) debug_level: u8,
     pub(crate) render_settings: RenderSettings,
 }
 
 impl From<&UiState> for ErrorDisplaySettings {
     fn from(ui: &UiState) -> Self {
         Self {
-            message_verbosity: ui.message_verbosity,
-            debug_verbosity: ui.debug_verbosity,
+            verbosity: ui.verbosity,
+            debug_level: ui.debug_level,
             render_settings: ui.render_settings.clone(),
         }
     }
@@ -628,11 +628,11 @@ fn prepare_host_run(
     );
     super::assembly::apply_runtime_side_effects(
         state.runtime.config.resolved(),
-        invocation_ui.ui.debug_verbosity,
+        invocation_ui.ui.debug_level,
         &state.runtime.themes,
     );
     tracing::debug!(
-        debug_count = invocation_ui.ui.debug_verbosity,
+        debug_level = invocation_ui.ui.debug_level,
         "developer logging initialized"
     );
     tracing::info!(
@@ -700,11 +700,11 @@ pub(crate) fn resolve_invocation_ui(
         ui: UiState::new(
             render_settings,
             crate::ui::messages::adjust_verbosity(
-                ui.message_verbosity,
+                ui.verbosity,
                 invocation.verbose,
                 invocation.quiet,
             ),
-            ui.debug_verbosity.saturating_add(invocation.debug).min(3),
+            ui.debug_level.saturating_add(invocation.debug).min(3),
         ),
         plugin_provider: invocation.plugin_provider.clone(),
         help_level: help_level(config, invocation.verbose, invocation.quiet),

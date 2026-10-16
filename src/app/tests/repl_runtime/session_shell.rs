@@ -2,9 +2,9 @@
 fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
     let mut state = make_test_state(Vec::new());
     let history = make_test_history(&mut state);
-    let original_message = state.runtime.ui.message_verbosity;
-    let original_error_detail = state.runtime.ui.message_verbosity;
-    let original_debug = state.runtime.ui.debug_verbosity;
+    let original_message = state.runtime.ui.verbosity;
+    let original_error_detail = state.runtime.ui.verbosity;
+    let original_debug = state.runtime.ui.debug_level;
 
     repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -13,9 +13,9 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         &history,
         "-q config get missing.key", None,).map(|executed| executed.result)
     .expect("quiet config get should complete");
-    assert_eq!(state.runtime.ui.message_verbosity, original_message);
-    assert_eq!(state.runtime.ui.message_verbosity, original_error_detail);
-    assert_eq!(state.runtime.ui.debug_verbosity, original_debug);
+    assert_eq!(state.runtime.ui.verbosity, original_message);
+    assert_eq!(state.runtime.ui.verbosity, original_error_detail);
+    assert_eq!(state.runtime.ui.debug_level, original_debug);
 
     repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
@@ -24,9 +24,9 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         &history,
         "-v doctor last", None,).map(|executed| executed.result)
     .expect("doctor last with verbosity override should complete");
-    assert_eq!(state.runtime.ui.message_verbosity, original_message);
-    assert_eq!(state.runtime.ui.message_verbosity, original_error_detail);
-    assert_eq!(state.runtime.ui.debug_verbosity, original_debug);
+    assert_eq!(state.runtime.ui.verbosity, original_message);
+    assert_eq!(state.runtime.ui.verbosity, original_error_detail);
+    assert_eq!(state.runtime.ui.debug_level, original_debug);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         "missing", Some(&mut sink),)
     .expect("failure should render through the sink");
     let err_text = &sink.stderr;
-    assert!(err_text.contains("unknown command `missing`"));
+    assert!(err_text.contains("unknown command missing"));
 
     let last = state
         .last_repl_failure()

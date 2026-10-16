@@ -512,9 +512,9 @@ fn make_state_with_plugins(plugins: crate::plugin::PluginManager) -> AppState {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
         render_settings: settings,
-        message_verbosity: MessageLevel::Success,
+        verbosity: MessageLevel::Success,
 
-        debug_verbosity: 0,
+        debug_level: 0,
         plugins,
         native_commands: crate::native::NativeCommandRegistry::default(),
         themes: crate::ui::theme_catalog::ThemeCatalog::default(),
@@ -628,7 +628,7 @@ fn staged_repl_line_validation_rejects_invalid_invocations_before_pipeline_execu
 #[test]
 fn repl_dispatch_and_classification_cover_representative_line_categories_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
-    state.runtime.ui.debug_verbosity = 1;
+    state.runtime.ui.debug_level = 1;
     let history = test_history();
 
     assert!(matches!(
@@ -740,7 +740,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
 fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    state.runtime.ui.debug_verbosity = 1;
+    state.runtime.ui.debug_level = 1;
     let history = test_history();
 
     let mut sink = crate::app::BufferedUiSink::default();

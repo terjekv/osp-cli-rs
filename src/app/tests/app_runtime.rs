@@ -528,7 +528,7 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
 }
 
 #[test]
-fn bootstrap_message_verbosity_handles_non_utf8_short_flags_and_double_dash_unit() {
+fn bootstrap_verbosity_handles_non_utf8_short_flags_and_double_dash_unit() {
     let mut args = vec![
         OsString::from("osp"),
         OsString::from("--verbose"),
@@ -724,8 +724,8 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     .with_native_commands(test_native_registry())
     .build();
 
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.session.prompt_prefix, "osp-dev");
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
@@ -742,7 +742,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     assert!(state.clients.native_commands().command("ldap").is_some());
 
     let config = test_config(&[
-        ("ui.message.verbosity", "trace"),
+        ("ui.verbosity", "trace"),
         ("debug.level", "2"),
         ("theme.name", "dracula"),
     ]);
@@ -753,14 +753,14 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     );
     let ui = crate::app::UiState::from_resolved_config(&context, &config)
         .expect("ui state should derive from resolved config");
-    assert_eq!(ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(ui.debug_verbosity, 2);
+    assert_eq!(ui.verbosity, MessageLevel::Trace);
+    assert_eq!(ui.debug_level, 2);
     assert_eq!(ui.render_settings.theme_name, "dracula");
 
     let state = crate::app::AppState::from_resolved_config(context, config)
         .expect("app state should derive from resolved config");
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.runtime.ui.render_settings.theme_name, "dracula");
     assert!(state.clients.plugins().explicit_dirs().is_empty());
 
@@ -779,7 +779,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
 #[test]
 fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit() {
     let config = test_config(&[
-        ("ui.message.verbosity", "trace"),
+        ("ui.verbosity", "trace"),
         ("debug.level", "2"),
         ("theme.name", "dracula"),
     ]);
@@ -804,8 +804,8 @@ fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit(
         .with_launch(launch)
         .build();
 
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.runtime.ui.render_settings.theme_name, "dracula");
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
@@ -1046,7 +1046,7 @@ fn exit_code_classification_reserves_specific_codes_for_usage_unit() {
         assert_eq!(classify_exit_code(&clap_report), EXIT_CODE_USAGE);
 
         let mut invalid_session = ConfigLayer::default();
-        invalid_session.set("ui.message.verbosity", "definitely-invalid");
+        invalid_session.set("ui.verbosity", "definitely-invalid");
         let config_report = super::resolve_runtime_config(
             RuntimeConfigRequest::new(None, Some("cli"))
                 .with_runtime_load(crate::config::RuntimeLoadOptions::defaults_only())

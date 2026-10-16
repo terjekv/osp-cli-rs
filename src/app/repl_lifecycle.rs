@@ -20,7 +20,7 @@ pub(crate) fn rebuild_repl_parts(
         ReplStateRebuilder::capture(runtime, session, clients).rebuild()?;
     super::assembly::apply_runtime_side_effects(
         runtime.config.resolved(),
-        runtime.ui.debug_verbosity,
+        runtime.ui.debug_level,
         &runtime.themes,
     );
     Ok((runtime, session, clients))

@@ -72,13 +72,13 @@ enum ReplLinePlan {
 #[derive(Debug, Clone, Copy)]
 enum ReplTimingPlan {
     Flat {
-        debug_verbosity: u8,
+        debug_level: u8,
     },
     ParseOnly {
-        debug_verbosity: u8,
+        debug_level: u8,
     },
     Invocation {
-        debug_verbosity: u8,
+        debug_level: u8,
         parse_finished: Instant,
         execute_finished: Instant,
     },
@@ -91,7 +91,7 @@ pub(crate) struct ExecutedReplLine {
 }
 
 impl ExecutedReplLine {
-    fn flat(result: ReplResult, debug_verbosity: u8) -> Self {
+    fn flat(result: ReplResult, debug_level: u8) -> Self {
         let exit_code = match result {
             ReplResult::Exit(code) => code,
             _ => 0,
@@ -99,22 +99,22 @@ impl ExecutedReplLine {
         Self {
             result,
             exit_code,
-            timing: ReplTimingPlan::Flat { debug_verbosity },
+            timing: ReplTimingPlan::Flat { debug_level },
         }
     }
 
-    fn parse_only(result: ReplResult, debug_verbosity: u8) -> Self {
+    fn parse_only(result: ReplResult, debug_level: u8) -> Self {
         Self {
             result,
             exit_code: 0,
-            timing: ReplTimingPlan::ParseOnly { debug_verbosity },
+            timing: ReplTimingPlan::ParseOnly { debug_level },
         }
     }
 
     fn invocation(
         result: ReplResult,
         exit_code: i32,
-        debug_verbosity: u8,
+        debug_level: u8,
         parse_finished: Instant,
         execute_finished: Instant,
     ) -> Self {
@@ -122,7 +122,7 @@ impl ExecutedReplLine {
             result,
             exit_code,
             timing: ReplTimingPlan::Invocation {
-                debug_verbosity,
+                debug_level,
                 parse_finished,
                 execute_finished,
             },
@@ -188,7 +188,7 @@ pub(crate) fn execute_repl_plugin_line(
                     sink.write_stderr(&format!("{expanded}\n"));
                     resolved = expanded;
                 }
-                result => return Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity)),
+                result => return Ok(ExecutedReplLine::flat(result, runtime.ui.debug_level)),
             }
         }
         // Alias expansion needs the live execution config, which the generic
@@ -230,11 +230,9 @@ pub(crate) fn execute_repl_plugin_line(
     match execution {
         Ok(executed) => {
             let debug = match executed.timing {
-                ReplTimingPlan::Flat { debug_verbosity }
-                | ReplTimingPlan::ParseOnly { debug_verbosity }
-                | ReplTimingPlan::Invocation {
-                    debug_verbosity, ..
-                } => debug_verbosity,
+                ReplTimingPlan::Flat { debug_level }
+                | ReplTimingPlan::ParseOnly { debug_level }
+                | ReplTimingPlan::Invocation { debug_level, .. } => debug_level,
             };
             let _logging = crate::app::logging::override_stderr_level(debug);
             tracing::info!(target: "osp", exit_code = executed.exit_code,
@@ -263,37 +261,32 @@ pub(crate) fn execute_repl_plugin_line(
                 settings.clone(),
             ));
             let ui = &settings;
-            if ui.debug_verbosity > 0 {
-                session.record_prompt_timing(ui.debug_verbosity, started.elapsed(), None, None, None);
+            if ui.debug_level > 0 {
+                session.record_prompt_timing(ui.debug_level, started.elapsed(), None, None, None);
             }
-            let _logging = crate::app::logging::override_stderr_level(ui.debug_verbosity);
+            let _logging = crate::app::logging::override_stderr_level(ui.debug_level);
             let plain_settings = ui.render_settings.plain_copy_settings();
             let remember = !is_repl_bang_request(&resolved)
                 && !is_doctor_request(&resolved, runtime.config.resolved());
             let more = remember
-                && crate::app::host::has_report_detail(&err, ui.message_verbosity, &plain_settings);
+                && crate::app::host::has_report_detail(&err, ui.verbosity, &plain_settings);
             if remember {
                 session.record_failure_report(&resolved, err.clone(), plain_settings);
             }
-            let rendered = crate::app::render_process_error(
-                &err,
-                &ui.render_settings,
-                ui.message_verbosity,
-                more,
-            );
+            let rendered =
+                crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&rendered);
-                if ui.message_verbosity >= MessageLevel::Info {
+                if ui.verbosity >= MessageLevel::Info {
                     sink.write_stderr(&format!(
                         "{}\n",
-                        render_report_message(&err, ui.message_verbosity, &ui.render_settings)
-                            .trim_end()
+                        render_report_message(&err, ui.verbosity, &ui.render_settings).trim_end()
                     ));
                 }
             } else {
                 sink.write_stderr(&rendered);
             }
-            if ui.debug_verbosity >= 2
+            if ui.debug_level >= 2
                 && let Some(backtrace) =
                     crate::app::host::render_backtrace(&err, &ui.render_settings)
             {
@@ -301,7 +294,7 @@ pub(crate) fn execute_repl_plugin_line(
             }
             let exit_code = crate::app::classify_exit_code(&err);
             tracing::info!(target: "osp", exit_code, elapsed_ms = started.elapsed().as_millis(), "finished");
-            let mut executed = ExecutedReplLine::flat(ReplResult::Continue, ui.debug_verbosity);
+            let mut executed = ExecutedReplLine::flat(ReplResult::Continue, ui.debug_level);
             executed.exit_code = exit_code;
             Ok(executed)
         }
@@ -437,9 +430,9 @@ fn execute_repl_line_plan(
                         &scanned.invocation,
                     )
                     .ui
-                    .debug_verbosity
+                    .debug_level
                 })
-                .unwrap_or(runtime.ui.debug_verbosity);
+                .unwrap_or(runtime.ui.debug_level);
             let _logging = crate::app::logging::override_stderr_level(debug_level);
             let result =
                 execute_repl_builtin(runtime, session, clients, history, &raw, builtin, sink)?;
@@ -447,13 +440,13 @@ fn execute_repl_line_plan(
         }
         ReplLinePlan::Blank => Ok(ExecutedReplLine::flat(
             ReplResult::Continue,
-            runtime.ui.debug_verbosity,
+            runtime.ui.debug_level,
         )),
         ReplLinePlan::DslHelp { help } => {
             *accepted = true;
             Ok(ExecutedReplLine::flat(
                 ReplResult::Print(help),
-                runtime.ui.debug_verbosity,
+                runtime.ui.debug_level,
             ))
         }
         ReplLinePlan::Shortcut { parsed, shortcut } => {
@@ -463,7 +456,7 @@ fn execute_repl_line_plan(
                 | ReplShortcutPlan::CurrentShellHelp { invocation, .. }
                 | ReplShortcutPlan::ShellEntry { invocation, .. } => invocation,
             };
-            let debug_level = invocation.ui.debug_verbosity;
+            let debug_level = invocation.ui.debug_level;
             let error_display = crate::app::host::ErrorDisplaySettings::from(&invocation.ui);
             let _logging = crate::app::logging::override_stderr_level(debug_level);
             let result =
@@ -476,7 +469,7 @@ fn execute_repl_line_plan(
                 ParsedReplDispatch::Help { effective, .. } => &effective.ui,
                 ParsedReplDispatch::Invocation(invocation) => &invocation.effective.ui,
             };
-            let _logging = crate::app::logging::override_stderr_level(ui.debug_verbosity);
+            let _logging = crate::app::logging::override_stderr_level(ui.debug_level);
             let error_display = crate::app::host::ErrorDisplaySettings::from(ui);
             execute_repl_command_dispatch(
                 ReplExecutionContext {
@@ -499,18 +492,18 @@ fn execute_repl_line_plan(
 fn record_repl_timing(session: &AppSession, started: Instant, timing: ReplTimingPlan) {
     let finished = Instant::now();
     match timing {
-        ReplTimingPlan::Flat { debug_verbosity } => {
+        ReplTimingPlan::Flat { debug_level } => {
             session.record_prompt_timing(
-                debug_verbosity,
+                debug_level,
                 finished.saturating_duration_since(started),
                 None,
                 None,
                 None,
             );
         }
-        ReplTimingPlan::ParseOnly { debug_verbosity } => {
+        ReplTimingPlan::ParseOnly { debug_level } => {
             session.record_prompt_timing(
-                debug_verbosity,
+                debug_level,
                 finished.saturating_duration_since(started),
                 Some(finished.saturating_duration_since(started)),
                 None,
@@ -518,12 +511,12 @@ fn record_repl_timing(session: &AppSession, started: Instant, timing: ReplTiming
             );
         }
         ReplTimingPlan::Invocation {
-            debug_verbosity,
+            debug_level,
             parse_finished,
             execute_finished,
         } => {
             session.record_prompt_timing(
-                debug_verbosity,
+                debug_level,
                 finished.saturating_duration_since(started),
                 Some(parse_finished.saturating_duration_since(started)),
                 Some(execute_finished.saturating_duration_since(parse_finished)),

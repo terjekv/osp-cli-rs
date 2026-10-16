@@ -93,10 +93,10 @@ fn verbose_usage_failure_shows_parse_context_without_terse_hint_contract() {
 #[test]
 fn forensic_config_failure_renders_full_host_context_contract() {
     let output = run_osp(
-        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
-ui.message.verbosity = "definitely-invalid"
+ui.verbosity = "definitely-invalid"
 "#,
         ),
     );
@@ -107,7 +107,7 @@ ui.message.verbosity = "definitely-invalid"
     assert!(normalized.contains("failed to resolve config with session layer"));
     assert!(normalized.contains("config resolution failed"));
     assert!(
-        normalized.contains("invalid value for key ui.message.verbosity"),
+        normalized.contains("invalid value for key ui.verbosity"),
         "{normalized}"
     );
     assert!(!stderr.contains("Hint:"));
@@ -116,7 +116,7 @@ ui.message.verbosity = "definitely-invalid"
 #[test]
 fn forensic_runtime_failure_uses_configured_color_and_stacktrace_contract() {
     let output = run_osp(
-        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
 ui.color.mode = "always"
@@ -137,7 +137,7 @@ theme.name = "missing-theme"
 #[test]
 fn debug_runtime_failure_shows_context_without_stacktrace_contract() {
     let output = run_osp(
-        &["-vv", "config", "get", "ui.message.verbosity"],
+        &["-vv", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
 theme.name = "missing-theme"
@@ -171,7 +171,7 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
 #[test]
 fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
     let output = run_osp(
-        &["-vv", "config", "get", "ui.message.verbosity"],
+        &["-vv", "config", "get", "ui.verbosity"],
         Some("not = [valid\n"),
     );
 
@@ -187,7 +187,7 @@ fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
 #[test]
 fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let output = run_osp(
-        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some("not = [valid\n"),
     );
 

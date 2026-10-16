@@ -333,7 +333,7 @@ pub(super) fn execute_repl_command_dispatch(
             )?;
             Ok(super::ExecutedReplLine::parse_only(
                 ReplResult::Print(rendered),
-                effective.ui.debug_verbosity,
+                effective.ui.debug_level,
             ))
         }
         ParsedReplDispatch::Invocation(invocation) => {
@@ -369,7 +369,7 @@ pub(super) fn execute_repl_command_dispatch(
                     side_effects.show_intro_on_reload,
                 ),
                 exit_code,
-                effective.ui.debug_verbosity,
+                effective.ui.debug_level,
                 parse_finished,
                 execute_finished,
             ))

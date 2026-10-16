@@ -11,7 +11,7 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
         state
             .session
             .config_overrides
-            .set("ui.message.verbosity", "trace");
+            .set("ui.verbosity", "trace");
         state.session.config_overrides.set("debug.level", 2i64);
         state.session.config_overrides.set("ui.format", "json");
         state.session.config_overrides.set("theme.name", "dracula");
@@ -26,8 +26,8 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
             next.runtime.config.resolved().get_string("user.name"),
             Some("launch-user")
         );
-        assert_eq!(next.runtime.ui.message_verbosity, MessageLevel::Trace);
-        assert_eq!(next.runtime.ui.debug_verbosity, 2);
+        assert_eq!(next.runtime.ui.verbosity, MessageLevel::Trace);
+        assert_eq!(next.runtime.ui.debug_level, 2);
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Json);
         assert_eq!(next.runtime.ui.render_settings.theme_name, "dracula");
         assert_eq!(next.session.prompt_prefix, "osp-dev");

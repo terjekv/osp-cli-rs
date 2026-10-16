@@ -228,7 +228,7 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("none")),
             },
             BuiltinKey {
-                key: "ui.message.verbosity",
+                key: "ui.verbosity",
                 schema: SchemaEntry::string()
                     .with_allowed_values(
                         crate::core::MessageLevel::ALL

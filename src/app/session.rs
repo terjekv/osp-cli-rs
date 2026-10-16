@@ -580,8 +580,8 @@ pub(crate) struct AppStateInit {
     pub context: RuntimeContext,
     pub config: crate::config::ResolvedConfig,
     pub render_settings: crate::ui::RenderSettings,
-    pub message_verbosity: crate::ui::messages::MessageLevel,
-    pub debug_verbosity: u8,
+    pub verbosity: crate::ui::messages::MessageLevel,
+    pub debug_level: u8,
     pub plugins: crate::plugin::PluginManager,
     pub native_commands: NativeCommandRegistry,
     pub themes: crate::ui::theme_catalog::ThemeCatalog,
@@ -603,11 +603,7 @@ impl AppStateParts {
         }
         let clients = AppClients::new(init.plugins, init.native_commands);
         let config = crate::app::ConfigState::new(init.config);
-        let ui = crate::app::UiState::new(
-            init.render_settings,
-            init.message_verbosity,
-            init.debug_verbosity,
-        );
+        let ui = crate::app::UiState::new(init.render_settings, init.verbosity, init.debug_level);
         let auth = {
             let _phase =
                 tracing::info_span!(target: "osp_startup", "auth policy catalog setup").entered();
@@ -650,7 +646,7 @@ impl AppState {
     /// defaults.set("profile.default", "default");
     /// defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
     /// defaults.set("theme.path", Vec::<String>::new());
-    /// defaults.set("ui.message.verbosity", "warning");
+    /// defaults.set("ui.verbosity", "warning");
     ///
     /// let mut resolver = ConfigResolver::default();
     /// resolver.set_defaults(defaults);
@@ -663,7 +659,7 @@ impl AppState {
     /// .unwrap();
     ///
     /// assert_eq!(state.runtime.config_state().resolved().active_profile(), "default");
-    /// assert_eq!(state.runtime.ui().message_verbosity.as_str(), "warning");
+    /// assert_eq!(state.runtime.ui().verbosity.as_str(), "warning");
     /// assert!(state.clients.plugins().explicit_dirs().is_empty());
     /// ```
     pub fn from_resolved_config(
@@ -899,8 +895,8 @@ impl AppStateBuilder {
 
         let crate::app::UiState {
             render_settings,
-            message_verbosity,
-            debug_verbosity,
+            verbosity,
+            debug_level,
             ..
         } = ui;
 
@@ -909,8 +905,8 @@ impl AppStateBuilder {
                 context,
                 config,
                 render_settings,
-                message_verbosity,
-                debug_verbosity,
+                verbosity,
+                debug_level,
                 plugins,
                 native_commands,
                 themes,

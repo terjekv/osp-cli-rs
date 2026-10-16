@@ -56,7 +56,7 @@ pub(crate) fn run_plugin_repl(state: &mut AppState) -> Result<i32> {
     start_native_completion_refreshes(&state.runtime, &state.clients);
     let mut loop_state = lifecycle::ReplLoopState::new(should_show_repl_intro(
         state.runtime.config.resolved(),
-        state.runtime.ui.message_verbosity,
+        state.runtime.ui.verbosity,
     ));
     let mut sink = StdIoUiSink;
 
@@ -96,7 +96,7 @@ fn run_repl_cycle(
     cycle: lifecycle::ReplCycle,
 ) -> Result<crate::repl::ReplResult> {
     state.session.seed_startup_prompt_timing(
-        state.runtime.ui.debug_verbosity,
+        state.runtime.ui.debug_level,
         state.runtime.launch.startup_started_at.elapsed(),
     );
 
@@ -301,9 +301,9 @@ mod tests {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config,
             render_settings: settings,
-            message_verbosity: MessageLevel::Success,
+            verbosity: MessageLevel::Success,
 
-            debug_verbosity: 0,
+            debug_level: 0,
             plugins: crate::plugin::PluginManager::new(Vec::new())
                 .with_bundled_roots(false)
                 .with_default_roots(false),

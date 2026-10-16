@@ -269,7 +269,7 @@ fn render_last_failure_document(
             "detail": last.detail(MessageLevel::Info),
         });
         let mut output = CommandOutput::json(payload);
-        if ui.debug_verbosity >= 2
+        if ui.debug_level >= 2
             && let Some(backtrace) = last.backtrace()
         {
             output.stderr_text = format!("{backtrace}\n");
@@ -284,8 +284,8 @@ fn render_last_failure_document(
     if let Some(action) = action {
         out.push_str(&format!("  Action:  {action}\n"));
     }
-    let detail = last.detail(ui.message_verbosity);
-    if ui.message_verbosity >= MessageLevel::Info
+    let detail = last.detail(ui.verbosity);
+    if ui.verbosity >= MessageLevel::Info
         && normalized_failure_detail(&detail) != normalized_failure_detail(&last.summary)
     {
         out.push('\n');
@@ -296,12 +296,12 @@ fn render_last_failure_document(
             out.push('\n');
         }
     }
-    if let Some(command) = next_failure_detail_command(ui.message_verbosity, last) {
+    if let Some(command) = next_failure_detail_command(ui.verbosity, last) {
         out.push('\n');
         out.push_str(&format!("More: run `{command}` for more detail.\n"));
     }
     let mut output = CommandOutput::text(out);
-    if ui.debug_verbosity >= 2
+    if ui.debug_level >= 2
         && let Some(backtrace) = last.backtrace()
     {
         output.stderr_text = format!("{backtrace}\n");
@@ -350,11 +350,11 @@ mod tests {
     use serde_json::Value;
     use std::path::PathBuf;
 
-    fn ui_state(format: OutputFormat, debug_verbosity: u8) -> UiState {
+    fn ui_state(format: OutputFormat, debug_level: u8) -> UiState {
         UiState::new(
             RenderSettings::test_plain(format),
             MessageLevel::Success,
-            debug_verbosity,
+            debug_level,
         )
     }
 

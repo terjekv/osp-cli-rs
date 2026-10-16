@@ -229,9 +229,9 @@ pub struct UiState {
     /// Render settings derived from the current config snapshot.
     pub render_settings: RenderSettings,
     /// Default message verbosity derived from the current runtime config.
-    pub message_verbosity: MessageLevel,
+    pub verbosity: MessageLevel,
     /// Numeric debug verbosity used for trace-style host output.
-    pub debug_verbosity: u8,
+    pub debug_level: u8,
 }
 
 impl UiState {
@@ -246,7 +246,7 @@ impl UiState {
     /// let mut defaults = ConfigLayer::default();
     /// defaults.set("profile.default", "default");
     /// defaults.set("theme.path", Vec::<String>::new());
-    /// defaults.set("ui.message.verbosity", "info");
+    /// defaults.set("ui.verbosity", "info");
     ///
     /// let mut resolver = ConfigResolver::default();
     /// resolver.set_defaults(defaults);
@@ -258,7 +258,7 @@ impl UiState {
     /// )
     /// .unwrap();
     ///
-    /// assert_eq!(ui.message_verbosity.as_str(), "info");
+    /// assert_eq!(ui.verbosity.as_str(), "info");
     /// assert_eq!(ui.render_settings.runtime.terminal.as_deref(), Some("xterm-256color"));
     /// ```
     pub fn from_resolved_config(
@@ -291,19 +291,15 @@ impl UiState {
     ///     2,
     /// );
     ///
-    /// assert_eq!(ui.message_verbosity, MessageLevel::Success);
-    /// assert_eq!(ui.debug_verbosity, 2);
+    /// assert_eq!(ui.verbosity, MessageLevel::Success);
+    /// assert_eq!(ui.debug_level, 2);
     /// ```
-    pub fn new(
-        render_settings: RenderSettings,
-        message_verbosity: MessageLevel,
-        debug_verbosity: u8,
-    ) -> Self {
+    pub fn new(render_settings: RenderSettings, verbosity: MessageLevel, debug_level: u8) -> Self {
         Self {
             render_settings,
-            message_verbosity,
+            verbosity,
 
-            debug_verbosity,
+            debug_level,
         }
     }
 }

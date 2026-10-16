@@ -448,9 +448,9 @@ mod tests {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config,
             render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            message_verbosity: MessageLevel::Success,
+            verbosity: MessageLevel::Success,
 
-            debug_verbosity: 0,
+            debug_level: 0,
             plugins,
             native_commands,
             themes: crate::ui::theme_catalog::ThemeCatalog::default(),
