@@ -68,14 +68,14 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         "missing", Some(&mut sink),)
     .expect("failure should render through the sink");
     let err_text = &sink.stderr;
-    assert!(err_text.contains("unknown command missing"));
+    assert!(err_text.contains("Unknown command 'missing'"));
 
     let last = state
         .last_repl_failure()
         .expect("last failure should be recorded");
     assert_eq!(last.command_line, "missing");
     assert!(!last.summary.trim().is_empty());
-    assert!(last.detail(crate::core::MessageLevel::Info).contains("unknown command `missing`"));
+    assert!(last.detail(crate::core::MessageLevel::Info).contains("Unknown command 'missing'"));
 
     state.runtime.ui.render_settings.format = OutputFormat::Json;
     let rendered = doctor_cmd::run_doctor_command(

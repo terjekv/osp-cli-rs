@@ -73,7 +73,7 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
         stdout.matches("rose-pine-moon").count() == 2,
         "source and recall should each execute the resolved config command; stdout:\n{stdout}"
     );
-    assert!(stderr.contains("Warning: input is not a terminal"));
+    assert!(stderr.contains("warning: Input is not a terminal"));
 
     let mut documents = Vec::new();
     let mut remaining = stdout.as_ref();
@@ -278,7 +278,7 @@ fn repl_basic_mode_exits_cleanly_on_immediate_eof() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("default> "));
-    assert!(stderr.contains("Warning: input is not a terminal"));
+    assert!(stderr.contains("warning: Input is not a terminal"));
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn repl_basic_mode_restarts_after_refresh_without_tty() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let prompt_count = stdout.matches("default> ").count();
-    let warning_count = stderr.matches("Warning: input is not a terminal").count();
+    let warning_count = stderr.matches("warning: Input is not a terminal").count();
 
     assert!(
         prompt_count >= 2,

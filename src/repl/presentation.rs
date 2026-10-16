@@ -84,6 +84,9 @@ pub(crate) fn intro_style_with_verbosity(
     style: ReplIntroStyle,
     verbosity: MessageLevel,
 ) -> ReplIntroStyle {
+    if style == ReplIntroStyle::None {
+        return style;
+    }
     let mut rank = match style {
         ReplIntroStyle::None => 0_i8,
         ReplIntroStyle::Minimal => 1,

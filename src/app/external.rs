@@ -373,88 +373,106 @@ fn run_native_invocation(
     guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CommandOutput> {
-    let name = input.command_path.as_str();
-    let args = input.args;
-    let invocation = input.invocation;
-    if input.elevation.is_elevated() && !command.supports_invocation_elevation() {
-        return Err(miette!(
-            "elevation prefix is unsupported for native command `{name}`"
-        ));
-    }
-    let input_path = crate::command_policy::CommandPath::new(
-        std::iter::once(name.to_string()).chain(args.iter().cloned()),
-    );
-    before_external_dispatch(&mut state.runtime, &input_path, "command")?;
-    let parsed = NativeParse::new(command, name, args)?;
-    let intent = NativeIntent::from_parse(&parsed);
-    before_external_execution(
-        &mut state.runtime,
-        &parsed.path,
-        intent.requirement,
-        "command",
-    )?;
-    let parsed = refresh_native_parse(
-        command,
-        &state.session.native_context,
-        args,
-        state.runtime.config.resolved(),
-        parsed,
-        &intent,
-        &invocation.ui.render_settings.runtime.command_scope,
-    )?;
-    state.runtime.auth.refresh_native_auth(&command.describe());
-    ensure_external_access(&state.runtime, &parsed.path, intent.requirement, "command")?;
-
-    if intent.render_help || parsed.render_help {
-        mark_repl_command_accepted(accepted);
-        if let Err(error) = &parsed.matches
-            && error.kind() == clap::error::ErrorKind::DisplayVersion
-        {
-            return Ok(CommandOutput::document(guide_help(&error.to_string())));
-        }
-        let tokens = std::iter::once(name.to_string())
-            .chain(parsed.args.iter().cloned())
-            .collect::<Vec<_>>();
-        let (document, _, _) = crate::cli::command_help_document(
-            state.runtime.auth.visible_help_command(parsed.grammar, &[]),
-            &tokens,
-            &invocation.ui.render_settings.runtime.command_scope,
-        );
-        return Ok(CommandOutput::document(document));
-    }
-    if let Err(error) = parsed.matches {
-        let mut selected = &parsed.grammar;
-        for segment in parsed.path.as_slice().iter().skip(1) {
-            if let Some(child) = selected.find_subcommand(segment) {
-                selected = child;
-            }
-        }
-        if selected.has_subcommands() || parsed.args.len() + 1 == parsed.path.as_slice().len() {
-            return Err(super::host::report_clap_error_with_context(
-                error,
-                crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
-                parsed.grammar,
-                std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
+    let diagnostics = crate::diagnostics::DiagnosticSink::default();
+    let _scope = diagnostics.enter();
+    let level = input.invocation.ui.verbosity;
+    let result: Result<CommandOutput> = (|| {
+        let name = input.command_path.as_str();
+        let args = input.args;
+        let invocation = input.invocation;
+        if input.elevation.is_elevated() && !command.supports_invocation_elevation() {
+            return Err(miette!(
+                "elevation prefix is unsupported for native command `{name}`"
             ));
         }
+        let input_path = crate::command_policy::CommandPath::new(
+            std::iter::once(name.to_string()).chain(args.iter().cloned()),
+        );
+        before_external_dispatch(&mut state.runtime, &input_path, "command")?;
+        let parsed = NativeParse::new(command, name, args)?;
+        let intent = NativeIntent::from_parse(&parsed);
+        before_external_execution(
+            &mut state.runtime,
+            &parsed.path,
+            intent.requirement,
+            "command",
+        )?;
+        let parsed = refresh_native_parse(
+            command,
+            &state.session.native_context,
+            args,
+            state.runtime.config.resolved(),
+            parsed,
+            &intent,
+            &invocation.ui.render_settings.runtime.command_scope,
+        )?;
+        state.runtime.auth.refresh_native_auth(&command.describe());
+        ensure_external_access(&state.runtime, &parsed.path, intent.requirement, "command")?;
+
+        if intent.render_help || parsed.render_help {
+            mark_repl_command_accepted(accepted);
+            if let Err(error) = &parsed.matches
+                && error.kind() == clap::error::ErrorKind::DisplayVersion
+            {
+                return Ok(CommandOutput::document(guide_help(&error.to_string())));
+            }
+            let tokens = std::iter::once(name.to_string())
+                .chain(parsed.args.iter().cloned())
+                .collect::<Vec<_>>();
+            let (document, _, _) = crate::cli::command_help_document(
+                state.runtime.auth.visible_help_command(parsed.grammar, &[]),
+                &tokens,
+                &invocation.ui.render_settings.runtime.command_scope,
+            );
+            return Ok(CommandOutput::document(document));
+        }
+        if let Err(error) = parsed.matches {
+            let mut selected = &parsed.grammar;
+            for segment in parsed.path.as_slice().iter().skip(1) {
+                if let Some(child) = selected.find_subcommand(segment) {
+                    selected = child;
+                }
+            }
+            if selected.has_subcommands() || parsed.args.len() + 1 == parsed.path.as_slice().len() {
+                return Err(super::host::report_clap_error_with_context(
+                    error,
+                    crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
+                    parsed.grammar,
+                    std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
+                ));
+            }
+        }
+        mark_repl_command_accepted(accepted);
+        run_native_command(
+            command,
+            &mut state.runtime,
+            &mut state.session,
+            NativeRunInput {
+                args: &parsed.args,
+                action: None,
+                stages: input.stages,
+                invocation,
+                command_path: parsed.path.as_slice().join(" "),
+                elevation: input.elevation,
+                progress_sink: input.progress_sink,
+            },
+            guide_help,
+            accepted,
+        )
+    })();
+    match result {
+        Ok(mut output) => {
+            output.retained_evidence = diagnostics
+                .render(crate::core::MessageLevel::Evidence, output.exit_code != 0)
+                .0;
+            output.diagnostics = diagnostics.render(level, output.exit_code != 0);
+            Ok(output)
+        }
+        Err(error) if super::host::classify_exit_code(&error) == super::host::EXIT_CODE_USAGE => {
+            Err(error)
+        }
+        Err(error) => Err(super::host::report_with_evidence(error, diagnostics)),
     }
-    mark_repl_command_accepted(accepted);
-    run_native_command(
-        command,
-        &mut state.runtime,
-        &mut state.session,
-        NativeRunInput {
-            args: &parsed.args,
-            action: None,
-            stages: input.stages,
-            invocation,
-            command_path: parsed.path.as_slice().join(" "),
-            elevation: input.elevation,
-            progress_sink: input.progress_sink,
-        },
-        guide_help,
-        accepted,
-    )
 }
 
 fn mark_repl_command_accepted(accepted: &mut Option<&mut bool>) {
@@ -587,8 +605,7 @@ fn run_native_command(
     guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CommandOutput> {
-    tracing::info!(target: "osp", command = %input.command_path,
-        args = ?input.args, handler = "native", "running command");
+    tracing::info!(target: "osp::diagnostic", "debug: Dispatch selected; handler=native:{}.", command.command().get_name());
     if input.action.is_none() {
         session.native_context.clear_pagination();
     }
@@ -608,6 +625,8 @@ fn run_native_command(
         pending: RefCell::new(None),
         last_draw: std::cell::Cell::new(None),
     });
+    let diagnostics = crate::diagnostics::DiagnosticSink::current().unwrap_or_default();
+    let _diagnostic_scope = diagnostics.enter();
     let mut context = NativeCommandContext::new(
         runtime.config.resolved(),
         runtime_hints_for_invocation(runtime, input.invocation),
@@ -621,6 +640,7 @@ fn run_native_command(
             .command_scope
             .clone(),
     )
+    .with_diagnostic_sink(&diagnostics)
     .with_invocation_elevation(input.elevation)
     .with_session_context(
         if input.action.is_some() {
@@ -660,38 +680,50 @@ fn run_native_command(
         renderer.clear();
     }
 
-    match execution? {
-        NativeCommandOutcome::Help(text) => {
-            let mut document = guide_help(&text);
-            let path = input
-                .command_path
-                .split_whitespace()
-                .map(str::to_string)
-                .collect::<Vec<_>>();
-            runtime.auth.filter_help_document(&mut document, &path);
-            Ok(CommandOutput::document(document))
-        }
-        NativeCommandOutcome::Exit(code) => Ok(CommandOutput::exit(code)),
-        NativeCommandOutcome::Response(response) => render_native_response_with_context(
-            *response,
-            input.stages,
-            session,
-            input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
-        ),
-        NativeCommandOutcome::ResponseWithExit {
-            response,
-            exit_code,
-        } => {
-            let mut result = render_native_response_with_context(
+    let mut output = match execution {
+        Ok(outcome) => match outcome {
+            NativeCommandOutcome::Help(text) => {
+                let mut document = guide_help(&text);
+                let path = input
+                    .command_path
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                runtime.auth.filter_help_document(&mut document, &path);
+                Ok(CommandOutput::document(document))
+            }
+            NativeCommandOutcome::Exit(code) => Ok(CommandOutput::exit(code)),
+            NativeCommandOutcome::Response(response) => render_native_response_with_context(
                 *response,
                 input.stages,
                 session,
                 input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
-            )?;
-            result.exit_code = exit_code;
-            Ok(result)
+            ),
+            NativeCommandOutcome::ResponseWithExit {
+                response,
+                exit_code,
+            } => {
+                let mut result = render_native_response_with_context(
+                    *response,
+                    input.stages,
+                    session,
+                    input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
+                )?;
+                result.exit_code = exit_code;
+                Ok(result)
+            }
+        },
+        Err(report) => {
+            let mut output = CommandOutput::exit(super::host::classify_exit_code(&report));
+            output.failure_report = Some(report);
+            Ok(output)
         }
-    }
+    }?;
+    output.retained_evidence = diagnostics
+        .render(crate::core::MessageLevel::Evidence, output.exit_code != 0)
+        .0;
+    output.diagnostics = diagnostics.render(input.invocation.ui.verbosity, output.exit_code != 0);
+    Ok(output)
 }
 
 struct NativeProgressRenderer<'config, 'sink> {
@@ -1617,8 +1649,8 @@ mod tests {
         )
         .expect_err("misspelled command should fail with a suggestion");
 
-        assert!(err.to_string().contains("unknown command `lpad`"));
-        assert!(err.to_string().contains("Try: use command `osp ldap`"));
+        assert!(err.to_string().contains("Unknown command 'lpad'"));
+        assert!(err.to_string().contains("hint: Did you mean osp ldap?"));
     }
 
     #[test]
@@ -1647,9 +1679,9 @@ mod tests {
         )
         .expect_err("nested auth should block native external dispatch");
 
-        assert!(err.to_string().contains("command `ldap user`"));
+        assert!(err.to_string().contains("command ldap user"));
         assert!(err.to_string().contains("requires authentication"));
-        assert!(err.to_string().contains("Try: authenticate"));
+        assert!(err.to_string().contains("hint: authenticate"));
     }
 
     #[test]
@@ -1672,7 +1704,7 @@ mod tests {
         )
         .expect_err("the canonical aliased child policy should deny execution");
 
-        assert!(err.to_string().contains("command `lookup user`"));
+        assert!(err.to_string().contains("command lookup user"));
         assert!(err.to_string().contains("requires authentication"));
     }
 

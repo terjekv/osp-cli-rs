@@ -222,11 +222,11 @@ fn warn_basic_input_once(reason: BasicInputReason) {
     }
     match reason {
         BasicInputReason::NotATerminal => {
-            eprintln!("Warning: input is not a terminal; using basic input mode.");
+            eprintln!("warning: Input is not a terminal; using basic input mode.");
         }
         BasicInputReason::CursorProbeUnsupported => {
             eprintln!(
-                "Warning: terminal does not support cursor position requests; using basic input mode."
+                "warning: Terminal does not support cursor position requests; using basic input mode."
             );
         }
         BasicInputReason::Explicit => {}

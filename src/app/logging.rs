@@ -27,7 +27,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::{self, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry;
@@ -141,19 +140,7 @@ where
         mut writer: fmt::format::Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> std::fmt::Result {
-        let level = STDERR_OVERRIDE
-            .get()
-            .unwrap_or_else(|| self.0.load(Ordering::Relaxed));
-        if level >= 2 {
-            return fmt::format().compact().format_event(context, writer, event);
-        }
-        fmt::time::SystemTime.format_time(&mut writer)?;
-        write!(
-            writer,
-            " {:>5} {}: ",
-            event.metadata().level(),
-            event.metadata().target()
-        )?;
+        let _ = &self.0;
         context.format_fields(writer.by_ref(), event)?;
         writeln!(writer)
     }
@@ -196,7 +183,7 @@ impl LoggingState {
             let current = STDERR_OVERRIDE
                 .get()
                 .unwrap_or_else(|| level.load(Ordering::Relaxed));
-            metadata.level() <= &map_debug_level(current)
+            metadata.target() == "osp::diagnostic" && metadata.level() <= &map_debug_level(current)
         })
         .with_max_level_hint(tracing::Level::TRACE);
         let stderr_layer = fmt::layer()
@@ -212,7 +199,10 @@ impl LoggingState {
             .with_target(true)
             .with_ansi(false)
             .compact()
-            .with_filter(file_filter);
+            .with_filter(file_filter)
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                matches!(metadata.target(), "osp::diagnostic" | "osp::evidence")
+            }));
 
         if let Err(err) = registry()
             .with(crate::startup_trace::layer())

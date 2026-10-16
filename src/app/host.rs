@@ -605,6 +605,8 @@ fn run(
         };
     }
 
+    tracing::info!(target: "osp::diagnostic", "debug: Command complete; exit={}; startup={} ms; dispatch={} ms.", result.as_ref().copied().unwrap_or(1), action_started.saturating_duration_since(run_started).as_millis(), action_started.elapsed().as_millis());
+    tracing::trace!(target: "osp::diagnostic", "trace: +{} ms dispatch.end; exit={}.", run_started.elapsed().as_millis(), result.as_ref().copied().unwrap_or(1));
     result.map_err(|err| report_with_invocation(err, ErrorDisplaySettings::from(&invocation_ui.ui)))
 }
 
@@ -668,6 +670,23 @@ fn prepare_host_run(
         "osp session initialized"
     );
 
+    tracing::info!(target: "osp::diagnostic", "debug: Startup complete; profile={}.", crate::diagnostics::safe_text(state.runtime.config.resolved().active_profile()));
+    if invocation_ui.ui.debug_level >= 2 {
+        let config = state.runtime.config.resolved();
+        if let Some(path) =
+            crate::config::RuntimeConfigPaths::discover_with(state.runtime.launch.runtime_load)
+                .config_file
+        {
+            tracing::debug!(target: "osp::diagnostic", "debug: Config loaded; source={}; profile={}.", crate::diagnostics::safe_text(&path.display().to_string()), crate::diagnostics::safe_text(config.active_profile()));
+        }
+        for key in ["ui.verbosity", "debug.level"] {
+            if let Some(entry) = config.values().get(key) {
+                tracing::debug!(target: "osp::diagnostic", "debug: Config selected; key={key}; source={}.", entry.source);
+            }
+        }
+    }
+    tracing::debug!(target: "osp::diagnostic", "debug: Command scope resolved; scope=root.");
+    tracing::trace!(target: "osp::diagnostic", "trace: +{} ms startup.end; terminal={}.", run_started.elapsed().as_millis(), state.runtime.context.terminal_kind().as_config_terminal());
     Ok(PreparedHostRun {
         state,
         dispatch,
