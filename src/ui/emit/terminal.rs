@@ -457,7 +457,9 @@ fn table_row_lines(
         .map(|line_index| {
             let line_cells = cell_lines
                 .iter()
-                .map(|lines| PreparedCell {
+                .enumerate()
+                .map(|(index, lines)| PreparedCell {
+                    command: cells.get(index).is_some_and(|cell| cell.command),
                     raw: lines.get(line_index).cloned().unwrap_or_default(),
                     markdown: String::new(),
                     width: lines
@@ -783,6 +785,8 @@ fn table_row(
         );
         let styled_cell = if header {
             styler.paint(raw_cell, StyleToken::TableHeader)
+        } else if cell.is_some_and(|cell| cell.command) {
+            styler.paint(raw_cell, StyleToken::PromptCommand)
         } else {
             styler.paint_value(raw_cell)
         };

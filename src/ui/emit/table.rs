@@ -17,6 +17,7 @@ pub(super) struct PreparedCell {
     pub raw: String,
     pub markdown: String,
     pub width: usize,
+    pub command: bool,
 }
 
 impl PreparedTable {
@@ -33,7 +34,13 @@ impl PreparedTable {
         let rows = block
             .rows
             .iter()
-            .map(|row| prepare_cells(row))
+            .map(|row| {
+                let mut cells = prepare_cells(row);
+                for (cell, header) in cells.iter_mut().zip(&block.headers) {
+                    cell.command = header == "command";
+                }
+                cells
+            })
             .collect::<Vec<_>>();
         let mut widths = headers
             .iter()
@@ -64,6 +71,7 @@ fn prepare_cells(cells: &[String]) -> Vec<PreparedCell> {
 impl PreparedCell {
     fn new(raw: &str) -> Self {
         Self {
+            command: false,
             raw: raw.to_string(),
             markdown: escape_markdown_table_cell(raw),
             width: UnicodeWidthStr::width(raw),
