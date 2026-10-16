@@ -64,7 +64,10 @@ struct ResolvedMaps {
 
 impl ConfigResolver {
     /// Creates a resolver from pre-loaded config layers and an explicit schema.
-    pub fn from_loaded_layers_with_schema(layers: LoadedLayers, schema: ConfigSchema) -> Self {
+    pub(crate) fn from_loaded_layers_with_schema(
+        layers: LoadedLayers,
+        schema: ConfigSchema,
+    ) -> Self {
         Self { layers, schema }
     }
 
@@ -85,7 +88,7 @@ impl ConfigResolver {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
     ///
     /// let mut layers = LoadedLayers::default();
@@ -155,7 +158,7 @@ impl ConfigResolver {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
     ///
     /// let mut layers = LoadedLayers::default();
@@ -173,7 +176,7 @@ impl ConfigResolver {
     ///     &osp_cli::config::ConfigValue::String("dracula".to_string())
     /// );
     /// ```
-    pub fn explain_key(
+    pub(crate) fn explain_key(
         &self,
         key: &str,
         options: ResolveOptions,
@@ -412,4 +415,46 @@ fn should_preserve_selected_secret(
             .origin
             .as_deref()
             .is_some_and(|origin| origin.starts_with("OSP_SECRET__"))
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn config_internal_example_1() {
+        use crate::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
+
+        let mut layers = LoadedLayers::default();
+        layers.defaults.set("profile.default", "default");
+        layers.defaults.set("theme.name", "plain");
+        layers.session.set("theme.name", "dracula");
+
+        let resolved =
+            ConfigResolver::from_loaded_layers_with_schema(layers, ConfigSchema::default())
+                .resolve(ResolveOptions::default())
+                .unwrap();
+
+        assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
+    }
+
+    #[test]
+    fn config_internal_example_2() {
+        use crate::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
+
+        let mut layers = LoadedLayers::default();
+        layers.defaults.set("profile.default", "default");
+        layers.defaults.set("theme.name", "plain");
+        layers.cli.set("theme.name", "dracula");
+
+        let explain =
+            ConfigResolver::from_loaded_layers_with_schema(layers, ConfigSchema::default())
+                .explain_key("theme.name", ResolveOptions::default())
+                .unwrap();
+
+        assert_eq!(explain.key, "theme.name");
+        assert_eq!(
+            explain.final_entry.unwrap().value.reveal(),
+            &crate::config::ConfigValue::String("dracula".to_string())
+        );
+    }
 }

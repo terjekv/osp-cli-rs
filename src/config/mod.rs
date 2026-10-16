@@ -7,7 +7,7 @@
 //!   environment, and in-memory overrides.
 //! - [`crate::config::ConfigResolver`] applies source precedence, scope
 //!   precedence, interpolation, and schema adaptation.
-//! - [`crate::config::RuntimeConfig`] lowers the resolved config into the
+//! - `RuntimeConfig` lowers the resolved config into the
 //!   smaller runtime view used by the app and REPL.
 //! - [`crate::config::set_scoped_value_in_toml`] edits TOML-backed config files
 //!   while preserving the same schema and scope rules used at runtime.
@@ -34,7 +34,7 @@
 //!
 //! Host-style bootstrap with runtime defaults plus standard path discovery:
 //!
-//! ```no_run
+//! ```text
 //! use osp_cli::config::{
 //!     ResolveOptions, RuntimeConfig, RuntimeConfigPaths, RuntimeDefaults,
 //!     RuntimeLoadOptions, build_runtime_pipeline,
@@ -66,7 +66,7 @@
 //! - use [`crate::config::set_scoped_value_in_toml`] and
 //!   [`crate::config::unset_scoped_value_in_toml`] instead of editing TOML by
 //!   hand
-//! - use [`crate::config::ConfigResolver::explain_key`] when the main question
+//! - use `config explain` when the main question
 //!   is "why did this value win?"
 //!
 //! Broad-strokes flow:
@@ -94,7 +94,7 @@
 //! - load layers through [`crate::config::LoaderPipeline`]
 //! - resolve once through [`crate::config::ConfigResolver`]
 //! - consume the result as [`crate::config::ResolvedConfig`] or
-//!   [`crate::config::RuntimeConfig`]
+//!   `RuntimeConfig`
 //! - for host-style startup, prefer [`crate::config::RuntimeDefaults`],
 //!   [`crate::config::RuntimeConfigPaths`], and
 //!   [`crate::config::build_runtime_pipeline`] over hand-rolled file/env
@@ -124,11 +124,89 @@ mod secrets;
 mod selector;
 mod store;
 
-pub use core::*;
-pub use defaults::*;
-pub use error::*;
-pub use loader::*;
-pub use resolver::*;
-pub use runtime::*;
-pub use secrets::*;
-pub use store::*;
+pub(crate) use core::{
+    ActiveProfileSource, BootstrapConfigExplain, BootstrapPhase, BootstrapScopeRule,
+    BootstrapValueRule, ConfigExplain, ConfigSchema, ExplainCandidate, ExplainInterpolation,
+    ExplainInterpolationStep, ExplainLayer, SchemaEntry, bootstrap_key_spec, is_alias_key,
+    is_bootstrap_only_key, validate_bootstrap_value, validate_key_scope,
+};
+pub use core::{
+    ConfigLayer, ConfigSource, ConfigValue, LayerEntry, ResolveOptions, ResolvedConfig,
+    ResolvedValue, SchemaValueType, Scope, SecretValue, TomlEditResult, is_sensitive_key,
+};
+pub(crate) use defaults::{
+    DEFAULT_REPL_HISTORY_MAX_ENTRIES, DEFAULT_REPL_HISTORY_MENU_ROWS, DEFAULT_UI_WIDTH_MAX,
+};
+pub use error::{ConfigError, TomlParseDiagnostic};
+pub use loader::{
+    ChainedLoader, ConfigLoader, EnvSecretsLoader, EnvVarLoader, LoadedLayers, LoaderPipeline,
+    SecretsTomlLoader, StaticLayerLoader, TomlFileLoader,
+};
+pub use resolver::ConfigResolver;
+#[cfg(test)]
+pub(crate) use runtime::RuntimeConfig;
+pub use runtime::{
+    RuntimeBootstrapMode, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
+    build_runtime_pipeline, default_cache_root_dir, default_config_root_dir, default_home_dir,
+    default_state_root_dir,
+};
+pub(crate) use secrets::{RuntimeSecretStore, SecretBackendKind};
+pub(crate) use store::secret_file_mode;
+pub use store::{
+    TomlSecretPermissions, TomlStoreEditMode, TomlStoreEditOptions, set_scoped_value_in_toml,
+    unset_scoped_value_in_toml,
+};
+
+pub(crate) use core::{normalize_identifier, normalize_scope};
+use defaults::build_builtin_defaults;
+pub(crate) use error::with_path_context;
+pub(crate) use secrets::RuntimeSelectedSecretsLoader;
+pub(crate) use store::{lock_file_transaction, write_text_atomic};
+
+#[cfg(test)]
+use defaults::DEFAULT_PROFILE_NAME;
+
+#[cfg(test)]
+#[path = "tests/loading_and_mutation.rs"]
+mod loading_and_mutation;
+
+#[cfg(test)]
+#[path = "tests/diagnostics.rs"]
+mod diagnostics;
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn config_internal_example_1() {
+        let _example = || {
+            (|| {
+                use crate::config::{
+                    ResolveOptions, RuntimeConfig, RuntimeConfigPaths, RuntimeDefaults,
+                    RuntimeLoadOptions, build_runtime_pipeline,
+                };
+
+                let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
+                let paths = RuntimeConfigPaths::discover();
+                let presentation = None;
+                let cli = None;
+                let session = None;
+
+                let resolved = build_runtime_pipeline(
+                    defaults,
+                    presentation,
+                    &paths,
+                    RuntimeLoadOptions::default(),
+                    cli,
+                    session,
+                )
+                .resolve(ResolveOptions::new().with_terminal("cli"))?;
+
+                let runtime = RuntimeConfig::from_resolved(&resolved);
+                assert_eq!(runtime.active_profile, resolved.active_profile());
+                Ok::<(), crate::config::ConfigError>(())
+            })()
+            .unwrap();
+        };
+    }
+}

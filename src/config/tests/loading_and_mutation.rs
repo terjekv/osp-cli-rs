@@ -1,9 +1,9 @@
-use crate::temp_support::make_temp_dir;
-use osp_cli::config::{
+use crate::config::{
     ConfigLayer, ConfigResolver, ConfigSource, ConfigValue, EnvVarLoader, LoaderPipeline,
     ResolveOptions, Scope, StaticLayerLoader, TomlFileLoader, TomlStoreEditOptions,
     set_scoped_value_in_toml, unset_scoped_value_in_toml,
 };
+use crate::tests::make_temp_dir;
 
 fn defaults_layer() -> ConfigLayer {
     let mut defaults = ConfigLayer::default();
@@ -75,7 +75,7 @@ fn config_file_mutation_round_trips_through_reload_and_explain() {
         env_pipeline
             .load_layers()
             .expect("layers should load for explain"),
-        osp_cli::config::ConfigSchema::default(),
+        crate::config::ConfigSchema::default(),
     )
     .explain_key("theme.name", options)
     .expect("theme explain should succeed");
@@ -195,7 +195,7 @@ fn config_store_round_trips_terminal_profile_scope_and_list_values_through_reloa
 
 #[test]
 fn embedded_client_loads_typed_product_config_and_rotates_persisted_credentials() {
-    use osp_cli::config::{
+    use crate::config::{
         ChainedLoader, ConfigLoader, ConfigSchema, EnvSecretsLoader, RuntimeConfig,
         RuntimeConfigPaths, RuntimeSecretStore, SchemaEntry, SecretBackendKind, SecretsTomlLoader,
         TomlSecretPermissions, TomlStoreEditMode,
@@ -403,7 +403,7 @@ ui.presentation = "compact"
             .entries()
             .find(|(key, _)| *key == "extensions.site.retry_ratio")
             .map(|(_, entry)| entry.value_type()),
-        Some(osp_cli::config::SchemaValueType::Float)
+        Some(crate::config::SchemaValueType::Float)
     );
     let ratio_edit = schema
         .parse_input_value("extensions.site.retry_ratio", "2.25")
@@ -438,7 +438,7 @@ ui.presentation = "compact"
     assert_eq!(ratio_entry.origin.as_deref(), config_path.to_str());
     #[cfg(unix)]
     assert_eq!(
-        osp_cli::config::secret_file_mode(&secrets_path).unwrap(),
+        crate::config::secret_file_mode(&secrets_path).unwrap(),
         0o600
     );
 }

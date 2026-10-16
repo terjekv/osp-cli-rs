@@ -558,7 +558,7 @@ fn create_temp_file(
 /// Returns the Unix permission bits for a secrets file.
 ///
 /// Unix-only.
-pub fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
+pub(crate) fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
     use std::os::unix::fs::PermissionsExt;
 
     let metadata = std::fs::metadata(path).map_err(|err| ConfigError::FileRead {

@@ -238,7 +238,7 @@ impl Display for SchemaValueType {
 
 /// Bootstrap stage in which a key must be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapPhase {
+pub(crate) enum BootstrapPhase {
     /// The key is needed before path-dependent config can be loaded.
     Path,
     /// The key is needed before the active profile can be finalized.
@@ -247,7 +247,7 @@ pub enum BootstrapPhase {
 
 /// Scope restriction for bootstrap-only keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapScopeRule {
+pub(crate) enum BootstrapScopeRule {
     /// The key is valid only in the global scope.
     GlobalOnly,
     /// The key is valid globally or in a terminal-only scope.
@@ -256,14 +256,14 @@ pub enum BootstrapScopeRule {
 
 /// Additional validation rule for bootstrap values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapValueRule {
+pub(crate) enum BootstrapValueRule {
     /// The value must be a string containing at least one non-whitespace character.
     NonEmptyString,
 }
 
 /// Bootstrap metadata derived from a schema entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootstrapKeySpec {
+pub(crate) struct BootstrapKeySpec {
     /// Canonical dotted config key.
     pub key: &'static str,
     /// Bootstrap phase in which the key is consulted.
@@ -286,7 +286,7 @@ impl BootstrapKeySpec {
 /// Schema definition for a single config key.
 #[derive(Debug, Clone)]
 #[must_use]
-pub struct SchemaEntry {
+pub(crate) struct SchemaEntry {
     canonical_key: Option<&'static str>,
     doc: Option<&'static str>,
     value_type: SchemaValueType,
@@ -306,7 +306,7 @@ impl SchemaEntry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{SchemaEntry, SchemaValueType};
     ///
     /// let entry = SchemaEntry::string().required();
@@ -367,6 +367,7 @@ impl SchemaEntry {
     }
 
     /// Starts a schema entry for floating-point values.
+    #[cfg(test)]
     pub fn float() -> Self {
         Self {
             canonical_key: None,
@@ -463,13 +464,6 @@ impl SchemaEntry {
         entry
     }
 
-    /// Starts a schema entry for integer values greater than or equal to zero.
-    pub fn non_negative_integer() -> Self {
-        let mut entry = Self::integer();
-        entry.non_negative_integer = true;
-        entry
-    }
-
     /// Returns the declared schema type for the key.
     pub fn value_type(&self) -> SchemaValueType {
         self.value_type
@@ -551,7 +545,7 @@ const REMOVED_KEYS: &[&str] = &[
 
 /// Config schema used for validation, parsing, and runtime filtering.
 #[derive(Debug, Clone)]
-pub struct ConfigSchema {
+pub(crate) struct ConfigSchema {
     entries: BTreeMap<String, SchemaEntry>,
 }
 
@@ -686,7 +680,7 @@ impl ConfigSchema {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{ConfigSchema, ConfigValue};
     ///
     /// let schema = ConfigSchema::default();
@@ -1326,7 +1320,7 @@ pub struct ResolvedValue {
 
 /// Candidate entry considered while explaining a key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainCandidate {
+pub(crate) struct ExplainCandidate {
     /// Zero-based index of the entry within its layer.
     pub entry_index: usize,
     /// Candidate value before final selection.
@@ -1343,7 +1337,7 @@ pub struct ExplainCandidate {
 
 /// Per-layer explanation for a resolved or bootstrap key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainLayer {
+pub(crate) struct ExplainLayer {
     /// Source represented by this explanation layer.
     pub source: ConfigSource,
     /// Index of the selected candidate within `candidates`, if any.
@@ -1354,7 +1348,7 @@ pub struct ExplainLayer {
 
 /// Single placeholder expansion step captured by `config explain`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainInterpolationStep {
+pub(crate) struct ExplainInterpolationStep {
     /// Placeholder name referenced by the template.
     pub placeholder: String,
     /// Placeholder value before schema adaptation or interpolation.
@@ -1371,7 +1365,7 @@ pub struct ExplainInterpolationStep {
 
 /// Interpolation trace for a resolved string value.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainInterpolation {
+pub(crate) struct ExplainInterpolation {
     /// Original string template before placeholder substitution.
     pub template: ConfigValue,
     /// Placeholder expansion steps applied to the template.
@@ -1380,7 +1374,7 @@ pub struct ExplainInterpolation {
 
 /// Source used to determine the active profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActiveProfileSource {
+pub(crate) enum ActiveProfileSource {
     /// The active profile came from an explicit override.
     Override,
     /// The active profile came from `profile.default`.
@@ -1399,7 +1393,7 @@ impl ActiveProfileSource {
 
 /// Human-readable explanation of runtime resolution for a single key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConfigExplain {
+pub(crate) struct ConfigExplain {
     /// Canonical key being explained.
     pub key: String,
     /// Profile used during resolution.
@@ -1420,7 +1414,7 @@ pub struct ConfigExplain {
 
 /// Human-readable explanation of bootstrap resolution for a single key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BootstrapConfigExplain {
+pub(crate) struct BootstrapConfigExplain {
     /// Canonical key being explained.
     pub key: String,
     /// Profile used during bootstrap resolution.
@@ -1661,13 +1655,13 @@ fn flatten_key_value(
 }
 
 /// Looks up bootstrap-time metadata for a canonical config key.
-pub fn bootstrap_key_spec(key: &str) -> Option<BootstrapKeySpec> {
+pub(crate) fn bootstrap_key_spec(key: &str) -> Option<BootstrapKeySpec> {
     builtin_config_schema().bootstrap_key_spec(key)
 }
 
 /// Reports whether `key` is consumed during bootstrap but not exposed as a
 /// normal runtime-resolved config key.
-pub fn is_bootstrap_only_key(key: &str) -> bool {
+pub(crate) fn is_bootstrap_only_key(key: &str) -> bool {
     bootstrap_key_spec(key).is_some_and(|spec| !spec.runtime_visible)
 }
 
@@ -1675,24 +1669,24 @@ pub fn is_bootstrap_only_key(key: &str) -> bool {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::config::is_alias_key;
 ///
 /// assert!(is_alias_key("alias.prod"));
 /// assert!(is_alias_key(" Alias.User "));
 /// assert!(!is_alias_key("ui.format"));
 /// ```
-pub fn is_alias_key(key: &str) -> bool {
+pub(crate) fn is_alias_key(key: &str) -> bool {
     normalize_identifier(key).starts_with("alias.")
 }
 
 /// Validates that a key can be written in the provided scope.
-pub fn validate_key_scope(key: &str, scope: &Scope) -> Result<(), ConfigError> {
+pub(crate) fn validate_key_scope(key: &str, scope: &Scope) -> Result<(), ConfigError> {
     builtin_config_schema().validate_key_scope(key, scope)
 }
 
 /// Validates bootstrap-only value constraints for a key.
-pub fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), ConfigError> {
+pub(crate) fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), ConfigError> {
     builtin_config_schema().validate_bootstrap_value(key, value)
 }
 

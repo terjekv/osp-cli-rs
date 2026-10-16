@@ -6,13 +6,13 @@ use super::ConfigLayer;
 use super::runtime::RuntimeEnvironment;
 
 /// Default logical profile name used when no profile override is active.
-pub const DEFAULT_PROFILE_NAME: &str = "default";
+pub(crate) const DEFAULT_PROFILE_NAME: &str = "default";
 /// Default maximum number of REPL history entries to keep.
-pub const DEFAULT_REPL_HISTORY_MAX_ENTRIES: i64 = 1000;
+pub(crate) const DEFAULT_REPL_HISTORY_MAX_ENTRIES: i64 = 1000;
 /// Default maximum number of rows shown in the REPL history search menu.
-pub const DEFAULT_REPL_HISTORY_MENU_ROWS: i64 = 5;
+pub(crate) const DEFAULT_REPL_HISTORY_MENU_ROWS: i64 = 5;
 /// Default maximum terminal width used for rendered output.
-pub const DEFAULT_UI_WIDTH_MAX: i64 = -1;
+pub(crate) const DEFAULT_UI_WIDTH_MAX: i64 = -1;
 
 pub(super) fn build_builtin_defaults(
     env: &RuntimeEnvironment,

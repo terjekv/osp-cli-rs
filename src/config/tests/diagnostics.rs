@@ -1,9 +1,9 @@
-use crate::temp_support::make_temp_dir;
-use osp_cli::app::{AccessPolicy, AppRuntime, BufferedUiSink};
-use osp_cli::config::{
+use crate::app::{AccessPolicy, AppRuntime, BufferedUiSink};
+use crate::config::{
     ConfigLayer, ConfigSchema, LoaderPipeline, ResolveOptions, SchemaEntry, StaticLayerLoader,
     TomlFileLoader,
 };
+use crate::tests::make_temp_dir;
 use serde_json::json;
 
 struct ProductSessionBootstrap;
@@ -30,7 +30,7 @@ impl AccessPolicy for ProductSessionBootstrap {
             .with_file(TomlFileLoader::new(path.into()).required())
             .load_layers()
             .map_err(miette::Report::new)?;
-        osp_cli::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
+        crate::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
             .resolve(ResolveOptions::new())
             .map_err(miette::Report::new)?;
         Ok(())
@@ -55,7 +55,7 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         session_path.to_string_lossy().to_string(),
     );
     product_defaults.set("extensions.site.service.enabled", true);
-    let app = osp_cli::App::new()
+    let app = crate::App::new()
         .with_product_defaults(product_defaults)
         .with_access_policy(ProductSessionBootstrap);
 

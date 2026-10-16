@@ -12,3 +12,38 @@ include!("tests/layer_parsing.rs");
 include!("tests/resolved_helpers.rs");
 include!("tests/adaptation_env.rs");
 include!("tests/resolve_options.rs");
+
+#[test]
+fn config_internal_example_1() {
+    use crate::config::{SchemaEntry, SchemaValueType};
+
+    let entry = SchemaEntry::string().required();
+    assert_eq!(entry.value_type(), SchemaValueType::String);
+    assert!(entry.runtime_visible());
+}
+
+#[test]
+fn config_internal_example_2() {
+    use crate::config::{ConfigSchema, ConfigValue};
+
+    let schema = ConfigSchema::default();
+    assert_eq!(
+        schema
+            .parse_input_value("repl.history.enabled", "true")
+            .unwrap(),
+        ConfigValue::Bool(true)
+    );
+    assert_eq!(
+        schema.parse_input_value("theme.name", "dracula").unwrap(),
+        ConfigValue::String("dracula".to_string())
+    );
+}
+
+#[test]
+fn config_internal_example_3() {
+    use crate::config::is_alias_key;
+
+    assert!(is_alias_key("alias.prod"));
+    assert!(is_alias_key(" Alias.User "));
+    assert!(!is_alias_key("ui.format"));
+}

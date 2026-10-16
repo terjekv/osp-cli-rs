@@ -7,12 +7,6 @@ mod temp_support;
 #[path = "integration/app/mod.rs"]
 mod app;
 
-#[path = "integration/config/mod.rs"]
-mod config;
-
-#[path = "integration/diagnostics.rs"]
-mod diagnostics;
-
 #[path = "integration/dsl/mod.rs"]
 mod dsl;
 

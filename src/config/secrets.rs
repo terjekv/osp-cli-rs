@@ -22,7 +22,7 @@ const KEYRING_SERVICE: &str = "osp-cli:secrets:v1";
 
 /// Supported persistent secrets backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SecretBackendKind {
+pub(crate) enum SecretBackendKind {
     /// Owner-only TOML file.
     Toml,
     /// Native platform credential store with a value-free TOML index.
@@ -56,7 +56,7 @@ impl SecretBackendKind {
 
 /// Backend-neutral result from changing a persisted secret.
 #[derive(Clone, PartialEq)]
-pub struct SecretStoreEditResult {
+pub(crate) struct SecretStoreEditResult {
     /// Previously stored value, when present.
     pub previous: Option<ConfigValue>,
     /// Backend that received the operation.
@@ -66,7 +66,7 @@ pub struct SecretStoreEditResult {
 }
 
 /// Runtime-selected persistent secret store.
-pub struct RuntimeSecretStore {
+pub(crate) struct RuntimeSecretStore {
     backend: SecretStoreBackend,
 }
 

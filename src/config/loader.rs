@@ -461,7 +461,7 @@ impl ConfigLoader for ChainedLoader {
 /// Materialized config layers grouped by source priority.
 ///
 /// This is the concrete snapshot handed to
-/// [`ConfigResolver::from_loaded_layers_with_schema`](crate::config::ConfigResolver::from_loaded_layers_with_schema)
+/// the host schema resolver
 /// after the load phase is complete.
 #[derive(Debug, Clone, Default)]
 pub struct LoadedLayers {
