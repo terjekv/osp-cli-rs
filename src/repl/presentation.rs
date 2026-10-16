@@ -211,10 +211,15 @@ fn parse_intro_template_payload(template: &str, help: &Document) -> Document {
 }
 
 /// Picks one entry from `repl.intro_tips`, the same one all day (UTC).
-fn tip_of_the_day(config: &crate::config::ResolvedConfig) -> String {
-    let tips = config
+fn tip_of_the_day(view: ReplViewContext<'_>, intro_commands: &[String]) -> String {
+    let tips = view
+        .config
         .get_string_list("repl.intro_tips")
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|tip| expand_intro_template(view, intro_commands, &tip).into_owned())
+        .filter(|tip| !tip.trim().is_empty())
+        .collect::<Vec<_>>();
     if tips.is_empty() {
         return String::new();
     }
@@ -243,6 +248,21 @@ fn expand_intro_template<'a>(
         };
         let close = open + 2 + close_rel;
         let key = template[open + 2..close].trim();
+        if let Some(command) = key.strip_prefix("#visible ")
+            && let Some(end_rel) = template[close + 2..].find("{{/visible}}")
+        {
+            let end = close + 2 + end_rel;
+            let path = crate::core::command_policy::CommandPath::new(command.split_whitespace());
+            if view.auth.external_command_path_access(&path).is_visible() {
+                out.push_str(&expand_intro_template(
+                    view,
+                    intro_commands,
+                    &template[close + 2..end],
+                ));
+            }
+            cursor = end + "{{/visible}}".len();
+            continue;
+        }
         if key.is_empty() {
             out.push_str("{{}}");
             cursor = close + 2;
@@ -321,7 +341,7 @@ fn resolve_intro_placeholder(
                 .unwrap_or_else(|| theme_display_name(&view.ui.render_settings.theme_name));
         }
         "version" => return env!("CARGO_PKG_VERSION").to_string(),
-        "tip" => return tip_of_the_day(view.config),
+        "tip" => return tip_of_the_day(view, intro_commands),
         "intro.commands" => {
             return intro_commands
                 .iter()
