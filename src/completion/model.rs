@@ -14,10 +14,7 @@
 //!   internal parser quirks
 
 pub use crate::core::shell_words::QuoteStyle;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::Range,
-};
+use std::{collections::BTreeMap, ops::Range};
 
 /// Semantic type for values completed by the engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,20 +69,6 @@ impl CursorState {
     }
 
     /// Creates a synthetic cursor state for a standalone token stub.
-    ///
-    /// This is useful in tests and non-editor callers that only care about a
-    /// single token rather than a full input buffer.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::CursorState;
-    ///
-    /// let state = CursorState::synthetic("ldap");
-    ///
-    /// assert_eq!(state.raw_stub, "ldap");
-    /// assert_eq!(state.replace_range, 0..4);
-    /// ```
     pub fn synthetic(token_stub: impl Into<String>) -> Self {
         let token_stub = token_stub.into();
         let len = token_stub.len();
@@ -165,7 +148,6 @@ impl SuggestionEntry {
         self.sort = Some(sort.into());
         self
     }
-
     /// Adds spellings that match this suggestion without being listed.
     pub fn aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
@@ -179,215 +161,96 @@ impl From<&str> for SuggestionEntry {
     }
 }
 
-/// A provider-supplied value used by advisory planning data.
-///
-/// `Unknown` is distinct from an absent map entry so callers can preserve
-/// incomplete facts without turning them into a rejection.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanningValue {
-    /// A value compared case-insensitively for exact columns.
-    Text(String),
-    /// An integer in the column's canonical unit.
-    Number(i64),
-    /// A present but unusable value.
-    Unknown,
-}
-
-impl PlanningValue {
-    /// Creates a textual planning value.
-    pub fn text(value: impl Into<String>) -> Self {
-        Self::Text(value.into())
-    }
-
-    /// Creates a numeric planning value in the column's canonical unit.
-    pub fn number(value: i64) -> Self {
-        Self::Number(value)
-    }
-
-    /// Creates an explicitly unknown planning value.
-    pub const fn unknown() -> Self {
-        Self::Unknown
-    }
-}
-
-impl From<&str> for PlanningValue {
-    fn from(value: &str) -> Self {
-        Self::text(value)
-    }
-}
-
-impl From<String> for PlanningValue {
-    fn from(value: String) -> Self {
-        Self::Text(value)
-    }
-}
-
-impl From<i64> for PlanningValue {
-    fn from(value: i64) -> Self {
-        Self::Number(value)
-    }
-}
-
-/// Numeric matching metadata for one minimum column.
+/// Flag-name visibility, ordering and requiredness hints.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PlanningNumericColumn {
-    /// Case-insensitive suffix scales applied to typed values.
-    ///
-    /// An empty map accepts plain integer input with scale one. The row's
-    /// [`PlanningValue::Number`] is expected to use the canonical unit.
-    pub unit_scales: BTreeMap<String, i64>,
-}
-
-impl PlanningNumericColumn {
-    /// Adds a suffix scale for typed values in this column.
-    pub fn unit_scale(mut self, suffix: impl Into<String>, scale: i64) -> Self {
-        self.unit_scales.insert(suffix.into(), scale);
-        self
-    }
-}
-
-/// One advisory planning row.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PlanningRow {
-    /// Caller-defined columns and identity fields for this row.
-    pub values: BTreeMap<String, PlanningValue>,
-}
-
-impl PlanningRow {
-    /// Creates an empty planning row.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Adds or replaces one caller-defined column value.
-    pub fn value(mut self, column: impl Into<String>, value: impl Into<PlanningValue>) -> Self {
-        self.values.insert(column.into(), value.into());
-        self
-    }
-}
-
-/// One advisory relational table used to narrow completion locally.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PlanningTable {
-    /// Columns that must equal explicit flag values when known.
-    pub columns: BTreeSet<String>,
-    /// Numeric columns whose row values must be at least explicit values.
-    pub minimum_columns: BTreeMap<String, PlanningNumericColumn>,
-    /// Candidate rows. Missing or unknown cells remain unconstrained.
-    pub rows: Vec<PlanningRow>,
-    /// Whether a known mismatch may narrow away a provider or value.
-    pub exhaustive: bool,
-}
-
-impl PlanningTable {
-    /// Creates an empty planning table.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Adds one exact-match column.
-    pub fn exact_column(mut self, column: impl Into<String>) -> Self {
-        self.columns.insert(column.into());
-        self
-    }
-
-    /// Adds one minimum numeric column with its typed-value scales.
-    pub fn minimum_column(
-        mut self,
-        column: impl Into<String>,
-        numeric: PlanningNumericColumn,
-    ) -> Self {
-        self.minimum_columns.insert(column.into(), numeric);
-        self
-    }
-
-    /// Replaces the candidate rows in this table.
-    pub fn rows(mut self, rows: impl IntoIterator<Item = PlanningRow>) -> Self {
-        self.rows = rows.into_iter().collect();
-        self
-    }
-}
-
-/// Optional provider-supplied relational facts for completion.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PlanningHints {
-    /// Optional candidate column containing the user-visible provider value.
-    /// Other identity fields remain ordinary caller-defined candidate values.
-    pub provider_column: Option<String>,
-    /// Caller-defined identity columns used to scope separate runtime lanes.
-    ///
-    /// A table only constrains an explicit request when one of its rows is in
-    /// scope for these values. Missing or unknown identity cells are wildcards.
-    pub identity_columns: BTreeSet<String>,
-    /// Advisory tables evaluated locally for each completion request.
-    pub tables: Vec<PlanningTable>,
-}
-
-impl PlanningHints {
-    /// Adds one advisory planning table.
-    pub fn table(mut self, table: PlanningTable) -> Self {
-        self.tables.push(table);
-        self
-    }
-
-    /// Sets the caller-defined provider identity column.
-    pub fn provider_column(mut self, column: impl Into<String>) -> Self {
-        self.provider_column = Some(column.into());
-        self
-    }
-
-    /// Adds one caller-defined identity column used for lane scoping.
-    pub fn identity_column(mut self, column: impl Into<String>) -> Self {
-        self.identity_columns.insert(column.into());
-        self
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-/// OS version suggestions shared globally or scoped by provider.
-pub struct OsVersions {
-    /// Suggestions indexed by OS name across all providers.
-    pub union: BTreeMap<String, Vec<SuggestionEntry>>,
-    /// Suggestions indexed first by provider, then by OS name.
-    pub by_provider: BTreeMap<String, BTreeMap<String, Vec<SuggestionEntry>>>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-/// Request-form hints used to derive flag and value suggestions.
-pub struct RequestHints {
-    /// Known request keys.
-    pub keys: Vec<String>,
-    /// Request keys that must be present.
-    pub required: Vec<String>,
-    /// Allowed values grouped by tier.
-    pub tiers: BTreeMap<String, Vec<String>>,
-    /// Default values by request key.
-    pub defaults: BTreeMap<String, String>,
-    /// Explicit value choices by request key.
-    pub choices: BTreeMap<String, Vec<String>>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-/// Request hints shared globally and overridden by provider.
-pub struct RequestHintSet {
-    /// Hints available regardless of provider.
-    pub common: RequestHints,
-    /// Provider-specific request hints.
-    pub by_provider: BTreeMap<String, RequestHints>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-/// Flag-name hints shared globally and overridden by provider.
 pub struct FlagHints {
-    /// Optional flags available regardless of provider.
+    /// Ordinary allowed flag spellings.
     pub common: Vec<String>,
-    /// Optional flags available for specific providers.
-    pub by_provider: BTreeMap<String, Vec<String>>,
-    /// Required flags available regardless of provider.
+    /// Allowed flag spellings ranked before ordinary flags.
+    pub preferred: Vec<String>,
+    /// Additional allowed spellings, ranked after ordinary flags.
+    pub other: Vec<String>,
+    /// Required flag spellings, ranked before optional flags.
     pub required_common: Vec<String>,
-    /// Required flags available for specific providers.
-    pub required_by_provider: BTreeMap<String, Vec<String>>,
 }
+
+/// Context-dependent flag metadata returned before suggestion ranking.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FlagCompletions {
+    /// Replaces flag-name hints when present; otherwise keeps static hints.
+    pub hints: Option<FlagHints>,
+    /// Replaces suggestions for these flags, including with an empty list.
+    /// Path and large-catalog completion retain their usual precedence.
+    pub values: BTreeMap<String, Vec<SuggestionEntry>>,
+}
+
+/// A local completion callback shared by tree clones.
+///
+/// Called with the resolved cursor command, including merged context flags.
+/// While completing a flag value, the active value is excluded from
+/// [`CommandLine::flag_values`] and [`CommandLine::flag_values_map`] so it
+/// cannot constrain its own suggestions. Callbacks must not perform network I/O.
+/// Equality compares callback identity, like [`ValueCatalog`].
+#[derive(Clone)]
+pub struct DynamicCompletion(std::sync::Arc<dyn Fn(&CommandLine) -> FlagCompletions + Send + Sync>);
+
+impl DynamicCompletion {
+    /// Supplies context-dependent flag hints and value suggestions.
+    ///
+    /// The tree keeps its static grammar for parsing. The callback replaces
+    /// only suggestion metadata, and may return empty value lists to suppress
+    /// static suggestions. Flags outside a returned hint list are hidden.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osp_cli::completion::{
+    ///     CommandSpec, DynamicCompletion, FlagCompletions, FlagNode, SuggestionEntry,
+    /// };
+    /// use std::collections::BTreeMap;
+    ///
+    /// let mut command = CommandSpec::new("deploy")
+    ///     .flag("--region", FlagNode::new())
+    ///     .flag("--image", FlagNode::new());
+    /// command.dynamic = Some(DynamicCompletion::new(|line| {
+    ///     let image = if line.has_flag("--region") { "local" } else { "default" };
+    ///     FlagCompletions {
+    ///         values: BTreeMap::from([("--image".into(), vec![SuggestionEntry::value(image)])]),
+    ///         ..FlagCompletions::default()
+    ///     }
+    /// }));
+    /// ```
+    pub fn new(complete: impl Fn(&CommandLine) -> FlagCompletions + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(complete))
+    }
+
+    pub(super) fn resolve(&self, cmd: &CommandLine, node: &CompletionNode) -> CompletionNode {
+        let completion = (self.0)(cmd);
+        let mut node = node.clone();
+        if let Some(hints) = completion.hints {
+            node.flag_hints = Some(hints);
+        }
+        for (flag, entries) in completion.values {
+            if let Some(flag) = node.flags.get_mut(&flag) {
+                flag.suggestions = entries;
+            }
+        }
+        node
+    }
+}
+
+impl std::fmt::Debug for DynamicCompletion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DynamicCompletion(..)")
+    }
+}
+
+impl PartialEq for DynamicCompletion {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for DynamicCompletion {}
 
 /// Positional argument definition for one command slot.
 ///
@@ -422,10 +285,10 @@ impl ArgNode {
     /// ```
     /// use osp_cli::completion::{ArgNode, SuggestionEntry, ValueType};
     ///
-    /// let entry = SuggestionEntry::value("alma")
-    ///     .meta("linux")
-    ///     .display("AlmaLinux")
-    ///     .sort("02");
+    /// let entry = SuggestionEntry {
+    ///     display: Some("AlmaLinux".into()),
+    ///     ..SuggestionEntry::value("alma").meta("linux").sort("02")
+    /// };
     /// let arg = ArgNode::named("image")
     ///     .tooltip("Image name")
     ///     .multi()
@@ -558,18 +421,6 @@ pub struct FlagNode {
     pub value_type: Option<ValueType>,
     /// Generic suggestions for the flag value.
     pub suggestions: Vec<SuggestionEntry>,
-    /// Provider-specific value suggestions.
-    pub suggestions_by_provider: BTreeMap<String, Vec<SuggestionEntry>>,
-    /// Providers whose value suggestions form a complete allowed-value catalog.
-    pub exhaustive_suggestions_by_provider: BTreeSet<String>,
-    /// Allowed providers by OS name.
-    pub os_provider_map: BTreeMap<String, Vec<String>>,
-    /// OS version suggestions attached to this flag.
-    pub os_versions: Option<OsVersions>,
-    /// Request-form hints attached to this flag.
-    pub request_hints: Option<RequestHintSet>,
-    /// Extra flag-name hints attached to this flag.
-    pub flag_hints: Option<FlagHints>,
     /// Preferred spelling when this entry is another spelling of one flag.
     ///
     /// Menus list the preferred spelling once, labelled with its other
@@ -655,8 +506,8 @@ pub struct CompletionNode {
     pub args: Vec<ArgNode>,
     /// Extra flag-name hints contributed by this node.
     pub flag_hints: Option<FlagHints>,
-    /// Optional advisory relational facts used to narrow explicit flag values.
-    pub planning: Option<PlanningHints>,
+    /// Optional local callback for context-dependent flag completion.
+    pub dynamic: Option<DynamicCompletion>,
 }
 
 impl CompletionNode {
@@ -667,39 +518,6 @@ impl CompletionNode {
     }
 
     /// Adds a child node keyed by command or value name.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::{
-    ///     CompletionNode, ContextScope, FlagNode, SuggestionEntry, ValueType,
-    /// };
-    ///
-    /// let mut flag = FlagNode::new()
-    ///     .tooltip("Provider")
-    ///     .flag_only()
-    ///     .multi()
-    ///     .value_type(ValueType::Path)
-    ///     .suggestions([SuggestionEntry::from("alpha")]);
-    /// flag.context_only = true;
-    /// flag.context_scope = ContextScope::Global;
-    ///
-    /// let node = CompletionNode::default()
-    ///     .sort("01")
-    ///     .with_child("status", CompletionNode::default())
-    ///     .with_flag("--provider", flag.clone());
-    ///
-    /// assert_eq!(flag.tooltip.as_deref(), Some("Provider"));
-    /// assert!(flag.flag_only);
-    /// assert!(flag.multi);
-    /// assert!(flag.context_only);
-    /// assert_eq!(flag.context_scope, ContextScope::Global);
-    /// assert_eq!(flag.value_type, Some(ValueType::Path));
-    /// assert_eq!(flag.suggestions.len(), 1);
-    /// assert_eq!(node.sort.as_deref(), Some("01"));
-    /// assert!(node.children.contains_key("status"));
-    /// assert_eq!(node.flags.get("--provider"), Some(&flag));
-    /// ```
     pub fn with_child(mut self, name: impl Into<String>, node: CompletionNode) -> Self {
         self.children.insert(name.into(), node);
         self

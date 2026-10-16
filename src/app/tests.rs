@@ -254,7 +254,7 @@ fn sample_catalog() -> Vec<CommandCatalogEntry> {
 }
 
 fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
-    vec![CommandCatalogEntry {
+    let mut catalog = vec![CommandCatalogEntry {
         name: "orch".to_string(),
         about: "Provision orchestrator resources".to_string(),
         auth: None,
@@ -290,16 +290,6 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
                                 crate::completion::SuggestionEntry::from("red"),
                                 crate::completion::SuggestionEntry::from("blue"),
                             ],
-                            suggestions_by_provider: BTreeMap::from([
-                                (
-                                    "alpha".to_string(),
-                                    vec![crate::completion::SuggestionEntry::from("red")],
-                                ),
-                                (
-                                    "beta".to_string(),
-                                    vec![crate::completion::SuggestionEntry::from("blue")],
-                                ),
-                            ]),
                             ..crate::completion::FlagNode::default()
                         },
                     ),
@@ -313,7 +303,27 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
         requires_selection: false,
         selected_explicitly: false,
         source: Some(PluginSource::Explicit),
-    }]
+    }];
+    catalog[0].completion.subcommands[0].dynamic =
+        Some(crate::completion::DynamicCompletion::new(|cmd| {
+            let values = match cmd
+                .flag_values("--provider")
+                .and_then(|values| values.first())
+                .map(String::as_str)
+            {
+                Some("alpha") => vec![crate::completion::SuggestionEntry::from("red")],
+                Some("beta") => vec![crate::completion::SuggestionEntry::from("blue")],
+                _ => vec![
+                    crate::completion::SuggestionEntry::from("red"),
+                    crate::completion::SuggestionEntry::from("blue"),
+                ],
+            };
+            crate::completion::FlagCompletions {
+                values: BTreeMap::from([("--image".into(), values)]),
+                ..Default::default()
+            }
+        }));
+    catalog
 }
 
 fn sample_conflicted_catalog() -> Vec<CommandCatalogEntry> {

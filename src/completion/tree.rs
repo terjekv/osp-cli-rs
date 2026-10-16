@@ -11,7 +11,8 @@
 use std::collections::BTreeMap;
 
 use crate::completion::model::{
-    ArgNode, CompletionNode, CompletionTree, FlagHints, FlagNode, PlanningHints, SuggestionEntry,
+    ArgNode, CompletionNode, CompletionTree, DynamicCompletion, FlagHints, FlagNode,
+    SuggestionEntry,
 };
 use crate::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
 use thiserror::Error;
@@ -65,10 +66,10 @@ pub struct CommandSpec {
     pub args: Vec<ArgNode>,
     /// Flags accepted by this command.
     pub flags: BTreeMap<String, FlagNode>,
-    /// Provider-aware flag visibility and requiredness hints.
+    /// Flag visibility and requiredness hints.
     pub flag_hints: Option<FlagHints>,
-    /// Optional advisory relational facts used to narrow explicit flag values.
-    pub planning: Option<PlanningHints>,
+    /// Optional local callback for context-dependent flag completion.
+    pub dynamic: Option<DynamicCompletion>,
     /// Nested subcommands below this command.
     pub subcommands: Vec<CommandSpec>,
 }
@@ -278,7 +279,7 @@ impl CompletionTreeBuilder {
             args: spec.args.clone(),
             flags: spec.flags.clone(),
             flag_hints: spec.flag_hints.clone(),
-            planning: spec.planning.clone(),
+            dynamic: spec.dynamic.clone(),
             ..CompletionNode::default()
         };
 
@@ -313,7 +314,7 @@ pub(crate) fn command_spec_from_command_def(def: &CommandDef) -> CommandSpec {
             required_common,
             ..FlagHints::default()
         }),
-        planning: None,
+        dynamic: None,
         subcommands: def
             .subcommands
             .iter()

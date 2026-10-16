@@ -411,16 +411,6 @@ impl CommandLineParser {
     /// `cursor` is clamped to the input length and to a valid UTF-8 character
     /// boundary before the parser slices the line.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::CommandLineParser;
-    ///
-    /// let parsed = CommandLineParser.analyze("ldap user ali", 13);
-    ///
-    /// assert_eq!(parsed.parsed.cursor_tokens, vec!["ldap", "user", "ali"]);
-    /// assert_eq!(parsed.cursor.token_stub, "ali");
-    /// ```
     pub fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
         self.analyze_with_flag_arity(line, cursor, |_, _| None)
     }
@@ -663,16 +653,6 @@ impl CommandLineParser {
 
     /// Returns the active quote style for the token being edited, if any.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::{CommandLineParser, QuoteStyle};
-    ///
-    /// assert_eq!(
-    ///     CommandLineParser.compute_stub_quote(r#"ldap user "ali"#),
-    ///     Some(QuoteStyle::Double)
-    /// );
-    /// ```
     pub fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }

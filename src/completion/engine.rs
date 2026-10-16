@@ -6,7 +6,7 @@
 //! without knowing about the parser/context/suggester split.
 
 use crate::completion::{
-    context::{ProviderSelection, TreeResolver},
+    context::TreeResolver,
     model::{
         CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
         CompletionTree, ContextScope, CursorState, MatchKind, ParsedLine, SuggestionOutput,
@@ -242,14 +242,14 @@ impl CompletionEngine {
 
     /// Required flags of the command at the cursor that the line still lacks.
     ///
-    /// Only flags the tree declares as required are reported, including the
-    /// provider-specific ones once a provider is selected. A flag counts as
+    /// Only flags the tree declares as required are reported, including any
+    /// supplied by the local completion callback. A flag counts as
     /// given under any of its spellings.
     pub(crate) fn missing_required_flags(&self, analysis: &CompletionAnalysis) -> Vec<String> {
         let resolver = TreeResolver::new(self.suggester.tree());
         let node = resolver.resolved_nodes(&analysis.context).flag_scope_node;
         let cmd = &analysis.parsed.full_cmd;
-        let provider = ProviderSelection::from_command(cmd, node);
+        let node = crate::completion::suggest::resolve_dynamic(node, cmd);
         let given = |flag: &str| {
             cmd.has_flag(flag)
                 || node.flags.iter().any(|(spelling, meta)| {
@@ -257,7 +257,7 @@ impl CompletionEngine {
                 })
         };
         self.suggester
-            .required_flags(node, &provider)
+            .required_flags(&node)
             .into_iter()
             .filter(|flag| !given(flag))
             .collect()
@@ -557,8 +557,8 @@ mod tests {
     use crate::completion::{
         CompletionEngine,
         model::{
-            ArgNode, CompletionNode, CompletionTree, FlagNode, QuoteStyle, SuggestionEntry,
-            SuggestionOutput,
+            ArgNode, CompletionNode, CompletionTree, DynamicCompletion, FlagCompletions, FlagNode,
+            QuoteStyle, SuggestionEntry, SuggestionOutput,
         },
     };
 
@@ -578,10 +578,6 @@ mod tests {
         deploy.flags.insert(
             "--image".to_string(),
             FlagNode {
-                suggestions_by_provider: BTreeMap::from([
-                    ("alpha".to_string(), vec![SuggestionEntry::from("red")]),
-                    ("beta".to_string(), vec![SuggestionEntry::from("blue")]),
-                ]),
                 suggestions: vec![SuggestionEntry::from("red"), SuggestionEntry::from("blue")],
                 ..FlagNode::default()
             },
@@ -594,6 +590,21 @@ mod tests {
             },
         );
 
+        deploy.dynamic = Some(DynamicCompletion::new(|cmd| {
+            let values = match cmd
+                .flag_values("--provider")
+                .and_then(|values| values.first())
+                .map(String::as_str)
+            {
+                Some("alpha") => vec![SuggestionEntry::from("red")],
+                Some("beta") => vec![SuggestionEntry::from("blue")],
+                _ => vec![SuggestionEntry::from("red"), SuggestionEntry::from("blue")],
+            };
+            FlagCompletions {
+                values: BTreeMap::from([("--image".into(), values)]),
+                ..FlagCompletions::default()
+            }
+        }));
         let mut service = CompletionNode::default();
         service.children.insert("deploy".to_string(), deploy);
 

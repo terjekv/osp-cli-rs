@@ -7,6 +7,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Replace provider and placement completion metadata with the
+  generic `DynamicCompletion` callback on `CommandSpec` and `CompletionNode`.
+  Remove `Planning*`, `OsVersions`, `RequestHints`, `RequestHintSet`,
+  `ProviderNarrowing`, `narrow_provider_candidates`, and provider fields on
+  `FlagNode` and `FlagHints`. Products now own their contextual completion rules.
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide
   restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use
