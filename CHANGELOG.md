@@ -12,6 +12,13 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   Remove `Planning*`, `OsVersions`, `RequestHints`, `RequestHintSet`,
   `ProviderNarrowing`, `narrow_provider_candidates`, and provider fields on
   `FlagNode` and `FlagHints`. Products now own their contextual completion rules.
+- **Breaking:** Remove test-only completion constructors and analysis helpers
+  from the public API, including `CompletionNode::{sort,with_child,with_flag}`,
+  `CursorState::synthetic`, `Suggestion::new`, `CommandLine::last_flag_occurrence`,
+  `CompletionEngine::{analyze_command,matched_command_len_tokens}`, and
+  `CommandLineParser::{analyze,compute_stub_quote}`,
+  `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
+
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide
   restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use

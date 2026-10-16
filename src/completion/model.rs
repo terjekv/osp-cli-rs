@@ -69,6 +69,7 @@ impl CursorState {
     }
 
     /// Creates a synthetic cursor state for a standalone token stub.
+    #[cfg(test)]
     pub fn synthetic(token_stub: impl Into<String>) -> Self {
         let token_stub = token_stub.into();
         let len = token_stub.len();
@@ -133,24 +134,11 @@ impl SuggestionEntry {
         self
     }
 
-    /// Sets the human-friendly label shown in menus.
-    ///
-    /// If omitted, UIs can fall back to the inserted value.
-    pub fn display(mut self, display: impl Into<String>) -> Self {
-        self.display = Some(display.into());
-        self
-    }
-
     /// Sets the hidden sort key for this suggestion.
     ///
     /// If omitted, the suggestion carries no explicit sort hint.
     pub fn sort(mut self, sort: impl Into<String>) -> Self {
         self.sort = Some(sort.into());
-        self
-    }
-    /// Adds spellings that match this suggestion without being listed.
-    pub fn aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.aliases.extend(aliases.into_iter().map(Into::into));
         self
     }
 }
@@ -454,6 +442,7 @@ impl FlagNode {
     /// Marks this flag as repeatable.
     ///
     /// If omitted, the flag is treated as non-repeatable.
+    #[cfg(test)]
     pub fn multi(mut self) -> Self {
         self.multi = true;
         self
@@ -462,6 +451,7 @@ impl FlagNode {
     /// Sets the semantic value type for this flag.
     ///
     /// If omitted, the flag carries no special value-type hint.
+    #[cfg(test)]
     pub fn value_type(mut self, value_type: ValueType) -> Self {
         self.value_type = Some(value_type);
         self
@@ -512,18 +502,21 @@ pub struct CompletionNode {
 
 impl CompletionNode {
     /// Sets the hidden sort key for this node.
+    #[cfg(test)]
     pub fn sort(mut self, sort: impl Into<String>) -> Self {
         self.sort = Some(sort.into());
         self
     }
 
     /// Adds a child node keyed by command or value name.
+    #[cfg(test)]
     pub fn with_child(mut self, name: impl Into<String>, node: CompletionNode) -> Self {
         self.children.insert(name.into(), node);
         self
     }
 
     /// Adds a flag node keyed by its spelling.
+    #[cfg(test)]
     pub fn with_flag(mut self, name: impl Into<String>, node: FlagNode) -> Self {
         self.flags.insert(name.into(), node);
         self
@@ -618,6 +611,7 @@ impl CommandLine {
     }
 
     /// Returns the last flag occurrence, if any.
+    #[cfg(test)]
     pub fn last_flag_occurrence(&self) -> Option<&FlagOccurrence> {
         self.flag_occurrences().last()
     }
@@ -841,35 +835,6 @@ pub struct Suggestion {
     pub sort: Option<String>,
     /// Numeric score used for ranking.
     pub match_score: u32,
-}
-
-impl Suggestion {
-    /// Creates a suggestion with default ranking metadata.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::Suggestion;
-    ///
-    /// let suggestion = Suggestion::new("hello");
-    ///
-    /// assert_eq!(suggestion.text, "hello");
-    /// assert_eq!(suggestion.meta, None);
-    /// assert_eq!(suggestion.display, None);
-    /// assert!(!suggestion.is_exact);
-    /// assert_eq!(suggestion.sort, None);
-    /// assert_eq!(suggestion.match_score, u32::MAX);
-    /// ```
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            meta: None,
-            display: None,
-            is_exact: false,
-            sort: None,
-            match_score: u32::MAX,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

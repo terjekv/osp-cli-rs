@@ -411,6 +411,7 @@ impl CommandLineParser {
     /// `cursor` is clamped to the input length and to a valid UTF-8 character
     /// boundary before the parser slices the line.
     ///
+    #[cfg(test)]
     pub fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
         self.analyze_with_flag_arity(line, cursor, |_, _| None)
     }
@@ -653,6 +654,7 @@ impl CommandLineParser {
 
     /// Returns the active quote style for the token being edited, if any.
     ///
+    #[cfg(test)]
     pub fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }
@@ -797,6 +799,7 @@ fn is_number(text: &str) -> bool {
     text.parse::<f64>().is_ok()
 }
 
+#[cfg(test)]
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
     quote_style_for_state(scan_shell(text, |_| {}))
 }

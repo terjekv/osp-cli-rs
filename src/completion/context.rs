@@ -20,6 +20,7 @@ impl<'a> TreeResolver<'a> {
         Self { tree }
     }
 
+    #[cfg(test)]
     pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
         let mut node = &self.tree.root;
         let mut matched = 0usize;
