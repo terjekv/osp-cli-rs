@@ -105,6 +105,15 @@ impl ReplSession {
             notices.post(line.as_ref().to_string());
         }
     }
+
+    /// Requests best-effort audio for the current rich session.
+    pub fn request_bell(&self, config: &crate::config::ResolvedConfig) {
+        let notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.is_cancelled() && self.is_current(&notices) && sound_enabled(config) {
+            crate::repl::bell::request();
+            crate::repl::bell::finish_background();
+        }
+    }
 }
 
 pub(crate) struct SessionOwner(pub(crate) ReplSession);
@@ -115,6 +124,7 @@ impl SessionOwner {
             cancelled: Mutex::new(false),
             wake: Condvar::new(),
         }));
+        crate::repl::bell::discard();
         let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(old) = notices.owner.replace(session.clone()) {
             cancel(&old);
@@ -135,6 +145,7 @@ fn cancel(session: &ReplSession) {
 impl Drop for SessionOwner {
     fn drop(&mut self) {
         cancel(&self.0);
+        crate::repl::bell::discard();
         let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
         if self.0.is_current(&notices) {
             notices.owner = None;
@@ -160,6 +171,7 @@ pub(crate) fn attach(printer: &ExternalPrinter<String>) {
 }
 
 pub(crate) fn attach_basic() {
+    crate::repl::bell::discard();
     let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(owner) = notices.owner.take() {
         cancel(&owner);
@@ -169,6 +181,35 @@ pub(crate) fn attach_basic() {
         eprintln!("{line}");
     }
     notices.basic = true;
+}
+
+fn sound_enabled(config: &crate::config::ResolvedConfig) -> bool {
+    use std::io::IsTerminal;
+    config
+        .get_string("repl.notifications.sound")
+        .is_some_and(|sound| sound.eq_ignore_ascii_case("bell"))
+        && config.get_string("ui.format") != Some("json")
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+        && std::io::stderr().is_terminal()
+}
+
+pub(crate) fn request_foreground_bell(
+    config: &crate::config::ResolvedConfig,
+    format: crate::core::output::OutputFormat,
+) {
+    let notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
+    if notices.owner.is_some()
+        && !notices.basic
+        && format != crate::core::output::OutputFormat::Json
+        && sound_enabled(config)
+    {
+        crate::repl::bell::request();
+    }
+}
+
+pub(crate) fn finish_foreground() {
+    crate::repl::bell::finish();
 }
 
 #[cfg(test)]

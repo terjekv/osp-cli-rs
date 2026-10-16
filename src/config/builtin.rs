@@ -264,6 +264,15 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("")),
             },
             BuiltinKey {
+                key: "repl.notifications.sound",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(["off", "bell"])
+                    .with_doc(
+                        "Master terminal sound policy; best-effort BEL in rich human REPL only",
+                    ),
+                default: Some(ConfigValue::from("off")),
+            },
+            BuiltinKey {
                 key: "repl.input_mode",
                 schema: SchemaEntry::string()
                     .with_allowed_values(

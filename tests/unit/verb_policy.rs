@@ -39,6 +39,7 @@ fn builtin_command_verbs_are_consistent() {
         "history",
         "alias",
         "completions",
+        "notifications",
     ]);
     assert_eq!(
         top_level, allowed_top,
@@ -61,6 +62,7 @@ fn builtin_command_verbs_are_consistent() {
             "doctor",
         ]),
     );
+    assert_subcommands(&cmd, "notifications", set(&["preview"]));
     assert_subcommands(&cmd, "theme", set(&["list", "show", "use"]));
     assert_subcommands(
         &cmd,

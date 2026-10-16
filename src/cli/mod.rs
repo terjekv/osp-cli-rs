@@ -169,6 +169,8 @@ pub enum Commands {
     Config(ConfigArgs),
     /// Create and manage command aliases.
     Alias(AliasArgs),
+    /// Preview local terminal feedback (no service requests).
+    Notifications(NotificationsArgs),
     /// Inspect or prune REPL history.
     History(HistoryArgs),
     /// Generate static shell completion for built-in commands and flags.
@@ -182,6 +184,21 @@ pub enum Commands {
     #[command(external_subcommand)]
     /// Dispatch an external or plugin-provided command line.
     External(Vec<String>),
+}
+
+/// Local terminal notification controls.
+#[derive(Debug, Clone, Args)]
+pub struct NotificationsArgs {
+    /// The local feedback operation.
+    #[command(subcommand)]
+    pub command: NotificationsCommands,
+}
+
+/// Explicit local notification operations.
+#[derive(Debug, Clone, Subcommand)]
+pub enum NotificationsCommands {
+    /// Request the same terminal bell as enabled event feedback.
+    Preview,
 }
 
 impl Commands {

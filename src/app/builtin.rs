@@ -140,6 +140,13 @@ impl<'a> BuiltinExecutor<'a> {
                 args,
             )
             .map(Some),
+            Commands::Notifications(_) => {
+                crate::repl::notices::request_foreground_bell(
+                    self.runtime.config.resolved(),
+                    surface.ui().render_settings.format,
+                );
+                Ok(Some(CommandOutput::exit(0)))
+            }
             Commands::History(args) => self.run_history_command(surface, args).map(Some),
             Commands::Context(args) => {
                 context_cmd::run_context_command(self.session, args).map(Some)

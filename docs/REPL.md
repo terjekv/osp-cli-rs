@@ -352,3 +352,20 @@ Workers use its bounded, sanitized `post_notice(kind, text)` aggregate sink and
 commands, line prompts, raw menus, pagers or the history picker own the terminal.
 Rebuild, fallback and exit cancel the handle and discard queued product output.
 Workers must also validate their own credential generation before publication.
+
+### Terminal bells
+
+`repl.notifications.sound = "off" | "bell"` is the master policy (library default
+`off`; products can choose another default). `notifications preview` explicitly
+exercises the same local sink without HTTP. It respects the master, rate limit
+and machine-output suppression. Native commands request semantic feedback with
+`NativeCommandContext::request_bell()`, flushed after foreground output. Workers
+may request a bell only through their current `ReplSession` while the editor owns
+input; sounds suppressed during another interaction are discarded.
+
+BEL is best effort: the local terminal may play a sound, flash or ignore it,
+including over SSH and tmux. OSP never runs an audio subprocess or configures
+terminal passthrough. At most one BEL is emitted per ten seconds process-wide.
+One-shot, basic/non-TTY and JSON output never emit event or preview bells.
+Disable sound for this session with
+`config set repl.notifications.sound off --session`. Muting never replays audio.

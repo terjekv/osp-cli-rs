@@ -204,9 +204,10 @@ where
             }
         };
 
-        if let Some(result) =
-            handle_interactive_signal(signal, editor, history_store, appearance, submission)?
-        {
+        let result =
+            handle_interactive_signal(signal, editor, history_store, appearance, submission)?;
+        crate::repl::notices::finish_foreground();
+        if let Some(result) = result {
             return Ok(result);
         }
     }

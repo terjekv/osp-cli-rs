@@ -144,6 +144,14 @@ impl<'a> NativeCommandContext<'a> {
         Ok(())
     }
 
+    /// Requests a rate-limited terminal bell after this REPL invocation flushes.
+    ///
+    /// The master sound setting, JSON/basic/one-shot suppression and actual
+    /// terminal ownership are host policy. This never adds bytes to a payload.
+    pub fn request_bell(&self) {
+        crate::repl::notices::request_foreground_bell(self.config, self.runtime_hints.format);
+    }
+
     /// Display a notice or confirmation through the host renderer, outside stream filters.
     ///
     /// Without a progress sink, this is a no-op.

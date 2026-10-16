@@ -100,6 +100,7 @@
 //!   `new(...)` for exact constructors, `builder(...)` for staged
 //!   configuration, `with_*` setters, and `build()` as the terminal step
 
+mod bell;
 pub(crate) mod completion;
 pub(crate) mod dispatch;
 mod engine;
@@ -112,7 +113,7 @@ pub(crate) mod input;
 pub(crate) mod lifecycle;
 mod menu;
 mod menu_core;
-mod notices;
+pub(crate) mod notices;
 pub(crate) mod presentation;
 mod product;
 pub(crate) mod surface;

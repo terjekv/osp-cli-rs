@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Add master-controlled terminal bell requests and `notifications preview` in
+  rich human REPL sessions, with a ten-second limit.
+
 - Native products can register suspended editor actions and cancellable REPL work.
   Background notices are bounded and pause during foreground terminal use.
 - **Breaking:** `run_repl` callbacks receive `ReplEvent` to distinguish typed lines

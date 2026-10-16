@@ -111,6 +111,7 @@ pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
             CMD_HISTORY,
             matches!(args.command, HistoryCommands::List(_)),
         ),
+        Commands::Notifications(_) => ("notifications", false),
         Commands::Completions(_) => ("completions", false),
         Commands::Config(args) => (
             CMD_CONFIG,
