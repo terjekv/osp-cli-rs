@@ -32,12 +32,7 @@ pub(crate) fn parse_inline_command(
     match parse_inline_command_tokens(tokens) {
         Ok(command) => Ok(InlineCommandPlan::Command(command)),
         Err(error) => {
-            let help = matches!(
-                error.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
-                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            );
+            let help = crate::native::is_clap_help_error(error.kind());
             // Help is a document; callers apply any stages to it once.
             if help {
                 return Ok(InlineCommandPlan::Help(error));

@@ -281,7 +281,7 @@ impl NativeParse {
         let path = native_resolved_path(&grammar, name, &args, matches.as_ref().ok());
         let render_help = matches
             .as_ref()
-            .is_err_and(|error| is_native_help_error(error.kind()));
+            .is_err_and(|error| crate::native::is_clap_help_error(error.kind()));
         Ok(Self {
             args,
             grammar,
@@ -514,16 +514,6 @@ fn native_path_from_matches(
         current = submatches;
     }
     crate::command_policy::CommandPath::new(segments)
-}
-
-fn is_native_help_error(kind: clap::error::ErrorKind) -> bool {
-    matches!(
-        kind,
-        clap::error::ErrorKind::DisplayHelp
-            | clap::error::ErrorKind::DisplayVersion
-            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            | clap::error::ErrorKind::MissingSubcommand
-    )
 }
 
 fn native_resolved_path(

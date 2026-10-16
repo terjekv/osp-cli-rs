@@ -693,6 +693,28 @@ pub enum NativeCommandOutcome {
     Exit(i32),
 }
 
+impl NativeCommandOutcome {
+    /// Treats help, version and missing-subcommand requests as help documents;
+    /// preserves all other clap failures as errors.
+    pub fn from_clap(error: clap::Error) -> Result<Self> {
+        if is_clap_help_error(error.kind()) {
+            Ok(Self::Help(error.to_string()))
+        } else {
+            Err(error.into())
+        }
+    }
+}
+
+pub(crate) fn is_clap_help_error(kind: clap::error::ErrorKind) -> bool {
+    matches!(
+        kind,
+        clap::error::ErrorKind::DisplayHelp
+            | clap::error::ErrorKind::DisplayVersion
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            | clap::error::ErrorKind::MissingSubcommand
+    )
+}
+
 /// Trait implemented by in-process commands registered alongside plugins.
 pub trait NativeCommand: Send + Sync {
     /// Applies the resolved host configuration before help, policy, completion,

@@ -41,6 +41,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 
+- **Breaking:** Native and inline commands share help/version/missing-subcommand handling.
+  Missing subcommands show help successfully, including direct native LDAP
+  execution.
+
 - **Breaking:** Native preliminary notices and measured frames are suppressed for
   JSON, output pipelines and non-terminal stderr. Ordinary progress events
   retain their stream behavior.
