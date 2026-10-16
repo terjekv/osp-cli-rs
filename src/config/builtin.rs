@@ -158,9 +158,9 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
             BuiltinKey {
                 key: "ui.help.level",
                 schema: SchemaEntry::string()
-                    .with_allowed_values(["inherit", "none", "tiny", "normal", "verbose"])
-                    .with_doc("Help detail level or inherit"),
-                default: Some(ConfigValue::from("inherit")),
+                    .with_allowed_values(["none", "tiny", "normal", "verbose"])
+                    .with_doc("Base help detail level, adjusted by -v and -q"),
+                default: Some(ConfigValue::from("normal")),
             },
             BuiltinKey {
                 key: "ui.messages.layout",

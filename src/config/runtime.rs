@@ -743,7 +743,7 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "ui.help.level"),
-            Some(&ConfigValue::String("inherit".to_string()))
+            Some(&ConfigValue::String("normal".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.messages.layout"),

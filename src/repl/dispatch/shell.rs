@@ -333,10 +333,10 @@ fn repl_help_command_result_for_scope(
     if session.scope.is_root() {
         let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
         return Ok(CommandOutput::output(
-            presentation::repl_document_output(
-                &presentation::build_repl_command_overview_view(&prepared.surface)
-                    .filtered_for_help_level(invocation.help_level),
-            ),
+            presentation::repl_document_output(&presentation::build_repl_command_overview_view(
+                &prepared.surface,
+                invocation.help_level,
+            )),
             None,
         ));
     }

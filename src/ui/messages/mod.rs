@@ -196,7 +196,8 @@ pub(crate) fn message_layout_from_config(config: &ResolvedConfig) -> MessageLayo
 }
 
 pub fn adjust_verbosity(base: MessageLevel, verbose: u8, quiet: u8) -> MessageLevel {
-    let rank = base.as_rank() + verbose as i8 - quiet as i8;
+    let rank =
+        (i16::from(base.as_rank()) + i16::from(verbose) - i16::from(quiet)).clamp(0, 4) as i8;
     MessageLevel::from_rank(rank)
 }
 

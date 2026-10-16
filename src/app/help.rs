@@ -55,17 +55,21 @@ pub(crate) fn help_level(
     verbose: u8,
     quiet: u8,
 ) -> HelpLevel {
-    match config.get_string("ui.help.level") {
-        Some(value) if value != "inherit" => {
-            HelpLevel::parse(value).unwrap_or_else(|| derived_help_level(verbose, quiet))
-        }
-        Some(_) | None => derived_help_level(verbose, quiet),
-    }
+    let base = config
+        .get_string("ui.help.level")
+        .and_then(HelpLevel::parse)
+        .unwrap_or(HelpLevel::Normal);
+    adjust_help_level(base, verbose, quiet)
 }
 
-pub(crate) fn derived_help_level(verbose: u8, quiet: u8) -> HelpLevel {
-    let rank = (2_i16 + i16::from(verbose) - i16::from(quiet)).clamp(0, 3);
-    match rank {
+fn adjust_help_level(base: HelpLevel, verbose: u8, quiet: u8) -> HelpLevel {
+    let rank = match base {
+        HelpLevel::None => 0,
+        HelpLevel::Tiny => 1,
+        HelpLevel::Normal => 2,
+        HelpLevel::Verbose => 3,
+    };
+    match (rank + i16::from(verbose) - i16::from(quiet)).clamp(0, 3) {
         0 => HelpLevel::None,
         1 => HelpLevel::Tiny,
         2 => HelpLevel::Normal,
@@ -123,8 +127,11 @@ pub(crate) fn render_settings_for_help_with_scan(
             overrides.invocation.quiet,
         );
     } else {
-        effective_help_level =
-            derived_help_level(overrides.invocation.verbose, overrides.invocation.quiet);
+        effective_help_level = adjust_help_level(
+            HelpLevel::Normal,
+            overrides.invocation.verbose,
+            overrides.invocation.quiet,
+        );
     }
     if let Some(format) = overrides.invocation.format {
         settings.format = format;

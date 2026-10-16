@@ -144,7 +144,7 @@ In practice:
 The main keys here are:
 
 - `ui.help.level`
-  - `inherit | none | tiny | normal | verbose`
+  - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `ui.messages.layout`
   - `grouped | plain | minimal`
 - `ui.chrome.frame`

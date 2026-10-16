@@ -37,6 +37,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- **Breaking:** Remove `ui.help.level = "inherit"`; the default is `normal`.
+  Invocation `-v`/`-q` now adjust an explicit help level, and REPL `help -v`
+  includes invocation options. Verbosity counts saturate safely.
+
 - Plain detailed diagnostics use uncolored ASCII source annotations instead
   of the narrated screen-reader report.
 
