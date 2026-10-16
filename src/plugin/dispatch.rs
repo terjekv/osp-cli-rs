@@ -144,6 +144,10 @@ impl ExecutedPluginCommand {
             });
         }
 
+        for line in self.raw.stderr.lines().filter(|line| !line.trim().is_empty()) {
+            tracing::info!(target: "osp::plugin", plugin = %self.provider.plugin_id, "{line}");
+        }
+
         let mut response: ResponseV1 =
             serde_json::from_slice(&self.raw.stdout).map_err(|source| {
                 tracing::debug!(

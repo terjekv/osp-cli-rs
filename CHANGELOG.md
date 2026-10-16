@@ -35,6 +35,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- `-d` now shows plugin stderr on successful execution.
+
 - REPL per-line `-d` flags now adjust stderr logging for that command only.
 
 - `-d` now adds to the configured `debug.level`, saturating at trace level.

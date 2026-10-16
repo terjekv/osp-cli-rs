@@ -275,3 +275,7 @@ Env mapping rules:
 Examples:
 - `extensions.plugins.env.api.url = "https://common.example"`
 - `extensions.plugins.acme-inventory.env.api.token = "sekrit"`
+
+Plugin diagnostics belong on stderr. `osp -d` shows stderr from successful
+plugin processes; failed processes include stderr in their error.
+`OSP_DEBUG_LEVEL` tells the plugin how much diagnostic detail was requested.

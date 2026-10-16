@@ -299,7 +299,7 @@ Messages are shown to the user alongside the output:
 | `warning` | Something unexpected but not fatal |
 | `success` | Positive confirmation |
 | `info` | Neutral operator evidence (shown with `-v`) |
-| `trace` | Diagnostic detail (shown with `-vv`) |
+| `trace` | Additional user-facing detail (shown with `-vv`); write developer diagnostics to stderr |
 
 `osp` renders plugin `messages` on stderr using the same grouping and
 verbosity rules as built-in commands. Keep table/JSON/value data in
@@ -582,3 +582,7 @@ instrumentation is enabled).
 Plugins have a default process timeout of 10 seconds. If your plugin
 needs longer (large queries, slow APIs), consider streaming partial
 results or increasing the timeout via configuration.
+
+Plugin diagnostics belong on stderr. `osp -d` shows stderr from successful
+plugin processes; failed processes include stderr in their error.
+`OSP_DEBUG_LEVEL` tells the plugin how much diagnostic detail was requested.

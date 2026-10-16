@@ -129,3 +129,7 @@ If a plugin times out:
 - Authoring guide: [WRITING_PLUGINS.md](WRITING_PLUGINS.md)
 - Packaging and manifests: [PLUGIN_PACKAGING.md](PLUGIN_PACKAGING.md)
 - Protocol details: [PLUGIN_PROTOCOL.md](PLUGIN_PROTOCOL.md)
+
+Plugin diagnostics belong on stderr. `osp -d` shows stderr from successful
+plugin processes; failed processes include stderr in their error.
+`OSP_DEBUG_LEVEL` tells the plugin how much diagnostic detail was requested.
