@@ -79,7 +79,7 @@ pub(crate) mod state;
 mod tests;
 
 pub use manager::{
-    CommandCatalogEntry, CommandConflict, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, DiscoveredPlugin,
-    DoctorReport, PluginDispatchContext, PluginDispatchError, PluginManager, PluginSource,
-    PluginSummary, RawPluginOutput,
+    CommandCatalogEntry, CommandConflict, CommandSource, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS,
+    DiscoveredPlugin, DoctorReport, PluginDispatchContext, PluginDispatchError, PluginManager,
+    PluginSource, PluginSummary, RawPluginOutput,
 };

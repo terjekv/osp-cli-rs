@@ -122,7 +122,10 @@ fn plugin_manager_surfaces_provider_selection_across_catalog_help_and_completion
         .find(|entry| entry.name == "shared")
         .expect("shared command should exist");
     assert_eq!(selected_entry.provider.as_deref(), Some("beta"));
-    assert_eq!(selected_entry.source, Some(PluginSource::Explicit));
+    assert_eq!(
+        selected_entry.source.plugin_source(),
+        Some(PluginSource::Explicit)
+    );
     assert!(selected_entry.conflicted);
     assert!(!selected_entry.requires_selection);
     assert!(selected_entry.selected_explicitly);

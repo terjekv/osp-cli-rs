@@ -229,6 +229,25 @@ pub struct DoctorReport {
     pub conflicts: Vec<CommandConflict>,
 }
 
+/// Execution origin of a command catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandSource {
+    /// Registered in-process command.
+    Native,
+    /// External plugin command; discovery source is absent for unresolved providers.
+    Plugin(Option<PluginSource>),
+}
+
+impl CommandSource {
+    /// Returns the selected plugin's discovery source, when resolved.
+    pub fn plugin_source(self) -> Option<PluginSource> {
+        match self {
+            Self::Native => None,
+            Self::Plugin(source) => source,
+        }
+    }
+}
+
 /// Normalized command-level catalog entry derived from the discovered plugin set.
 ///
 /// Help, completion, and dispatch-selection code can share this view without
@@ -256,8 +275,8 @@ pub struct CommandCatalogEntry {
     /// Whether the provider was selected by explicit preference rather than by
     /// unique-provider resolution.
     pub selected_explicitly: bool,
-    /// Discovery source for the selected provider, if resolved.
-    pub source: Option<PluginSource>,
+    /// Execution origin, including discovery source for a selected plugin.
+    pub source: CommandSource,
 }
 
 impl CommandCatalogEntry {
@@ -286,7 +305,7 @@ impl CommandCatalogEntry {
     ///     conflicted: false,
     ///     requires_selection: false,
     ///     selected_explicitly: false,
-    ///     source: None,
+    ///     source: osp_cli::plugin::CommandSource::Plugin(None),
     /// };
     ///
     /// assert_eq!(entry.auth_hint().as_deref(), Some("auth"));

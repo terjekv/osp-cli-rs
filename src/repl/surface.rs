@@ -394,7 +394,7 @@ fn provider_selection_summary(entry: &CommandCatalogEntry, base: Option<&str>) -
         );
     }
 
-    let selected_label = match (&entry.provider, entry.source) {
+    let selected_label = match (&entry.provider, entry.source.plugin_source()) {
         (Some(provider), Some(source)) => format!("{provider} ({source})"),
         _ => return base.to_string(),
     };
@@ -466,7 +466,7 @@ fn plugins_command_spec(catalog: &[CommandCatalogEntry], help_layout: HelpLayout
         .collect::<Vec<_>>();
     let command_names = catalog
         .iter()
-        .filter(|entry| entry.source.is_some() || !entry.providers.is_empty())
+        .filter(|entry| matches!(entry.source, crate::plugin::CommandSource::Plugin(_)))
         .map(|entry| SuggestionEntry::value(entry.name.clone()))
         .collect::<Vec<_>>();
 

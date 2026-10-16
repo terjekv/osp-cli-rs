@@ -280,14 +280,14 @@ pub(crate) fn external_command_source_label(entry: &CommandCatalogEntry) -> Stri
         return format!("plugin providers: {}", entry.providers.join(", "));
     }
 
-    match (&entry.provider, entry.source) {
+    match (&entry.provider, entry.source.plugin_source()) {
         (Some(provider), Some(source)) => format!("{provider} ({source})"),
         _ => "native integration".to_string(),
     }
 }
 
 fn is_native_command_entry(entry: &CommandCatalogEntry) -> bool {
-    entry.provider.is_none() && entry.source.is_none() && entry.providers.is_empty()
+    matches!(entry.source, crate::plugin::CommandSource::Native)
 }
 
 fn matching_external_command_entries<'a>(

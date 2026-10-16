@@ -658,7 +658,9 @@ fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
             conflicted: false,
             requires_selection: false,
             selected_explicitly: false,
-            source: Some(crate::plugin::PluginSource::Explicit),
+            source: crate::plugin::CommandSource::Plugin(Some(
+                crate::plugin::PluginSource::Explicit,
+            )),
         }],
     );
 

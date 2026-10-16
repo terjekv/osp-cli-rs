@@ -249,7 +249,7 @@ fn sample_catalog() -> Vec<CommandCatalogEntry> {
         conflicted: false,
         requires_selection: false,
         selected_explicitly: false,
-        source: Some(PluginSource::Explicit),
+        source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
     }]
 }
 
@@ -302,7 +302,7 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
         conflicted: false,
         requires_selection: false,
         selected_explicitly: false,
-        source: Some(PluginSource::Explicit),
+        source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
     }];
     catalog[0].completion.subcommands[0].dynamic =
         Some(crate::completion::DynamicCompletion::new(|cmd| {
@@ -345,7 +345,7 @@ fn sample_conflicted_catalog() -> Vec<CommandCatalogEntry> {
         conflicted: true,
         requires_selection: true,
         selected_explicitly: false,
-        source: None,
+        source: crate::plugin::CommandSource::Plugin(None),
     }]
 }
 

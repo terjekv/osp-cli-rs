@@ -44,6 +44,7 @@ use crate::core::plugin::{
 };
 use crate::core::runtime::RuntimeHints;
 use crate::plugin::catalog::collect_command_auth;
+use crate::plugin::{CommandCatalogEntry, CommandSource};
 
 /// Elevation requested for one native-command execution.
 ///
@@ -64,25 +65,6 @@ impl InvocationElevation {
     pub fn is_elevated(self) -> bool {
         matches!(self, Self::Elevated)
     }
-}
-
-/// Public metadata snapshot for one registered native command.
-///
-/// This is the describe-time surface projected into help, completion, and
-/// policy code. It is not an execution handle; callers should fetch the command
-/// from [`NativeCommandRegistry`] when they need to run it.
-#[derive(Debug, Clone)]
-pub struct NativeCommandCatalogEntry {
-    /// Canonical command path root exposed to CLI and REPL users.
-    pub name: String,
-    /// Short human-facing summary used in listings and overviews.
-    pub about: String,
-    /// Optional auth/visibility metadata projected into policy surfaces.
-    pub auth: Option<DescribeCommandAuthV1>,
-    /// Direct child names available immediately below this command.
-    pub subcommands: Vec<String>,
-    /// Completion tree rooted at this command's describe-time shape.
-    pub completion: CommandSpec,
 }
 
 /// Runtime context passed to native command implementations.
@@ -757,12 +739,12 @@ impl NativeCommandRegistry {
     }
 
     /// Returns catalog metadata for all registered native commands.
-    pub fn catalog(&self) -> Vec<NativeCommandCatalogEntry> {
+    pub fn catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(false)
     }
 
     /// Returns catalog metadata with native runtime completion additions.
-    pub fn completion_catalog(&self) -> Vec<NativeCommandCatalogEntry> {
+    pub fn completion_catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(true)
     }
 
@@ -786,7 +768,7 @@ impl NativeCommandRegistry {
         }
     }
 
-    fn catalog_with_completion(&self, augment_completion: bool) -> Vec<NativeCommandCatalogEntry> {
+    fn catalog_with_completion(&self, augment_completion: bool) -> Vec<CommandCatalogEntry> {
         self.commands
             .values()
             .map(|command| {
@@ -796,12 +778,18 @@ impl NativeCommandRegistry {
                 if augment_completion {
                     command.augment_completion(&mut completion);
                 }
-                NativeCommandCatalogEntry {
+                CommandCatalogEntry {
                     name: describe.name.clone(),
                     about: describe.about.clone(),
                     auth: describe.auth.clone(),
                     subcommands: crate::plugin::conversion::direct_subcommand_names(&completion),
                     completion,
+                    provider: None,
+                    providers: Vec::new(),
+                    conflicted: false,
+                    requires_selection: false,
+                    selected_explicitly: false,
+                    source: CommandSource::Native,
                 }
             })
             .collect()

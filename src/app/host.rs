@@ -7,7 +7,7 @@
 
 use crate::config::ResolvedConfig;
 use crate::core::output::OutputFormat;
-use crate::native::{NativeCommandCatalogEntry, NativeCommandRegistry};
+use crate::native::NativeCommandRegistry;
 use crate::repl;
 use clap::{CommandFactory, FromArgMatches};
 use miette::{Result, miette};
@@ -655,14 +655,10 @@ fn prepare_host_run(
 pub(crate) fn authorized_command_catalog_for(
     auth: &AuthState,
     clients: &AppClients,
-    native_catalog: Vec<NativeCommandCatalogEntry>,
+    native_catalog: Vec<CommandCatalogEntry>,
 ) -> Vec<CommandCatalogEntry> {
     let mut all = clients.plugins().command_catalog();
-    all.extend(
-        native_catalog
-            .into_iter()
-            .map(native_catalog_entry_to_command_catalog_entry),
-    );
+    all.extend(native_catalog);
     all.sort_by(|left, right| left.name.cmp(&right.name));
     all.into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
@@ -1168,24 +1164,6 @@ where
         current = source.source();
     }
     None
-}
-
-fn native_catalog_entry_to_command_catalog_entry(
-    entry: NativeCommandCatalogEntry,
-) -> CommandCatalogEntry {
-    CommandCatalogEntry {
-        name: entry.name,
-        about: entry.about,
-        auth: entry.auth,
-        subcommands: entry.subcommands,
-        completion: entry.completion,
-        provider: None,
-        providers: Vec::new(),
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: None,
-    }
 }
 
 fn add_native_command_help(view: &mut Document, native_commands: &NativeCommandRegistry) {

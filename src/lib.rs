@@ -266,9 +266,9 @@ pub mod ui;
 pub use crate::app::{App, AppBuilder, AppRunner, run_from, run_process};
 pub use crate::core::command_policy;
 pub use crate::native::{
-    InvocationElevation, NativeCommand, NativeCommandCatalogEntry, NativeCommandContext,
-    NativeCommandOutcome, NativeCommandRegistry, NativePagination, NativeProgressEvent,
-    NativeProgressSink, NativeSessionContext, NativeSessionContextEntry,
+    InvocationElevation, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+    NativeCommandRegistry, NativePagination, NativeProgressEvent, NativeProgressSink,
+    NativeSessionContext, NativeSessionContextEntry,
 };
 
 mod native;

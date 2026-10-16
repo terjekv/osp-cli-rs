@@ -64,7 +64,7 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                         selection.mode,
                         ProviderSelectionMode::Override | ProviderSelectionMode::Preference
                     ),
-                    source: Some(selection.plugin.source),
+                    source: super::CommandSource::Plugin(Some(selection.plugin.source)),
                 });
             }
             ProviderResolution::Ambiguous(_) => {
@@ -83,7 +83,7 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                     conflicted: true,
                     requires_selection: true,
                     selected_explicitly: false,
-                    source: None,
+                    source: super::CommandSource::Plugin(None),
                 });
             }
         }
@@ -156,6 +156,7 @@ pub(crate) fn render_repl_help(catalog: &[CommandCatalogEntry]) -> String {
                 provider = command.provider.as_deref().unwrap_or("-"),
                 source = command
                     .source
+                    .plugin_source()
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string()),
             ));

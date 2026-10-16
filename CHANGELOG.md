@@ -15,6 +15,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove `NativeSessionContext::set_context_value_with_prompt`;
   use `set_prompt_value(key, label, value)` instead.
 
+- **Breaking:** Native catalogs return `CommandCatalogEntry`, whose `source`
+  explicitly distinguishes native commands from plugins.
+
 - **Breaking:** Replace mutable discovered-plugin command vectors with one
   normalized command map.
 

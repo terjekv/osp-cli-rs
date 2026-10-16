@@ -447,7 +447,7 @@ fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
                 "requires_selection" => command.requires_selection,
                 "selected_explicitly" => command.selected_explicitly,
                 "source" => command
-                    .source
+                    .source.plugin_source()
                     .map(|value| value.to_string())
                     .map_or(serde_json::Value::Null, Into::into),
                 "auth_hint" => auth_hint,
@@ -632,7 +632,7 @@ mod tests {
             conflicted: true,
             requires_selection: false,
             selected_explicitly: true,
-            source: Some(PluginSource::Explicit),
+            source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
             subcommands: vec!["show".to_string()],
         }]);
         assert_eq!(row_str(&commands[0], "name"), Some("shared"));

@@ -105,7 +105,7 @@ fn plugin_sdk_metadata_flows_through_host_catalog_policy_and_dispatch_contract()
     assert_eq!(entry.about, "Inspect directory records");
     assert_eq!(entry.provider.as_deref(), Some("sdk"));
     assert_eq!(entry.providers, vec!["sdk (explicit)".to_string()]);
-    assert_eq!(entry.source, Some(PluginSource::Explicit));
+    assert_eq!(entry.source.plugin_source(), Some(PluginSource::Explicit));
     assert_eq!(entry.subcommands, vec!["inspect".to_string()]);
     assert_eq!(serde_json::to_value(&entry.auth).unwrap(), wire["commands"][0]["auth"]);
     let inspect = &entry.completion.subcommands[0];
