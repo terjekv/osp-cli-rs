@@ -5,7 +5,7 @@
 
 use miette::Result;
 
-use crate::app::CliCommandResult;
+use crate::app::CommandOutput;
 use crate::app::{AppClients, AppRuntime, AppSession, authorized_command_catalog_for};
 use crate::cli::IntroArgs;
 use crate::repl::ReplViewContext;
@@ -48,8 +48,8 @@ impl<'a> IntroCommandContext<'a> {
 pub(crate) fn run_intro_command(
     context: IntroCommandContext<'_>,
     _args: IntroArgs,
-) -> Result<CliCommandResult> {
-    Ok(CliCommandResult::output(
+) -> Result<CommandOutput> {
+    Ok(CommandOutput::output(
         repl_document_output(&build_repl_intro_payload(
             context.view,
             &context.surface,
@@ -62,9 +62,7 @@ pub(crate) fn run_intro_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{
-        AppState, AppStateInit, LaunchContext, ReplCommandOutput, RuntimeContext, TerminalKind,
-    };
+    use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::native::NativeCommandRegistry;
@@ -160,12 +158,9 @@ mod tests {
             run_intro_command(context, IntroArgs::default()).expect("intro command should succeed");
 
         assert_eq!(result.exit_code, 0);
-        let ReplCommandOutput::Output(structured) = result
-            .output
-            .expect("intro command should emit structured output")
-        else {
-            panic!("intro command should return guide output");
+        let crate::app::CommandBody::Output(structured) = result.body else {
+            panic!("intro command should emit structured output");
         };
-        assert!(structured.output.meta.document_rows);
+        assert!(structured.meta.document_rows);
     }
 }

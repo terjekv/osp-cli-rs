@@ -33,7 +33,7 @@ use crate::native::{NativeCommandRegistry, NativeSessionContext};
 use crate::plugin::PluginManager;
 use crate::repl::HistoryShellContext;
 
-use super::command_output::ReplCommandOutput;
+use super::command_output::CommandOutput;
 use super::runtime::{AppClients, AppRuntime, LaunchContext, RuntimeContext, UiState};
 use super::timing::TimingSummary;
 
@@ -322,7 +322,7 @@ pub(crate) struct LastFailureDiagnostics {
 #[derive(Debug, Clone)]
 /// Stored output contract for replaying the last successful REPL result.
 pub(crate) struct LastSuccess {
-    pub(crate) output: ReplCommandOutput,
+    pub(crate) output: std::sync::Arc<CommandOutput>,
     pub(crate) stages: Vec<String>,
 }
 
@@ -403,7 +403,7 @@ impl AppSession {
     pub(crate) fn record_success_output(
         &mut self,
         command_line: &str,
-        output: &ReplCommandOutput,
+        output: CommandOutput,
         stages: &[String],
     ) {
         let command_line = command_line.trim().to_string();
@@ -411,7 +411,7 @@ impl AppSession {
             return;
         }
         self.last_success = Some(LastSuccess {
-            output: output.clone(),
+            output: std::sync::Arc::new(output),
             stages: stages.to_vec(),
         });
     }
@@ -925,7 +925,7 @@ mod tests {
 
         session.record_success_output(
             "list users",
-            &crate::app::ReplCommandOutput::Json(serde_json::json!([{ "name": "alice" }])),
+            crate::app::CommandOutput::json(serde_json::json!([{ "name": "alice" }])),
             &["P name".to_string()],
         );
         session.record_failure("list users", "Command failed", "detail");

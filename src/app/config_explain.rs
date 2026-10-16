@@ -18,34 +18,35 @@ use crate::app::UiState;
 use crate::cli::ConfigExplainArgs;
 use crate::ui::explain_presentation_effect;
 
-use super::{CliCommandResult, RuntimeConfigRequest, prepare_runtime_config};
+use super::{CommandOutput, RuntimeConfigRequest, prepare_runtime_config};
 
 pub(crate) fn config_explain_result(
     config: &ResolvedConfig,
     ui: &UiState,
     request: RuntimeConfigRequest,
     args: ConfigExplainArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let explain = explain_runtime_config(request, &args.key)?;
 
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
         push_missing_config_key_messages(&mut messages, config, &args.key);
-        return Ok(CliCommandResult {
+        return Ok(CommandOutput {
             exit_code: 1,
             messages,
-            output: None,
-            stderr_text: None,
+            body: crate::app::CommandBody::None,
+            stderr_text: String::new(),
             failure_report: None,
+            ..CommandOutput::exit(0)
         });
     }
 
     if matches!(ui.render_settings.format, OutputFormat::Json) {
         let payload = config_explain_json(&explain, config, args.show_secrets);
-        return Ok(CliCommandResult::json(payload));
+        return Ok(CommandOutput::json(payload));
     }
 
-    Ok(CliCommandResult::text(render_config_explain_text(
+    Ok(CommandOutput::text(render_config_explain_text(
         &explain,
         config,
         args.show_secrets,

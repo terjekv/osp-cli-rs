@@ -63,16 +63,13 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         .expect("plugin response should prepare");
     assert_eq!(result.exit_code, 0);
     assert!(result.failure_report.is_none());
-    let Some(ReplCommandOutput::Output(prepared)) = result.output else {
+    let crate::app::CommandBody::Output(prepared) = result.body else {
         panic!("expected structured plugin output");
     };
-    let cli_rendered = render_output(
-        &prepared.output,
-        &super::super::resolve_render_settings_with_hint(
+    let cli_rendered = crate::ui::render_output(&prepared, &super::super::resolve_render_settings_with_hint(
             &state.runtime.ui.render_settings,
-            prepared.format_hint,
-        ),
-    );
+            result.format_hint,
+        ));
 
     let repl_rendered = repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,

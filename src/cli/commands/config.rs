@@ -7,10 +7,10 @@
 use super::resolve_terminal_selector;
 use crate::app::{AppRuntime, AppSession, RuntimeContext, TerminalKind, UiState};
 use crate::app::{
-    CliCommandResult, ReplCommandOutput, RuntimeConfigRequest, config_explain_json,
-    config_explain_result, config_value_to_json_for_key, explain_runtime_config, format_scope,
-    is_sensitive_key, prepare_runtime_config, push_missing_config_key_messages,
-    render_config_explain_text, resolve_runtime_config,
+    CommandOutput, RuntimeConfigRequest, config_explain_json, config_explain_result,
+    config_value_to_json_for_key, explain_runtime_config, format_scope, is_sensitive_key,
+    prepare_runtime_config, push_missing_config_key_messages, render_config_explain_text,
+    resolve_runtime_config,
 };
 use crate::cli::pipeline::validate_alias_template;
 use crate::cli::rows::output::rows_to_output_result;
@@ -118,10 +118,10 @@ impl<'a> ConfigReadContext<'a> {
 pub(crate) fn run_config_command(
     context: ConfigCommandContext<'_>,
     args: ConfigArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let read = context.read();
     match args.command {
-        ConfigCommands::Show(show) => Ok(CliCommandResult::output(
+        ConfigCommands::Show(show) => Ok(CommandOutput::output(
             rows_to_output_result(config_show_rows(read, show)),
             None,
         )),
@@ -131,7 +131,7 @@ pub(crate) fn run_config_command(
         }
         ConfigCommands::Set(set) => run_config_set(context, set),
         ConfigCommands::Unset(unset) => run_config_unset(context, unset),
-        ConfigCommands::Doctor => Ok(CliCommandResult::output(
+        ConfigCommands::Doctor => Ok(CommandOutput::output(
             rows_to_output_result(config_diagnostics_rows(read)),
             None,
         )),
@@ -141,7 +141,7 @@ pub(crate) fn run_config_command(
 pub(crate) fn run_alias_command(
     context: ConfigCommandContext<'_>,
     args: AliasArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     match args.command {
         AliasCommands::List(list) => Ok(super::rows_with_empty_info(
             alias_list_rows(context.read(), list),
@@ -183,10 +183,7 @@ fn alias_list_rows(context: ConfigReadContext<'_>, args: AliasListArgs) -> Vec<R
         .collect()
 }
 
-fn run_alias_add(
-    context: ConfigCommandContext<'_>,
-    args: AliasAddArgs,
-) -> Result<CliCommandResult> {
+fn run_alias_add(context: ConfigCommandContext<'_>, args: AliasAddArgs) -> Result<CommandOutput> {
     let key = alias_key(&args.name)?;
     validate_alias_template(&args.name, &args.template, context.config)?;
     run_config_set(
@@ -208,7 +205,7 @@ fn run_alias_add(
 fn run_alias_remove(
     context: ConfigCommandContext<'_>,
     args: AliasRemoveArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     run_config_unset(
         context,
         ConfigUnsetArgs {
@@ -252,30 +249,21 @@ fn config_show_rows(context: ConfigReadContext<'_>, args: ConfigShowArgs) -> Vec
         .collect()
 }
 
-fn run_config_get(context: ConfigReadContext<'_>, args: ConfigGetArgs) -> Result<CliCommandResult> {
+fn run_config_get(context: ConfigReadContext<'_>, args: ConfigGetArgs) -> Result<CommandOutput> {
     let mut messages = MessageBuffer::default();
     let rows = config_get_rows(context, &args, &mut messages)?;
     match rows {
-        Some(rows) => Ok(CliCommandResult {
-            exit_code: 0,
+        Some(rows) => Ok(CommandOutput {
             messages,
-            output: Some(ReplCommandOutput::Output(Box::new(
-                crate::app::StructuredCommandOutput {
-                    presentation: Default::default(),
-                    source_document: None,
-                    output: rows_to_output_result(rows),
-                    format_hint: None,
-                },
-            ))),
-            stderr_text: None,
-            failure_report: None,
+            ..CommandOutput::output(rows_to_output_result(rows), None)
         }),
-        None => Ok(CliCommandResult {
+        None => Ok(CommandOutput {
             exit_code: 1,
             messages,
-            output: None,
-            stderr_text: None,
+            body: crate::app::CommandBody::None,
+            stderr_text: String::new(),
             failure_report: None,
+            ..CommandOutput::exit(0)
         }),
     }
 }
@@ -505,7 +493,7 @@ fn config_entry_row(
 fn run_config_set(
     mut context: ConfigCommandContext<'_>,
     args: ConfigSetArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let requested_key = args.key.trim().to_ascii_lowercase();
     let key = if requested_key == "user.display_name" {
         let user = args
@@ -622,17 +610,12 @@ fn run_config_set(
             .wrap_err_with(|| format!("failed to resolve config for key `{key}` after set"))?;
         if matches!(context.ui.render_settings.format, OutputFormat::Json) {
             let payload = config_explain_json(&explain, &config, false);
-            ReplCommandOutput::Json(payload)
+            CommandOutput::json(payload)
         } else {
-            ReplCommandOutput::Text(render_config_explain_text(&explain, &config, false))
+            CommandOutput::text(render_config_explain_text(&explain, &config, false))
         }
     } else {
-        ReplCommandOutput::Output(Box::new(crate::app::StructuredCommandOutput {
-            presentation: Default::default(),
-            source_document: None,
-            output: rows_to_output_result(rows),
-            format_hint: None,
-        }))
+        CommandOutput::output(rows_to_output_result(rows), None)
     };
 
     let persistence = if matches!(store, ConfigStore::Session) {
@@ -675,19 +658,13 @@ fn run_config_set(
         }
     }
     messages.success(success);
-    Ok(CliCommandResult {
-        exit_code: 0,
-        messages,
-        output: Some(output),
-        stderr_text: None,
-        failure_report: None,
-    })
+    Ok(CommandOutput { messages, ..output })
 }
 
 fn run_config_unset(
     mut context: ConfigCommandContext<'_>,
     args: ConfigUnsetArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let key = args.key.trim().to_ascii_lowercase();
     ConfigSchema::default()
         .validate_writable_key(&key)
@@ -737,19 +714,9 @@ fn run_config_unset(
         ));
     }
 
-    Ok(CliCommandResult {
-        exit_code: 0,
+    Ok(CommandOutput {
         messages,
-        output: Some(ReplCommandOutput::Output(Box::new(
-            crate::app::StructuredCommandOutput {
-                presentation: Default::default(),
-                source_document: None,
-                output: rows_to_output_result(rows),
-                format_hint: None,
-            },
-        ))),
-        stderr_text: None,
-        failure_report: None,
+        ..CommandOutput::output(rows_to_output_result(rows), None)
     })
 }
 

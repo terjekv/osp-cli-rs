@@ -17,10 +17,7 @@ use std::path::PathBuf;
 use crate::app::{AppRuntime, AppSession};
 use crate::cli::{HistoryArgs, HistoryCommands, HistoryPruneArgs};
 
-use crate::app::{
-    CMD_HISTORY, CMD_LIST, DEFAULT_REPL_PROMPT, ReplCommandOutput, StructuredCommandOutput,
-    config_usize,
-};
+use crate::app::{CMD_HISTORY, CMD_LIST, CommandOutput, DEFAULT_REPL_PROMPT, config_usize};
 use crate::cli::rows::output::rows_to_output_result;
 
 const DEFAULT_REPL_HISTORY_EXCLUDES: [&str; 4] = ["exit", "quit", "help", "history list"];
@@ -109,14 +106,12 @@ pub(crate) fn run_history_repl_command(
     session: &mut AppSession,
     args: HistoryArgs,
     history: &SharedHistory,
-) -> Result<ReplCommandOutput> {
+) -> Result<CommandOutput> {
     if !history
         .with(|store| store.history_enabled())
         .unwrap_or(false)
     {
-        return Ok(ReplCommandOutput::Text(
-            "History is disabled.\n".to_string(),
-        ));
+        return Ok(CommandOutput::text("History is disabled.\n".to_string()));
     }
 
     let scope = HistoryScopeView::from_session(session);
@@ -147,14 +142,7 @@ pub(crate) fn run_history_repl_command(
             let rows = history_entries_rows(entries);
             let mut output = rows_to_output_result(rows);
             output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
-            Ok(ReplCommandOutput::Output(Box::new(
-                StructuredCommandOutput {
-                    presentation: Default::default(),
-                    source_document: None,
-                    output,
-                    format_hint: None,
-                },
-            )))
+            Ok(CommandOutput::output(output, None))
         }
         HistoryCommands::Prune(HistoryPruneArgs { keep }) => {
             let removed = history
@@ -164,7 +152,7 @@ pub(crate) fn run_history_repl_command(
                 .map_err(|err| {
                     crate::app::report_anyhow_with_context(err, "failed to prune REPL history")
                 })?;
-            Ok(ReplCommandOutput::Text(if removed == 0 {
+            Ok(CommandOutput::text(if removed == 0 {
                 format!("No entries removed from {}.\n", scope.label)
             } else {
                 format!(
@@ -182,7 +170,7 @@ pub(crate) fn run_history_repl_command(
                 .map_err(|err| {
                     crate::app::report_anyhow_with_context(err, "failed to clear REPL history")
                 })?;
-            Ok(ReplCommandOutput::Text(if removed == 0 {
+            Ok(CommandOutput::text(if removed == 0 {
                 format!("{} is already empty.\n", scope.label)
             } else {
                 format!("Cleared {}.\n", scope.label)
@@ -281,7 +269,6 @@ mod tests {
         HistoryScopeView, build_history_config, history_command, repl_history_enabled,
         repl_history_exclude_patterns, run_history_repl_command,
     };
-    use crate::app::ReplCommandOutput;
     use crate::app::{
         AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind,
     };
@@ -461,8 +448,8 @@ mod tests {
         )
         .expect("history command should return a disabled notice");
 
-        match output {
-            ReplCommandOutput::Text(text) => assert_eq!(text, "History is disabled.\n"),
+        match output.body {
+            crate::app::CommandBody::Text(text) => assert_eq!(text, "History is disabled.\n"),
             other => panic!("unexpected disabled history output: {other:?}"),
         }
     }
@@ -485,9 +472,9 @@ mod tests {
         )
         .expect("history list should succeed");
 
-        match output {
-            ReplCommandOutput::Output(output) => {
-                let rows = output.output.into_rows().expect("list should produce rows");
+        match output.body {
+            crate::app::CommandBody::Output(output) => {
+                let rows = output.into_rows().expect("list should produce rows");
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0]["command"], Value::String("config show".to_string()));
                 assert!(rows[0].contains_key("timestamp_ms"));
@@ -564,10 +551,10 @@ mod tests {
         )
         .expect("bounded history list should succeed");
 
-        let ReplCommandOutput::Output(output) = output else {
+        let crate::app::CommandBody::Output(output) = output.body else {
             panic!("history list should return structured rows");
         };
-        let rows = output.output.into_rows().expect("list should produce rows");
+        let rows = output.into_rows().expect("list should produce rows");
         assert_eq!(
             rows.iter()
                 .map(|row| row["command"].as_str().expect("command should be text"))
@@ -648,8 +635,8 @@ mod tests {
             &history,
         )
         .expect("scoped prune should succeed");
-        match prune {
-            ReplCommandOutput::Text(text) => {
+        match prune.body {
+            crate::app::CommandBody::Text(text) => {
                 assert_eq!(text, "Removed 1 entry from ldap shell history.\n")
             }
             other => panic!("unexpected prune output: {other:?}"),
@@ -676,8 +663,10 @@ mod tests {
             &history,
         )
         .expect("scoped clear should succeed");
-        match clear {
-            ReplCommandOutput::Text(text) => assert_eq!(text, "Cleared ldap shell history.\n"),
+        match clear.body {
+            crate::app::CommandBody::Text(text) => {
+                assert_eq!(text, "Cleared ldap shell history.\n")
+            }
             other => panic!("unexpected clear output: {other:?}"),
         }
         assert!(

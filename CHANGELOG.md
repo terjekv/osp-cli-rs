@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Use one command output value with an exclusive structured, text, JSON, or
+  empty body across CLI, REPL, progress, and replay.
+
 - **Breaking:** Move progress and presentation signals from `OutputMeta` to
   command presentation state, independent of canonical output data.
 

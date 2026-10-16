@@ -1,8 +1,7 @@
 use super::{ParsedReplDispatch, parse_repl_invocation, render_repl_command_output};
 use crate::app::sink::BufferedUiSink;
 use crate::app::{
-    AppState, AppStateInit, CliCommandResult, LaunchContext, ReplCommandOutput, RuntimeContext,
-    TerminalKind,
+    AppState, AppStateInit, CommandOutput, LaunchContext, RuntimeContext, TerminalKind,
 };
 use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 use crate::core::output::OutputFormat;
@@ -154,14 +153,12 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
     let invocation = base_invocation(&state);
     let mut sink = BufferedUiSink::default();
 
-    let json_result = CliCommandResult {
+    let json_result = CommandOutput {
         exit_code: 0,
         messages: Default::default(),
-        output: Some(ReplCommandOutput::Json(serde_json::json!([
-            "alpha", "beta"
-        ]))),
-        stderr_text: None,
+        stderr_text: String::new(),
         failure_report: None,
+        ..CommandOutput::json(serde_json::json!(["alpha", "beta"]))
     };
     let json_rendered = render_repl_command_output(
         &state.runtime,
@@ -175,12 +172,12 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
     .expect("json pipeline should render");
     assert_eq!(json_rendered.trim(), "beta");
 
-    let text_result = CliCommandResult {
+    let text_result = CommandOutput {
         exit_code: 0,
         messages: Default::default(),
-        output: Some(ReplCommandOutput::Text("alpha\nbeta\n".to_string())),
-        stderr_text: None,
+        stderr_text: String::new(),
         failure_report: None,
+        ..CommandOutput::text("alpha\nbeta\n".to_string())
     };
     let text_rendered = render_repl_command_output(
         &state.runtime,
@@ -200,14 +197,15 @@ fn structured_command_failures_are_not_mislabeled_as_render_failures() {
     let mut state = make_state();
     let invocation = base_invocation(&state);
     let mut sink = BufferedUiSink::default();
-    let result = CliCommandResult {
+    let result = CommandOutput {
         exit_code: 1,
         messages: Default::default(),
-        output: None,
-        stderr_text: None,
+        body: crate::app::CommandBody::None,
+        stderr_text: String::new(),
         failure_report: Some(miette::miette!(
             "resource_not_found: No visible resource matched"
         )),
+        ..CommandOutput::exit(0)
     };
 
     let err = render_repl_command_output(

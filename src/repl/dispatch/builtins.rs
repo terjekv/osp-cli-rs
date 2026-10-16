@@ -402,8 +402,9 @@ fn execute_last_result_builtin(
         last.stages.clone()
     };
     stages.extend(parsed.stages);
-    let rendered = crate::app::render_saved_repl_output_with_runtime(
-        &crate::app::CommandRenderRuntime::new(runtime.config.resolved(), &invocation.ui),
+    let rendered = crate::app::render_saved_repl_output(
+        runtime.config.resolved(),
+        &invocation.ui,
         &last.output,
         &stages,
     )?;
@@ -418,8 +419,7 @@ pub(super) fn is_repl_bang_request(raw: &str) -> bool {
 mod tests {
     use super::{BangCommand, PaginationDirection, execute_repl_builtin, parse_repl_builtin};
     use crate::app::{
-        AppState, AppStateInit, LaunchContext, ReplCommandOutput, RuntimeContext,
-        StructuredCommandOutput, TerminalKind,
+        AppState, AppStateInit, CommandOutput, LaunchContext, RuntimeContext, TerminalKind,
     };
     use crate::cli::rows::output::rows_to_output_result;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
@@ -573,7 +573,7 @@ mod tests {
 
         state.session.record_success_output(
             "config show",
-            &ReplCommandOutput::Text("visible\n".to_string()),
+            CommandOutput::text("visible\n".to_string()),
             &[],
         );
         assert!(matches!(
@@ -594,15 +594,13 @@ mod tests {
 
         state.session.record_success_output(
             "ldap user alice | P name",
-            &ReplCommandOutput::Output(Box::new(StructuredCommandOutput {
-                presentation: Default::default(),
-                source_document: None,
-                output: rows_to_output_result(vec![crate::row! {
+            CommandOutput::output(
+                rows_to_output_result(vec![crate::row! {
                     "name" => "alice",
                     "role" => "admin"
                 }]),
-                format_hint: None,
-            })),
+                None,
+            ),
             &["P name".to_string()],
         );
         assert!(matches!(

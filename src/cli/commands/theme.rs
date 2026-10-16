@@ -4,7 +4,7 @@
 //! theme definition, or set an in-process theme override for the current run.
 
 use crate::app::{AppRuntime, UiState};
-use crate::app::{CliCommandResult, resolve_known_theme_name};
+use crate::app::{CommandOutput, resolve_known_theme_name};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs, ThemeUseArgs};
 use crate::completion::{CompletionNode, SuggestionEntry};
@@ -35,18 +35,18 @@ pub(crate) fn run_theme_command(
     config_overrides: &mut ConfigLayer,
     context: ThemeCommandContext<'_>,
     args: ThemeArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     match args.command {
         ThemeCommands::List => {
             let rows = theme_list_rows(context.themes, &context.ui.render_settings.theme_name);
             let mut output = rows_to_output_result(rows);
             output.meta.display_columns =
                 Some(["name", "source", "status"].map(str::to_string).to_vec());
-            Ok(CliCommandResult::output(output, None))
+            Ok(CommandOutput::output(output, None))
         }
         ThemeCommands::Show(ThemeShowArgs { name }) => {
             let selected = name.unwrap_or_else(|| context.ui.render_settings.theme_name.clone());
-            Ok(CliCommandResult::output(
+            Ok(CommandOutput::output(
                 rows_to_output_result(theme_show_rows(context.themes, &selected)?),
                 None,
             ))
@@ -55,7 +55,7 @@ pub(crate) fn run_theme_command(
             let selected = resolve_known_theme_name(&name, context.themes)?;
             config_overrides.replace_scoped("theme.name", selected.clone().into(), Scope::global());
 
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             result
                 .messages
                 .success(format!("active theme set to: {selected}"));
@@ -180,8 +180,7 @@ mod tests {
         ThemeCommandContext, augment_theme_completion, run_theme_command, theme_command,
         theme_list_rows, theme_show_rows,
     };
-    use crate::app::CliCommandResult;
-    use crate::app::ReplCommandOutput;
+    use crate::app::CommandOutput;
     use crate::app::UiState;
     use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs};
     use crate::config::ConfigLayer;
@@ -230,12 +229,11 @@ mod tests {
         )
     }
 
-    fn extract_output_rows(result: CliCommandResult) -> Option<Vec<Row>> {
-        let output = match result.output? {
-            ReplCommandOutput::Output(output) => output.output,
-            ReplCommandOutput::Json(_) | ReplCommandOutput::Text(_) => return None,
-        };
-        output.into_rows()
+    fn extract_output_rows(result: CommandOutput) -> Option<Vec<Row>> {
+        match result.body {
+            crate::app::CommandBody::Output(output) => output.into_rows(),
+            _ => None,
+        }
     }
 
     #[test]
@@ -315,7 +313,7 @@ mod tests {
 
     #[test]
     fn theme_output_helpers_and_command_def_expose_runtime_choices_unit() {
-        assert!(extract_output_rows(CliCommandResult::text("hello")).is_none());
+        assert!(extract_output_rows(CommandOutput::text("hello")).is_none());
 
         let mut def = crate::completion::CompletionNode::from_clap(&theme_command());
         augment_theme_completion(&mut def, &builtin_theme_catalog());

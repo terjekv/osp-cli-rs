@@ -1,17 +1,16 @@
-use super::command_output::{CommandRenderRuntime, apply_output_stages, run_cli_command};
+use super::command_output::{apply_output_stages, run_cli_command};
 use super::help::parse_help_render_overrides;
 use super::{
-    CliCommandResult, ErrorDetail, authorized_command_catalog_for, command_output,
-    plugin_dispatch_context_for_runtime, resolve_runtime_config, run_cli_command_with_ui, run_from,
-    run_from_with_sink,
-};
-use super::{
-    EXIT_CODE_ERROR, EXIT_CODE_USAGE, PluginConfigEntry, PluginConfigScope, ReplCommandOutput,
+    CommandOutput, EXIT_CODE_ERROR, EXIT_CODE_USAGE, PluginConfigEntry, PluginConfigScope,
     RunAction, RuntimeConfigRequest, build_cli_session_layer, build_dispatch_plan,
     classify_exit_code, collect_plugin_config_env, config_value_to_plugin_env,
     enrich_dispatch_error, is_sensitive_key, plugin_config_env_name, plugin_path_discovery_enabled,
     plugin_process_timeout, render_report_message, resolve_invocation_ui,
     resolve_render_settings_with_hint, run_inline_builtin_command,
+};
+use super::{
+    ErrorDetail, authorized_command_catalog_for, command_output,
+    plugin_dispatch_context_for_runtime, resolve_runtime_config, run_from, run_from_with_sink,
 };
 use crate::app::sink::BufferedUiSink;
 use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};

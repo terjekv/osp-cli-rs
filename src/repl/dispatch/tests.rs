@@ -9,8 +9,8 @@ use super::{
     parse_repl_builtin, render_repl_command_output, repl_command_spec, repl_help_for_scope,
     run_repl_command,
 };
+use crate::app::CommandOutput;
 use crate::app::{AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
-use crate::app::{CliCommandResult, ReplCommandOutput, StructuredCommandOutput};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{
     Commands, ConfigArgs, ConfigCommands, ConfigSetArgs, ConfigUnsetArgs, DebugCompleteArgs,
@@ -288,15 +288,13 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
     let history = test_history();
     state.session.record_success_output(
         "ldap user alice | P name",
-        &ReplCommandOutput::Output(Box::new(StructuredCommandOutput {
-            presentation: Default::default(),
-            source_document: None,
-            output: rows_to_output_result(vec![crate::row! {
+        CommandOutput::output(
+            rows_to_output_result(vec![crate::row! {
                 "name" => "alice",
                 "role" => "admin"
             }]),
-            format_hint: None,
-        })),
+            None,
+        ),
         &["P name".to_string()],
     );
 
@@ -877,12 +875,12 @@ fn render_repl_command_output_handles_text_none_and_stderr_unit() {
         &mut state.session,
         "doctor last",
         &[],
-        CliCommandResult {
+        CommandOutput {
             exit_code: 0,
             messages: Default::default(),
-            output: Some(ReplCommandOutput::Text("hello".to_string())),
-            stderr_text: Some("\nwarn\n".to_string()),
+            stderr_text: "\nwarn\n".to_string(),
             failure_report: None,
+            ..CommandOutput::text("hello".to_string())
         },
         &invocation,
         &mut sink,
@@ -896,7 +894,7 @@ fn render_repl_command_output_handles_text_none_and_stderr_unit() {
         &mut state.session,
         "doctor last",
         &[],
-        CliCommandResult::exit(0),
+        CommandOutput::exit(0),
         &invocation,
         &mut sink,
     )

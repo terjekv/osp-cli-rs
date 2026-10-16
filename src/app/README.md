@@ -45,6 +45,6 @@ modules should not import `app`; the one current exception is
 - **Command chosen wrongly:** `dispatch.rs`, then `osp plugins doctor` for
   provider conflicts.
 
-Help results use `CliCommandResult::document`. Builtins supply clap metadata;
-native commands also use clap metadata; plugins retain their text-help boundary. Only doctor keeps
-a separate data fallback beside a presentation document.
+Help results use `CommandOutput::document`. Builtins supply clap metadata;
+native commands also use clap metadata; plugins retain their text-help boundary. Doctor attaches its presentation document to the same result while retaining
+its canonical data rows.

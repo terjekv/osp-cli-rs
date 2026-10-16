@@ -85,6 +85,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
     assert_eq!(last.command_line, "missing");
     assert!(!last.summary.trim().is_empty());
     assert!(last.detail.contains("unknown command `missing`"));
+
     assert!(state.session.last_failure_diagnostics.is_some());
 
     state.runtime.ui.render_settings.format = OutputFormat::Json;
@@ -120,14 +121,12 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         },
     )
     .expect("doctor last should render");
-    match rendered.output {
-        Some(ReplCommandOutput::Json(json)) => {
+    match rendered.body {
+        crate::app::CommandBody::Json(json) => {
             assert_eq!(json["status"], "error");
             assert_eq!(json["command"], "missing");
         }
-        Some(ReplCommandOutput::Output(_)) => panic!("unexpected doctor output variant"),
-        Some(ReplCommandOutput::Text(_)) => panic!("unexpected doctor output variant"),
-        None => panic!("expected doctor output"),
+        other => panic!("expected doctor JSON output, got {other:?}"),
     }
 }
 

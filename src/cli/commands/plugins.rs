@@ -6,7 +6,7 @@
 
 use super::resolve_terminal_selector;
 use crate::app::{AppClients, AppRuntime, AuthState, ConfigState, RuntimeContext};
-use crate::app::{CliCommandResult, PluginConfigScope, plugin_config_entries};
+use crate::app::{CommandOutput, PluginConfigScope, plugin_config_entries};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{PluginCommandStateArgs, PluginConfigArgs, PluginsArgs, PluginsCommands};
 use crate::config::{
@@ -51,7 +51,7 @@ impl<'a> PluginsCommandContext<'a> {
 pub(crate) fn run_plugins_command(
     context: PluginsCommandContext<'_>,
     args: PluginsArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let plugin_manager = context.plugin_manager;
     match args.command {
         PluginsCommands::List => {
@@ -84,13 +84,13 @@ pub(crate) fn run_plugins_command(
         )),
         PluginsCommands::Refresh => {
             plugin_manager.invalidate_describe_cache();
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             result.messages.success("refreshed plugin discovery cache");
             Ok(result)
         }
         PluginsCommands::Doctor => {
             let report = plugin_manager.doctor();
-            Ok(CliCommandResult::output(
+            Ok(CommandOutput::output(
                 rows_to_output_result(plugin_doctor_rows(context, &report)),
                 None,
             ))
@@ -109,7 +109,7 @@ pub(crate) fn run_plugins_command(
                 plugin_scope(context, &args.target.scope),
             )?;
             sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             if removed {
                 result
                     .messages
@@ -138,7 +138,7 @@ pub(crate) fn run_plugins_command(
                 plugin_scope(context, &args.target.scope),
             )?;
             sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             result.messages.success(format!(
                 "selected provider for command `{command}`: {}",
                 args.plugin_id
@@ -153,7 +153,7 @@ pub(crate) fn run_plugins_command(
                 plugin_scope(context, &args.target.scope),
             )?;
             sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             if removed {
                 result.messages.success(format!(
                     "cleared provider selection for command `{command}`"
@@ -187,7 +187,7 @@ fn set_command_state(
     args: &PluginCommandStateArgs,
     state: PluginCommandState,
     verb: &str,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let command = validated_state_command(context, &args.target.command)?;
     persist_command_state(
         context,
@@ -196,7 +196,7 @@ fn set_command_state(
         plugin_scope(context, &args.target.scope),
     )?;
     sync_current_command_preferences(context)?;
-    let mut result = CliCommandResult::exit(0);
+    let mut result = CommandOutput::exit(0);
     result
         .messages
         .success(format!("{verb} command: {command}"));

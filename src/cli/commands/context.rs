@@ -1,6 +1,6 @@
 //! `context` command for values remembered in the active REPL session.
 
-use crate::app::{AppSession, CliCommandResult};
+use crate::app::{AppSession, CommandOutput};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{ContextArgs, ContextCommands};
 use crate::core::row::Row;
@@ -10,7 +10,7 @@ use serde_json::Value;
 pub(crate) fn run_context_command(
     session: &AppSession,
     args: ContextArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     if let Some(ContextCommands::Clear(args)) = args.command {
         session.native_context.clear_context(args.kind.as_deref());
     }
@@ -29,5 +29,5 @@ pub(crate) fn run_context_command(
         })
         .collect();
 
-    Ok(CliCommandResult::output(rows_to_output_result(rows), None))
+    Ok(CommandOutput::output(rows_to_output_result(rows), None))
 }

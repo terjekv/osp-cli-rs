@@ -765,7 +765,9 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
-    if let Some(document) = &output.document {
+    if let Some(document) = &output.document
+        && (output.meta.document_rows || matches!(document, OutputDocument::Json(_)))
+    {
         return document.json_value();
     }
     match &output.items {

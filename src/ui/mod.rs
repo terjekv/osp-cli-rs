@@ -59,6 +59,7 @@ mod chrome;
 mod doc;
 mod emit;
 mod lower;
+pub(crate) use lower::json_value;
 mod plan;
 pub(crate) mod settings;
 mod text;

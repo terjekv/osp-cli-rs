@@ -28,9 +28,9 @@ pub(crate) mod theme;
 fn rows_with_empty_info(
     rows: Vec<crate::core::row::Row>,
     empty_info: &str,
-) -> crate::app::CliCommandResult {
+) -> crate::app::CommandOutput {
     let empty = rows.is_empty();
-    let mut result = crate::app::CliCommandResult::output(
+    let mut result = crate::app::CommandOutput::output(
         crate::cli::rows::output::rows_to_output_result(rows),
         None,
     );

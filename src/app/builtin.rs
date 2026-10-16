@@ -9,8 +9,8 @@
 use miette::{Result, miette};
 
 use super::{
-    AppClients, AppRuntime, AppSession, CliCommandResult, ResolvedInvocation, UiSink, UiState,
-    run_cli_command_with_ui,
+    AppClients, AppRuntime, AppSession, CommandOutput, ResolvedInvocation, UiSink, UiState,
+    run_cli_command,
 };
 use crate::cli::commands::{
     config as config_cmd, context as context_cmd, doctor as doctor_cmd, history as history_cmd,
@@ -33,7 +33,7 @@ pub(crate) fn run_cli_builtin_command_parts(
         .dispatch(BuiltinSurface::Cli(&invocation.ui), command)?
         .ok_or_else(|| miette!("expected builtin command"))?;
     let result = super::command_output::apply_stages_to_cli_result(result, stages)?;
-    run_cli_command_with_ui(runtime.config.resolved(), &invocation.ui, result, sink)
+    run_cli_command(runtime.config.resolved(), &invocation.ui, result, sink)
 }
 
 pub(crate) fn run_inline_builtin_command(
@@ -43,7 +43,7 @@ pub(crate) fn run_inline_builtin_command(
     invocation: Option<&ResolvedInvocation>,
     command: Commands,
     stages: &[String],
-) -> Result<Option<CliCommandResult>> {
+) -> Result<Option<CommandOutput>> {
     if matches!(command, Commands::External(_)) {
         return Ok(None);
     }
@@ -63,7 +63,7 @@ pub(crate) fn run_repl_builtin_command(
     history: &SharedHistory,
     invocation: &ResolvedInvocation,
     command: Commands,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     BuiltinExecutor::new(runtime, session, clients)
         .dispatch(
             BuiltinSurface::Repl {
@@ -98,7 +98,7 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         command: Commands,
-    ) -> Result<Option<CliCommandResult>> {
+    ) -> Result<Option<CommandOutput>> {
         command.validate_dispatch_surface(matches!(surface, BuiltinSurface::Repl { .. }))?;
         match command {
             Commands::Plugins(args) => plugins_cmd::run_plugins_command(
@@ -155,7 +155,7 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         args: crate::cli::HistoryArgs,
-    ) -> Result<CliCommandResult> {
+    ) -> Result<CommandOutput> {
         match surface {
             BuiltinSurface::Repl { history, .. } => {
                 history_cmd::run_history_repl_command(self.session, args, history)
@@ -173,7 +173,7 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         args: IntroArgs,
-    ) -> Result<CliCommandResult> {
+    ) -> Result<CommandOutput> {
         intro_cmd::run_intro_command(
             intro_cmd::IntroCommandContext::from_parts(
                 self.runtime,
@@ -189,7 +189,7 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         args: ReplArgs,
-    ) -> Result<CliCommandResult> {
+    ) -> Result<CommandOutput> {
         match surface {
             BuiltinSurface::Repl { .. } => {
                 Err(miette!("`repl` debug commands are not available in REPL"))

@@ -641,19 +641,20 @@ fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
         MessageLevel::Success,
         0,
     );
-    let runtime = super::CommandRenderRuntime::new(&config, &ui);
+
     let mut sink = BufferedUiSink::default();
     let mut messages = MessageBuffer::default();
     messages.success("done");
 
     let exit = super::run_cli_command(
-        &runtime,
-        super::CliCommandResult {
+        &config,
+        &ui,
+        super::CommandOutput {
             exit_code: 7,
             messages,
-            output: Some(super::ReplCommandOutput::Text("payload\n".to_string())),
-            stderr_text: Some("warn\n".to_string()),
+            stderr_text: "warn\n".to_string(),
             failure_report: None,
+            ..super::CommandOutput::text("payload\n".to_string())
         },
         &mut sink,
     )
@@ -666,7 +667,7 @@ fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
 }
 
 #[test]
-fn run_cli_command_with_ui_builds_runtime_from_config_and_ui_unit() {
+fn run_cli_command_builds_runtime_from_config_and_ui_unit() {
     let config = test_config(&[]);
     let ui = crate::app::UiState::new(
         RenderSettings::test_plain(OutputFormat::Value),
@@ -675,15 +676,15 @@ fn run_cli_command_with_ui_builds_runtime_from_config_and_ui_unit() {
     );
     let mut sink = BufferedUiSink::default();
 
-    let exit = super::run_cli_command_with_ui(
+    let exit = super::run_cli_command(
         &config,
         &ui,
-        super::CliCommandResult {
+        super::CommandOutput {
             exit_code: 3,
             messages: MessageBuffer::default(),
-            output: Some(super::ReplCommandOutput::Text("payload\n".to_string())),
-            stderr_text: None,
+            stderr_text: String::new(),
             failure_report: None,
+            ..super::CommandOutput::text("payload\n".to_string())
         },
         &mut sink,
     )
@@ -899,7 +900,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         .expect("protocol failure should still parse");
     assert_eq!(prepared.exit_code, 1);
     let report = prepared.failure_report.expect("expected failure response");
-    let Some(ReplCommandOutput::Output(output)) = prepared.output else {
+    let crate::app::CommandBody::Output(output) = prepared.body else {
         panic!("expected structured failure data");
     };
     let rendered = prepared.messages.render_grouped(MessageLevel::Trace);
@@ -908,14 +909,13 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
     assert_eq!(report.to_string(), "NOT_FOUND: missing user");
     assert_eq!(
         output
-            .output
             .document
             .as_ref()
             .map(|document| document.json_value()),
         None
     );
     assert_eq!(
-        crate::core::output_model::output_items_to_value(&output.output.items),
+        crate::core::output_model::output_items_to_value(&output.items),
         serde_json::json!({
             "code": "vm_ambiguous",
             "candidates": [{"name": "db01.uio.no", "provider": "vmware"}]
@@ -953,10 +953,11 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             .expect("pipeline should apply");
     assert_eq!(prepared.exit_code, 0);
     assert!(prepared.failure_report.is_none());
-    let Some(ReplCommandOutput::Output(output)) = prepared.output else {
+    let crate::app::CommandBody::Output(output) = prepared.body else {
         panic!("expected successful output response");
     };
-    assert!(output.format_hint.is_none());
+    assert!(prepared.format_hint.is_none());
+    assert!(output.document.is_none());
 }
 
 #[test]
@@ -1022,11 +1023,11 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
         .expect("protocol failure should still parse");
 
     assert_eq!(result.exit_code, 1);
-    let Some(ReplCommandOutput::Output(output)) = result.output.as_ref() else {
+    let crate::app::CommandBody::Output(output) = &result.body else {
         panic!("structured failure data should remain renderable");
     };
     assert_eq!(
-        crate::core::output_model::output_items_to_value(&output.output.items),
+        crate::core::output_model::output_items_to_value(&output.items),
         serde_json::json!({})
     );
     assert_eq!(

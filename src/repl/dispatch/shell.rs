@@ -8,7 +8,7 @@ use crate::app::dispatch::{
     resolve_external_command_source,
 };
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession, CliCommandResult};
+use crate::app::{AppClients, AppRuntime, AppSession, CommandOutput};
 use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::scan_command_tokens;
 use crate::repl::{input, lifecycle, presentation};
@@ -322,10 +322,10 @@ fn repl_help_command_result_for_scope(
     session: &mut AppSession,
     clients: &AppClients,
     invocation: &ResolvedInvocation,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     if session.scope.is_root() {
         let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
-        return Ok(CliCommandResult::output(
+        return Ok(CommandOutput::output(
             presentation::repl_document_output(
                 &presentation::build_repl_command_overview_view(&prepared.surface)
                     .filtered_for_help_level(invocation.help_level),

@@ -6,7 +6,7 @@
 
 use miette::Result;
 
-use crate::app::CliCommandResult;
+use crate::app::CommandOutput;
 use crate::app::session::LastFailureDiagnostics;
 use crate::app::{
     AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
@@ -57,10 +57,10 @@ impl<'a> DoctorCommandContext<'a> {
 pub(crate) fn run_doctor_command(
     context: DoctorCommandContext<'_>,
     args: DoctorArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let command = args.command.unwrap_or(DoctorCommands::All);
     match command {
-        DoctorCommands::Config => Ok(CliCommandResult::output(
+        DoctorCommands::Config => Ok(CommandOutput::output(
             rows_to_output_result(config_cmd::config_diagnostics_rows(context.config)),
             None,
         )),
@@ -75,7 +75,7 @@ pub(crate) fn run_doctor_command(
             context.last_failure,
             context.last_failure_diagnostics,
         )),
-        DoctorCommands::Theme => Ok(CliCommandResult::output(
+        DoctorCommands::Theme => Ok(CommandOutput::output(
             rows_to_output_result(theme_doctor_rows(context.themes)),
             None,
         )),
@@ -104,7 +104,7 @@ impl CredentialDiagnostics<'_> {
     }
 }
 
-fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult> {
+fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CommandOutput> {
     let facts = context.auth.session_facts();
     let credentials = facts
         .credentials
@@ -127,7 +127,7 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
     sections.push(("theme", theme_doctor_rows(context.themes)));
 
     if matches!(context.ui.render_settings.format, OutputFormat::Json) {
-        return Ok(CliCommandResult::json(doctor_report_json_value(&sections)));
+        return Ok(CommandOutput::json(doctor_report_json_value(&sections)));
     }
 
     sections[0].1[0].insert(
@@ -140,7 +140,7 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
         ),
     );
 
-    Ok(CliCommandResult::document_with_output(
+    Ok(CommandOutput::document_with_output(
         doctor_report_guide(&sections),
         doctor_report_output(&sections),
         None,
@@ -253,16 +253,16 @@ fn render_last_failure_document(
     ui: &UiState,
     last_failure: Option<&LastFailure>,
     diagnostics: Option<&LastFailureDiagnostics>,
-) -> crate::app::CliCommandResult {
+) -> crate::app::CommandOutput {
     let Some(last) = last_failure else {
         if matches!(ui.render_settings.format, OutputFormat::Json) {
-            return CliCommandResult::json(serde_json::json!({
+            return CommandOutput::json(serde_json::json!({
                 "status": "ok",
                 "failure": null,
                 "message": "No recorded REPL failure in this session.",
             }));
         }
-        return CliCommandResult::text("No recorded REPL failure in this session.\n");
+        return CommandOutput::text("No recorded REPL failure in this session.\n");
     };
 
     let (summary, action) = split_failure_action(&last.summary);
@@ -274,7 +274,7 @@ fn render_last_failure_document(
             "action": action,
             "detail": last.detail,
         });
-        return CliCommandResult::json(payload);
+        return CommandOutput::json(payload);
     }
 
     let mut out = String::new();
@@ -307,7 +307,7 @@ fn render_last_failure_document(
         out.push('\n');
         out.push_str(&format!("More: run `{command}` for more detail.\n"));
     }
-    CliCommandResult::text(out)
+    CommandOutput::text(out)
 }
 
 fn split_failure_action(summary: &str) -> (&str, Option<&str>) {
@@ -343,7 +343,6 @@ mod tests {
         DoctorCommandContext, LastFailureDiagnostics, doctor_command, render_last_failure_document,
         run_doctor_command, theme_doctor_rows,
     };
-    use crate::app::ReplCommandOutput;
     use crate::app::{AuthState, ErrorDetail, LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
     use crate::cli::{DoctorArgs, DoctorCommands};
@@ -422,7 +421,7 @@ mod tests {
     #[test]
     fn doctor_last_rendering_covers_empty_text_debug_and_json_modes_unit() {
         let empty = render_last_failure_document(&ui_state(OutputFormat::Table, 0), None, None);
-        let Some(ReplCommandOutput::Text(empty_text)) = empty.output else {
+        let crate::app::CommandBody::Text(empty_text) = empty.body else {
             panic!("expected text output");
         };
         assert!(empty_text.contains("No recorded REPL failure"));
@@ -444,7 +443,7 @@ mod tests {
             Some(&failure),
             Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(verbose_text)) = verbose.output else {
+        let crate::app::CommandBody::Text(verbose_text) = verbose.body else {
             panic!("expected text output");
         };
         assert!(verbose_text.contains("Command: ldap user nope"));
@@ -457,7 +456,7 @@ mod tests {
             Some(&failure),
             Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(compact_text)) = compact.output else {
+        let crate::app::CommandBody::Text(compact_text) = compact.body else {
             panic!("expected text output");
         };
         assert!(compact_text.contains("Error:   request failed"));
@@ -470,7 +469,7 @@ mod tests {
             Some(&failure),
             Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(debug_text)) = debug.output else {
+        let crate::app::CommandBody::Text(debug_text) = debug.body else {
             panic!("expected text output");
         };
         assert!(debug_text.contains("policy gate: ldap user"));
@@ -481,7 +480,7 @@ mod tests {
             Some(&failure),
             Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(forensic_text)) = forensic.output else {
+        let crate::app::CommandBody::Text(forensic_text) = forensic.body else {
             panic!("expected text output");
         };
         assert!(forensic_text.contains("cause chain"));
@@ -496,7 +495,7 @@ mod tests {
             Some(&json_failure),
             None,
         );
-        let Some(ReplCommandOutput::Json(json)) = json_result.output else {
+        let crate::app::CommandBody::Json(json) = json_result.body else {
             panic!("expected json output");
         };
         assert_eq!(json["status"], Value::String("error".to_string()));
@@ -538,7 +537,7 @@ mod tests {
             },
         )
         .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Json(json)) = visible.output else {
+        let crate::app::CommandBody::Json(json) = visible.body else {
             panic!("expected json output");
         };
         assert!(json.get("config").is_some());
@@ -552,7 +551,7 @@ mod tests {
             },
         )
         .expect("doctor theme should succeed");
-        assert!(theme.output.is_some());
+        assert!(!matches!(theme.body, crate::app::CommandBody::None));
         assert!(theme.messages.is_empty());
 
         let table = run_doctor_command(
@@ -562,12 +561,14 @@ mod tests {
             },
         )
         .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Output(guide)) = table.output else {
+        let crate::app::CommandBody::Output(guide) = table.body else {
             panic!("expected guide output");
         };
         assert!(
             guide
-                .source_document
+                .document
+                .as_ref()
+                .and_then(crate::core::output_model::OutputDocument::semantic)
                 .expect("expected semantic guide payload")
                 .blocks
                 .iter()
@@ -575,7 +576,6 @@ mod tests {
                     if matches!(blocks.as_slice(), [DocBlock::Data { .. }])))
         );
         let rows = guide
-            .output
             .as_rows()
             .expect("doctor guide output should keep a structured fallback");
         assert!(rows[0].get("config").is_some());

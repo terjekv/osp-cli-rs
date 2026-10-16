@@ -18,7 +18,7 @@ use crate::ui::theme_catalog::ThemeCatalog;
 
 use super::history;
 use super::presentation::{ReplIntroStyle, intro_style, intro_style_with_verbosity};
-use crate::app::CliCommandResult;
+use crate::app::CommandOutput;
 use crate::cli::{DebugCompleteArgs, DebugHighlightArgs, DebugMenuArg, ReplArgs, ReplCommands};
 use crate::ui::messages::MessageLevel;
 
@@ -126,7 +126,7 @@ pub(crate) fn run_repl_debug_command_for(
     session: &AppSession,
     clients: &crate::app::AppClients,
     args: ReplArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     match args.command {
         ReplCommands::DebugComplete(args) => {
             run_repl_debug_complete(runtime, session, clients, args)
@@ -142,7 +142,7 @@ fn run_repl_debug_complete(
     session: &AppSession,
     clients: &crate::app::AppClients,
     args: DebugCompleteArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
     let cursor = args.cursor.unwrap_or(args.line.len());
 
@@ -215,7 +215,7 @@ fn run_repl_debug_complete(
     let payload = serde_json::from_str(&payload)
         .into_diagnostic()
         .wrap_err("failed to parse serialized REPL debug payload")?;
-    Ok(CliCommandResult::json(payload))
+    Ok(CommandOutput::json(payload))
 }
 
 fn run_repl_debug_highlight(
@@ -223,7 +223,7 @@ fn run_repl_debug_highlight(
     session: &AppSession,
     clients: &crate::app::AppClients,
     args: DebugHighlightArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let prepared = lifecycle::prepare_repl_surface_state(runtime, session, clients)?;
     let projected_line = input::project_repl_ui_line(&args.line, runtime.config.resolved())?;
     let command_color = prepared
@@ -246,7 +246,7 @@ fn run_repl_debug_highlight(
         "hidden_suggestions": projected_line.hidden_suggestions,
         "spans": spans,
     });
-    Ok(CliCommandResult::json(payload))
+    Ok(CommandOutput::json(payload))
 }
 
 #[cfg(test)]
@@ -426,10 +426,7 @@ mod tests {
             },
         )
         .expect("debug complete should succeed");
-        assert!(matches!(
-            complete.output,
-            Some(crate::app::ReplCommandOutput::Json(_))
-        ));
+        assert!(matches!(complete.body, crate::app::CommandBody::Json(_)));
 
         let history_complete = run_repl_debug_command_for(
             &runtime,
@@ -450,8 +447,8 @@ mod tests {
         )
         .expect("history debug complete should succeed");
         assert!(matches!(
-            history_complete.output,
-            Some(crate::app::ReplCommandOutput::Json(_))
+            history_complete.body,
+            crate::app::CommandBody::Json(_)
         ));
 
         let highlight = run_repl_debug_command_for(
@@ -465,9 +462,6 @@ mod tests {
             },
         )
         .expect("debug highlight should succeed");
-        assert!(matches!(
-            highlight.output,
-            Some(crate::app::ReplCommandOutput::Json(_))
-        ));
+        assert!(matches!(highlight.body, crate::app::CommandBody::Json(_)));
     }
 }

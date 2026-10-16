@@ -6,7 +6,6 @@ use super::{
     secrets_permissions_diagnostic, session_scoped_value, validate_store_key,
     validate_write_scopes,
 };
-use crate::app::ReplCommandOutput;
 use crate::app::{RuntimeContext, TerminalKind, UiState};
 use crate::cli::{ConfigScopeArgs, ConfigSetArgs, ConfigStoreArgs, ConfigUnsetArgs};
 use crate::config::{
@@ -149,10 +148,10 @@ fn alias_commands_reuse_resolved_config_and_session_mutation_unit() {
         },
     )
     .expect("alias list should succeed");
-    let Some(ReplCommandOutput::Output(listed)) = listed.output else {
+    let crate::app::CommandBody::Output(listed) = listed.body else {
         panic!("alias list should return structured output");
     };
-    let OutputItems::Rows(rows) = listed.output.items else {
+    let OutputItems::Rows(rows) = listed.items else {
         panic!("alias list should return rows");
     };
     assert_eq!(rows[0]["name"], "hosts");
@@ -487,10 +486,7 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
     )
     .expect("alias lookup should succeed");
     assert_eq!(alias_result.exit_code, 0);
-    assert!(matches!(
-        alias_result.output,
-        Some(ReplCommandOutput::Output(_))
-    ));
+    assert!(!matches!(alias_result.body, crate::app::CommandBody::None));
 
     let missing_result = run_config_get(
         context,
@@ -504,7 +500,7 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
     )
     .expect("missing key should return a structured miss");
     assert_eq!(missing_result.exit_code, 1);
-    assert!(missing_result.output.is_none());
+    assert!(matches!(missing_result.body, crate::app::CommandBody::None));
     assert!(
         missing_result
             .messages
@@ -543,10 +539,7 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
         .expect("session config set should succeed");
 
     assert_eq!(set_result.exit_code, 0);
-    assert!(matches!(
-        set_result.output,
-        Some(ReplCommandOutput::Output(_))
-    ));
+    assert!(!matches!(set_result.body, crate::app::CommandBody::None));
     assert!(
         set_result
             .messages
@@ -565,10 +558,7 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     let unset_result = run_config_unset(unset_context, config_unset_args("ui.format"))
         .expect("session config unset should succeed");
 
-    assert!(matches!(
-        unset_result.output,
-        Some(ReplCommandOutput::Output(_))
-    ));
+    assert!(!matches!(unset_result.body, crate::app::CommandBody::None));
     assert!(
         unset_result
             .messages
@@ -582,7 +572,8 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
         ConfigTestFixture::with_format(TerminalKind::Repl, OutputFormat::Json);
     let result = run_config_set(explain_fixture.command(), explain_args)
         .expect("session config set explain should succeed");
-    assert!(matches!(result.output, Some(ReplCommandOutput::Json(_))));
+    assert!(matches!(result.body, crate::app::CommandBody::Json(_)));
+    assert!(!matches!(result.body, crate::app::CommandBody::None));
 }
 
 #[test]

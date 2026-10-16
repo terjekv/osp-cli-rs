@@ -22,7 +22,7 @@ pub(super) struct ParsedReplInvocation {
 
 pub(super) enum ParsedReplDispatch {
     Help {
-        result: Box<crate::app::CliCommandResult>,
+        result: Box<crate::app::CommandOutput>,
         effective: Box<ResolvedInvocation>,
         stages: Vec<String>,
     },
@@ -83,7 +83,7 @@ pub(super) fn parse_repl_invocation(
         return Ok(repl_help_dispatch(
             parsed,
             &effective,
-            crate::app::CliCommandResult::document(
+            crate::app::CommandOutput::document(
                 render_invalid_help_alias(input::help_alias_target_at(
                     &scanned.tokens,
                     command_index,
@@ -112,7 +112,7 @@ pub(super) fn parse_repl_invocation(
             return Ok(repl_help_dispatch(
                 parsed,
                 &effective,
-                crate::app::CliCommandResult::output(output, None),
+                crate::app::CommandOutput::output(output, None),
             ));
         }
     };
@@ -131,7 +131,7 @@ pub(super) fn parse_repl_invocation(
 fn repl_help_dispatch(
     parsed: &input::ReplParsedLine,
     effective: &ResolvedInvocation,
-    result: crate::app::CliCommandResult,
+    result: crate::app::CommandOutput,
 ) -> ParsedReplDispatch {
     ParsedReplDispatch::Help {
         result: Box::new(result),
@@ -281,7 +281,7 @@ pub(super) fn render_repl_command_output(
     session: &mut AppSession,
     line: &str,
     stages: &[String],
-    mut result: crate::app::CliCommandResult,
+    mut result: crate::app::CommandOutput,
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
@@ -290,8 +290,9 @@ pub(super) fn render_repl_command_output(
     {
         return Err(report);
     }
-    app::render_repl_command_with_runtime(
-        &app::CommandRenderRuntime::new(runtime.config.resolved(), &invocation.ui),
+    app::render_repl_command(
+        runtime.config.resolved(),
+        &invocation.ui,
         session,
         line,
         stages,
@@ -387,7 +388,7 @@ fn run_repl_command_with_progress(
     clients: &AppClients,
     history: &SharedHistory,
     input: ReplRunInput<'_, '_, '_>,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     let result = match input.command {
         Commands::External(tokens) => run_repl_external_command_with_progress(
             runtime,
@@ -451,7 +452,7 @@ pub(super) fn run_repl_command(
     command: Commands,
     invocation: &ResolvedInvocation,
     history: &SharedHistory,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     let mut accepted = false;
     run_repl_command_with_progress(
         runtime,
@@ -474,7 +475,7 @@ pub(super) fn run_repl_external_command(
     session: &mut AppSession,
     tokens: Vec<String>,
     invocation: &ResolvedInvocation,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     app::run_external_command_with_help_renderer(
         runtime,
         session,
@@ -494,7 +495,7 @@ fn run_repl_external_command_with_progress(
     invocation: &ResolvedInvocation,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     app::external::run_external_command_for_repl(
         runtime,
         session,
