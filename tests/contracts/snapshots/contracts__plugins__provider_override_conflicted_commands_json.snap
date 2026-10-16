@@ -6,7 +6,7 @@ expression: sanitized
 [
   {
     "name": "ranked",
-    "about": "provider selection required; use --plugin-provider <plugin-id> or `osp plugins select-provider ranked <plugin-id>`",
+    "about": "provider selection required",
     "provider": null,
     "providers": [
       "explicit-provider (explicit)",

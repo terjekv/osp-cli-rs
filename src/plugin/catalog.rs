@@ -76,10 +76,7 @@ pub(crate) fn build_command_catalog(view: &ActivePluginView<'_>) -> Vec<CommandC
                 });
             }
             ProviderResolution::Ambiguous(_) => {
-                let about = format!(
-                    "provider selection required; use --plugin-provider <plugin-id> or `osp plugins select-provider {} <plugin-id>`",
-                    resolved.command()
-                );
+                let about = "provider selection required".to_string();
                 out.push(CommandCatalogEntry {
                     name: resolved.command().to_string(),
                     about,
