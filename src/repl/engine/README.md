@@ -39,5 +39,5 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 ## Common changes
 
 - **Key binding:** `build_repl_keybindings` in `session.rs`.
-- **When typing opens the menu:** `AutoCompleteEmacs::opens_menu`.
+- **When typing opens the menu:** `AutoCompleteEmacs::opens_menu_at`.
 - **What the status line says:** `ReplHinter::status`.

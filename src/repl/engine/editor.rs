@@ -78,15 +78,16 @@ impl AutoCompleteEmacs {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn opens_menu(&self, commands: &[EditCommand]) -> bool {
+        self.opens_menu_at(commands, Some(self.painted.word_len_before_cursor().0))
+    }
+
     /// Whether typing these commands should open a closed menu.
     ///
     /// Starting a flag always does; a `-` inside a word such as a hostname
     /// does not. Otherwise `tab_mode` decides. A space only opens in `Always`
     /// mode and is handled with the token commit below.
-    pub(crate) fn opens_menu(&self, commands: &[EditCommand]) -> bool {
-        self.opens_menu_at(commands, Some(self.painted.word_len_before_cursor().0))
-    }
-
     fn opens_menu_at(&self, commands: &[EditCommand], word_len: Option<usize>) -> bool {
         let [EditCommand::InsertChar(ch)] = commands else {
             return false;
