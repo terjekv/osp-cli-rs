@@ -233,3 +233,9 @@ columns remain stable for zero, one or many rows. Use `--json` for complete
 machine data, or `P` to choose the fields needed for your task. Set
 `ui.table.overflow=wrap` to preserve complete cell values across lines; the
 explicit `none` setting disables width fitting.
+
+Ordered `F` comparisons accept `now` and `now-Ns`, `now-Nm`, `now-Nh`,
+`now-Nd`, for example `F created_at >= now-24h`. N is a nonnegative integer;
+a day is exactly 86400 seconds. Each compiled filter samples the clock once,
+and invalid or overflowing durations fail before filtering. These predicates
+filter fetched rows only: they do not change server pagination or fetch history.

@@ -13,7 +13,7 @@ const VERBS: &[VerbInfo] = &[
     VerbInfo {
         verb: "F",
         summary: "Filter rows",
-        help: "F field OP value; OP: = == != > >= < <= ~. F field text contains text. Example: F status=running. Quote regex alternation: F name ~ 'foo|bar'. Naive dates/times use local timezone; use RFC3339 offsets for ambiguous DST times.",
+        help: "F field OP value; OP: = == != > >= < <= ~. F field text contains text. Example: F status=running. Quote regex alternation: F name ~ 'foo|bar'. Ordered comparisons accept now and now-N{s,m,h,d} for fetched rows only. Naive dates/times use local timezone; use RFC3339 offsets for ambiguous DST times.",
     },
     VerbInfo {
         verb: "P",

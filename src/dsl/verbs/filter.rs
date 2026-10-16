@@ -206,6 +206,46 @@ fn parse_filter_spec(spec: &str) -> Result<ParsedFilterSpec> {
         ));
     }
 
+    if matches!(
+        operator,
+        Operator::Gt | Operator::Ge | Operator::Lt | Operator::Le
+    ) && (value.text == "now" || value.text.starts_with("now-"))
+    {
+        let now = chrono::Utc::now();
+        let seconds = if value.text == "now" {
+            0
+        } else {
+            let duration = &value.text[4..];
+            let split = duration.len().saturating_sub(1);
+            let amount = duration
+                .get(..split)
+                .ok_or_else(|| anyhow!("F: invalid relative time"))?;
+            let unit = &duration[split..];
+            let multiplier = match unit {
+                "s" => 1,
+                "m" => 60,
+                "h" => 3600,
+                "d" => 86400,
+                _ => {
+                    return Err(anyhow!(
+                        "F: relative time requires now-N followed by s, m, h, or d"
+                    ));
+                }
+            };
+            amount
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+                .then(|| amount.parse::<i64>().ok())
+                .flatten()
+                .and_then(|amount| amount.checked_mul(multiplier))
+                .ok_or_else(|| anyhow!("F: relative time duration is invalid or out of range"))?
+        };
+        value.text = chrono::Duration::try_seconds(seconds)
+            .and_then(|duration| now.checked_sub_signed(duration))
+            .ok_or_else(|| anyhow!("F: relative time is out of range"))?
+            .to_rfc3339();
+    }
+
     let original_operator = operator;
     if matches!(operator, Operator::Ne) {
         operator = Operator::Eq;
