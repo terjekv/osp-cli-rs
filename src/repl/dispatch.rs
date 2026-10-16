@@ -174,7 +174,11 @@ pub(crate) fn execute_repl_plugin_line(
     let sink = sink.unwrap_or(&mut stdio);
     let mut accepted = false;
     let started = Instant::now();
-    let mut resolved = line.to_string();
+    let mut resolved = if line.trim_start().starts_with('|') {
+        format!("last {}", line.trim_start())
+    } else {
+        line.to_string()
+    };
     let mut keep_history = false;
     let execution = (|| {
         if let Some(command @ builtins::BangCommand::Last) = builtins::parse_bang_command(line)? {

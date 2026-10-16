@@ -24,6 +24,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   arbitrary plugin stderr, including help output. Preserve structured plugin UI
   text with terminal sanitization and redaction of injected secrets.
 
+- REPL lines beginning with `|` pipe the saved answer without another request.
+
 - **Breaking:** Plugins are drop-in `osp-NAME` executables. Builtins and native
   commands win name clashes; the first plugin found wins. PATH is searched by
   default. Root help now lists plugins, and inventory shows shadowed entries.

@@ -849,7 +849,16 @@ fn expand_external_tokens(
     tokens: &[String],
 ) -> Result<(ParsedCommandLine, InvocationElevation)> {
     let (tokens, elevation) = parse_invocation_elevation(tokens)?;
-    let parsed = parse_command_tokens_with_aliases(&tokens, runtime.config.resolved())?;
+    // REPL text has already separated pipes while quote information was present.
+    let parsed = if runtime.context.terminal_kind() == TerminalKind::Repl {
+        crate::cli::pipeline::finalize_command_with_aliases(
+            tokens,
+            Vec::new(),
+            runtime.config.resolved(),
+        )?
+    } else {
+        parse_command_tokens_with_aliases(&tokens, runtime.config.resolved())?
+    };
     Ok((parsed, elevation))
 }
 

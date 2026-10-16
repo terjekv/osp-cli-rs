@@ -376,3 +376,8 @@ Disable sound for this session with
 Intro templates and daily tips may use `{{actions}}` to show registered action
 labels with their resolved keys; disabled and unavailable actions are omitted.
 The root help surface uses the same resolved metadata.
+
+A leading `|` replays the saved answer: `| F status=failed` means
+`last | F status=failed` and makes no new request. Separate leading-pipe lines
+each start from the saved answer, not the previous replay. Quoted literal pipes
+remain ordinary command arguments.

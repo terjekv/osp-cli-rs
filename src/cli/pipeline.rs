@@ -153,7 +153,7 @@ fn maybe_expand_alias(
     Ok(Some(expanded))
 }
 
-fn finalize_command_with_aliases(
+pub(crate) fn finalize_command_with_aliases(
     command_tokens: Vec<String>,
     stages: Vec<String>,
     config: &ResolvedConfig,
