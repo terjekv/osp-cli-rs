@@ -116,13 +116,13 @@ For more information, try '--help'.\n",
 
 #[test]
 fn repl_exit_behaves_differently_for_root_and_shells_unit() {
-    let mut root = AppSession::with_cache_limit(4);
+    let mut root = AppSession::default();
     assert!(matches!(
         handle_repl_exit_request(&mut root),
         ReplLineResult::Exit(0)
     ));
 
-    let mut nested = AppSession::with_cache_limit(4);
+    let mut nested = AppSession::default();
     nested.scope.enter("ldap");
     assert!(matches!(
         handle_repl_exit_request(&mut nested),
@@ -197,7 +197,7 @@ fn repl_restart_detection_covers_mutating_commands_unit() {
 
 #[test]
 fn leave_repl_shell_returns_none_at_root_unit() {
-    let mut session = AppSession::with_cache_limit(4);
+    let mut session = AppSession::default();
     assert!(leave_repl_shell(&mut session).is_none());
     assert!(matches!(
         finalize_repl_command(String::new(), true, false),
@@ -345,7 +345,7 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
         .save_command_line("config show")
         .expect("third command saves");
 
-    let mut session = AppSession::with_cache_limit(4);
+    let mut session = AppSession::default();
     session.scope.enter("ldap");
     assert_eq!(current_history_scope(&session).as_deref(), Some("ldap "));
     assert_eq!(

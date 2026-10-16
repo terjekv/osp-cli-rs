@@ -63,7 +63,7 @@ mod tests {
             .save_command_line("config show")
             .expect("history seed should save");
 
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
         let result = run_history_repl_command(
             &mut session,
             HistoryArgs {

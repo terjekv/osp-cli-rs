@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn history_scope_label_tracks_current_shell_unit() {
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
         assert_eq!(
             HistoryScopeView::from_session(&session).label,
             "root history"
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn run_history_repl_command_reports_disabled_history_unit() {
         let history = shared_history(false);
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
 
         let output = run_history_repl_command(
             &mut session,
@@ -488,7 +488,7 @@ mod tests {
         history
             .save_command_line("config show")
             .expect("history seed should save");
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
 
         let output = run_history_repl_command(
             &mut session,
@@ -563,7 +563,7 @@ mod tests {
                 .with_profile_scoped(false)
                 .build(),
         );
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
         session.scope.enter("ldap");
 
         let output = run_history_repl_command(
@@ -603,7 +603,7 @@ mod tests {
         assert!(help.contains("+02:00"));
 
         let history = shared_history(true);
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
         let error = run_history_repl_command(
             &mut session,
             HistoryArgs {
@@ -649,7 +649,7 @@ mod tests {
         history
             .save_command_line("mreg host a")
             .expect("history seed should save");
-        let mut session = AppSession::with_cache_limit(8);
+        let mut session = AppSession::default();
         session.scope.enter("ldap");
 
         let prune = run_history_repl_command(

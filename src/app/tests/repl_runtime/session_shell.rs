@@ -194,7 +194,6 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     history
         .save_command_line("cache first")
         .expect("history seed should save");
-    let cache_size_before = state.repl_cache_size();
     let expanded = repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
@@ -209,7 +208,6 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
-    assert_eq!(state.repl_cache_size(), cache_size_before);
 }
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
@@ -264,7 +262,6 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     history
         .save_command_line("cache beta")
         .expect("history seed should save");
-    let cache_size_before = state.repl_cache_size();
     let expanded = repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
@@ -279,7 +276,6 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
-    assert_eq!(state.repl_cache_size(), cache_size_before);
 }
 
 #[test]

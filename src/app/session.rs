@@ -7,7 +7,7 @@
 //! High-level flow:
 //!
 //! - track prompt timing plus last-success/last-failure REPL details
-//! - maintain REPL scope stack and small in-memory caches
+//! - maintain the REPL scope stack
 //! - bundle session state that host code needs to carry between dispatches
 //!
 //! Contract:
@@ -19,18 +19,16 @@
 //!
 //! Public API shape:
 //!
-//! - use [`AppSession::default`] or [`AppSession::with_cache_limit`] plus the
-//!   `with_*` chainers for session-scoped REPL state
+//! - use [`AppSession::default`] plus the `with_*` chainers for session-scoped
+//!   REPL state
 //! - use [`AppStateBuilder`] when you need a fully assembled runtime/session
 //!   snapshot outside the full CLI bootstrap
 //! - these types are host machinery, not lightweight semantic DTOs
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use crate::config::{ConfigLayer, DEFAULT_SESSION_CACHE_MAX_RESULTS};
-use crate::core::row::Row;
+use crate::config::ConfigLayer;
 use crate::native::{NativeCommandRegistry, NativeSessionContext};
 use crate::plugin::PluginManager;
 use crate::repl::HistoryShellContext;
@@ -272,7 +270,7 @@ impl ReplScopeStack {
     }
 }
 
-/// Session-scoped REPL state, caches, and prompt metadata.
+/// Session-scoped REPL state and prompt metadata.
 #[non_exhaustive]
 #[must_use]
 #[derive(Clone)]
@@ -290,19 +288,11 @@ pub struct AppSession {
     pub(crate) startup_prompt_timing_pending: bool,
     /// Current command shell within the REPL.
     pub scope: ReplScopeStack,
-    /// Rows returned by the most recent successful REPL command.
-    pub last_rows: Vec<Row>,
     /// Raw output plus pipeline stages from the most recent successful REPL command.
     pub(crate) last_success: Option<LastSuccess>,
     /// Summary of the most recent failed REPL command.
     pub last_failure: Option<LastFailure>,
     pub(crate) last_failure_diagnostics: Option<LastFailureDiagnostics>,
-    /// Cached row outputs keyed by command line.
-    pub result_cache: HashMap<String, Vec<Row>>,
-    /// Eviction order for the row-result cache.
-    pub cache_order: VecDeque<String>,
-    /// Maximum number of cached result sets to retain.
-    pub max_cached_results: usize,
     /// Session-scoped config overrides layered above persisted config.
     pub config_overrides: ConfigLayer,
 }
@@ -343,66 +333,6 @@ pub(crate) enum ReplExitTransition {
 }
 
 impl AppSession {
-    /// Creates a session with a bounded row-result cache.
-    ///
-    /// A requested cache limit of `0` is clamped to `1` so the session never
-    /// stores a zero-capacity cache by accident.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::app::AppSession;
-    ///
-    /// let session = AppSession::with_cache_limit(4).with_prompt_prefix("demo");
-    ///
-    /// assert_eq!(session.max_cached_results, 4);
-    /// assert_eq!(session.prompt_prefix, "demo");
-    /// ```
-    pub fn with_cache_limit(max_cached_results: usize) -> Self {
-        let bounded = max_cached_results.max(1);
-        Self {
-            prompt_prefix: "osp".to_string(),
-            history_enabled: true,
-            history_shell: HistoryShellContext::default(),
-            prompt_timing: DebugTimingState::default(),
-            native_context: NativeSessionContext::default(),
-            startup_prompt_timing_pending: true,
-            scope: ReplScopeStack::default(),
-            last_rows: Vec::new(),
-            last_success: None,
-            last_failure: None,
-            last_failure_diagnostics: None,
-            result_cache: HashMap::new(),
-            cache_order: VecDeque::new(),
-            max_cached_results: bounded,
-            config_overrides: ConfigLayer::default(),
-        }
-    }
-
-    /// Creates the default session snapshot for the current resolved config.
-    pub(crate) fn from_resolved_config(config: &crate::config::ResolvedConfig) -> Self {
-        let session_cache_max_results = crate::app::config_usize(
-            config,
-            "session.cache.max_results",
-            DEFAULT_SESSION_CACHE_MAX_RESULTS as usize,
-        );
-        Self::with_cache_limit(session_cache_max_results)
-    }
-
-    /// Creates the default session snapshot for the current resolved config
-    /// and attaches the supplied session-layer overrides.
-    pub(crate) fn from_resolved_config_with_overrides(
-        config: &crate::config::ResolvedConfig,
-        config_overrides: ConfigLayer,
-    ) -> Self {
-        Self::with_cache_limit(crate::app::config_usize(
-            config,
-            "session.cache.max_results",
-            DEFAULT_SESSION_CACHE_MAX_RESULTS as usize,
-        ))
-        .with_config_overrides(config_overrides)
-    }
-
     /// Replaces the prompt prefix shown ahead of any scope label.
     pub fn with_prompt_prefix(mut self, prompt_prefix: impl Into<String>) -> Self {
         self.prompt_prefix = prompt_prefix.into();
@@ -469,23 +399,6 @@ impl AppSession {
         self.sync_history_shell_context();
     }
 
-    /// Stores the latest successful row output and updates the result cache.
-    pub fn record_result(&mut self, command_line: &str, rows: Vec<Row>) {
-        let key = command_line.trim().to_string();
-        if key.is_empty() {
-            return;
-        }
-
-        self.last_rows = rows.clone();
-        insert_bounded_cache(
-            &mut self.result_cache,
-            &mut self.cache_order,
-            self.max_cached_results,
-            key,
-            rows,
-        );
-    }
-
     /// Stores the last successful output so the REPL can replay it later.
     pub(crate) fn record_success_output(
         &mut self,
@@ -547,13 +460,6 @@ impl AppSession {
         self.last_failure_diagnostics = Some(diagnostics);
     }
 
-    /// Returns cached rows for a previously executed command line.
-    pub fn cached_rows(&self, command_line: &str) -> Option<&[Row]> {
-        self.result_cache
-            .get(command_line.trim())
-            .map(|rows| rows.as_slice())
-    }
-
     /// Returns the last successful REPL output contract, if available.
     pub(crate) fn last_success(&self) -> Option<&LastSuccess> {
         self.last_success.as_ref()
@@ -611,28 +517,21 @@ impl AppSession {
     }
 }
 
-fn insert_bounded_cache<V>(
-    cache: &mut HashMap<String, V>,
-    order: &mut VecDeque<String>,
-    limit: usize,
-    key: String,
-    value: V,
-) {
-    if !cache.contains_key(&key)
-        && cache.len() >= limit
-        && let Some(evict_key) = order.pop_front()
-    {
-        cache.remove(&evict_key);
-    }
-
-    order.retain(|item| item != &key);
-    order.push_back(key.clone());
-    cache.insert(key, value);
-}
-
 impl Default for AppSession {
     fn default() -> Self {
-        Self::with_cache_limit(DEFAULT_SESSION_CACHE_MAX_RESULTS as usize)
+        Self {
+            prompt_prefix: "osp".to_string(),
+            history_enabled: true,
+            history_shell: HistoryShellContext::default(),
+            prompt_timing: DebugTimingState::default(),
+            native_context: NativeSessionContext::default(),
+            startup_prompt_timing_pending: true,
+            scope: ReplScopeStack::default(),
+            last_success: None,
+            last_failure: None,
+            last_failure_diagnostics: None,
+            config_overrides: ConfigLayer::default(),
+        }
     }
 }
 
@@ -678,8 +577,7 @@ impl AppStateParts {
             )
         };
         let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);
-        let session = session_override
-            .unwrap_or_else(|| AppSession::from_resolved_config(runtime.config.resolved()));
+        let session = session_override.unwrap_or_default();
 
         Self {
             runtime,
@@ -695,7 +593,7 @@ impl AppStateParts {
 pub struct AppState {
     /// Runtime-scoped services and resolved config state.
     pub runtime: AppRuntime,
-    /// Session-scoped REPL caches and prompt metadata.
+    /// Session-scoped REPL state and prompt metadata.
     pub session: AppSession,
     /// Shared client registries used during command execution.
     pub clients: AppClients,
@@ -767,11 +665,6 @@ impl AppState {
         self.session.sync_history_shell_context();
     }
 
-    /// Records rows produced by a REPL command.
-    pub fn record_repl_rows(&mut self, command_line: &str, rows: Vec<Row>) {
-        self.session.record_result(command_line, rows);
-    }
-
     /// Records a failed REPL command and its associated messages.
     pub fn record_repl_failure(
         &mut self,
@@ -782,26 +675,9 @@ impl AppState {
         self.session.record_failure(command_line, summary, detail);
     }
 
-    /// Returns the rows from the most recent successful REPL command.
-    pub fn last_repl_rows(&self) -> Vec<Row> {
-        self.session.last_rows.clone()
-    }
-
     /// Returns details about the most recent failed REPL command.
     pub fn last_repl_failure(&self) -> Option<LastFailure> {
         self.session.last_failure.clone()
-    }
-
-    /// Returns cached rows for a previously executed REPL command.
-    pub fn cached_repl_rows(&self, command_line: &str) -> Option<Vec<Row>> {
-        self.session
-            .cached_rows(command_line)
-            .map(ToOwned::to_owned)
-    }
-
-    /// Returns the number of cached REPL result sets.
-    pub fn repl_cache_size(&self) -> usize {
-        self.session.result_cache.len()
     }
 }
 
@@ -833,7 +709,7 @@ impl AppState {
 ///     RuntimeContext::new(None, TerminalKind::Repl, None),
 ///     config,
 /// )?
-/// .with_session(AppSession::with_cache_limit(32).with_prompt_prefix("demo"))
+/// .with_session(AppSession::default().with_prompt_prefix("demo"))
 /// .build();
 ///
 /// assert_eq!(state.prompt_prefix(), "demo");
@@ -910,7 +786,7 @@ impl AppStateBuilder {
             crate::app::assembly::RenderSettingsSeed::DefaultAuto,
             None,
         )?;
-        let session = AppSession::from_resolved_config(&config);
+        let session = AppSession::default();
         crate::ui::theme_catalog::log_theme_issues(&themes.issues);
         Ok(Self {
             context,
@@ -1014,21 +890,19 @@ impl AppStateBuilder {
 mod tests {
     use std::time::Duration;
 
-    use serde_json::Value;
-
     use super::{AppSession, ReplExitTransition};
     use crate::config::ConfigLayer;
 
     #[test]
     fn request_repl_exit_tracks_root_and_shell_transitions_unit() {
-        let mut root = AppSession::with_cache_limit(4);
+        let mut root = AppSession::default();
         assert!(matches!(
             root.request_repl_exit(),
             ReplExitTransition::ExitRoot
         ));
 
         // Entering another shell switches; exit then returns to root.
-        let mut shell = AppSession::with_cache_limit(4);
+        let mut shell = AppSession::default();
         shell.enter_repl_scope("ldap");
         shell.enter_repl_scope("orch");
         assert_eq!(shell.scope.commands(), vec!["orch".to_string()]);
@@ -1040,21 +914,17 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_state_round_trip_preserves_rows_and_scope_unit() {
-        let mut session = AppSession::with_cache_limit(4)
+    fn rebuild_state_round_trip_preserves_replay_and_scope_unit() {
+        let mut session = AppSession::default()
             .with_prompt_prefix("osp-dev")
             .with_history_enabled(false);
         let mut overrides = ConfigLayer::default();
         overrides.set("ui.format", "json");
         session = session.with_config_overrides(overrides);
-        session.max_cached_results = 7;
         session.enter_repl_scope("ldap");
         session.record_prompt_timing(2, Duration::from_secs(3), None, None, None);
         session.startup_prompt_timing_pending = false;
 
-        let mut row = crate::core::row::Row::new();
-        row.insert("name".to_string(), Value::from("alice"));
-        session.record_result("list users", vec![row.clone()]);
         session.record_success_output(
             "list users",
             &crate::app::ReplCommandOutput::Json(serde_json::json!([{ "name": "alice" }])),
@@ -1062,15 +932,13 @@ mod tests {
         );
         session.record_failure("list users", "Command failed", "detail");
         let snapshot = session.capture_rebuild_state();
-        let mut restored = AppSession::with_cache_limit(1);
+        let mut restored = AppSession::default();
         restored.restore_rebuild_state(snapshot);
 
         assert_eq!(restored.prompt_prefix, "osp-dev");
         assert!(!restored.history_enabled);
-        assert_eq!(restored.max_cached_results, 7);
         assert_eq!(restored.scope.commands(), vec!["ldap".to_string()]);
         assert_eq!(restored.history_shell.prefix(), Some("ldap ".to_string()));
-        assert_eq!(restored.cached_rows("list users"), Some(&[row][..]));
         assert!(restored.last_success().is_some());
         assert_eq!(
             restored

@@ -78,10 +78,8 @@ impl ResolvedHostInputs {
     ) -> Result<Self> {
         let themes = crate::ui::theme_catalog::load_theme_catalog(config);
         let plugins = build_plugin_manager(config, launch, plugin_preferences_override.as_ref());
-        let default_session = match session_overrides {
-            Some(overrides) => AppSession::from_resolved_config_with_overrides(config, overrides),
-            None => AppSession::from_resolved_config(config),
-        };
+        let default_session =
+            AppSession::default().with_config_overrides(session_overrides.unwrap_or_default());
         let ui = derive_ui_state(context, config, &themes, render_seed, theme_name_override)?;
 
         Ok(Self {

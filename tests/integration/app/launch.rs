@@ -260,15 +260,6 @@ fn app_state_builder_tracks_session_public_helpers_from_resolved_config() {
 
     assert_eq!(state.prompt_prefix(), "demo");
 
-    let mut row = serde_json::Map::new();
-    row.insert("uid".to_string(), serde_json::json!("alice"));
-    state.record_repl_rows("ldap user alice", vec![row.clone()]);
-    assert_eq!(state.repl_cache_size(), 1);
-    let cached = state
-        .cached_repl_rows("ldap user alice")
-        .expect("cached rows should be available");
-    assert_eq!(cached[0]["uid"], "alice");
-
     state.record_repl_failure("ldap user missing", "boom", "boom detail");
     let failure = state
         .last_repl_failure()

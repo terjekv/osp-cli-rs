@@ -26,9 +26,7 @@ use terminal_size::{Height, terminal_size};
 use crate::app::resolve_render_settings_with_hint;
 use crate::app::sink::UiSink;
 use crate::app::{AppSession, ErrorDetail, UiState};
-use crate::cli::rows::output::{
-    output_to_rows, plugin_data_to_output_result, rows_to_output_result,
-};
+use crate::cli::rows::output::{plugin_data_to_output_result, rows_to_output_result};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ReplCommandOutput {
@@ -819,7 +817,7 @@ pub(crate) fn render_repl_command_with_runtime(
 
     let rendered = match output {
         Some(ReplCommandOutput::Output(structured)) => {
-            render_repl_structured_command(runtime, session, line, stages, structured, sink)?
+            render_repl_structured_command(runtime, stages, structured, sink)?
         }
         Some(raw @ (ReplCommandOutput::Text(_) | ReplCommandOutput::Json(_))) => {
             if stages.is_empty() {
@@ -836,7 +834,6 @@ pub(crate) fn render_repl_command_with_runtime(
                     staged.format_hint,
                 );
                 let rendered = render_output(&staged.output, &render_settings);
-                session.record_result(line, output_to_rows(&staged.output));
                 maybe_copy_output_with_runtime(runtime, &staged.output, sink);
                 rendered
             }
@@ -875,8 +872,6 @@ pub(crate) fn render_structured_repl_output(
 
 fn render_repl_structured_command(
     runtime: &CommandRenderRuntime<'_>,
-    session: &mut AppSession,
-    line: &str,
     stages: &[String],
     structured: Box<StructuredCommandOutput>,
     sink: &mut dyn UiSink,
@@ -901,7 +896,6 @@ fn render_repl_structured_command(
     } else {
         render_structured_output(runtime.config(), &render_settings, &output)
     };
-    session.record_result(line, output_to_rows(&output));
     maybe_copy_output_with_runtime(runtime, &output, sink);
     Ok(rendered)
 }

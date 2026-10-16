@@ -861,7 +861,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
         .with_plugin_dir("/tmp/osp-plugin-a")
         .with_config_root(Some(std::path::PathBuf::from("/tmp/osp-config")))
         .with_cache_root(Some(std::path::PathBuf::from("/tmp/osp-cache")));
-    let session = crate::app::AppSession::with_cache_limit(5).with_prompt_prefix("osp-dev");
+    let session = crate::app::AppSession::default().with_prompt_prefix("osp-dev");
     let plugins =
         crate::plugin::PluginManager::new(vec![std::path::PathBuf::from("/tmp/osp-plugin-a")])
             .with_roots(
@@ -885,7 +885,6 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
     assert_eq!(state.runtime.ui.debug_verbosity, 2);
     assert_eq!(state.session.prompt_prefix, "osp-dev");
-    assert_eq!(state.session.max_cached_results, 5);
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
         &[std::path::PathBuf::from("/tmp/osp-plugin-a")]
@@ -973,7 +972,7 @@ fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit(
 }
 
 #[test]
-fn app_session_cache_helpers_cover_public_session_surface_unit() {
+fn app_session_helpers_cover_public_session_surface_unit() {
     let mut neutral_session = crate::app::AppSession::default();
     neutral_session.scope.enter("theme");
     assert_eq!(
@@ -985,14 +984,13 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
     overrides.set("extensions.site.enabled", true);
     let history_shell = HistoryShellContext::default();
 
-    let built_session = crate::app::AppSession::with_cache_limit(0)
+    let built_session = crate::app::AppSession::default()
         .with_prompt_prefix("builder")
         .with_history_enabled(false)
         .with_history_shell(history_shell.clone())
         .with_config_overrides(overrides.clone());
     assert_eq!(built_session.prompt_prefix, "builder");
     assert!(!built_session.history_enabled);
-    assert_eq!(built_session.max_cached_results, 1);
     assert_eq!(
         built_session
             .config_overrides
@@ -1003,25 +1001,13 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
         1
     );
 
-    let mut session = crate::app::AppSession::with_cache_limit(0)
+    let mut session = crate::app::AppSession::default()
         .with_prompt_prefix("demo")
         .with_history_enabled(false)
         .with_history_shell(history_shell)
         .with_config_overrides(overrides);
     assert_eq!(session.prompt_prefix, "demo");
     assert!(!session.history_enabled);
-    assert_eq!(session.max_cached_results, 1);
-
-    session.record_result("   ", vec![serde_json::Map::new()]);
-    assert!(session.last_rows.is_empty());
-
-    let mut row = serde_json::Map::new();
-    row.insert("uid".to_string(), serde_json::json!("alice"));
-    session.record_result("ldap user alice", vec![row.clone()]);
-    assert_eq!(
-        session.cached_rows("ldap user alice").unwrap()[0]["uid"],
-        "alice"
-    );
 
     session.record_failure("   ", "ignored", "ignored");
     assert!(session.last_failure.is_none());
@@ -1039,12 +1025,6 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
     assert!(session.prompt_timing.badge().is_some());
     session.record_prompt_timing(0, std::time::Duration::from_millis(0), None, None, None);
     assert!(session.prompt_timing.badge().is_none());
-
-    let default_session = crate::app::AppSession::default();
-    assert_eq!(
-        default_session.max_cached_results,
-        crate::config::DEFAULT_SESSION_CACHE_MAX_RESULTS as usize
-    );
 }
 
 #[test]

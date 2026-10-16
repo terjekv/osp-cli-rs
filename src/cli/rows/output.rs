@@ -6,17 +6,13 @@
 
 use crate::core::output_model::{
     ColumnAlignment, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta, OutputResult,
-    compute_key_index, output_items_to_rows, rows_from_value,
+    compute_key_index, rows_from_value,
 };
 use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
 use crate::core::row::Row;
 
 pub(crate) fn rows_to_output_result(rows: Vec<Row>) -> OutputResult {
     OutputResult::from_rows(rows)
-}
-
-pub(crate) fn output_to_rows(output: &OutputResult) -> Vec<Row> {
-    output_items_to_rows(&output.items)
 }
 
 pub(crate) fn plugin_data_to_output_result(
@@ -88,10 +84,10 @@ fn column_alignment_from_plugin(value: ColumnAlignmentV1) -> ColumnAlignment {
 
 #[cfg(test)]
 mod tests {
-    use super::{output_to_rows, plugin_data_to_output_result, rows_to_output_result};
+    use super::{plugin_data_to_output_result, rows_to_output_result};
     use crate::core::output::OutputFormat;
     use crate::core::output_model::{
-        ColumnAlignment, Group, OutputItems, OutputMeta, OutputResult,
+        ColumnAlignment, Group, OutputItems, OutputMeta, OutputResult, output_items_to_rows,
     };
     use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
     use crate::dsl::apply_output_pipeline;
@@ -174,10 +170,10 @@ mod tests {
         let scalar_array = plugin_data_to_output_result(json!(["alice", "bob"]), None);
         let empty_array = plugin_data_to_output_result(json!([]), None);
 
-        let scalar_rows = output_to_rows(&scalar);
-        let object_rows = output_to_rows(&object);
-        let scalar_array_rows = output_to_rows(&scalar_array);
-        let empty_array_rows = output_to_rows(&empty_array);
+        let scalar_rows = output_items_to_rows(&scalar.items);
+        let object_rows = output_items_to_rows(&object.items);
+        let scalar_array_rows = output_items_to_rows(&scalar_array.items);
+        let empty_array_rows = output_items_to_rows(&empty_array.items);
 
         assert_eq!(scalar_rows, vec![crate::row! { "value" => "hello" }]);
         assert_eq!(
@@ -295,7 +291,7 @@ mod tests {
         );
 
         assert_eq!(
-            output_to_rows(&output),
+            output_items_to_rows(&output.items),
             vec![crate::row! {
                 "name" => "db01.uio.no",
                 "provider" => json!({"name": "vmware"}),
@@ -345,7 +341,7 @@ mod tests {
         );
 
         assert_eq!(
-            output_to_rows(&output),
+            output_items_to_rows(&output.items),
             vec![data.as_object().unwrap().clone()]
         );
         assert_eq!(
@@ -378,7 +374,7 @@ mod tests {
         let projected = apply_output_pipeline(output, &["P name".to_string()])
             .expect("pipeline should see canonical collection rows");
         assert_eq!(
-            output_to_rows(&projected),
+            output_items_to_rows(&projected.items),
             vec![crate::row! {"name" => "db01.uio.no"}]
         );
 
@@ -400,7 +396,7 @@ mod tests {
 
         let output = rows_to_output_result(rows.clone());
 
-        assert_eq!(output_to_rows(&output), rows);
+        assert_eq!(output_items_to_rows(&output.items), rows);
         assert_eq!(
             output.meta.key_index,
             vec!["uid".to_string(), "count".to_string()]
@@ -443,7 +439,7 @@ mod tests {
             },
         };
 
-        let rows = output_to_rows(&output);
+        let rows = output_items_to_rows(&output.items);
 
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["team"], Value::String("ops".to_string()));

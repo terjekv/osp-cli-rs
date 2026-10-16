@@ -26,7 +26,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
     assert!(breakdown.contains("e300.0ms"));
     assert!(breakdown.contains("r17.0ms"));
 
-    let mut session = crate::app::AppSession::with_cache_limit(8);
+    let mut session = crate::app::AppSession::default();
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(42));
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(99));
     let seeded =
