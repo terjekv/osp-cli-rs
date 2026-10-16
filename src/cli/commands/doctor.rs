@@ -7,11 +7,10 @@
 use miette::Result;
 
 use crate::app::CommandOutput;
-use crate::app::{
-    AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
-};
+use crate::app::{AppClients, AppRuntime, AppSession, AuthState, LastFailure, UiState};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{DoctorArgs, DoctorCommands, PluginsArgs, PluginsCommands};
+use crate::core::MessageLevel;
 use crate::core::command_policy::CredentialState;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
@@ -267,9 +266,15 @@ fn render_last_failure_document(
             "command": last.command_line,
             "summary": summary,
             "action": action,
-            "detail": last.detail(ErrorDetail::Normal),
+            "detail": last.detail(MessageLevel::Info),
         });
-        return CommandOutput::json(payload);
+        let mut output = CommandOutput::json(payload);
+        if ui.debug_verbosity >= 2
+            && let Some(backtrace) = last.backtrace()
+        {
+            output.stderr_text = format!("{backtrace}\n");
+        }
+        return output;
     }
 
     let mut out = String::new();
@@ -279,8 +284,8 @@ fn render_last_failure_document(
     if let Some(action) = action {
         out.push_str(&format!("  Action:  {action}\n"));
     }
-    let detail = last.detail(ui.error_detail);
-    if ui.error_detail != ErrorDetail::Terse
+    let detail = last.detail(ui.message_verbosity);
+    if ui.message_verbosity >= MessageLevel::Info
         && normalized_failure_detail(&detail) != normalized_failure_detail(&last.summary)
     {
         out.push('\n');
@@ -291,11 +296,17 @@ fn render_last_failure_document(
             out.push('\n');
         }
     }
-    if let Some(command) = next_failure_detail_command(ui.error_detail, last) {
+    if let Some(command) = next_failure_detail_command(ui.message_verbosity, last) {
         out.push('\n');
         out.push_str(&format!("More: run `{command}` for more detail.\n"));
     }
-    CommandOutput::text(out)
+    let mut output = CommandOutput::text(out);
+    if ui.debug_verbosity >= 2
+        && let Some(backtrace) = last.backtrace()
+    {
+        output.stderr_text = format!("{backtrace}\n");
+    }
+    output
 }
 
 fn split_failure_action(summary: &str) -> (&str, Option<&str>) {
@@ -309,10 +320,10 @@ fn normalized_failure_detail(detail: &str) -> &str {
     split_failure_action(detail).0.trim()
 }
 
-fn next_failure_detail_command(current: ErrorDetail, last: &LastFailure) -> Option<&'static str> {
-    if current == ErrorDetail::Terse
+fn next_failure_detail_command(current: MessageLevel, last: &LastFailure) -> Option<&'static str> {
+    if current < MessageLevel::Info
         && normalized_failure_detail(&last.summary)
-            != normalized_failure_detail(&last.detail(ErrorDetail::Normal))
+            != normalized_failure_detail(&last.detail(MessageLevel::Info))
     {
         Some("doctor last -v")
     } else {
@@ -326,7 +337,8 @@ mod tests {
         DoctorCommandContext, doctor_command, render_last_failure_document, run_doctor_command,
         theme_doctor_rows,
     };
-    use crate::app::{AuthState, ErrorDetail, LastFailure, RuntimeContext, TerminalKind, UiState};
+    use crate::core::MessageLevel;
+    use crate::app::{AuthState, LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
@@ -334,7 +346,6 @@ mod tests {
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
-    use crate::ui::messages::MessageLevel;
     use crate::ui::theme_catalog::{ThemeCatalog, ThemeLoadIssue};
     use serde_json::Value;
     use std::path::PathBuf;
@@ -419,7 +430,11 @@ mod tests {
         failure.summary = "request failed. Try: authenticate again".to_string();
 
         let verbose = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 1).with_error_detail(ErrorDetail::Normal),
+            &UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Info,
+                0,
+            ),
             Some(&failure),
         );
         let crate::app::CommandBody::Text(verbose_text) = verbose.body else {
@@ -441,7 +456,11 @@ mod tests {
         assert!(compact_text.contains("doctor last -v"));
 
         let debug = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 2).with_error_detail(ErrorDetail::Debug),
+            &UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Trace,
+                0,
+            ),
             Some(&failure),
         );
         let crate::app::CommandBody::Text(debug_text) = debug.body else {
@@ -450,14 +469,13 @@ mod tests {
         assert!(debug_text.contains("policy gate: ldap user"));
         assert!(!debug_text.contains("Stack backtrace"));
 
-        let forensic = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 3).with_error_detail(ErrorDetail::Forensic),
-            Some(&failure),
-        );
+        let forensic =
+            render_last_failure_document(&ui_state(OutputFormat::Table, 3), Some(&failure));
+        assert!(forensic.stderr_text.contains("Stack backtrace"));
         let crate::app::CommandBody::Text(forensic_text) = forensic.body else {
             panic!("expected text output");
         };
-        assert!(forensic_text.contains("Stack backtrace"));
+        assert!(!forensic_text.contains("Stack backtrace"));
 
         let json_failure = LastFailure::new(
             "plugins refresh".to_string(),

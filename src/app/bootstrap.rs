@@ -24,7 +24,7 @@ use crate::config::{
     build_runtime_pipeline,
 };
 use crate::ui::messages::MessageLevel;
-use miette::{Result, WrapErr};
+use miette::Result;
 
 use crate::app::logging::{DeveloperLoggingConfig, FileLoggingConfig, parse_level_filter};
 use crate::app::{LaunchContext, RuntimeContext, TerminalKind};

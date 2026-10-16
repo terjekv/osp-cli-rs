@@ -33,7 +33,7 @@ fn make_state() -> AppState {
         config,
         render_settings: RenderSettings::test_plain(OutputFormat::Json),
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins: crate::plugin::PluginManager::new(Vec::new())
             .with_bundled_roots(false)

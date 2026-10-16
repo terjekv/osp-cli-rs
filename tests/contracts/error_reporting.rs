@@ -93,7 +93,7 @@ fn verbose_usage_failure_shows_parse_context_without_terse_hint_contract() {
 #[test]
 fn forensic_config_failure_renders_full_host_context_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
         Some(
             r#"[default]
 ui.message.verbosity = "definitely-invalid"
@@ -116,7 +116,7 @@ ui.message.verbosity = "definitely-invalid"
 #[test]
 fn forensic_runtime_failure_uses_configured_color_and_stacktrace_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
         Some(
             r#"[default]
 ui.color.mode = "always"
@@ -187,7 +187,7 @@ fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
 #[test]
 fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.message.verbosity"],
         Some("not = [valid\n"),
     );
 

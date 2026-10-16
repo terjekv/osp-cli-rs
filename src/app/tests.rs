@@ -9,8 +9,8 @@ use super::{
     resolve_render_settings_with_hint, run_inline_builtin_command,
 };
 use super::{
-    ErrorDetail, authorized_command_catalog_for, command_output,
-    plugin_dispatch_context_for_runtime, resolve_runtime_config, run_from, run_from_with_sink,
+    authorized_command_catalog_for, command_output, plugin_dispatch_context_for_runtime,
+    resolve_runtime_config, run_from, run_from_with_sink,
 };
 use crate::app::sink::BufferedUiSink;
 use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
@@ -108,7 +108,7 @@ fn make_completion_state_with_entries_and_native(
         config,
         render_settings: settings,
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)
@@ -433,7 +433,7 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
         config,
         render_settings: settings,
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins: PluginManager::new(plugin_dirs)
             .with_roots(config_root, cache_root)

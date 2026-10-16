@@ -106,7 +106,6 @@ pub(crate) use config_explain::{
     render_config_explain_text,
 };
 pub(crate) use facts::*;
-pub use host::ErrorDetail;
 pub use host::run_from;
 pub(crate) use host::*;
 pub(crate) use repl_lifecycle::rebuild_repl_in_place;
@@ -497,17 +496,16 @@ impl App {
         let code = match result {
             Ok(code) => code,
             Err(err) => {
-                let (error_detail, message_verbosity, error_render_settings) = {
+                let (message_verbosity, debug_level, error_render_settings) = {
                     let _phase = tracing::info_span!(target: "osp_startup", "process error display preparation").entered();
                     if let Some(ui) = host::error_display_settings(&err) {
                         (
-                            ui.error_detail,
                             ui.message_verbosity,
+                            ui.debug_verbosity,
                             ui.render_settings.clone(),
                         )
                     } else {
                         let (verbose, quiet) = (scan.invocation.verbose, scan.invocation.quiet);
-                        let error_detail = adjust_error_detail(ErrorDetail::Terse, verbose, quiet);
                         let message_verbosity =
                             adjust_verbosity(MessageLevel::Success, verbose, quiet);
                         let error_render_settings = help::render_settings_for_help_with_scan(
@@ -516,19 +514,32 @@ impl App {
                             &crate::config::ConfigLayer::default(),
                         )
                         .settings;
-                        (error_detail, message_verbosity, error_render_settings)
+                        (
+                            message_verbosity,
+                            scan.invocation.debug.min(3),
+                            error_render_settings,
+                        )
                     }
                 };
-                let rendered = render_process_error(
-                    &err,
-                    error_detail,
-                    &error_render_settings,
-                    message_verbosity,
+                let err = host::report_with_invocation(
+                    err,
+                    host::ErrorDisplaySettings {
+                        message_verbosity,
+                        debug_verbosity: debug_level,
+                        render_settings: error_render_settings.clone(),
+                    },
                 );
+                let rendered =
+                    render_process_error(&err, &error_render_settings, message_verbosity);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
                 } else {
                     sink.write_stderr(&rendered);
+                }
+                if debug_level >= 2
+                    && let Some(backtrace) = host::render_backtrace(&err, &error_render_settings)
+                {
+                    sink.write_stderr(&format!("{backtrace}\n"));
                 }
                 classify_exit_code(&err)
             }
@@ -812,11 +823,10 @@ where
 
 pub(crate) fn render_process_error(
     err: &miette::Report,
-    detail: ErrorDetail,
     settings: &crate::ui::RenderSettings,
     message_verbosity: MessageLevel,
 ) -> String {
-    let message = render_report_message(err, detail, settings);
+    let message = render_report_message(err, message_verbosity, settings);
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
         let code = match exit_code {

@@ -1,5 +1,4 @@
 use super::*;
-use miette::WrapErr;
 use std::sync::{Arc, Mutex};
 
 fn env_lock() -> &'static Mutex<()> {
@@ -584,8 +583,8 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
     let (verbose, quiet, debug) = (counts.verbose, counts.quiet, counts.debug);
     assert_eq!((verbose, quiet, debug), (2, 1, 0));
     assert_eq!(
-        crate::app::adjust_error_detail(ErrorDetail::Terse, verbose, quiet),
-        ErrorDetail::Normal
+        crate::ui::messages::adjust_verbosity(MessageLevel::Success, verbose, quiet),
+        MessageLevel::Info
     );
 }
 
@@ -602,28 +601,28 @@ fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
         stderr: "backend exploded".to_string(),
     });
 
-    let rendered = render_report_message(&report, ErrorDetail::Terse, &settings);
+    let rendered = render_report_message(&report, MessageLevel::Success, &settings);
     assert!(rendered.contains("plugin ldap exited with status 7: backend exploded"));
     assert!(rendered.contains("Try: inspect the plugin stderr"));
     assert!(!rendered.contains("run again with -v"));
 
-    let rendered = render_report_message(&report, ErrorDetail::Normal, &settings);
+    let rendered = render_report_message(&report, MessageLevel::Info, &settings);
     assert!(rendered.contains("plugin ldap exited with status 7"));
     assert!(rendered.contains("plugin command failed"));
     assert!(rendered.contains("backend exploded"));
     assert!(!rendered.contains("Try:"));
 
-    let rendered = render_report_message(&report, ErrorDetail::Debug, &settings);
+    let rendered = render_report_message(&report, MessageLevel::Trace, &settings);
     assert!(rendered.contains("plugin ldap exited with status 7"));
     assert!(rendered.contains("plugin command failed"));
     assert!(rendered.contains("backend exploded"));
     assert!(!rendered.contains("Try:"));
     assert!(!rendered.contains("Stack backtrace"));
 
-    let rendered = render_report_message(&report, ErrorDetail::Forensic, &settings);
+    let rendered = render_report_message(&report, MessageLevel::Trace, &settings);
     assert!(rendered.contains("plugin command failed"));
     assert!(rendered.contains("backend exploded"));
-    assert!(rendered.contains("Stack backtrace"));
+    assert!(!rendered.contains("Stack backtrace"));
 
     let report = crate::app::host::report_report_with_context(
         miette::miette!("unknown theme: missing-theme"),
@@ -631,7 +630,7 @@ fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
             "failed to derive host runtime inputs for startup",
         ),
     );
-    let rendered = render_report_message(&report, ErrorDetail::Terse, &settings);
+    let rendered = render_report_message(&report, MessageLevel::Success, &settings);
     assert!(rendered.contains("unknown theme: missing-theme"));
     assert!(!rendered.starts_with("failed to derive host runtime inputs for startup"));
 }
@@ -994,18 +993,18 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
         .expect("failure should carry diagnostics");
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let terse = render_report_message(&report, ErrorDetail::Terse, &settings);
+    let terse = render_report_message(&report, MessageLevel::Success, &settings);
     assert!(
         terse.contains("resource_not_found: No visible resource matched"),
         "{terse}"
     );
     assert!(!terse.contains("http_status"));
 
-    let normal = render_report_message(&report, ErrorDetail::Normal, &settings);
+    let normal = render_report_message(&report, MessageLevel::Info, &settings);
     assert!(normal.contains("http_status"));
     assert!(normal.contains("missing.uio.no"));
 
-    let debug = render_report_message(&report, ErrorDetail::Debug, &settings);
+    let debug = render_report_message(&report, MessageLevel::Trace, &settings);
     assert!(debug.contains("Backend details"));
     assert!(debug.contains("missing.uio.no"));
 }

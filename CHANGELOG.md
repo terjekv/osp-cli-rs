@@ -37,6 +37,13 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- **Breaking:** Failures use one detailed report at `-v` and above; `-vvv`
+  saturates at `-vv`. Captured backtraces move to stderr at `-dd`, including
+  `doctor last -dd`. Remove the public `ErrorDetail` API and UI field;
+  `LastFailure::detail` and `render_report_message` take `MessageLevel`.
+- Detailed failures show each cause and backend details once, and suppress
+  empty result output on failure.
+
 - `plugins doctor` warns about plugin flags consumed by the host; providers
   remain runnable.
 

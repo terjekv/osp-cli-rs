@@ -3,7 +3,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
     let mut state = make_test_state(Vec::new());
     let history = make_test_history(&mut state);
     let original_message = state.runtime.ui.message_verbosity;
-    let original_error_detail = state.runtime.ui.error_detail;
+    let original_error_detail = state.runtime.ui.message_verbosity;
     let original_debug = state.runtime.ui.debug_verbosity;
 
     repl_dispatch::execute_repl_plugin_line(
@@ -14,7 +14,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         "-q config get missing.key", None,).map(|executed| executed.result)
     .expect("quiet config get should complete");
     assert_eq!(state.runtime.ui.message_verbosity, original_message);
-    assert_eq!(state.runtime.ui.error_detail, original_error_detail);
+    assert_eq!(state.runtime.ui.message_verbosity, original_error_detail);
     assert_eq!(state.runtime.ui.debug_verbosity, original_debug);
 
     repl_dispatch::execute_repl_plugin_line(
@@ -25,7 +25,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         "-v doctor last", None,).map(|executed| executed.result)
     .expect("doctor last with verbosity override should complete");
     assert_eq!(state.runtime.ui.message_verbosity, original_message);
-    assert_eq!(state.runtime.ui.error_detail, original_error_detail);
+    assert_eq!(state.runtime.ui.message_verbosity, original_error_detail);
     assert_eq!(state.runtime.ui.debug_verbosity, original_debug);
 }
 
@@ -84,7 +84,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         .expect("last failure should be recorded");
     assert_eq!(last.command_line, "missing");
     assert!(!last.summary.trim().is_empty());
-    assert!(last.detail(crate::app::ErrorDetail::Normal).contains("unknown command `missing`"));
+    assert!(last.detail(crate::core::MessageLevel::Info).contains("unknown command `missing`"));
 
     state.runtime.ui.render_settings.format = OutputFormat::Json;
     let rendered = doctor_cmd::run_doctor_command(
@@ -140,7 +140,7 @@ fn rebuild_repl_state_preserves_last_failure_unit() {
 
         assert_eq!(last.command_line, "ldap user nope");
         assert_eq!(last.summary, "boom");
-        assert_eq!(last.detail(crate::app::ErrorDetail::Normal), "boom detail");
+        assert_eq!(last.detail(crate::core::MessageLevel::Info), "boom detail");
     });
 }
 

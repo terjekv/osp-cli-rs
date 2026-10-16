@@ -15,21 +15,17 @@ Use:
 Behavior:
 
 - default: errors, warnings, and normal success messages
-- `-v`: more detail plus cause/context chain on failures
-- `-vv`: rich diagnostic failure output, with snippets when available
-- `-vvv`: rich diagnostic failure output plus stack backtrace
+- `-v`: full failure report, including causes, backend details and source snippets
+- `-vv`: same detailed failure report as `-v`, with trace-level messages
+- `-vvv`: same as `-vv`; use `-dd` for captured backtraces
 - `-q`: fewer non-essential messages
 - `-qq`: quiet except for errors
 
 These flags work in both CLI and REPL and apply to one invocation at a time.
 
-Important split:
-
-- `-v/-vv/-vvv` change how failures are rendered
-- `-d/-dd/-ddd` change developer logs and timing
-
-They are related but not interchangeable. A command can have a terse failure
-and high debug logging, or a forensic failure render without extra debug logs.
+`-v`/`-q` set how much osp tells you: messages, failure explanations, human
+field detail and help. `-d` shows what osp is doing. The axes compose freely;
+`-q -d` keeps quiet messages with operator logs. Further counts saturate.
 
 ## Developer Debug Output
 
@@ -42,7 +38,7 @@ Use:
 Behavior:
 
 - `-d`: command dispatch, service requests, plugin stderr and the final outcome
-- `-dd`: more detailed debug output
+- `-dd`: internal debug events and the error’s captured backtrace
 - `-ddd`: the most detailed terminal debug stream
 
 Debug logs are written to `stderr`, not `stdout`. Operator trace lines contain
@@ -111,9 +107,9 @@ Useful config keys:
 
 Use `config explain <key>` to see where an effective value comes from.
 
-If you need the full colored forensic error render, prefer invocation flags
-such as `-vvv`. That is intentionally a per-command decision rather than a
-sticky logging default.
+For a bug report, use `-v -dd 2>osp.txt` to capture the full explanation,
+operator trace, internal events and a captured backtrace. `doctor last -v`
+shows the saved REPL report; `doctor last -dd` writes its backtrace to stderr.
 
 ## Plugin Runtime Hints
 

@@ -302,7 +302,7 @@ mod tests {
             config,
             render_settings: settings,
             message_verbosity: MessageLevel::Success,
-            error_detail: crate::app::ErrorDetail::Terse,
+
             debug_verbosity: 0,
             plugins: crate::plugin::PluginManager::new(Vec::new())
                 .with_bundled_roots(false)

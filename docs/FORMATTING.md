@@ -96,26 +96,16 @@ These are also invocation-local:
 `-v/-q` control process-facing error detail and message verbosity. `-d`
 controls developer debug logs and timing on `stderr`.
 
-Error ladder:
-
-- default
-  - concise summary
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic output, including labeled snippets when the error is
-    source-shaped
-- `-vvv`
-  - rich diagnostic output plus stack backtrace
-
-This is separate from `-d`. `-d` does not change the command result and does
-not replace the error-detail ladder.
+Failures are concise below info verbosity. `-v` and above show one full report
+with each cause, backend details and source annotations once. `-vv` additionally
+reveals trace messages and all human fields; extra `v`s saturate. `-dd` writes
+the captured error backtrace to stderr without changing stdout or failure text.
 
 Normal operator flow:
 
 1. run the command normally
-2. if it fails, rerun with `-v`, `-vv`, or `-vvv`
-3. in the REPL, `doctor last -v/-vv/-vvv` lets you inspect the recorded
+2. if it fails, rerun with `-v`; add `-d` for the operator trace or `-dd` for internals
+3. in the REPL, `doctor last -v` lets you inspect the recorded
    failure again without retyping the command
 4. in the REPL, `last` replays the last successful result and `last --raw`
    shows the pre-pipeline payload
@@ -125,7 +115,7 @@ Examples:
 ```bash
 osp plugins commands -v
 osp config get ui.format -vv
-osp config get ui.format -vvv
+osp config get ui.format -v -dd
 osp plugins commands -dd
 osp plugins commands --json -q
 ```

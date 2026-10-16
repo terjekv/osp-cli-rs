@@ -15,7 +15,7 @@ use terminal_size::{Height, terminal_size};
 
 use crate::app::resolve_render_settings_with_hint;
 use crate::app::sink::UiSink;
-use crate::app::{AppSession, ErrorDetail, UiState};
+use crate::app::{AppSession, UiState};
 use crate::cli::rows::output::{plugin_data_to_output_result, rows_to_output_result};
 
 /// Transient human presentation belongs to the invocation, not canonical data.
@@ -204,6 +204,7 @@ impl CommandOutput {
 pub(crate) struct CommandBackendDetails {
     pub(super) error: ResponseErrorV1,
     source: miette::Report,
+    pub(super) backtrace: std::backtrace::Backtrace,
 }
 
 impl std::fmt::Display for CommandBackendDetails {
@@ -286,17 +287,48 @@ pub(crate) fn run_cli_command(
         emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);
     }
     if let Some(report) = &result.failure_report
-        && ui.error_detail >= ErrorDetail::Normal
+        && ui.message_verbosity >= MessageLevel::Info
     {
         let detail =
-            super::host::render_report_message(report, ui.error_detail, &ui.render_settings);
+            super::host::render_report_message(report, ui.message_verbosity, &ui.render_settings);
         let summary =
-            super::host::render_report_message(report, ErrorDetail::Terse, &ui.render_settings);
-        if detail.trim() != summary.trim() {
-            sink.write_stderr(&format!("{}\n", detail.trim_end()));
+            super::host::render_report_message(report, MessageLevel::Success, &ui.render_settings);
+        let extra = detail
+            .strip_prefix(summary.trim())
+            .unwrap_or(&detail)
+            .trim();
+        if !extra.is_empty() {
+            sink.write_stderr(&format!("{extra}\n"));
         }
     }
-    if result.failure_report.is_none() || ui.message_verbosity >= MessageLevel::Info {
+    let show_failure_data = ui.message_verbosity >= MessageLevel::Info
+        && result.failure_report.as_ref().is_some_and(|report| {
+            let empty = match &result.body {
+                CommandBody::None => true,
+                CommandBody::Text(text) => text.trim().is_empty(),
+                CommandBody::Output(output) => progress_output_is_empty(output),
+                CommandBody::Json(value) => {
+                    value.is_null()
+                        || value.as_array().is_some_and(Vec::is_empty)
+                        || value.as_object().is_some_and(serde_json::Map::is_empty)
+                }
+            };
+            if empty {
+                return false;
+            }
+            let data = result.body.json_value();
+            !super::host::find_error_in_chain::<CommandBackendDetails>(report).is_some_and(
+                |backend| {
+                    backend.error.details == data
+                        || backend
+                            .error
+                            .details
+                            .as_object()
+                            .is_some_and(|details| details.values().any(|value| value == &data))
+                },
+            )
+        });
+    if result.failure_report.is_none() || show_failure_data {
         let rendered = result.render(config, &ui.render_settings);
         if result.failure_report.is_some()
             || result
@@ -316,6 +348,12 @@ pub(crate) fn run_cli_command(
                 maybe_copy_output(config, ui, output, sink);
             }
         }
+    }
+    if ui.debug_verbosity >= 2
+        && let Some(report) = &result.failure_report
+        && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
+    {
+        sink.write_stderr(&format!("{backtrace}\n"));
     }
     if !result.stderr_text.is_empty() {
         sink.write_stderr(&result.stderr_text);
@@ -502,6 +540,7 @@ pub(crate) fn cli_result_from_plugin_response(
             miette::Report::new(CommandBackendDetails {
                 error,
                 source: report,
+                backtrace: std::backtrace::Backtrace::force_capture(),
             })
         } else {
             result.messages.error("command failed");

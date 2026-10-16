@@ -331,8 +331,11 @@ impl LastFailure {
         report: std::sync::Arc<miette::Report>,
         settings: crate::ui::RenderSettings,
     ) -> Self {
-        let summary =
-            super::host::render_report_message(&report, super::ErrorDetail::Terse, &settings);
+        let summary = super::host::render_report_message(
+            &report,
+            crate::core::MessageLevel::Success,
+            &settings,
+        );
         let backtrace =
             super::host::capture_missing_report_backtrace(&report).map(std::sync::Arc::new);
         Self {
@@ -347,19 +350,27 @@ impl LastFailure {
     }
 
     /// Renders diagnostic detail with the terminal settings captured at failure time.
-    pub fn detail(&self, level: super::ErrorDetail) -> String {
+    pub fn detail(&self, level: crate::core::MessageLevel) -> String {
         match &self.evidence {
             FailureEvidence::Text(detail) => detail.clone(),
+            FailureEvidence::Report {
+                report, settings, ..
+            } => super::host::render_report_message(report, level, settings),
+        }
+    }
+    /// Renders the backtrace captured when the failure was recorded, if available.
+    pub fn backtrace(&self) -> Option<String> {
+        match &self.evidence {
+            FailureEvidence::Text(_) => None,
             FailureEvidence::Report {
                 report,
                 settings,
                 backtrace,
-            } => super::host::render_saved_report_message(
-                report,
-                level,
-                settings,
-                backtrace.as_deref(),
-            ),
+            } => super::host::render_backtrace(report, settings).or_else(|| {
+                backtrace
+                    .as_ref()
+                    .map(|trace| format!("Stack backtrace:\n{trace}"))
+            }),
         }
     }
 }
@@ -570,7 +581,6 @@ pub(crate) struct AppStateInit {
     pub config: crate::config::ResolvedConfig,
     pub render_settings: crate::ui::RenderSettings,
     pub message_verbosity: crate::ui::messages::MessageLevel,
-    pub error_detail: crate::app::ErrorDetail,
     pub debug_verbosity: u8,
     pub plugins: crate::plugin::PluginManager,
     pub native_commands: NativeCommandRegistry,
@@ -597,8 +607,7 @@ impl AppStateParts {
             init.render_settings,
             init.message_verbosity,
             init.debug_verbosity,
-        )
-        .with_error_detail(init.error_detail);
+        );
         let auth = {
             let _phase =
                 tracing::info_span!(target: "osp_startup", "auth policy catalog setup").entered();
@@ -891,7 +900,6 @@ impl AppStateBuilder {
         let crate::app::UiState {
             render_settings,
             message_verbosity,
-            error_detail,
             debug_verbosity,
             ..
         } = ui;
@@ -902,7 +910,6 @@ impl AppStateBuilder {
                 config,
                 render_settings,
                 message_verbosity,
-                error_detail,
                 debug_verbosity,
                 plugins,
                 native_commands,

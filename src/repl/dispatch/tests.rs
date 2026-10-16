@@ -508,7 +508,7 @@ fn make_state_with_plugins(plugins: crate::plugin::PluginManager) -> AppState {
         config,
         render_settings: settings,
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins,
         native_commands: crate::native::NativeCommandRegistry::default(),

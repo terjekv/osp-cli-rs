@@ -449,7 +449,7 @@ mod tests {
             config,
             render_settings: RenderSettings::test_plain(OutputFormat::Json),
             message_verbosity: MessageLevel::Success,
-            error_detail: crate::app::ErrorDetail::Terse,
+
             debug_verbosity: 0,
             plugins,
             native_commands,

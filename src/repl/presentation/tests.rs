@@ -70,7 +70,7 @@ fn make_state(entries: &[(&str, &str)]) -> AppState {
         config,
         render_settings: RenderSettings::test_plain(OutputFormat::Json),
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)
@@ -854,7 +854,7 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
         config,
         render_settings: RenderSettings::test_plain(OutputFormat::Json),
         message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
+
         debug_verbosity: 0,
         plugins: PluginManager::new(Vec::new())
             .with_bundled_roots(false)

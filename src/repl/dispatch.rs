@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppClients, AppRuntime, AppSession};
-use crate::app::{ErrorDetail, ResolvedInvocation, render_report_message, resolve_invocation_ui};
+use crate::app::{ResolvedInvocation, render_report_message, resolve_invocation_ui};
 use crate::cli::invocation::scan_command_tokens;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
 
@@ -256,25 +256,24 @@ pub(crate) fn execute_repl_plugin_line(
                 );
             }
             let plain_settings = ui.render_settings.plain_copy_settings();
-            let summary = render_report_message(&err, ErrorDetail::Terse, &plain_settings);
+            let summary = render_report_message(&err, MessageLevel::Success, &plain_settings);
             let mut doctor_command = None;
             if !is_repl_bang_request(&resolved)
                 && !is_doctor_request(&resolved, runtime.config.resolved())
             {
-                doctor_command =
-                    if render_report_message(&err, ErrorDetail::Normal, &plain_settings).trim()
-                        != summary.trim()
-                    {
-                        Some("doctor last -v")
-                    } else {
-                        None
-                    };
+                doctor_command = if render_report_message(&err, MessageLevel::Info, &plain_settings)
+                    .trim()
+                    != summary.trim()
+                {
+                    Some("doctor last -v")
+                } else {
+                    None
+                };
                 session.record_failure_report(&resolved, err.clone(), plain_settings);
             }
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&crate::app::render_process_error(
                     &err,
-                    ui.error_detail,
                     &ui.render_settings,
                     ui.message_verbosity,
                 ));
@@ -283,10 +282,16 @@ pub(crate) fn execute_repl_plugin_line(
                 executed.exit_code = crate::app::classify_exit_code(&err);
                 return Ok(executed);
             }
+            if ui.debug_verbosity >= 2
+                && let Some(backtrace) =
+                    crate::app::host::render_backtrace(&err, &ui.render_settings)
+            {
+                sink.write_stderr(&format!("{backtrace}\n"));
+            }
             let mut messages = MessageBuffer::default();
-            let detail = render_report_message(&err, ui.error_detail, &ui.render_settings);
+            let detail = render_report_message(&err, ui.message_verbosity, &ui.render_settings);
             let visible_error = doctor_command
-                .filter(|_| ui.error_detail == ErrorDetail::Terse)
+                .filter(|_| ui.message_verbosity < MessageLevel::Info)
                 .map(|command| format!("{detail}\nMore: run `{command}` for more detail."))
                 .unwrap_or(detail);
             messages.push_titled(MessageLevel::Error, "Command failed", visible_error);

@@ -21,19 +21,13 @@ These commands usually tell you the most with the least effort:
 
 Use these to identify the problem before changing settings.
 
-Error-detail ladder:
+By default, failures give an actionable summary. `-v` adds the full report,
+including causes, backend details and source annotations. `-vv` adds trace-level
+messages and human fields; it uses the same failure report. Further `v`s saturate.
 
-- default
-  - short actionable failure
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic output, including snippets for config/DSL/input failures
-- `-vvv`
-  - the same rich report plus a stack backtrace
-
-Use `-d/-dd/-ddd` when you need host debug logs and timing. Use `-v/-vv/-vvv`
-when you need a better failure report.
+Use `-d` for command dispatch, plugin stderr, service requests and outcomes.
+`-dd` adds internal events and captured error backtraces; `-ddd` adds trace events.
+For a bug report, run `osp -v -dd ... 2>osp.txt`. JSON stdout stays unchanged.
 
 For startup delays before the first REPL prompt or a one-shot command, run
 `OSP_TRACE_STARTUP=1 osp` or `OSP_TRACE_STARTUP=json osp ...` and inspect the
@@ -43,8 +37,8 @@ In the REPL, the normal loop is:
 
 1. let the command fail normally
 2. read the short error
-3. rerun with `-v/-vv/-vvv` or inspect the recorded failure with
-   `doctor last -v/-vv/-vvv`
+3. rerun with `-v` or inspect the recorded failure with
+   `doctor last -v`
 
 For successful REPL output, use:
 
