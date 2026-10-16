@@ -61,6 +61,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Redact sensitive names consistently in config, plugin environment values and
   error details, including cookies, authorization and underscore-delimited keys.
 
+- REPL prompt borders honour Unicode suppression. Products can supply the
+  greeting name with `AppRuntime::set_display_name` without changing identity.
+
 - `DisplayRule::Hyperlink` marks HTTP(S) URL fields for terminal hyperlinks.
   The renderer alone emits OSC 8 in rich TTY output; plain output, exports,
   pipelines and `last` replay retain the plain URL. Product text remains sanitized.

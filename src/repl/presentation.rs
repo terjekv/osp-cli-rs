@@ -315,8 +315,12 @@ fn resolve_intro_placeholder(
         "display_name" => {
             let user = effective_user(view);
             return view
-                .config
-                .get_string(&format!("user.display_names.{user}"))
+                .context
+                .display_name()
+                .or_else(|| {
+                    view.config
+                        .get_string(&format!("user.display_names.{user}"))
+                })
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or(user)
                 .to_string();
@@ -571,6 +575,11 @@ pub(crate) fn build_repl_prompt(view: ReplViewContext<'_>) -> ReplPrompt {
                 .get_string("repl.prompt")
                 .unwrap_or(DEFAULT_REPL_PROMPT),
         );
+        let template = if resolved.unicode {
+            template
+        } else {
+            template.replace(['╭', '╰'], "+").replace('─', "-")
+        };
         render_prompt_template_styled(
             &template,
             &user_text,

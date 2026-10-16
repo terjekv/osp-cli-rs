@@ -106,6 +106,7 @@ pub struct RuntimeContext {
     pub(crate) repl_start: bool,
     terminal_env: Option<String>,
     authenticated_subject: Option<String>,
+    display_name: Option<String>,
 }
 
 impl RuntimeContext {
@@ -139,7 +140,12 @@ impl RuntimeContext {
             repl_start: terminal_kind == TerminalKind::Repl,
             terminal_env,
             authenticated_subject: None,
+            display_name: None,
         }
+    }
+
+    pub(crate) fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
     }
 
     /// Returns the normalized profile override, if one was supplied.
@@ -517,6 +523,14 @@ impl AppRuntime {
         self.context.authenticated_subject = subject
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+    }
+
+    /// Sets the product-resolved name used by the REPL greeting.
+    pub fn set_display_name(&mut self, name: Option<&str>) {
+        self.context.display_name = name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
             .map(ToOwned::to_owned);
     }
 
