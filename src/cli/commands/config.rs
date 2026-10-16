@@ -145,7 +145,15 @@ pub(crate) fn run_alias_command(
     match args.command {
         AliasCommands::List(list) => Ok(super::rows_with_empty_info(
             alias_list_rows(context.read(), list),
-            "No aliases configured. Add one with `alias add NAME TEMPLATE`.",
+            &format!(
+                "No aliases configured. Add one with `{}`.",
+                context
+                    .ui
+                    .render_settings
+                    .runtime
+                    .command_scope
+                    .command("alias add NAME TEMPLATE")
+            ),
         )),
         AliasCommands::Add(add) => run_alias_add(context, add),
         AliasCommands::Remove(remove) => run_alias_remove(context, remove),
@@ -313,7 +321,10 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
     } else {
         paths.secrets_file.clone()
     };
-    let secrets = secrets_permissions_diagnostic(selected_path);
+    let secrets = secrets_permissions_diagnostic(
+        selected_path,
+        &context.ui.render_settings.runtime.command_scope,
+    );
     let known_profiles = serde_json::Value::Array(
         context
             .config
@@ -371,6 +382,7 @@ struct SecretsPermissionsDiagnostic {
 
 fn secrets_permissions_diagnostic(
     path: Option<std::path::PathBuf>,
+    scope: &crate::core::CommandScope,
 ) -> SecretsPermissionsDiagnostic {
     let Some(path) = path else {
         return SecretsPermissionsDiagnostic {
@@ -405,8 +417,9 @@ fn secrets_permissions_diagnostic(
                 let message = match status {
                     "ok" => "secrets file permissions are 0600".to_string(),
                     "warning" => format!(
-                        "secrets file mode is {:o}; 0600 is recommended so `config set --secrets` stays predictable",
-                        mode
+                        "secrets file mode is {:o}; 0600 is recommended so `{}` stays predictable",
+                        mode,
+                        scope.command("config set --secrets")
                     ),
                     _ => format!(
                         "secrets file mode is {:o}; owner-only permissions are required",

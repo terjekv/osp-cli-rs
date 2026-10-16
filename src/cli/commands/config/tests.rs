@@ -783,20 +783,22 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
 fn secrets_permissions_diagnostic_covers_missing_ok_warning_and_issue_unit() {
     use std::os::unix::fs::PermissionsExt;
 
-    let missing = secrets_permissions_diagnostic(None);
+    let missing = secrets_permissions_diagnostic(None, &crate::core::CommandScope::OneShot);
     assert_eq!(missing.status, "unavailable");
 
     let dir = crate::tests::make_temp_dir("osp-cli-config-secrets-diagnostic");
 
     let absent_path = dir.join("missing.toml");
-    let absent = secrets_permissions_diagnostic(Some(absent_path));
+    let absent =
+        secrets_permissions_diagnostic(Some(absent_path), &crate::core::CommandScope::OneShot);
     assert_eq!(absent.status, "missing");
 
     let ok_path = dir.join("ok.toml");
     std::fs::write(&ok_path, "token = 'secret'\n").expect("fixture should be written");
     std::fs::set_permissions(&ok_path, std::fs::Permissions::from_mode(0o600))
         .expect("permissions should be set");
-    let ok = secrets_permissions_diagnostic(Some(ok_path.clone()));
+    let ok =
+        secrets_permissions_diagnostic(Some(ok_path.clone()), &crate::core::CommandScope::OneShot);
     assert_eq!(ok.status, "ok");
     assert_eq!(ok.mode, serde_json::Value::String("600".to_string()));
 
@@ -804,7 +806,8 @@ fn secrets_permissions_diagnostic_covers_missing_ok_warning_and_issue_unit() {
     std::fs::write(&warning_path, "token = 'secret'\n").expect("fixture should be written");
     std::fs::set_permissions(&warning_path, std::fs::Permissions::from_mode(0o400))
         .expect("permissions should be set");
-    let warning = secrets_permissions_diagnostic(Some(warning_path));
+    let warning =
+        secrets_permissions_diagnostic(Some(warning_path), &crate::core::CommandScope::OneShot);
     assert_eq!(warning.status, "warning");
     assert_eq!(warning.mode, serde_json::Value::String("400".to_string()));
     assert!(warning.message.contains("0600 is recommended"));
@@ -813,7 +816,8 @@ fn secrets_permissions_diagnostic_covers_missing_ok_warning_and_issue_unit() {
     std::fs::write(&issue_path, "token = 'secret'\n").expect("fixture should be written");
     std::fs::set_permissions(&issue_path, std::fs::Permissions::from_mode(0o644))
         .expect("permissions should be set");
-    let issue = secrets_permissions_diagnostic(Some(issue_path));
+    let issue =
+        secrets_permissions_diagnostic(Some(issue_path), &crate::core::CommandScope::OneShot);
     assert_eq!(issue.status, "issue");
     assert!(
         issue

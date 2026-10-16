@@ -59,9 +59,15 @@ pub(crate) fn run_theme_command(
             result
                 .messages
                 .success(format!("active theme set to: {selected}"));
-            result.messages.info(
-                "theme change is for the current process; persistent writes land with `config set`",
-            );
+            result.messages.info(format!(
+                "theme change is for the current process; persistent writes land with `{}`",
+                context
+                    .ui
+                    .render_settings
+                    .runtime
+                    .command_scope
+                    .command("config set")
+            ));
             Ok(result)
         }
     }
