@@ -1,23 +1,6 @@
 use super::*;
 
 #[test]
-fn plugin_format_hint_parser_supports_known_values_unit() {
-    assert_eq!(
-        parse_output_format_hint(Some("table")),
-        Some(OutputFormat::Table)
-    );
-    assert_eq!(
-        parse_output_format_hint(Some("mreg")),
-        Some(OutputFormat::Mreg)
-    );
-    assert_eq!(
-        parse_output_format_hint(Some("markdown")),
-        Some(OutputFormat::Markdown)
-    );
-    assert_eq!(parse_output_format_hint(Some("unknown")), None);
-}
-
-#[test]
 fn plugin_config_env_name_normalizes_extension_keys_unit() {
     assert_eq!(
         plugin_config_env_name("api.token"),

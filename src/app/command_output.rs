@@ -106,7 +106,7 @@ impl PreparedPluginOutput {
         Self {
             messages,
             output: plugin_data_to_output_result(data, Some(meta)),
-            format_hint: parse_output_format_hint(meta.format_hint.as_deref()),
+            format_hint: meta.format_hint.as_deref().and_then(OutputFormat::parse),
         }
     }
 }
@@ -639,19 +639,6 @@ fn plugin_response_messages(messages: &[ResponseMessageV1]) -> MessageBuffer {
         out.push(level, message.text.clone());
     }
     out
-}
-
-pub(crate) fn parse_output_format_hint(value: Option<&str>) -> Option<OutputFormat> {
-    let normalized = value?.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "auto" => Some(OutputFormat::Auto),
-        "json" => Some(OutputFormat::Json),
-        "table" => Some(OutputFormat::Table),
-        "md" | "markdown" => Some(OutputFormat::Markdown),
-        "mreg" => Some(OutputFormat::Mreg),
-        "value" => Some(OutputFormat::Value),
-        _ => None,
-    }
 }
 
 fn render_cli_output(

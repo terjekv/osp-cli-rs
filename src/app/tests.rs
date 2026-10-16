@@ -1,6 +1,4 @@
-use super::command_output::{
-    CommandRenderRuntime, apply_output_stages, parse_output_format_hint, run_cli_command,
-};
+use super::command_output::{CommandRenderRuntime, apply_output_stages, run_cli_command};
 use super::help::parse_help_render_overrides;
 use super::{
     CliCommandResult, ErrorDetail, authorized_command_catalog_for, bootstrap_verbosity_counts,
