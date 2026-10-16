@@ -611,13 +611,22 @@ fn maybe_copy_output(
     if !output.meta.wants_copy {
         return;
     }
-    if let Err(err) =
-        copy_output_to_clipboard(output, &ui.render_settings, &ClipboardService::new())
-    {
-        let mut messages = MessageBuffer::default();
-        messages.warning(format!("clipboard copy failed: {err}"));
-        emit_messages_for_ui(config, ui, &messages, ui.verbosity, sink);
+    let mut messages = MessageBuffer::default();
+    match copy_output_to_clipboard(output, &ui.render_settings, &ClipboardService::new()) {
+        Ok(()) if ui.render_settings.format == OutputFormat::Json => return,
+        Ok(()) => {
+            let (count, noun) = match &output.items {
+                OutputItems::Rows(rows) => (rows.len(), "row"),
+                OutputItems::Groups(groups) => (groups.len(), "group"),
+            };
+            messages.success(format!(
+                "Copied {count} {noun}{}.",
+                if count == 1 { "" } else { "s" }
+            ));
+        }
+        Err(err) => messages.warning(format!("clipboard copy failed: {err}")),
     }
+    emit_messages_for_ui(config, ui, &messages, ui.verbosity, sink);
 }
 
 pub(crate) fn cli_result_from_plugin_response(

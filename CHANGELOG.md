@@ -7,6 +7,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Confirm successful `| Y` clipboard copies with the row or group count.
+
 - Default history exclusions use `history*`, covering every history command
   and its flag variants.
 
