@@ -29,6 +29,9 @@
 //!   higher-level modules like `app`, `repl`, or `ui`
 
 pub(crate) mod clap_metadata;
+/// Reader-relative command suggestions.
+pub mod command_scope;
+pub use command_scope::CommandScope;
 /// Visibility and access-policy evaluation for commands.
 pub mod command_policy;
 /// Ordered semantic document blocks shared by producers and renderers.

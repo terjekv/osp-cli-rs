@@ -7,6 +7,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Add `core::CommandScope` for command suggestions written for the current prompt.
+
 - **Breaking:** Inspect `LastFailure::detail` on demand instead of reading a
   pre-rendered detail field.
 
