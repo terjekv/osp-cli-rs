@@ -200,6 +200,10 @@ pub struct ReplRunConfig {
     pub prompt_right: Option<PromptRightRenderer>,
     /// Optional projector used before completion/highlighting analysis.
     pub line_projector: Option<LineProjector>,
+    /// Named product actions, executed after the editor releases the terminal.
+    pub actions: Vec<crate::repl::ReplAction>,
+    /// Reports actual input selection: a rich lifetime, or `None` for basic input.
+    pub on_start: Option<Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
 }
 
 impl ReplRunConfig {
@@ -218,6 +222,8 @@ impl ReplRunConfig {
             tab_mode: ReplTabMode::Tab,
             prompt_right: None,
             line_projector: None,
+            actions: Vec::new(),
+            on_start: None,
         }
     }
 

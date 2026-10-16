@@ -329,3 +329,26 @@ the right prompt when it collides with input. Context and incognito remain;
 product attention takes priority over timing. Basic and JSON sessions omit it.
 A cached update is visible at the next editor paint. Without a meaningful
 transition notice, an idle prompt does not repaint until the next key.
+
+### Product actions and terminal ownership
+
+The editor dispatches `ReplEvent::Line` for a submitted line and
+`ReplEvent::Action` for a named action. Native products register `ReplAction`s
+and implement `execute_repl_action`; the host uses ordinary elevation without
+running an interactive login hook. Actions bypass user history, alias expansion,
+shell navigation, last-command expansion and pagination reset. The same editor
+retains its draft and byte cursor across normal return, cancellation and errors.
+
+`repl.bindings.<action-id>` accepts F2 through F12 or `none`; conflicting keys
+are rejected. Products supply a default and a human label. Basic and JSON
+sessions have no product shortcuts. Existing Ctrl+R, Ctrl+L and pagination keys
+keep their meanings.
+
+`start_repl(config, Some(ReplSession))` supplies a cancellable rich-editor lifetime.
+Basic selection and fallback report `None` for legacy startup behavior only;
+recurring attention and sound remain disabled.
+Workers use its bounded, sanitized `post_notice(kind, text)` aggregate sink and
+`wait(duration)` cancellation point. The host queues delivery while foreground
+commands, line prompts, raw menus, pagers or the history picker own the terminal.
+Rebuild, fallback and exit cancel the handle and discard queued product output.
+Workers must also validate their own credential generation before publication.

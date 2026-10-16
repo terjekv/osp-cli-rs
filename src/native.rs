@@ -428,6 +428,13 @@ impl NativeSessionContext {
             .unwrap_or_default()
     }
 
+    pub(crate) fn for_editor_action(&self) -> Self {
+        Self {
+            pagination: Arc::new(RwLock::new(PaginationState::default())),
+            ..self.clone()
+        }
+    }
+
     /// Replaces the trusted native-command pagination context for this REPL.
     pub fn set_pagination(&self, pagination: NativePagination) {
         if let Ok(mut state) = self.pagination.write() {
@@ -626,6 +633,31 @@ pub trait NativeCommand: Send + Sync {
     fn repl_status(&self) -> Option<String> {
         None
     }
+
+    /// Named editor actions offered by this product, resolved against config.
+    fn repl_actions(&self, _config: &ResolvedConfig) -> Result<Vec<crate::repl::ReplAction>> {
+        Ok(Vec::new())
+    }
+
+    /// Runs a registered editor action with ordinary invocation context.
+    ///
+    /// The host suspends editor output and preserves draft, cursor, history,
+    /// pagination and shell scope. This does not run the interactive access hook:
+    /// missing credentials must return guidance without an implicit login.
+    fn execute_repl_action(
+        &self,
+        _id: &str,
+        _context: &NativeCommandContext<'_>,
+    ) -> Result<NativeCommandOutcome> {
+        anyhow::bail!("unknown editor action")
+    }
+
+    /// Reports actual REPL input selection without blocking startup.
+    ///
+    /// Rich input supplies a cancellable lifetime. Basic input supplies `None`
+    /// for existing startup behavior only: do not start recurring work or audio.
+    /// Session-wide JSON never calls this hook. Stop rich work on cancellation.
+    fn start_repl(&self, _config: &ResolvedConfig, _session: Option<crate::repl::ReplSession>) {}
 
     /// Refreshes runtime completion data on a host-owned background thread.
     ///

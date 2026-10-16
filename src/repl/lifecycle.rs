@@ -132,7 +132,7 @@ impl ReplCycle {
         };
 
         Ok(Self {
-            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared),
+            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared)?,
             help_text: intro_text,
             clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
         })
@@ -144,7 +144,7 @@ fn build_repl_cycle_run_config(
     session: &AppSession,
     clients: &AppClients,
     prepared: PreparedReplSurfaceState,
-) -> ReplRunConfig {
+) -> Result<ReplRunConfig> {
     let view = ReplViewContext::from_parts(runtime, session);
 
     let product_status =
@@ -170,7 +170,7 @@ fn build_repl_cycle_run_config(
                     .unwrap_or_default()
             }) as crate::repl::PromptRightRenderer)
         };
-    ReplRunConfig::builder(
+    let mut config = ReplRunConfig::builder(
         build_repl_prompt(view),
         history::build_history_config(runtime, session),
     )
@@ -186,7 +186,32 @@ fn build_repl_cycle_run_config(
     .with_line_projector(Some(input::build_repl_ui_line_projector(
         runtime.config.resolved(),
     )))
-    .build()
+    .build();
+    if runtime.ui.render_settings.format != crate::core::output::OutputFormat::Json {
+        let mut commands = Vec::new();
+        for entry in clients.native_commands().catalog() {
+            if runtime
+                .auth
+                .external_command_access(&entry.name)
+                .is_visible()
+                && let Some(command) = clients.native_commands().command(&entry.name)
+            {
+                config.actions.extend(
+                    command
+                        .repl_actions(runtime.config.resolved())
+                        .map_err(|e| miette::miette!("{e:#}"))?,
+                );
+                commands.push(command.clone());
+            }
+        }
+        let resolved = runtime.config.resolved().clone();
+        config.on_start = Some(std::sync::Arc::new(move |session| {
+            for command in &commands {
+                command.start_repl(&resolved, session.clone());
+            }
+        }));
+    }
+    Ok(config)
 }
 
 pub(super) fn prepare_repl_surface_state(

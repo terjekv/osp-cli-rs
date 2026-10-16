@@ -463,6 +463,7 @@ fn run_native_invocation(
         session,
         NativeRunInput {
             args: &parsed.args,
+            action: None,
             stages: &invocation_args.stages,
             invocation,
             command_path: parsed.path.as_slice().join(" "),
@@ -530,8 +531,66 @@ fn native_resolved_path(
         .unwrap_or_else(|_| crate::command_policy::CommandPath::new([name]))
 }
 
+pub(crate) fn run_repl_action(
+    runtime: &mut AppRuntime,
+    session: &mut AppSession,
+    clients: &AppClients,
+    id: &str,
+) -> Result<crate::repl::ReplResult> {
+    let invocation = super::resolve_invocation_ui(
+        runtime.config.resolved(),
+        &runtime.ui,
+        &crate::cli::invocation::InvocationOptions::default(),
+    );
+    for entry in clients.native_commands().catalog() {
+        if !runtime
+            .auth
+            .external_command_access(&entry.name)
+            .is_visible()
+        {
+            continue;
+        }
+        let Some(command) = clients.native_commands().command(&entry.name) else {
+            continue;
+        };
+        if command
+            .repl_actions(runtime.config.resolved())
+            .map_err(|e| miette!("{e:#}"))?
+            .iter()
+            .any(|action| action.id == id && action.key.is_some())
+        {
+            let mut sink = super::sink::StdIoUiSink;
+            let result = run_native_command(
+                command.as_ref(),
+                runtime,
+                session,
+                NativeRunInput {
+                    args: &[],
+                    action: Some(id),
+                    stages: &[],
+                    invocation: &invocation,
+                    command_path: entry.name.clone(),
+                    elevation: InvocationElevation::Ordinary,
+                    progress_sink: Some(&mut sink),
+                },
+                Document::from_help_text,
+                &mut None,
+            )?;
+            super::run_cli_command(
+                runtime.config.resolved(),
+                &invocation.ui,
+                &result,
+                &mut sink,
+            )?;
+            return Ok(crate::repl::ReplResult::Continue);
+        }
+    }
+    Err(miette!("Editor action is unavailable: {id}"))
+}
+
 struct NativeRunInput<'args, 'stages, 'invocation, 'sink> {
     args: &'args [String],
+    action: Option<&'args str>,
     stages: &'stages [String],
     invocation: &'invocation ResolvedInvocation,
     command_path: String,
@@ -549,7 +608,9 @@ fn run_native_command(
 ) -> Result<CommandOutput> {
     tracing::info!(target: "osp", command = %input.command_path,
         args = ?input.args, handler = "native", "running command");
-    session.native_context.clear_pagination();
+    if input.action.is_none() {
+        session.native_context.clear_pagination();
+    }
     let progress_renderer = input.progress_sink.map(|sink| NativeProgressRenderer {
         config: runtime.config.resolved(),
         ui: &input.invocation.ui,
@@ -581,33 +642,37 @@ fn run_native_command(
     )
     .with_invocation_elevation(input.elevation)
     .with_session_context(
-        session
-            .native_context
-            .for_command(input.command_path.as_str()),
+        if input.action.is_some() {
+            session.native_context.for_editor_action()
+        } else {
+            session.native_context.clone()
+        }
+        .for_command(input.command_path.as_str()),
     );
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
     }
 
-    let execution =
-        command
-            .execute(input.args, &context)
-            .map_err(|err| match err.downcast::<clap::Error>() {
-                Ok(err) => {
-                    mark_repl_command_rejected(accepted);
-                    super::host::report_clap_error_with_context(
-                        err,
-                        crate::app::host::ErrorContext::NativeExecution,
-                        command.command(),
-                        std::iter::once(command.command().get_name().to_string())
-                            .chain(input.args.iter().cloned()),
-                    )
-                }
-                Err(err) => crate::app::report_anyhow_with_context(
-                    err,
-                    crate::app::host::ErrorContext::NativeExecution,
-                ),
-            });
+    let execution = match input.action {
+        Some(action) => command.execute_repl_action(action, &context),
+        None => command.execute(input.args, &context),
+    }
+    .map_err(|err| match err.downcast::<clap::Error>() {
+        Ok(err) => {
+            mark_repl_command_rejected(accepted);
+            super::host::report_clap_error_with_context(
+                err,
+                crate::app::host::ErrorContext::NativeExecution,
+                command.command(),
+                std::iter::once(command.command().get_name().to_string())
+                    .chain(input.args.iter().cloned()),
+            )
+        }
+        Err(err) => crate::app::report_anyhow_with_context(
+            err,
+            crate::app::host::ErrorContext::NativeExecution,
+        ),
+    });
     drop(context);
     if let Some(renderer) = progress_renderer.as_ref() {
         renderer.clear();
@@ -629,7 +694,7 @@ fn run_native_command(
             *response,
             input.stages,
             session,
-            runtime.context.terminal_kind() == TerminalKind::Repl,
+            input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
         ),
         NativeCommandOutcome::ResponseWithExit {
             response,
@@ -639,7 +704,7 @@ fn run_native_command(
                 *response,
                 input.stages,
                 session,
-                runtime.context.terminal_kind() == TerminalKind::Repl,
+                input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
             )?;
             result.exit_code = exit_code;
             Ok(result)
@@ -728,7 +793,9 @@ fn render_native_response_with_context(
     let mut result = match cli_result_from_plugin_response(response, stages) {
         Ok(result) => result,
         Err(error) => {
-            session.native_context.clear_pagination();
+            if show_pagination_hint {
+                session.native_context.clear_pagination();
+            }
             return Err(error);
         }
     };

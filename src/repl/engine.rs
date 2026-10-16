@@ -88,6 +88,8 @@ struct ReplRunContext {
     tab_mode: ReplTabMode,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
+    actions: Vec<crate::repl::ReplAction>,
+    on_start: Option<std::sync::Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
 }
 
 /// Runs the interactive REPL and delegates submitted lines to `execute`.
@@ -111,7 +113,7 @@ struct ReplRunContext {
 /// the editor applies the other actions before reading another line.
 pub fn run_repl<F>(config: ReplRunConfig, mut execute: F) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     crate::startup_trace::initialize();
     let ReplRunConfig {
@@ -123,6 +125,8 @@ where
         tab_mode,
         prompt_right,
         line_projector,
+        actions,
+        on_start,
     } = config;
     let history_store = SharedHistory::new(history_config);
     let mut submission = SubmissionContext {
@@ -144,6 +148,8 @@ where
             tab_mode,
             line_projector,
             history_store: history_store.clone(),
+            actions,
+            on_start,
         },
         basic_reason,
         &mut submission,
@@ -160,7 +166,7 @@ fn run_repl_with_reason<F, B, I>(
     mut run_interactive_fn: I,
 ) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
     B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
     I: FnMut(
         InteractiveLoopConfig<'_>,
@@ -175,13 +181,22 @@ where
         tab_mode,
         line_projector,
         history_store,
+        actions,
+        on_start,
     } = context;
 
     if let Some(reason) = basic_reason {
         warn_basic_input_once(reason);
+        if let Some(start) = on_start {
+            start(None);
+        }
         return run_basic_fn(&prompt, submission);
     }
 
+    let owner = crate::repl::notices::SessionOwner::new();
+    if let Some(start) = &on_start {
+        start(Some(owner.0.clone()));
+    }
     run_interactive_fn(
         InteractiveLoopConfig {
             prompt: &prompt,
@@ -189,6 +204,8 @@ where
             appearance,
             tab_mode,
             line_projector,
+            actions,
+            on_start,
         },
         history_store,
         submission,

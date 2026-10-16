@@ -7,6 +7,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Native products can register suspended editor actions and cancellable REPL work.
+  Background notices are bounded and pause during foreground terminal use.
+- **Breaking:** `run_repl` callbacks receive `ReplEvent` to distinguish typed lines
+  from named actions.
+
 - Native products can contribute sanitized cached status to the REPL right prompt.
 
 - Add `AccessPolicy::before_dispatch` for product credential acquisition before

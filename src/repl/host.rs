@@ -100,7 +100,19 @@ fn run_repl_cycle(
         state.runtime.launch.startup_started_at.elapsed(),
     );
 
-    run_repl(cycle.run_config, |line, history| {
+    run_repl(cycle.run_config, |event, history| {
+        let line = match event {
+            crate::repl::ReplEvent::Line(line) => line,
+            crate::repl::ReplEvent::Action(id) => {
+                return crate::app::external::run_repl_action(
+                    &mut state.runtime,
+                    &mut state.session,
+                    &state.clients,
+                    id,
+                )
+                .map_err(|err| anyhow::Error::from_boxed(err.into()));
+            }
+        };
         dispatch::execute_repl_plugin_line(
             &mut state.runtime,
             &mut state.session,

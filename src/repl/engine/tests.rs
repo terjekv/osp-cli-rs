@@ -126,7 +126,10 @@ fn history_expansion_variants_resolve_recent_relative_and_prefix_queries_unit() 
 fn submission_delegates_help_and_exit_to_host() {
     let history = disabled_history();
     let mut seen = Vec::new();
-    let mut execute = |line: &str, _: &SharedHistory| {
+    let mut execute = |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        let crate::repl::ReplEvent::Line(line) = event else {
+            unreachable!()
+        };
         seen.push(line.to_string());
         Ok(match line {
             "help" => ReplResult::Print("host help".to_string()),
@@ -454,7 +457,7 @@ fn completion_analysis_marks_uncommitted_root_tokens_as_subcommand_context_unit(
 fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
     let history = disabled_history();
 
-    let mut restart_execute = |_line: &str, _: &SharedHistory| {
+    let mut restart_execute = |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
         Ok(ReplResult::Restart {
             output: "restarting".to_string(),
             reload: ReplReloadKind::WithIntro,
@@ -473,9 +476,10 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
         } if output == "restarting"
     ));
 
-    let mut failing_execute = |_line: &str, _: &SharedHistory| -> anyhow::Result<ReplResult> {
-        Err(anyhow::anyhow!("submit failed"))
-    };
+    let mut failing_execute =
+        |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| -> anyhow::Result<ReplResult> {
+            Err(anyhow::anyhow!("submit failed"))
+        };
     let mut failing_submission = SubmissionContext {
         history_store: &history,
         execute: &mut failing_execute,
@@ -483,8 +487,9 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
     let result = evaluate_repl_submission("broken", &mut failing_submission);
     assert!(matches!(result, ReplResult::Continue));
 
-    let mut noop_execute =
-        |_line: &str, _: &SharedHistory| Ok(ReplResult::Print("ignored".to_string()));
+    let mut noop_execute = |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        Ok(ReplResult::Print("ignored".to_string()))
+    };
     let mut noop_submission = SubmissionContext {
         history_store: &history,
         execute: &mut noop_execute,
@@ -654,7 +659,8 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
     ] {
         let history = SharedHistory::new(history_config());
         let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
-        let mut execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
+        let mut execute =
+            |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
         let mut submission = SubmissionContext {
             history_store: &history,
             execute: &mut execute,
@@ -670,6 +676,8 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
                 tab_mode: ReplTabMode::Tab,
                 line_projector: None,
                 history_store: history.clone(),
+                actions: Vec::new(),
+                on_start: None,
             },
             reason,
             &mut submission,
@@ -772,10 +780,12 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         ReplTabMode::Tab,
         None,
         history.clone(),
+        None,
     );
     assert_eq!(built_editor.current_buffer_contents(), "");
 
-    let mut fallback_execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
+    let mut fallback_execute =
+        |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut fallback_submission = SubmissionContext {
         history_store: &history,
         execute: &mut fallback_execute,
@@ -794,7 +804,10 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
 
     let executed = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&executed);
-    let mut execute = move |line: &str, _: &SharedHistory| {
+    let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        let crate::repl::ReplEvent::Line(line) = event else {
+            unreachable!()
+        };
         seen.lock()
             .expect("executed command log should not be poisoned")
             .push(line.to_string());
@@ -831,7 +844,8 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         vec!["help".to_string()]
     );
 
-    let mut error_execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
+    let mut error_execute =
+        |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut error_submission = SubmissionContext {
         history_store: &history,
         execute: &mut error_execute,

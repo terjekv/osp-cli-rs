@@ -48,9 +48,12 @@
 //! .build();
 //!
 //! let _result = run_repl(config, |line, _history| -> Result<ReplResult> {
-//!     match line.trim() {
+//!     match line {
+//!         osp_cli::repl::ReplEvent::Line(line) => match line.trim() {
 //!         "exit" | "quit" => Ok(ReplResult::Exit(0)),
 //!         _ => Ok(ReplResult::Continue),
+//!         },
+//!         osp_cli::repl::ReplEvent::Action(_) => Ok(ReplResult::Continue),
 //!     }
 //! })?;
 //! # Ok::<(), anyhow::Error>(())
@@ -111,6 +114,7 @@ mod menu;
 mod menu_core;
 mod notices;
 pub(crate) mod presentation;
+mod product;
 pub(crate) mod surface;
 
 #[cfg(test)]
@@ -125,7 +129,8 @@ pub use engine::{
     color_from_style_spec, default_pipe_verbs, run_repl,
 };
 pub use menu_core::MenuDebug;
-pub use notices::post_notice;
+pub use notices::{ReplSession, post_notice};
+pub use product::{ReplAction, ReplEvent};
 // Debug surfaces for REPL completion, highlight, and history inspection.
 pub use engine::{
     CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,

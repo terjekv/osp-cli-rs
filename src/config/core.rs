@@ -538,6 +538,7 @@ enum DynamicSchemaKeyKind {
     PluginCommandState,
     PluginCommandProvider,
     UserDisplayName,
+    ReplBinding,
 }
 
 impl Default for ConfigSchema {
@@ -1859,7 +1860,8 @@ fn adapt_dynamic_value_for_schema(
     let adapted = match kind {
         DynamicSchemaKeyKind::PluginCommandState
         | DynamicSchemaKeyKind::PluginCommandProvider
-        | DynamicSchemaKeyKind::UserDisplayName => {
+        | DynamicSchemaKeyKind::UserDisplayName
+        | DynamicSchemaKeyKind::ReplBinding => {
             adapt_value_for_schema(key, value, &SchemaEntry::string())?
         }
     };
@@ -1868,6 +1870,15 @@ fn adapt_dynamic_value_for_schema(
         validate_allowed_values(key, &adapted, Some(&["enabled", "disabled"]))?;
     }
 
+    if matches!(kind, DynamicSchemaKeyKind::ReplBinding) {
+        validate_allowed_values(
+            key,
+            &adapted,
+            Some(&[
+                "none", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+            ]),
+        )?;
+    }
     Ok(adapted)
 }
 
@@ -1894,6 +1905,9 @@ fn validate_allowed_values(
 
 fn dynamic_schema_key_kind(key: &str) -> Option<DynamicSchemaKeyKind> {
     let normalized = normalize_identifier(key);
+    if let Some(action) = normalized.strip_prefix("repl.bindings.") {
+        return (!action.is_empty()).then_some(DynamicSchemaKeyKind::ReplBinding);
+    }
     // `user.display_names.<user>`: the name shown for one `-u` user.
     if let Some(user) = normalized.strip_prefix("user.display_names.") {
         return (!user.trim().is_empty() && !user.contains('.'))

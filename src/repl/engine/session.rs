@@ -27,6 +27,9 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) appearance: ReplAppearance,
     pub(crate) tab_mode: ReplTabMode,
     pub(crate) line_projector: Option<LineProjector>,
+    pub(crate) actions: Vec<crate::repl::ReplAction>,
+    pub(crate) on_start:
+        Option<std::sync::Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
 }
 
 pub(crate) struct SubmissionContext<'a, F> {
@@ -39,13 +42,13 @@ pub(crate) fn evaluate_repl_submission<F>(
     ctx: &mut SubmissionContext<'_, F>,
 ) -> ReplResult
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     let raw = raw.trim();
     if raw.is_empty() {
         return ReplResult::Continue;
     }
-    match (ctx.execute)(raw, ctx.history_store) {
+    match (ctx.execute)(crate::repl::ReplEvent::Line(raw), ctx.history_store) {
         Ok(result) => result,
         Err(err) => {
             eprintln!("{err}");
@@ -60,7 +63,7 @@ pub(crate) fn run_repl_interactive<F>(
     submission: &mut SubmissionContext<'_, F>,
 ) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     let InteractiveLoopConfig {
         prompt,
@@ -68,8 +71,26 @@ where
         appearance,
         tab_mode,
         line_projector,
+        actions,
+        on_start,
     } = config;
 
+    let mut bindings = build_repl_keybindings();
+    for action in &actions {
+        if let Some(key) = action.key {
+            anyhow::ensure!(
+                bindings
+                    .find_binding(KeyModifiers::NONE, KeyCode::F(key))
+                    .is_none(),
+                "conflicting action key F{key}"
+            );
+            bindings.add_binding(
+                KeyModifiers::NONE,
+                KeyCode::F(key),
+                ReedlineEvent::ExecuteHostCommand(format!("\0osp-action:{}", action.id)),
+            );
+        }
+    }
     let mut editor = {
         let _phase = tracing::info_span!(target: "osp_startup", "editor construction").entered();
         build_interactive_editor(
@@ -78,6 +99,7 @@ where
             tab_mode,
             line_projector,
             history_store.clone(),
+            Some(bindings),
         )
     };
     drive_interactive_editor(
@@ -87,7 +109,12 @@ where
         submission,
         &mut editor,
         |editor| editor.read_line(prompt),
-        run_repl_basic,
+        |prompt, submission| {
+            if let Some(start) = &on_start {
+                start(None);
+            }
+            run_repl_basic(prompt, submission)
+        },
     )
 }
 
@@ -97,6 +124,7 @@ pub(super) fn build_interactive_editor(
     tab_mode: ReplTabMode,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
+    bindings: Option<reedline::Keybindings>,
 ) -> Reedline {
     let tree = completion_tree;
     let completer = Box::new(
@@ -108,7 +136,7 @@ pub(super) fn build_interactive_editor(
     let hinter = build_repl_hinter(&tree, appearance, line_projector.clone(), painted.clone());
     let highlighter = build_repl_highlighter(&tree, appearance, line_projector);
     let edit_mode = Box::new(AutoCompleteEmacs::new(
-        Emacs::new(build_repl_keybindings()),
+        Emacs::new(bindings.unwrap_or_else(build_repl_keybindings)),
         completion_menu.clone(),
         tab_mode,
         painted,
@@ -143,7 +171,7 @@ pub(super) fn drive_interactive_editor<F, R, B>(
     mut run_basic_fn: B,
 ) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
     R: FnMut(&mut Reedline) -> io::Result<Signal>,
     B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
 {
@@ -189,7 +217,7 @@ pub(crate) fn run_repl_basic<F>(
     submission: &mut SubmissionContext<'_, F>,
 ) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     crate::repl::notices::attach_basic();
     crate::startup_trace::begin_first_prompt();
@@ -295,9 +323,35 @@ fn handle_interactive_signal<F>(
     submission: &mut SubmissionContext<'_, F>,
 ) -> Result<Option<ReplResult>>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     match signal {
+        Signal::Success(line) if line.starts_with("\0osp-action:") => {
+            let draft = editor.current_buffer_contents().to_string();
+            let cursor = editor.current_insertion_point();
+            let id = line.trim_start_matches("\0osp-action:");
+            let result =
+                match (submission.execute)(crate::repl::ReplEvent::Action(id), history_store) {
+                    Ok(ReplResult::Print(output)) => {
+                        print!("{output}");
+                        None
+                    }
+                    Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
+                    Ok(result) => Some(result),
+                    Err(error) => {
+                        eprintln!("{error}");
+                        None
+                    }
+                };
+            if editor.current_buffer_contents() != draft {
+                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(draft)]);
+            }
+            editor.run_edit_commands(&[EditCommand::MoveToPosition {
+                position: cursor,
+                select: false,
+            }]);
+            Ok(result)
+        }
         Signal::Success(line) if line == HOST_COMMAND_HISTORY_PICKER => {
             // `Ctrl-R` leaves reedline through a private host command so we
             // can temporarily hand terminal ownership to skim. Once skim
@@ -463,7 +517,10 @@ mod tests {
 
         let executed = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&executed);
-        let mut execute = move |line: &str, _: &SharedHistory| {
+        let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+            let crate::repl::ReplEvent::Line(line) = event else {
+                unreachable!()
+            };
             seen.lock()
                 .expect("executed command log should not be poisoned")
                 .push(line.to_string());
