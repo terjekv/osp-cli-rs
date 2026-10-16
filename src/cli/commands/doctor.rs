@@ -12,9 +12,7 @@ use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{DoctorArgs, DoctorCommands};
 use crate::core::MessageLevel;
 use crate::core::command_policy::CredentialState;
-use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
-use crate::core::output_model::OutputResult;
 use crate::core::row::Row;
 use crate::ui::theme_catalog::ThemeCatalog;
 use serde::Serialize;
@@ -62,16 +60,6 @@ struct CredentialDiagnostics<'a> {
     state: &'a CredentialState,
 }
 
-impl CredentialDiagnostics<'_> {
-    fn label(&self) -> String {
-        let state = if self.state.valid { "valid" } else { "invalid" };
-        self.state.ttl_seconds.map_or_else(
-            || format!("{}: {state}", self.service),
-            |ttl| format!("{}: {state} ({ttl}s remaining)", self.service),
-        )
-    }
-}
-
 fn run_doctor_all(
     runtime: &AppRuntime,
     session: &AppSession,
@@ -102,25 +90,119 @@ fn run_doctor_all(
 
     sections.push(("theme", theme_doctor_rows(&runtime.themes)));
 
-    if matches!(ui.render_settings.format, OutputFormat::Json) {
-        return Ok(CommandOutput::json(doctor_report_json_value(&sections)));
+    let mut checks = runtime.auth.local_checks(runtime.config.resolved());
+    for check in &mut checks {
+        check.url = check.url.as_deref().map(crate::diagnostics::safe_url);
+        check.identity = check.identity.as_deref().map(crate::diagnostics::safe_text);
+        check.profile = check.profile.as_deref().map(crate::diagnostics::safe_text);
     }
-
-    sections[0].1[0].insert(
-        "credentials".to_string(),
-        serde_json::json!(
-            credentials
-                .iter()
-                .map(CredentialDiagnostics::label)
-                .collect::<Vec<_>>()
-        ),
+    let cache = crate::config::default_cache_root_dir().map(|path| {
+        let status = if !path.exists() {
+            "not created yet"
+        } else if std::fs::read_dir(&path).is_ok() {
+            "readable"
+        } else {
+            "not readable"
+        };
+        (
+            crate::diagnostics::safe_text(&path.display().to_string()),
+            status,
+        )
+    });
+    if matches!(ui.render_settings.format, OutputFormat::Json) {
+        let mut report = doctor_report_json_value(&sections);
+        if let Some((path, status)) = &cache {
+            report["cache"] = serde_json::json!({"path": path, "status": status});
+        }
+        report["local"] = serde_json::to_value(checks).unwrap_or_default();
+        return Ok(CommandOutput::json(report));
+    }
+    let mut text = format!(
+        "ok: Config loaded (profile {}).\n",
+        runtime.config.resolved().active_profile()
     );
-
-    Ok(CommandOutput::document_with_output(
-        doctor_report_guide(&sections),
-        doctor_report_output(&sections),
-        None,
-    ))
+    if checks.is_empty() {
+        for credential in &credentials {
+            let lifetime = credential
+                .state
+                .ttl_seconds
+                .map(|seconds| format!(", {seconds}s remaining"))
+                .unwrap_or_default();
+            text.push_str(&format!(
+                "{}: {} credential is {}{} (not checked against the server).\n",
+                if credential.state.valid {
+                    "ok"
+                } else {
+                    "warning"
+                },
+                credential.service,
+                if credential.state.valid {
+                    "present"
+                } else {
+                    "absent or expired"
+                },
+                lifetime
+            ));
+        }
+    }
+    for check in &checks {
+        text.push_str(&format!("{}: {}\n", check.status, check.message));
+        if let Some(action) = &check.action {
+            text.push_str(&format!("hint: {action}\n"));
+        }
+    }
+    let plugins = plugins_cmd::plugin_rows(clients, false);
+    let count = plugins.len();
+    text.push_str(&format!(
+        "ok: {count} plugin{} found.\n",
+        if count == 1 { "" } else { "s" }
+    ));
+    for plugin in clients.plugins().list() {
+        if plugin.describe.as_ref().is_some_and(|description| {
+            description.flags.contains_key("--verbose") && description.flags.contains_key("-d")
+        }) {
+            text.push_str(&format!("warning: Plugin {} uses osp's own flags --verbose and -d.\nhint: Pass plugin flags after --, or ask the plugin author to rename them.\n", plugin.name));
+        }
+    }
+    if let Some(path) = std::env::var_os("SSL_CERT_FILE") {
+        if std::fs::File::open(path).is_ok() {
+            text.push_str("ok: TLS trust file is readable.\n");
+        } else {
+            text.push_str("warning: TLS trust file is not readable.\n");
+        }
+    }
+    text.push_str("info: doctor checks this machine only; it does not contact services.\n");
+    let mut verbose = String::new();
+    if ui.verbosity >= MessageLevel::Info {
+        if let Some(path) =
+            &crate::config::RuntimeConfigPaths::discover_with(runtime.launch.runtime_load)
+                .config_file
+        {
+            verbose.push_str(&format!("info: Config file: {}.\n", path.display()));
+        }
+        for check in checks {
+            if let Some(detail) = check.detail {
+                verbose.push_str(&format!("info: {detail}\n"));
+            }
+        }
+        if crate::config::RuntimeConfigPaths::discover_with(runtime.launch.runtime_load)
+            .secrets_file
+            .as_ref()
+            .is_none_or(|p| !p.exists())
+        {
+            verbose.push_str("info: Secret store: not created yet.\n");
+        }
+    }
+    if ui.verbosity >= MessageLevel::Trace
+        && let Some((path, status)) = cache
+    {
+        verbose.push_str(&format!(
+            "cache: Local cache directory: {status} ({path}).\n"
+        ));
+    }
+    let mut output = CommandOutput::text(text);
+    output.stderr_text = verbose;
+    Ok(output)
 }
 
 fn session_doctor_rows(
@@ -149,26 +231,6 @@ fn session_doctor_rows(
     vec![row]
 }
 
-fn doctor_report_guide(sections: &[(&str, Vec<Row>)]) -> Document {
-    Document {
-        blocks: sections
-            .iter()
-            .map(|(name, rows)| {
-                DocBlock::section(
-                    *name,
-                    vec![DocBlock::Data {
-                        value: doctor_section_view_value(rows),
-                    }],
-                )
-            })
-            .collect(),
-    }
-}
-
-fn doctor_report_output(sections: &[(&str, Vec<Row>)]) -> OutputResult {
-    OutputResult::from_rows(vec![doctor_report_row(sections, doctor_section_view_value)])
-}
-
 fn doctor_report_json_value(sections: &[(&str, Vec<Row>)]) -> Value {
     doctor_report_value(sections, doctor_section_json_value)
 }
@@ -188,14 +250,6 @@ fn doctor_report_row(
         .iter()
         .map(|(name, rows)| ((*name).to_string(), value_for_rows(rows)))
         .collect::<Map<String, Value>>()
-}
-
-fn doctor_section_view_value(rows: &[Row]) -> Value {
-    match rows {
-        [] => Value::Array(Vec::new()),
-        [row] => Value::Object(row.clone()),
-        _ => Value::Array(rows.iter().cloned().map(Value::Object).collect()),
-    }
 }
 
 fn doctor_section_json_value(rows: &[Row]) -> Value {
@@ -259,12 +313,13 @@ fn render_last_failure_document(
     }
 
     let mut out = String::new();
-    out.push_str("Last REPL failure:\n");
+    out.push_str("Last command failure:\n");
     out.push_str(&format!("  Command: {}\n", last.command_line));
     out.push_str(&format!("  Error:   {summary}\n"));
     if let Some(action) = action {
         out.push_str(&format!("  Action:  {action}\n"));
     }
+    let base_len = out.len();
     let detail = last.detail(ui.verbosity);
     if ui.verbosity >= MessageLevel::Info
         && normalized_failure_detail(&detail) != normalized_failure_detail(&last.summary)
@@ -277,21 +332,22 @@ fn render_last_failure_document(
             out.push('\n');
         }
     }
-    if let Some(command) = next_failure_detail_command(ui.verbosity, last) {
-        out.push('\n');
-        out.push_str(&format!("More: run `{command}` for more detail.\n"));
+    let mut supplemental = out.split_off(base_len);
+    if ui.verbosity >= MessageLevel::Evidence {
+        supplemental.push_str(&last.command_evidence);
     }
     let mut output = CommandOutput::text(out);
+    output.stderr_text = supplemental;
     if ui.debug_level >= 2
         && let Some(backtrace) = last.backtrace()
     {
-        output.stderr_text = format!("{backtrace}\n");
+        output.stderr_text.push_str(&format!("{backtrace}\n"));
     }
     output
 }
 
 fn split_failure_action(summary: &str) -> (&str, Option<&str>) {
-    let Some((summary, action)) = summary.split_once("Try:") else {
+    let Some((summary, action)) = summary.split_once("hint:") else {
         return (summary.trim(), None);
     };
     (summary.trim().trim_end_matches('.'), Some(action.trim()))
@@ -299,17 +355,6 @@ fn split_failure_action(summary: &str) -> (&str, Option<&str>) {
 
 fn normalized_failure_detail(detail: &str) -> &str {
     split_failure_action(detail).0.trim()
-}
-
-fn next_failure_detail_command(current: MessageLevel, last: &LastFailure) -> Option<&'static str> {
-    if current < MessageLevel::Info
-        && normalized_failure_detail(&last.summary)
-            != normalized_failure_detail(&last.detail(MessageLevel::Info))
-    {
-        Some("doctor last -v")
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -321,7 +366,6 @@ mod tests {
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
     use crate::core::MessageLevel;
-    use crate::core::document::DocBlock;
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
@@ -379,7 +423,7 @@ mod tests {
             ),
             crate::ui::RenderSettings::test_plain(OutputFormat::Table),
         );
-        failure.summary = "request failed. Try: authenticate again".to_string();
+        failure.summary = "request failed. hint: authenticate again".to_string();
 
         let verbose = render_last_failure_document(
             &UiState::new(
@@ -392,10 +436,14 @@ mod tests {
         let crate::app::CommandBody::Text(verbose_text) = verbose.body else {
             panic!("expected text output");
         };
-        assert!(verbose_text.contains("Command: ldap user nope"));
+        assert!(verbose_text.contains("Command: ldap …"));
         assert!(verbose_text.contains("Error:   request failed"));
-        assert!(verbose_text.contains("Detail:"));
-        assert!(verbose_text.contains("missing capability: ldap.user.read"));
+        assert!(verbose.stderr_text.contains("Detail:"));
+        assert!(
+            verbose
+                .stderr_text
+                .contains("missing capability: ldap.user.read")
+        );
 
         let compact =
             render_last_failure_document(&ui_state(OutputFormat::Table, 0), Some(&failure));
@@ -405,7 +453,7 @@ mod tests {
         assert!(compact_text.contains("Error:   request failed"));
         assert!(compact_text.contains("Action:  authenticate again"));
         assert!(!compact_text.contains("Detail:"));
-        assert!(compact_text.contains("doctor last -v"));
+        assert!(!compact_text.contains("doctor last -v"));
 
         let debug = render_last_failure_document(
             &UiState::new(
@@ -418,7 +466,7 @@ mod tests {
         let crate::app::CommandBody::Text(debug_text) = debug.body else {
             panic!("expected text output");
         };
-        assert!(debug_text.contains("policy gate: ldap user"));
+        assert!(debug.stderr_text.contains("policy gate: ldap user"));
         assert!(!debug_text.contains("Stack backtrace"));
 
         let forensic =
@@ -513,25 +561,11 @@ mod tests {
             },
         )
         .expect("doctor all should succeed");
-        let crate::app::CommandBody::Output(guide) = table.body else {
-            panic!("expected guide output");
+        let crate::app::CommandBody::Text(text) = table.body else {
+            panic!("expected local status rows");
         };
-        assert!(
-            guide
-                .document
-                .as_ref()
-                .and_then(crate::core::output_model::OutputDocument::semantic)
-                .expect("expected semantic guide payload")
-                .blocks
-                .iter()
-                .all(|block| matches!(block, DocBlock::Section { blocks, .. }
-                    if matches!(blocks.as_slice(), [DocBlock::Data { .. }])))
-        );
-        let rows = guide
-            .as_rows()
-            .expect("doctor guide output should keep a structured fallback");
-        assert!(rows[0].get("config").is_some());
-        assert!(rows[0].get("theme").is_some());
+        assert!(text.contains("ok: Config loaded"));
+        assert!(text.contains("doctor checks this machine only"));
 
         let def = doctor_command();
         let names = def

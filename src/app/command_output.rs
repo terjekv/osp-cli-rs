@@ -89,19 +89,6 @@ impl CommandOutput {
         }
     }
 
-    pub(crate) fn document_with_output(
-        document: Document,
-        mut output: OutputResult,
-        format_hint: Option<OutputFormat>,
-    ) -> Self {
-        output
-            .meta
-            .render_recommendation
-            .get_or_insert(RenderRecommendation::Document);
-        output.document = Some(OutputDocument::Semantic(document));
-        Self::output(output, format_hint)
-    }
-
     pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
         Self {
             body: CommandBody::Output(Box::new(output)),

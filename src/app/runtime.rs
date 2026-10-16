@@ -565,6 +565,16 @@ impl AuthState {
         }
     }
 
+    pub(crate) fn local_checks(
+        &self,
+        config: &ResolvedConfig,
+    ) -> Vec<crate::diagnostics::LocalCheck> {
+        self.access_policy
+            .as_ref()
+            .map(|policy| policy.local_checks(config))
+            .unwrap_or_default()
+    }
+
     /// Reads live product facts without acquiring credentials.
     pub fn session_facts(&self) -> SessionFacts {
         self.access_policy

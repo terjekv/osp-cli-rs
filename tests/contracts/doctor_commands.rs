@@ -76,8 +76,8 @@ fn compact_doctor_renders_semantic_sections_with_key_value_rows_contract() {
         .clone();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("config:\n  status:"));
-    assert!(stdout.contains("\n\nplugins:\n"));
+    assert!(stdout.contains("ok: Config loaded (profile default)."));
+    assert!(stdout.contains("plugin"));
     assert!(!stdout.contains("- config "));
     assert!(
         output.stderr.is_empty(),

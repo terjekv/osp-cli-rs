@@ -56,6 +56,14 @@ pub trait AccessPolicy: Send + Sync {
         Ok(())
     }
 
+    /// Returns local setup observations without contacting services or acquiring credentials.
+    fn local_checks(
+        &self,
+        _config: &crate::config::ResolvedConfig,
+    ) -> Vec<crate::diagnostics::LocalCheck> {
+        Vec::new()
+    }
+
     /// Returns current session and credential facts for access, doctor and prompts.
     fn session_facts(&self) -> SessionFacts {
         SessionFacts::default()
