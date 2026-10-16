@@ -54,9 +54,7 @@ use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
 
 pub(crate) use lower::json_value;
-pub(crate) use messages::{
-    render_messages_from_settings as render_messages, render_messages_without_config,
-};
+pub use messages::{MessageRequest, render as render_messages};
 pub(crate) use plan::plan_output;
 pub use settings::RenderBackend;
 #[allow(unused_imports)]

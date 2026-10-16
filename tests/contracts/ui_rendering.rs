@@ -7,7 +7,7 @@ use serde_json::json;
 
 #[test]
 fn contextual_messages_preserve_event_order_and_theme_controls() {
-    use osp_cli::ui::messages::{MessageBuffer, MessageLayout, MessageLevel};
+    use osp_cli::ui::messages::{MessageBuffer, MessageLevel};
     let mut messages = MessageBuffer::new();
     messages.warning("Task still running.");
     messages.push_titled(
@@ -15,14 +15,16 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
         "Host lookup failed",
         "No matching host found.",
     );
-    let theme = osp_cli::ui::theme::resolve_theme("dracula");
-    let rendered = messages.render_grouped_styled(
-        MessageLevel::Warning,
-        true,
-        true,
-        Some(72),
-        &theme,
-        MessageLayout::Grouped,
+    let mut settings = RenderSettings::default();
+    settings.theme_name = "dracula".into();
+    settings.color = ColorMode::Always;
+    settings.unicode = UnicodeMode::Always;
+    settings.width = Some(72);
+    settings.chrome_frame = osp_cli::ui::section_chrome::SectionFrameStyle::TopBottom;
+    settings.ruled_section_policy = osp_cli::ui::section_chrome::RuledSectionPolicy::PerSection;
+    let rendered = osp_cli::ui::render_messages(
+        &messages,
+        &osp_cli::ui::MessageRequest::new(&settings, MessageLevel::Warning),
     );
     let plain = crate::output_support::strip_ansi(&rendered);
     assert!(plain.find("Warning").unwrap() < plain.find("Host lookup failed").unwrap());
@@ -30,13 +32,11 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
     assert!(rendered.contains("\x1b[38;2;241;250;140m"));
     assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
     assert!(rendered.contains("\x1b[38;2;248;248;242m  No matching host found."));
-    let uncolored = messages.render_grouped_styled(
-        MessageLevel::Warning,
-        false,
-        false,
-        Some(72),
-        &theme,
-        MessageLayout::Grouped,
+    settings.color = ColorMode::Never;
+    settings.unicode = UnicodeMode::Never;
+    let uncolored = osp_cli::ui::render_messages(
+        &messages,
+        &osp_cli::ui::MessageRequest::new(&settings, MessageLevel::Warning),
     );
     assert!(uncolored.contains("Host lookup failed") && !uncolored.contains('\x1b'));
 }

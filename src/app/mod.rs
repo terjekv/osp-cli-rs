@@ -69,7 +69,7 @@ use crate::config::ConfigLayer;
 use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
 use crate::ui::messages::{MessageBuffer, MessageLevel, adjust_verbosity};
-use crate::ui::render_messages_without_config;
+use crate::ui::{MessageRequest, render_messages};
 use std::ffi::OsString;
 use std::sync::Arc;
 
@@ -828,7 +828,13 @@ pub(crate) fn render_process_error(
         } else {
             "Command failed"
         },
-        message,
+        crate::ui::visible_inline_text(&message),
     );
-    render_messages_without_config(settings, &messages, message_verbosity)
+    render_messages(&messages, &{
+        let mut request = MessageRequest::new(settings, message_verbosity);
+        request.settings.chrome_frame = crate::ui::section_chrome::SectionFrameStyle::TopBottom;
+        request.ruled_policy = crate::ui::section_chrome::RuledSectionPolicy::Shared;
+        request.settings.width = request.settings.width.or(Some(12));
+        request
+    })
 }

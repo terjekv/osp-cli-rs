@@ -903,7 +903,13 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
     let crate::app::CommandBody::Output(output) = prepared.body else {
         panic!("expected structured failure data");
     };
-    let rendered = prepared.messages.render_grouped(MessageLevel::Trace);
+    let rendered = crate::ui::render_messages(
+        &prepared.messages,
+        &crate::ui::MessageRequest::new(
+            &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+            MessageLevel::Trace,
+        ),
+    );
     assert!(rendered.contains("queried fallback backend"));
     assert!(rendered.contains("NOT_FOUND: missing user"));
     assert_eq!(report.to_string(), "NOT_FOUND: missing user");

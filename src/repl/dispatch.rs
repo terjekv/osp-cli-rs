@@ -281,12 +281,13 @@ pub(crate) fn execute_repl_plugin_line(
                 .map(|command| format!("{detail}\nMore: run `{command}` for more detail."))
                 .unwrap_or(detail);
             messages.push_titled(MessageLevel::Error, "Command failed", visible_error);
-            let rendered = crate::ui::render_messages(
-                runtime.config.resolved(),
-                &ui.render_settings,
-                &messages,
-                ui.message_verbosity,
-            );
+            let rendered = crate::ui::render_messages(&messages, &{
+                let mut request =
+                    crate::ui::MessageRequest::new(&ui.render_settings, ui.message_verbosity);
+                request.layout =
+                    crate::ui::messages::message_layout_from_config(runtime.config.resolved());
+                request
+            });
             Err(miette!(rendered.trim_end().to_string()))
         }
     }

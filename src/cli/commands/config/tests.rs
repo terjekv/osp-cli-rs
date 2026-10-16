@@ -502,10 +502,14 @@ fn config_get_rows_and_run_config_get_cover_bootstrap_alias_and_missing_paths_un
     assert_eq!(missing_result.exit_code, 1);
     assert!(matches!(missing_result.body, crate::app::CommandBody::None));
     assert!(
-        missing_result
-            .messages
-            .render_grouped(MessageLevel::Error)
-            .contains("config key not found: missing.key")
+        crate::ui::render_messages(
+            &missing_result.messages,
+            &crate::ui::MessageRequest::new(
+                &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                MessageLevel::Error
+            )
+        )
+        .contains("config key not found: missing.key")
     );
 }
 
@@ -541,10 +545,14 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     assert_eq!(set_result.exit_code, 0);
     assert!(!matches!(set_result.body, crate::app::CommandBody::None));
     assert!(
-        set_result
-            .messages
-            .render_grouped(MessageLevel::Success)
-            .contains("set value for ui.format")
+        crate::ui::render_messages(
+            &set_result.messages,
+            &crate::ui::MessageRequest::new(
+                &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                MessageLevel::Success
+            )
+        )
+        .contains("set value for ui.format")
     );
 
     let mut unset_fixture = ConfigTestFixture::new(TerminalKind::Repl);
@@ -560,10 +568,14 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
 
     assert!(!matches!(unset_result.body, crate::app::CommandBody::None));
     assert!(
-        unset_result
-            .messages
-            .render_grouped(MessageLevel::Success)
-            .contains("unset value for ui.format")
+        crate::ui::render_messages(
+            &unset_result.messages,
+            &crate::ui::MessageRequest::new(
+                &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                MessageLevel::Success
+            )
+        )
+        .contains("unset value for ui.format")
     );
 
     let mut explain_args = config_set_args("ui.format", "json");
@@ -666,10 +678,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
             Some("json")
         );
         assert!(
-            config_set
-                .messages
-                .render_grouped(MessageLevel::Success)
-                .contains("set value for ui.format")
+            crate::ui::render_messages(
+                &config_set.messages,
+                &crate::ui::MessageRequest::new(
+                    &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                    MessageLevel::Success
+                )
+            )
+            .contains("set value for ui.format")
         );
 
         let mut secrets_args = config_set_args("ui.format", "table");
@@ -702,10 +718,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
             Some("table")
         );
         assert!(
-            secrets_set
-                .messages
-                .render_grouped(MessageLevel::Success)
-                .contains("set value for ui.format")
+            crate::ui::render_messages(
+                &secrets_set.messages,
+                &crate::ui::MessageRequest::new(
+                    &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                    MessageLevel::Success
+                )
+            )
+            .contains("set value for ui.format")
         );
 
         let mut unset_args = config_unset_args("ui.format");
@@ -715,10 +735,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let secrets_unset = run_config_unset(unset_fixture.command(), unset_args)
             .expect("persistent secrets unset should succeed");
         assert!(
-            secrets_unset
-                .messages
-                .render_grouped(MessageLevel::Success)
-                .contains("unset value for ui.format")
+            crate::ui::render_messages(
+                &secrets_unset.messages,
+                &crate::ui::MessageRequest::new(
+                    &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                    MessageLevel::Success
+                )
+            )
+            .contains("unset value for ui.format")
         );
         let secrets_payload =
             std::fs::read_to_string(&secrets_path).expect("secrets file should still be readable");
@@ -741,10 +765,14 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         let missing_unset = run_config_unset(missing_fixture.command(), missing_args)
             .expect("missing persistent unset should still succeed");
         assert!(
-            missing_unset
-                .messages
-                .render_grouped(MessageLevel::Warning)
-                .contains("no matching value for ui.margin")
+            crate::ui::render_messages(
+                &missing_unset.messages,
+                &crate::ui::MessageRequest::new(
+                    &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+                    MessageLevel::Warning
+                )
+            )
+            .contains("no matching value for ui.margin")
         );
     });
 }

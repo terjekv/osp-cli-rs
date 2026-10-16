@@ -389,12 +389,12 @@ pub(crate) fn run_progress_command_with_ui(
     if framed && !result.messages.is_empty() {
         rendered.insert_str(
             0,
-            &crate::ui::render_messages(
-                config,
-                &ui.render_settings,
-                &result.messages,
-                ui.message_verbosity,
-            ),
+            &crate::ui::render_messages(&result.messages, &{
+                let mut request =
+                    crate::ui::MessageRequest::new(&ui.render_settings, ui.message_verbosity);
+                request.layout = crate::ui::messages::message_layout_from_config(config);
+                request
+            }),
         );
     }
     if !rendered.is_empty() {
@@ -471,7 +471,11 @@ pub(crate) fn emit_messages_for_ui(
         return;
     }
 
-    let rendered = crate::ui::render_messages(config, &ui.render_settings, messages, verbosity);
+    let rendered = crate::ui::render_messages(messages, &{
+        let mut request = crate::ui::MessageRequest::new(&ui.render_settings, verbosity);
+        request.layout = crate::ui::messages::message_layout_from_config(config);
+        request
+    });
     if !rendered.is_empty() {
         sink.write_stderr(&rendered);
     }

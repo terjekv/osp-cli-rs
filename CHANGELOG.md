@@ -7,6 +7,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Render messages with `MessageRequest` and section dividers with
+  `SectionDividerRequest` through their single rendering entry points.
+- **Breaking:** Use `core::MessageLevel` for runtime verbosity and plugin response
+  severity, replacing `UiVerbosity` and `ResponseMessageLevelV1`; wire and
+  environment spellings are unchanged.
+
 - **Breaking:** Render output through `ui::render` and `RenderRequest` instead
   of separate row, document, copy, and configured output render functions.
 

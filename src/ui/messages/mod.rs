@@ -1,18 +1,10 @@
 //! Buffered user-facing messages and their canonical rendering helpers.
 
 mod render;
-use super::text::visible_inline_text;
 use crate::config::ResolvedConfig;
 use crate::ui::section_chrome::RuledSectionPolicy;
-use crate::ui::section_chrome::SectionFrameStyle;
 use crate::ui::settings::{RenderProfile, RenderSettings, resolve_settings};
-use crate::ui::style::{StyleOverrides, StyleToken, ThemeStyler};
-use crate::ui::theme::ThemeDefinition;
-
-pub(crate) use render::render_messages_with_styler_and_chrome;
-pub(crate) use render::{
-    MessageChrome, MessageRenderOptions, render_messages_with_styler_from_config,
-};
+use crate::ui::style::StyleToken;
 
 pub use crate::core::MessageLevel;
 
@@ -111,17 +103,30 @@ pub struct MessageBuffer {
     entries: Vec<UiMessage>,
 }
 
-/// Options for rendering grouped message output.
+/// Resolved presentation for rendering buffered messages.
 #[derive(Debug, Clone)]
-pub struct GroupedRenderOptions<'a> {
+pub struct MessageRequest {
     pub max_level: MessageLevel,
-    pub color: bool,
-    pub unicode: bool,
-    pub width: Option<usize>,
-    pub theme: &'a ThemeDefinition,
     pub layout: MessageLayout,
-    pub chrome_frame: SectionFrameStyle,
-    pub style_overrides: StyleOverrides,
+    pub settings: crate::ui::ResolvedRenderSettings,
+    pub ruled_policy: RuledSectionPolicy,
+}
+
+impl MessageRequest {
+    /// Resolves ordinary message chrome from render settings.
+    pub fn new(settings: &RenderSettings, max_level: MessageLevel) -> Self {
+        Self {
+            max_level,
+            layout: MessageLayout::Grouped,
+            settings: resolve_settings(settings, RenderProfile::Normal),
+            ruled_policy: settings.ruled_section_policy,
+        }
+    }
+}
+
+/// Renders message events in their requested layout and chrome.
+pub fn render(messages: &MessageBuffer, request: &MessageRequest) -> String {
+    render::render_messages(messages, request)
 }
 
 impl MessageBuffer {
@@ -181,61 +186,6 @@ impl MessageBuffer {
             .iter()
             .filter(move |entry| entry.level == level)
     }
-
-    pub fn render_grouped(&self, max_level: MessageLevel) -> String {
-        let theme = crate::ui::theme::resolve_theme("plain");
-        self.render_grouped_styled(
-            max_level,
-            false,
-            false,
-            None,
-            &theme,
-            MessageLayout::Grouped,
-        )
-    }
-
-    pub fn render_grouped_styled(
-        &self,
-        max_level: MessageLevel,
-        color: bool,
-        unicode: bool,
-        width: Option<usize>,
-        theme: &ThemeDefinition,
-        layout: MessageLayout,
-    ) -> String {
-        self.render_grouped_with_options(GroupedRenderOptions {
-            max_level,
-            color,
-            unicode,
-            width,
-            theme,
-            layout,
-            chrome_frame: default_message_chrome_frame(layout),
-            style_overrides: StyleOverrides::default(),
-        })
-    }
-
-    pub fn render_grouped_with_options(&self, options: GroupedRenderOptions<'_>) -> String {
-        if self.is_empty() {
-            return String::new();
-        }
-
-        let styler = ThemeStyler::new(options.color, options.theme, &options.style_overrides);
-        render::render_messages_with_styler_and_chrome(
-            self,
-            render::MessageRenderOptions {
-                max_level: options.max_level,
-                layout: options.layout,
-            },
-            &styler,
-            render::MessageChrome {
-                frame_style: options.chrome_frame,
-                ruled_policy: RuledSectionPolicy::PerSection,
-                unicode: options.unicode,
-                width: options.width,
-            },
-        )
-    }
 }
 
 pub(crate) fn message_layout_from_config(config: &ResolvedConfig) -> MessageLayout {
@@ -243,68 +193,6 @@ pub(crate) fn message_layout_from_config(config: &ResolvedConfig) -> MessageLayo
         .get_string("ui.messages.layout")
         .and_then(MessageLayout::parse)
         .unwrap_or(MessageLayout::Grouped)
-}
-
-pub(crate) fn render_messages_from_settings(
-    config: &ResolvedConfig,
-    settings: &RenderSettings,
-    messages: &MessageBuffer,
-    verbosity: MessageLevel,
-) -> String {
-    let resolved = resolve_settings(settings, RenderProfile::Normal);
-    let styler = ThemeStyler::new(resolved.color, &resolved.theme, &resolved.style_overrides);
-    render_messages_with_styler_from_config(
-        messages,
-        config,
-        verbosity,
-        &styler,
-        MessageChrome {
-            frame_style: settings.chrome_frame,
-            ruled_policy: settings.ruled_section_policy,
-            unicode: resolved.unicode,
-            width: resolved.width,
-        },
-    )
-}
-
-pub(crate) fn render_messages_without_config(
-    settings: &RenderSettings,
-    messages: &MessageBuffer,
-    verbosity: MessageLevel,
-) -> String {
-    let resolved = resolve_settings(settings, RenderProfile::Normal);
-    let styler = ThemeStyler::new(resolved.color, &resolved.theme, &resolved.style_overrides);
-    render_messages_with_styler_and_chrome(
-        &visible_message_buffer(messages),
-        MessageRenderOptions::full(verbosity),
-        &styler,
-        MessageChrome {
-            frame_style: SectionFrameStyle::TopBottom,
-            ruled_policy: RuledSectionPolicy::Shared,
-            unicode: resolved.unicode,
-            width: resolved.width.or(Some(12)),
-        },
-    )
-}
-
-fn visible_message_buffer(messages: &MessageBuffer) -> MessageBuffer {
-    let mut out = MessageBuffer::default();
-    for entry in messages.entries() {
-        out.push_message(UiMessage {
-            text: visible_inline_text(&entry.text),
-            ..entry.clone()
-        });
-    }
-    out
-}
-
-fn default_message_chrome_frame(layout: MessageLayout) -> SectionFrameStyle {
-    match layout {
-        MessageLayout::Minimal | MessageLayout::Plain | MessageLayout::Compact => {
-            SectionFrameStyle::None
-        }
-        MessageLayout::Grouped => SectionFrameStyle::TopBottom,
-    }
 }
 
 pub fn adjust_verbosity(base: MessageLevel, verbose: u8, quiet: u8) -> MessageLevel {

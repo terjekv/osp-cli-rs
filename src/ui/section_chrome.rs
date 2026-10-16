@@ -164,55 +164,30 @@ impl SectionRenderContext<'_> {
     }
 }
 
-#[cfg(test)]
-/// Renders a single section divider line for the given title and width hint.
-pub fn render_section_divider(
-    title: &str,
-    unicode: bool,
-    width: Option<usize>,
-    color: bool,
-    theme: &ThemeDefinition,
-    token: StyleToken,
-) -> String {
-    render_section_divider_with_overrides(
-        title,
+/// Presentation of a single titled section divider.
+#[derive(Clone, Copy)]
+pub struct SectionDividerRequest<'a> {
+    /// Use Unicode rule characters.
+    pub unicode: bool,
+    /// Target divider width.
+    pub width: Option<usize>,
+    /// Columns consumed before the title starts; at least two.
+    pub title_columns: usize,
+    /// Theme and style overrides.
+    pub render: SectionRenderContext<'a>,
+    /// Border and title styling.
+    pub tokens: SectionStyleTokens,
+}
+
+/// Renders a section divider using the requested width and styling.
+pub fn render_section_divider(title: &str, request: &SectionDividerRequest<'_>) -> String {
+    let SectionDividerRequest {
         unicode,
         width,
-        SectionRenderContext {
-            color,
-            theme,
-            style_overrides: &StyleOverrides::default(),
-        },
-        SectionStyleTokens::same(token),
-    )
-}
-
-/// Renders a section divider line using explicit style overrides.
-///
-/// Returns an unstyled divider when `render.color` is `false`.
-pub fn render_section_divider_with_overrides(
-    title: &str,
-    unicode: bool,
-    width: Option<usize>,
-    render: SectionRenderContext<'_>,
-    tokens: SectionStyleTokens,
-) -> String {
-    render_section_divider_with_columns(title, unicode, width, 2, render, tokens)
-}
-
-/// Renders a section divider while controlling the title start column.
-///
-/// `title_columns` describes how many columns the divider should consume before
-/// the title text starts. This lets shared ruled sections keep header lines
-/// flush-left while still aligning the title with indented body content.
-pub fn render_section_divider_with_columns(
-    title: &str,
-    unicode: bool,
-    width: Option<usize>,
-    title_columns: usize,
-    render: SectionRenderContext<'_>,
-    tokens: SectionStyleTokens,
-) -> String {
+        title_columns,
+        render,
+        tokens,
+    } = *request;
     let border_token = tokens.border;
     let title_token = tokens.title;
     let fill_char = if unicode { '─' } else { '-' };
@@ -383,8 +358,15 @@ fn render_ruled_section(
     let title = title.trim();
 
     if top_rule {
-        out.push_str(&render_section_divider_with_overrides(
-            title, unicode, width, render, tokens,
+        out.push_str(&render_section_divider(
+            title,
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode,
+                width,
+                title_columns: 2,
+                render,
+                tokens,
+            },
         ));
     } else if !title.is_empty() {
         let raw_title = format!("{title}:");
@@ -402,12 +384,15 @@ fn render_ruled_section(
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(&render_section_divider_with_overrides(
+        out.push_str(&render_section_divider(
             "",
-            unicode,
-            width,
-            render,
-            SectionStyleTokens::same(tokens.border),
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode,
+                width,
+                title_columns: 2,
+                render,
+                tokens: SectionStyleTokens::same(tokens.border),
+            },
         ));
     }
 
@@ -593,7 +578,6 @@ mod tests {
     use super::{
         SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
         render_section_block_with_overrides, render_section_divider,
-        render_section_divider_with_overrides,
     };
     use std::sync::Mutex;
     use unicode_width::UnicodeWidthStr;
@@ -613,11 +597,17 @@ mod tests {
 
         let divider = render_section_divider(
             "",
-            false,
-            None,
-            false,
-            &crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME),
-            crate::ui::style::StyleToken::PanelBorder,
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode: false,
+                width: None,
+                title_columns: 2,
+                render: SectionRenderContext {
+                    color: false,
+                    theme: &crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME),
+                    style_overrides: &crate::ui::StyleOverrides::default(),
+                },
+                tokens: SectionStyleTokens::same(crate::ui::style::StyleToken::PanelBorder),
+            },
         );
 
         match original {
@@ -636,18 +626,21 @@ mod tests {
             panel_title: Some("#445566".to_string()),
             ..Default::default()
         };
-        let divider = render_section_divider_with_overrides(
+        let divider = render_section_divider(
             "Info",
-            true,
-            Some(20),
-            SectionRenderContext {
-                color: true,
-                theme: &theme,
-                style_overrides: &overrides,
-            },
-            SectionStyleTokens {
-                border: crate::ui::style::StyleToken::PanelBorder,
-                title: crate::ui::style::StyleToken::PanelTitle,
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode: true,
+                width: Some(20),
+                title_columns: 2,
+                render: SectionRenderContext {
+                    color: true,
+                    theme: &theme,
+                    style_overrides: &overrides,
+                },
+                tokens: SectionStyleTokens {
+                    border: crate::ui::style::StyleToken::PanelBorder,
+                    title: crate::ui::style::StyleToken::PanelTitle,
+                },
             },
         );
 
@@ -766,8 +759,16 @@ mod tests {
         };
         let tokens = SectionStyleTokens::same(crate::ui::style::StyleToken::PanelBorder);
 
-        let divider =
-            render_section_divider_with_overrides("界界界界界", true, Some(16), render, tokens);
+        let divider = render_section_divider(
+            "界界界界界",
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode: true,
+                width: Some(16),
+                title_columns: 2,
+                render,
+                tokens,
+            },
+        );
         assert_eq!(UnicodeWidthStr::width(divider.as_str()), 16);
 
         let boxed = render_section_block_with_overrides(
