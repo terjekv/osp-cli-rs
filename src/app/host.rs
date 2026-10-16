@@ -432,7 +432,7 @@ fn handle_clap_parse_error(
                 app.native_commands.configure(config);
             }
             let (mut body, root_help, long_help) =
-                crate::cli::command_help_document(command.clone(), &tokens);
+                crate::cli::command_help_document(command.clone(), &tokens, &crate::core::CommandScope::OneShot);
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);

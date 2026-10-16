@@ -930,7 +930,14 @@ pub(crate) fn help_parse_tokens(tokens: &[String]) -> &[String] {
 pub(crate) fn command_help_document(
     mut command: clap::Command,
     tokens: &[String],
+    scope: &crate::core::CommandScope,
 ) -> (crate::core::document::Document, bool, bool) {
+    let name = if command.get_name() == "osp" {
+        ""
+    } else {
+        command.get_name()
+    };
+    command = command.clone().bin_name(scope.command(name));
     let tokens = help_parse_tokens(tokens);
     command.build();
     let parser = passive_command(command.clone());
@@ -1009,8 +1016,11 @@ pub(crate) fn builtin_command(name: &str) -> clap::Command {
         .clone()
 }
 
-pub(crate) fn inline_help_document(tokens: &[String]) -> (crate::core::document::Document, bool) {
-    let (document, _, long) = command_help_document(InlineCommandCli::command(), tokens);
+pub(crate) fn inline_help_document(
+    tokens: &[String],
+    scope: &crate::core::CommandScope,
+) -> (crate::core::document::Document, bool) {
+    let (document, _, long) = command_help_document(InlineCommandCli::command(), tokens, scope);
     (document, long)
 }
 

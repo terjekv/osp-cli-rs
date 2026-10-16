@@ -105,8 +105,12 @@ pub(super) fn parse_repl_invocation(
             return Err(miette!("missing command"));
         }
         app::command_plan::InlineCommandPlan::Help(err) => {
-            let (document, long_help) =
-                render_repl_parse_help(effective.help_level, &scoped_tokens, &err.to_string());
+            let (document, long_help) = render_repl_parse_help(
+                effective.help_level,
+                &scoped_tokens,
+                &err.to_string(),
+                &effective.ui.render_settings.runtime.command_scope,
+            );
             let mut output = document.to_output_result();
             output.meta.document_long_help = long_help;
             return Ok(repl_help_dispatch(
@@ -156,9 +160,10 @@ fn render_repl_parse_help(
     help_level: crate::core::document::HelpLevel,
     tokens: &[String],
     error_text: &str,
+    scope: &crate::core::CommandScope,
 ) -> (Document, bool) {
     let parsed = parse_clap_help(error_text);
-    let (mut view, long_help) = crate::cli::inline_help_document(tokens);
+    let (mut view, long_help) = crate::cli::inline_help_document(tokens, scope);
     extend_with_invocation_help(&mut view, help_level);
     if error_text.starts_with("error:")
         && let Some(summary) = parsed.summary

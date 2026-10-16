@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Write help usage lines for the current terminal or REPL shell, including the
+  `osp` executable in one-shot native help.
+
 - **Breaking:** `RenderRuntime` gains a public `command_scope` field. Native
   command contexts now carry the reader scope for follow-up commands.
 

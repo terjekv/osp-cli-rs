@@ -424,6 +424,7 @@ fn run_native_invocation(
         let (document, _, _) = crate::cli::command_help_document(
             runtime.auth.visible_help_command(parsed.grammar, &[]),
             &tokens,
+            &invocation.ui.render_settings.runtime.command_scope,
         );
         return Ok(CommandOutput::document(document));
     }
@@ -555,7 +556,15 @@ fn run_native_command(
         runtime.config.resolved(),
         runtime_hints_for_invocation(runtime, input.invocation),
     )
-    .with_command_scope(input.invocation.ui.render_settings.runtime.command_scope.clone())
+    .with_command_scope(
+        input
+            .invocation
+            .ui
+            .render_settings
+            .runtime
+            .command_scope
+            .clone(),
+    )
     .with_invocation_elevation(input.elevation)
     .with_session_context(
         session
@@ -791,7 +800,10 @@ fn plan_external_invocation(
     )? {
         super::command_plan::InlineCommandPlan::Command(command) => command,
         super::command_plan::InlineCommandPlan::Help(_) => {
-            let (mut view, long_help) = crate::cli::inline_help_document(&parsed.tokens);
+            let (mut view, long_help) = crate::cli::inline_help_document(
+                &parsed.tokens,
+                &invocation.ui.render_settings.runtime.command_scope,
+            );
             extend_with_invocation_help(&mut view, invocation.help_level);
             let mut output = view
                 .filtered_for_help_level(invocation.help_level)
