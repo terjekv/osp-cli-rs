@@ -41,6 +41,14 @@ impl ReplCompleter {
         self
     }
 
+    pub(crate) fn expand_last_command(&self, line: &str) -> Option<String> {
+        self.history
+            .as_ref()?
+            .with(|store| store.expand_last_command(line))
+            .ok()
+            .flatten()
+    }
+
     pub(crate) fn engine(&self) -> &CompletionEngine {
         &self.engine
     }
@@ -64,12 +72,7 @@ impl Completer for ReplCompleter {
             line.len()
         );
         if pos == line.len()
-            && let Some(expanded) = self.history.as_ref().and_then(|history| {
-                history
-                    .with(|store| store.expand_last_command(line))
-                    .ok()
-                    .flatten()
-            })
+            && let Some(expanded) = self.expand_last_command(line)
         {
             return vec![Suggestion {
                 value: expanded,

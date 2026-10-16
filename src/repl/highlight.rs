@@ -226,6 +226,17 @@ fn walk_line(
     projected_line: &str,
     cursor: usize,
 ) -> LineWalk {
+    if crate::repl::history_store::split_bang_request(projected_line).is_some() {
+        return LineWalk {
+            commands: parser
+                .tokenize_with_spans(projected_line)
+                .into_iter()
+                .filter(|span| span.value == "sudo" || span.value.starts_with('!'))
+                .map(|span| (span.start, span.end))
+                .collect(),
+            problem: None,
+        };
+    }
     let mut walk = LineWalk::default();
     let mut path = Vec::new();
     let mut scopes = vec![root];
