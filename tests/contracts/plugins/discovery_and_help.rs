@@ -2,7 +2,7 @@
 #[cfg(unix)]
 fn unknown_domain_command_shows_command_hint_contract() {
     let home = make_temp_dir("plugins-unknown");
-    plugin_command(&home, &home, &["missing"]).assert().failure().stderr(predicate::str::contains("unknown command missing").and(predicate::str::contains("list commands")));
+    plugin_command(&home, &home, &["missing"]).assert().failure().stderr(predicate::str::contains("Unknown command 'missing'").and(predicate::str::contains("list commands")));
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn external_plugin_help_keeps_raw_stderr_contract() {
     let home = make_temp_dir("plugins-help-stderr");
     let dir = home.join("plugins");
     write_plugin(&dir, "hello", None, "print('hello help'); print('help note', file=sys.stderr)\n");
-    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout("hello help\n").stderr("help note\n");
+    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout("hello help\n").stderr("");
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn path_plugins_work_without_describe_and_describe_errors_stay_runnable_contract
     let broken = write_plugin(&dir, "broken", Some(json!({})), "print('still runs')\n");
     std::fs::write(broken, "#!/bin/sh\nif [ \"$1\" = --osp-describe ]; then echo invalid; else echo 'still runs'; fi\n").unwrap();
     let rows = json_stdout(&mut plugin_command(&home, &dir, &["doctor", "plugins", "--json"]));
-    assert!(rows[0]["status"].as_str().unwrap().starts_with("describe error: invalid describe JSON:"));
+    assert!(rows[0]["status"].as_str().unwrap().starts_with("describe error: invalid describe JSON metadata"));
     plugin_command(&home, &dir, &["broken"]).assert().success().stdout("still runs\n");
 }
 

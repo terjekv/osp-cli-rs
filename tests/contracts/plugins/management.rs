@@ -23,7 +23,7 @@ fn plugins_enable_and_disable_contract() {
     plugin_command(&home, &dir, &["plugins", "disable", "hello"]).assert().success().stderr(predicate::str::contains("disabled plugin: hello"));
     let rows = json_stdout(&mut plugin_command(&home, &dir, &["plugins", "list", "--json"]));
     assert_eq!(rows[0]["status"], "disabled");
-    plugin_command(&home, &dir, &["hello"]).assert().failure().stderr(predicate::str::contains("unknown command"));
+    plugin_command(&home, &dir, &["hello"]).assert().failure().stderr(predicate::str::contains("Unknown command"));
     plugin_command(&home, &dir, &["other"]).assert().success().stdout("other runs\n");
     let config = std::fs::read_to_string(home.join(".config/osp/config.toml")).unwrap();
     assert!(config.contains("disabled"));

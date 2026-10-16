@@ -99,7 +99,7 @@ impl CommandCatalogEntry {
 }
 
 /// Environment supplied by the host in addition to the inherited environment.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct PluginDispatchContext {
     /// Rendering and session hints.
     pub(crate) runtime_hints: RuntimeHints,
@@ -109,6 +109,8 @@ pub(crate) struct PluginDispatchContext {
     pub(crate) shared_env: Vec<(String, String)>,
     /// Per-command config values, applied after shared values.
     pub(crate) plugin_env: HashMap<String, Vec<(String, String)>>,
+    /// Known secret values supplied through the executable environment.
+    pub(crate) secrets: Vec<String>,
 }
 
 /// Discovers executable commands and caches optional metadata.

@@ -37,7 +37,7 @@ JSON
         &history,
         "fail", Some(&mut sink),)
     .expect("failure should render through the sink");
-    assert!(sink.stderr.contains("MOCK_ERR: mock failure"));
+    assert!(sink.stderr.contains("Plugin fail failed: mock failure."));
 
 }
 

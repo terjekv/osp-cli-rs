@@ -6,10 +6,15 @@ use std::collections::HashMap;
 pub(crate) struct ConfigEnv {
     pub(crate) shared: Vec<(String, String)>,
     pub(crate) commands: HashMap<String, Vec<(String, String)>>,
+    pub(crate) secrets: Vec<String>,
 }
 
 pub(crate) fn config_env(config: &ResolvedConfig) -> ConfigEnv {
     let mut shared = Vec::new();
+    let mut secrets = std::env::vars_os()
+        .filter(|(key, _)| secret_name(&key.to_string_lossy()))
+        .filter_map(|(_, value)| value.into_string().ok())
+        .collect::<Vec<_>>();
     let mut commands: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for (key, entry) in config.values() {
         let Some(rest) = key.strip_prefix("extensions.plugins.") else {
@@ -29,13 +34,21 @@ pub(crate) fn config_env(config: &ResolvedConfig) -> ConfigEnv {
             .join("_")
             .to_ascii_uppercase();
         if !normalized.is_empty() {
-            target.push((
-                format!("OSP_PLUGIN_CFG_{normalized}"),
-                env_value(&entry.value),
-            ));
+            let value = env_value(&entry.value);
+            if entry.value.is_secret() || secret_name(&normalized) {
+                secrets.push(value.clone());
+            }
+            target.push((format!("OSP_PLUGIN_CFG_{normalized}"), value));
         }
     }
-    ConfigEnv { shared, commands }
+    secrets.retain(|value| !value.is_empty());
+    secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    secrets.dedup();
+    ConfigEnv {
+        shared,
+        commands,
+        secrets,
+    }
 }
 
 fn env_value(value: &ConfigValue) -> String {
@@ -56,4 +69,13 @@ fn json_value(value: &ConfigValue) -> serde_json::Value {
         ConfigValue::List(values) => values.iter().map(json_value).collect(),
         ConfigValue::Secret(_) => unreachable!("reveal unwraps secrets"),
     }
+}
+
+fn secret_name(name: &str) -> bool {
+    name.split('_').any(|part| {
+        matches!(
+            part.to_ascii_uppercase().as_str(),
+            "PASSWORD" | "TOKEN" | "SECRET" | "KEY" | "AUTHORIZATION" | "COOKIE"
+        )
+    })
 }

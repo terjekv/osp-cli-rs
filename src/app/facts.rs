@@ -78,6 +78,7 @@ pub(in crate::app) fn plugin_dispatch_context_for(
             .or_else(|| std::env::var("USER").ok()),
         shared_env: env.shared,
         plugin_env: env.commands,
+        secrets: env.secrets,
     }
 }
 

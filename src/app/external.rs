@@ -995,13 +995,25 @@ fn run_external_plugin_command(
             || !parsed.stages.is_empty()
             || invocation.ui.render_settings.format_explicit);
     let context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
+    tracing::info!(target: "osp::diagnostic", "debug: Dispatch selected; handler=plugin:{}.", plugin.name);
+    let diagnostics = crate::diagnostics::DiagnosticSink::default();
+    let started = std::time::Instant::now();
     let raw = crate::plugin::run::run(&plugin, args, &context, capture)?;
+    let elapsed_ms = started.elapsed().as_millis();
+    let bytes = raw.stdout.as_ref().map(Vec::len);
+    if raw.wrote_stderr && invocation.ui.debug_level >= 2 {
+        tracing::debug!(target: "osp::diagnostic", "debug: Plugin {} wrote to stderr; unverified text withheld.", plugin.name);
+    }
     let mut result = if let Some(bytes) = raw.stdout {
         match serde_json::from_slice::<serde_json::Value>(&bytes) {
             Ok(value) if value.get("protocol_version").is_some() => {
-                let response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
-                    .map_err(|error| miette!("invalid plugin response: {error}"))?;
-                response.validate_v1().map_err(|error| miette!("{error}"))?;
+                let mut response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
+                    .map_err(|_| {
+                    miette!("Invalid plugin response metadata.\nhint: Run osp doctor plugins.")
+                })?;
+                response.validate_v1().map_err(|_| {
+                    miette!("Invalid plugin response metadata.\nhint: Run osp doctor plugins.")
+                })?;
                 if response.ok
                     && let Some(entries) = response.context.as_ref()
                 {
@@ -1012,6 +1024,64 @@ fn run_external_plugin_command(
                     for (kind, value) in entries {
                         context.set_context_value(kind.clone(), value.clone());
                     }
+                }
+                let plugin_text = |raw: &str| {
+                    let mut text = raw.to_owned();
+                    for secret in &context.secrets {
+                        text = text.replace(secret, "[redacted]");
+                    }
+                    crate::ui::sanitize_human_text(&text)
+                        .replace('\n', " ")
+                        .chars()
+                        .take(512)
+                        .collect::<String>()
+                };
+                for message in &mut response.messages {
+                    message.text = plugin_text(&message.text);
+                }
+                if !response.ok
+                    && let Some(error) = response.error.as_mut()
+                {
+                    error.code = plugin_text(&error.code);
+                    if error.code.len() > 80
+                        || !error
+                            .code
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+                    {
+                        error.code = "plugin_error".into();
+                    }
+                    let mut details = serde_json::Map::new();
+                    if let Some(attempt) = error.details["attempt"].as_u64() {
+                        details.insert("attempt".into(), attempt.into());
+                    }
+                    if let Some(backend) = error.details["backend"]
+                        .as_str()
+                        .map(plugin_text)
+                        .filter(|backend| {
+                            !backend.is_empty()
+                                && backend.len() <= 80
+                                && backend.bytes().all(|byte| {
+                                    byte.is_ascii_lowercase()
+                                        || byte.is_ascii_digit()
+                                        || matches!(byte, b'_' | b'-')
+                                })
+                        })
+                    {
+                        details.insert("backend".into(), backend.into());
+                    }
+                    error.message = format!(
+                        "Plugin {} failed: {}.",
+                        plugin.name,
+                        plugin_text(&error.message).trim_end_matches('.')
+                    );
+                    if invocation.ui.verbosity < crate::core::MessageLevel::Info {
+                        details.insert(
+                            "action".into(),
+                            serde_json::json!("Rerun with -v for the plugin's details."),
+                        );
+                    }
+                    error.details = details.into();
                 }
                 cli_result_from_plugin_response(response, &[])?
             }
@@ -1034,12 +1104,30 @@ fn run_external_plugin_command(
     if raw.status != 0 {
         result.exit_code = raw.status;
         result.preserve_process_output = result.failure_report.is_none();
-        if capture {
-            result
-                .stderr_text
-                .push_str(&format!("{command} exited with status {}\n", raw.status));
+        if result.failure_report.is_none() {
+            result.stderr_text.push_str(&format!("error: Plugin {command} crashed (exit status {}).\nhint: Run osp doctor plugins.\n", raw.status));
         }
     }
+    let backend = result
+        .failure_report
+        .as_ref()
+        .and_then(super::host::find_error_in_chain::<super::command_output::CommandBackendDetails>);
+    let details = backend.map(|backend| &backend.error.details);
+    diagnostics.emit(crate::diagnostics::DiagnosticEvent::PluginOutcome {
+        plugin: plugin.name,
+        exit_code: raw.status,
+        elapsed_ms,
+        error_code: backend.map(|backend| backend.error.code.clone()),
+        attempt: details.and_then(|details| details["attempt"].as_u64()),
+        backend: details
+            .and_then(|details| details["backend"].as_str())
+            .map(str::to_owned),
+        bytes,
+    });
+    result.retained_evidence = diagnostics
+        .render(crate::core::MessageLevel::Evidence, result.exit_code != 0)
+        .0;
+    result.diagnostics = diagnostics.render(invocation.ui.verbosity, result.exit_code != 0);
     Ok(result)
 }
 

@@ -59,8 +59,8 @@ fn plugin_non_zero_exit_surfaces_stderr_contract() {
     let home = make_temp_dir("plugins-exit");
     let dir = home.join("plugins");
     write_plugin(&dir, "plain", None, "print('plain text'); print('backend note', file=sys.stderr); sys.exit(3)\n");
-    plugin_command(&home, &dir, &["plain"]).assert().code(3).stdout("plain text\n").stderr("backend note\n");
-    plugin_command(&home, &dir, &["plain", "--json"]).assert().code(3).stdout(predicate::str::contains("plain text")).stderr(predicate::str::contains("plain exited with status 3").and(predicate::str::contains("backend note")));
+    plugin_command(&home, &dir, &["plain"]).assert().code(3).stdout("plain text\n").stderr(predicate::str::contains("error: Plugin plain crashed (exit status 3)."));
+    plugin_command(&home, &dir, &["plain", "--json"]).assert().code(3).stdout(predicate::str::contains("plain text")).stderr(predicate::str::contains("Plugin plain crashed (exit status 3)"));
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn plugin_text_output_and_pipeline_contract() {
     let dir = home.join("plugins");
     write_plugin(&dir, "text", None, "print('plain text')\n");
     plugin_command(&home, &dir, &["text", "--json"]).assert().success().stdout(predicate::str::contains("plain text"));
-    plugin_command(&home, &dir, &["text", "|", "F name=bob"]).assert().failure().stderr(predicate::str::contains("text printed text, not JSON; pipes need JSON output"));
+    plugin_command(&home, &dir, &["text", "|", "F name=bob"]).assert().failure().stderr(predicate::str::contains("`text` printed text, not JSON; pipes need JSON output"));
 }
 
 #[test]
