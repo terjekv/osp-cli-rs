@@ -432,6 +432,21 @@ pub struct ResponseV1 {
     pub context: Option<BTreeMap<String, String>>,
 }
 
+impl ResponseV1 {
+    /// Creates a successful protocol v1 response with default metadata.
+    pub fn ok(data: impl Into<serde_json::Value>) -> Self {
+        Self {
+            protocol_version: PLUGIN_PROTOCOL_V1,
+            ok: true,
+            data: data.into(),
+            error: None,
+            messages: Vec::new(),
+            meta: ResponseMetaV1::default(),
+            context: None,
+        }
+    }
+}
+
 /// Structured error payload returned when `ok` is `false`.
 ///
 /// Keep stable, caller-meaningful failure classification in `code`; process
