@@ -22,14 +22,14 @@ mod command;
 mod shell;
 
 use crate::repl::{ReplResult, SharedHistory};
-use miette::{Result, miette};
+use miette::Result;
 use std::time::Instant;
 
 use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppClients, AppRuntime, AppSession};
 use crate::app::{ResolvedInvocation, render_report_message, resolve_invocation_ui};
 use crate::cli::invocation::scan_command_tokens;
-use crate::ui::messages::{MessageBuffer, MessageLevel};
+use crate::ui::messages::MessageLevel;
 
 use super::{ReplViewContext, completion, input};
 
@@ -243,44 +243,55 @@ pub(crate) fn execute_repl_plugin_line(
             Ok(executed)
         }
         Err(err) => {
-            let err = std::sync::Arc::new(err);
-            let fallback = crate::app::host::ErrorDisplaySettings::from(&runtime.ui);
-            let ui = crate::app::host::error_display_settings(&err).unwrap_or(&fallback);
-            if runtime.ui.debug_verbosity > 0 {
-                session.record_prompt_timing(
-                    runtime.ui.debug_verbosity,
-                    started.elapsed(),
-                    None,
-                    None,
-                    None,
-                );
+            let fallback_ui = input::ReplParsedLine::parse(&resolved, runtime.config.resolved())
+                .ok()
+                .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
+                .map(|scanned| {
+                    resolve_invocation_ui(
+                        runtime.config.resolved(),
+                        &runtime.ui,
+                        &scanned.invocation,
+                    )
+                    .ui
+                })
+                .unwrap_or_else(|| runtime.ui.clone());
+            let settings = crate::app::host::error_display_settings(&err)
+                .cloned()
+                .unwrap_or_else(|| crate::app::host::ErrorDisplaySettings::from(&fallback_ui));
+            let err = std::sync::Arc::new(crate::app::host::report_with_invocation(
+                err,
+                settings.clone(),
+            ));
+            let ui = &settings;
+            if ui.debug_verbosity > 0 {
+                session.record_prompt_timing(ui.debug_verbosity, started.elapsed(), None, None, None);
             }
+            let _logging = crate::app::logging::override_stderr_level(ui.debug_verbosity);
             let plain_settings = ui.render_settings.plain_copy_settings();
-            let summary = render_report_message(&err, MessageLevel::Success, &plain_settings);
-            let mut doctor_command = None;
-            if !is_repl_bang_request(&resolved)
-                && !is_doctor_request(&resolved, runtime.config.resolved())
-            {
-                doctor_command = if render_report_message(&err, MessageLevel::Info, &plain_settings)
-                    .trim()
-                    != summary.trim()
-                {
-                    Some("doctor last -v")
-                } else {
-                    None
-                };
+            let remember = !is_repl_bang_request(&resolved)
+                && !is_doctor_request(&resolved, runtime.config.resolved());
+            let more = remember
+                && crate::app::host::has_report_detail(&err, ui.message_verbosity, &plain_settings);
+            if remember {
                 session.record_failure_report(&resolved, err.clone(), plain_settings);
             }
+            let rendered = crate::app::render_process_error(
+                &err,
+                &ui.render_settings,
+                ui.message_verbosity,
+                more,
+            );
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
-                sink.write_stdout(&crate::app::render_process_error(
-                    &err,
-                    &ui.render_settings,
-                    ui.message_verbosity,
-                ));
-                let mut executed =
-                    ExecutedReplLine::flat(ReplResult::Continue, runtime.ui.debug_verbosity);
-                executed.exit_code = crate::app::classify_exit_code(&err);
-                return Ok(executed);
+                sink.write_stdout(&rendered);
+                if ui.message_verbosity >= MessageLevel::Info {
+                    sink.write_stderr(&format!(
+                        "{}\n",
+                        render_report_message(&err, ui.message_verbosity, &ui.render_settings)
+                            .trim_end()
+                    ));
+                }
+            } else {
+                sink.write_stderr(&rendered);
             }
             if ui.debug_verbosity >= 2
                 && let Some(backtrace) =
@@ -288,21 +299,11 @@ pub(crate) fn execute_repl_plugin_line(
             {
                 sink.write_stderr(&format!("{backtrace}\n"));
             }
-            let mut messages = MessageBuffer::default();
-            let detail = render_report_message(&err, ui.message_verbosity, &ui.render_settings);
-            let visible_error = doctor_command
-                .filter(|_| ui.message_verbosity < MessageLevel::Info)
-                .map(|command| format!("{detail}\nMore: run `{command}` for more detail."))
-                .unwrap_or(detail);
-            messages.push_titled(MessageLevel::Error, "Command failed", visible_error);
-            let rendered = crate::ui::render_messages(&messages, &{
-                let mut request =
-                    crate::ui::MessageRequest::new(&ui.render_settings, ui.message_verbosity);
-                request.layout =
-                    crate::ui::messages::message_layout_from_config(runtime.config.resolved());
-                request
-            });
-            Err(miette!(rendered.trim_end().to_string()))
+            let exit_code = crate::app::classify_exit_code(&err);
+            tracing::info!(target: "osp", exit_code, elapsed_ms = started.elapsed().as_millis(), "finished");
+            let mut executed = ExecutedReplLine::flat(ReplResult::Continue, ui.debug_verbosity);
+            executed.exit_code = exit_code;
+            Ok(executed)
         }
     }
 }

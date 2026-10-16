@@ -103,7 +103,7 @@ fn repl_requires_explicit_provider_selection_for_conflicted_commands() {
     assert!(
         session.wait_for_output_since(
             start,
-            "command `hello` requires provider selection",
+            "command hello requires provider selection",
             Duration::from_secs(3)
         ),
         "expected provider-selection error in repl output; output:\n{}",

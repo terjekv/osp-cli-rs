@@ -66,26 +66,19 @@ That includes:
 - `-v/-q/-d`
 - `--plugin-provider`
 
-For failures, the same detail ladder applies inside the REPL:
+Failures use the same renderer as one-shot commands: a concise summary by
+default and a full report at `-v` and above. `-vv` additionally enables trace
+messages and all human fields; further `v`s saturate. Plugin messages survive
+failed commands. Usage failures are titled “Invalid command”.
 
-- default
-  - terse actionable summary
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic report
-- `-vvv`
-  - rich diagnostic report plus stack backtrace
+Launch `-v`/`-q`/`-d` flags set session defaults. Per-line flags add to those
+defaults for one command only. `-d` shows command dispatch, plugin stderr,
+service requests and outcomes; `-dd` adds internal events and the captured
+backtrace on stderr. File logging is independent of per-line stderr settings.
 
-`-d/-dd/-ddd` are still about debug logs and timing, not the failure render
-itself.
-
-Practical failure workflow:
-
-1. run the command normally
-2. if it fails, read the terse failure
-3. rerun the command with `-v`, `-vv`, or `-vvv`, or inspect the recorded
-   failure with `doctor last -v`, `doctor last -vv`, or `doctor last -vvv`
+Read the short failure, then rerun with `-v` or inspect `doctor last -v`.
+Use `doctor last -dd` for its saved backtrace, or `-v -dd` on the original
+command to capture an explanation and diagnostic trace for a bug report.
 
 For successful results, the REPL also keeps the last replayable output:
 

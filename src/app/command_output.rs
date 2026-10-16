@@ -257,7 +257,7 @@ pub(crate) fn render_json_failure(
 pub(crate) fn run_cli_command(
     config: &ResolvedConfig,
     ui: &UiState,
-    result: CommandOutput,
+    result: &CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
     if ui.render_settings.format == OutputFormat::Json && result.exit_code != 0 {
@@ -303,7 +303,23 @@ pub(crate) fn run_cli_command(
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);
     }
+    let has_error_message = result
+        .messages
+        .entries()
+        .iter()
+        .any(|entry| entry.level == MessageLevel::Error);
     if let Some(report) = &result.failure_report
+        && !has_error_message
+    {
+        sink.write_stderr(&super::render_process_error(
+            report,
+            &ui.render_settings,
+            ui.message_verbosity,
+            false,
+        ));
+    }
+    if let Some(report) = &result.failure_report
+        && has_error_message
         && ui.message_verbosity >= MessageLevel::Info
     {
         let detail =
@@ -356,7 +372,7 @@ pub(crate) fn run_cli_command(
         {
             sink.write_stderr(&rendered);
         } else {
-            if let Some(pager) = pager_for_output(config, ui, &result, &rendered) {
+            if let Some(pager) = pager_for_output(config, ui, result, &rendered) {
                 sink.write_stdout_paged(&rendered, &pager);
             } else {
                 sink.write_stdout(&rendered);
@@ -675,10 +691,25 @@ pub(crate) fn render_repl_command(
     mut result: CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    if result.exit_code != 0
-        && let Some(report) = result.failure_report.take()
-    {
-        return Err(report);
+    if result.failure_report.is_some() {
+        run_cli_command(config, ui, &result, sink)?;
+        if let Some(report) = result.failure_report.take() {
+            if ui.render_settings.format != OutputFormat::Json
+                && super::host::has_report_detail(
+                    &report,
+                    ui.message_verbosity,
+                    &ui.render_settings,
+                )
+            {
+                sink.write_stderr("More: rerun with -v, or run `doctor last -v`\n");
+            }
+            session.record_failure_report(
+                line,
+                std::sync::Arc::new(report),
+                ui.render_settings.plain_copy_settings(),
+            );
+        }
+        return Ok(String::new());
     }
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.message_verbosity, sink);

@@ -286,15 +286,10 @@ pub(super) fn render_repl_command_output(
     session: &mut AppSession,
     line: &str,
     stages: &[String],
-    mut result: crate::app::CommandOutput,
+    result: crate::app::CommandOutput,
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    if result.exit_code != 0
-        && let Some(report) = result.failure_report.take()
-    {
-        return Err(report);
-    }
     app::render_repl_command(
         runtime.config.resolved(),
         &invocation.ui,

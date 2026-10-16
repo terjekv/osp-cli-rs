@@ -4,5 +4,5 @@ expression: sanitized
 ---
 - Command failed 
   plugin boom exited with status 7: boom-from-stderr
-  Try: inspect the plugin stderr output or rerun with -v/-vv for more context
+  Try: inspect the plugin stderr output or run osp plugins doctor
 ------------

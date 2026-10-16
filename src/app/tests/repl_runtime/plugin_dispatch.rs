@@ -31,14 +31,15 @@ JSON
     state.runtime.ui.render_settings.format = OutputFormat::Table;
 
     let history = make_test_history(&mut state);
-    let err = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
-        "fail", None,).map(|executed| executed.result)
-    .expect_err("response ok=false should become repl error");
-    assert!(err.to_string().contains("MOCK_ERR: mock failure"));
+        "fail", Some(&mut sink),)
+    .expect("failure should render through the sink");
+    assert!(sink.stderr.contains("MOCK_ERR: mock failure"));
 
 }
 
@@ -98,14 +99,15 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
     state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let err = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
-        "hello", None,).map(|executed| executed.result)
-    .expect_err("ambiguous plugin command should fail");
-    let message = format!("{err:#}");
+        "hello", Some(&mut sink),)
+    .expect("ambiguity should render through the sink");
+    let message = &sink.stderr;
     assert!(
         message.contains("provided by multiple plugins")
             || message.contains("requires provider selection"),

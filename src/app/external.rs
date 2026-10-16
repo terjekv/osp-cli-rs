@@ -123,7 +123,7 @@ pub(super) fn run_external_command(
         Some(sink),
         None,
     )?;
-    super::run_cli_command(runtime.config.resolved(), &invocation.ui, result, sink)
+    super::run_cli_command(runtime.config.resolved(), &invocation.ui, &result, sink)
 }
 
 pub(crate) fn run_external_command_with_help_renderer(

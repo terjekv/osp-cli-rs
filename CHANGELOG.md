@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- REPL failures retain plugin messages and use the one-shot failure renderer
+  and usage-error titles. Show one detail hint only below detailed verbosity.
+
 - JSON failure envelopes now stay identical across verbosity levels; requested
   failure explanations and backtraces go to stderr.
 

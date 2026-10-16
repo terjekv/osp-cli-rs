@@ -389,22 +389,18 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
         "ldap user",
-        None,
+        Some(&mut sink),
     )
-    .map(|executed| executed.result)
-    .expect_err("missing capability should deny the command");
-    let immediate = error
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(immediate.contains("command `ldap user`"));
+    .expect("failure should render through the sink");
+    let immediate = sink.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(immediate.contains("command ldap user"));
     assert!(immediate.contains("requires authentication"));
     assert!(immediate.contains("Try: authenticate"));
 
@@ -455,20 +451,20 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
         "ldap usr",
-        None,
+        Some(&mut sink),
     )
-    .map(|executed| executed.result)
-    .expect_err("subcommand typo should fail");
-    let immediate = error.to_string();
+    .expect("failure should render through the sink");
+    let immediate = &sink.stderr;
     assert!(immediate.contains("subcommand 'usr'"));
     assert!(
-        immediate.contains("Try: use `ldap user`"),
+        immediate.contains("More: rerun with -v"),
         "unexpected immediate error: {immediate}"
     );
     assert!(!immediate.contains("Usage:"));
@@ -502,7 +498,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     assert!(!debug.contains("Stack backtrace"));
 
     let forensic = doctor("-vvv doctor last");
-    assert!(forensic.contains("Stack backtrace"));
+    assert!(!forensic.contains("Stack backtrace"));
 }
 
 #[cfg(unix)]
@@ -515,22 +511,19 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
     state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
         "ldap user",
-        None,
+        Some(&mut sink),
     )
-    .map(|executed| executed.result)
-    .expect_err("missing username should fail");
-    let immediate = error.to_string();
+    .expect("failure should render through the sink");
+    let immediate = &sink.stderr;
     assert!(immediate.contains("<USERNAME>"), "{immediate}");
-    assert!(
-        immediate.contains("Try: use `ldap user --help`"),
-        "{immediate}"
-    );
+    assert!(immediate.contains("More: rerun with -v"), "{immediate}");
     assert!(!immediate.contains("Usage:"));
 }
 
@@ -651,7 +644,7 @@ fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
     let exit = super::run_cli_command(
         &config,
         &ui,
-        super::CommandOutput {
+        &super::CommandOutput {
             exit_code: 7,
             messages,
             stderr_text: "warn\n".to_string(),
@@ -681,7 +674,7 @@ fn run_cli_command_builds_runtime_from_config_and_ui_unit() {
     let exit = super::run_cli_command(
         &config,
         &ui,
-        super::CommandOutput {
+        &super::CommandOutput {
             exit_code: 3,
             messages: MessageBuffer::default(),
             stderr_text: String::new(),

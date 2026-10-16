@@ -828,6 +828,19 @@ impl miette::Diagnostic for SourceSnippet<'_> {
     }
 }
 
+pub(crate) fn has_report_detail(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
+    settings: &RenderSettings,
+) -> bool {
+    if level >= crate::core::MessageLevel::Info {
+        return false;
+    }
+    let summary = render_report_message(err, crate::core::MessageLevel::Success, settings);
+    let detail = render_report_message(err, crate::core::MessageLevel::Info, settings);
+    detail.trim() != summary.split("\nTry:").next().unwrap_or(&summary).trim()
+}
+
 pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
     report_backtrace(err)
         .is_none()

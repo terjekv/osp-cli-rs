@@ -530,7 +530,7 @@ impl App {
                     },
                 );
                 let rendered =
-                    render_process_error(&err, &error_render_settings, message_verbosity);
+                    render_process_error(&err, &error_render_settings, message_verbosity, false);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
                     if message_verbosity >= MessageLevel::Info {
@@ -832,13 +832,18 @@ pub(crate) fn render_process_error(
     err: &miette::Report,
     settings: &crate::ui::RenderSettings,
     message_verbosity: MessageLevel,
+    detail_hint: bool,
 ) -> String {
     let level = if settings.format == OutputFormat::Json {
         MessageLevel::Success
     } else {
         message_verbosity
     };
-    let message = render_report_message(err, level, settings);
+    let mut message = render_report_message(err, level, settings);
+    if detail_hint && settings.format != OutputFormat::Json {
+        message.truncate(message.find("\nTry:").unwrap_or(message.len()));
+        message.push_str("\nMore: rerun with -v, or run `doctor last -v`");
+    }
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
         let code = match exit_code {

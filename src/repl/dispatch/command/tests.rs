@@ -108,8 +108,13 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         Ok(_) => panic!("unknown argument should be reported as a syntax error"),
         Err(err) => err,
     };
-    assert!(err.to_string().contains("--wat"));
-    assert!(err.to_string().contains("Usage: config show"));
+    let detail = crate::app::render_report_message(
+        &err,
+        crate::core::MessageLevel::Info,
+        &state.runtime.ui.render_settings,
+    );
+    assert!(detail.contains("--wat"));
+    assert!(detail.contains("Usage: config show"));
     let mut sink = BufferedUiSink::default();
 
     let parsed = ReplParsedLine::parse("theme", state.runtime.config.resolved())
@@ -144,7 +149,14 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         Ok(_) => panic!("staged inline help parse errors should fail"),
         Err(err) => err,
     };
-    assert!(err.to_string().contains("--wat"));
+    assert!(
+        crate::app::render_report_message(
+            &err,
+            MessageLevel::Info,
+            &state.runtime.ui.render_settings
+        )
+        .contains("--wat")
+    );
 }
 
 #[test]
@@ -208,7 +220,7 @@ fn structured_command_failures_are_not_mislabeled_as_render_failures() {
         ..CommandOutput::exit(0)
     };
 
-    let err = render_repl_command_output(
+    let rendered = render_repl_command_output(
         &state.runtime,
         &mut state.session,
         "orch vm info missing",
@@ -217,10 +229,15 @@ fn structured_command_failures_are_not_mislabeled_as_render_failures() {
         &invocation,
         &mut sink,
     )
-    .expect_err("backend problem should remain a command failure");
+    .expect("backend failure should render through the sink");
 
+    assert!(rendered.is_empty());
+    let envelope: serde_json::Value =
+        serde_json::from_str(&sink.stdout).expect("failure should be JSON");
+    assert_eq!(envelope["ok"], false);
     assert_eq!(
-        err.to_string(),
+        envelope["error"]["message"],
         "resource_not_found: No visible resource matched"
     );
+    assert!(state.session.last_failure.is_some());
 }

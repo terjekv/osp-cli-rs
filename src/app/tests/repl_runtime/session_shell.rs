@@ -69,14 +69,15 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
     state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let err = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
-        "missing", None,).map(|executed| executed.result)
-    .expect_err("unknown command should fail");
-    let err_text = err.to_string();
+        "missing", Some(&mut sink),)
+    .expect("failure should render through the sink");
+    let err_text = &sink.stderr;
     assert!(err_text.contains("unknown command `missing`"));
 
     let last = state

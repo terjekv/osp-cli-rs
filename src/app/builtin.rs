@@ -33,7 +33,7 @@ pub(crate) fn run_cli_builtin_command_parts(
         .dispatch(BuiltinSurface::Cli(&invocation.ui), command)?
         .ok_or_else(|| miette!("expected builtin command"))?;
     let result = super::command_output::apply_stages_to_cli_result(result, stages)?;
-    run_cli_command(runtime.config.resolved(), &invocation.ui, result, sink)
+    run_cli_command(runtime.config.resolved(), &invocation.ui, &result, sink)
 }
 
 pub(crate) fn run_inline_builtin_command(

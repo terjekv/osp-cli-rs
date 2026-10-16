@@ -39,16 +39,21 @@ fn observe_dispatch_kind(
     history: &SharedHistory,
     line: &str,
 ) -> ObservedDispatchKind {
-    match execute_repl_plugin_line(
+    let execution = execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         history,
         line,
         None,
-    )
-    .map(|executed| executed.result)
+    );
+    if execution
+        .as_ref()
+        .is_ok_and(|executed| executed.exit_code != 0)
     {
+        return ObservedDispatchKind::Error;
+    }
+    match execution.map(|executed| executed.result) {
         Ok(ReplResult::Continue) => ObservedDispatchKind::Blank,
         Ok(ReplResult::Exit(_)) => ObservedDispatchKind::Exit,
         Ok(ReplResult::Print(output)) if output.is_empty() => ObservedDispatchKind::Blank,
@@ -606,17 +611,17 @@ fn staged_repl_line_validation_rejects_invalid_invocations_before_pipeline_execu
     for (line, needle) in cases {
         let mut state = make_state_with_plugins(empty_plugins());
         state.runtime.ui.render_settings.format = OutputFormat::Table;
-        let err = execute_repl_plugin_line(
+        let mut sink = crate::app::BufferedUiSink::default();
+        execute_repl_plugin_line(
             &mut state.runtime,
             &mut state.session,
             &state.clients,
             &test_history(),
             line,
-            None,
+            Some(&mut sink),
         )
-        .map(|executed| executed.result)
-        .expect_err("invalid staged line should fail before piping");
-        assert!(err.to_string().contains(needle), "line: {line}");
+        .expect("failure should render through the sink");
+        assert!(sink.stderr.contains(needle), "line: {line}");
     }
 }
 
@@ -721,7 +726,14 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
         "intro --wat | config",
     )
     .expect_err("invalid staged invocation should fail during classification");
-    assert!(err.to_string().contains("--wat"));
+    assert!(
+        crate::app::render_report_message(
+            &err,
+            crate::core::MessageLevel::Info,
+            &classified_state.runtime.ui.render_settings
+        )
+        .contains("--wat")
+    );
 }
 
 #[test]
@@ -731,17 +743,17 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     state.runtime.ui.debug_verbosity = 1;
     let history = test_history();
 
-    let err = execute_repl_plugin_line(
+    let mut sink = crate::app::BufferedUiSink::default();
+    execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
         "intro --wat | config",
-        None,
+        Some(&mut sink),
     )
-    .map(|executed| executed.result)
-    .expect_err("invalid staged invocation should still fail");
-    assert!(err.to_string().contains("--wat"));
+    .expect("failure should render through the sink");
+    assert!(sink.stderr.contains("--wat"));
 
     let last_failure = state
         .session
@@ -752,18 +764,18 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     assert!(last_failure.summary.contains("--wat"));
     assert!(state.session.prompt_timing.badge().is_some());
 
-    let err = execute_repl_plugin_line(
+    let mut sink = crate::app::BufferedUiSink::default();
+    execute_repl_plugin_line(
         &mut state.runtime,
         &mut state.session,
         &state.clients,
         &history,
         "config sho",
-        None,
+        Some(&mut sink),
     )
-    .map(|executed| executed.result)
-    .expect_err("invalid subcommands should be reported as syntax errors");
-    assert!(err.to_string().contains("unrecognized subcommand 'sho'"));
-    assert!(err.to_string().contains("Try: use `config show`"));
+    .expect("syntax errors should render through the sink");
+    assert!(sink.stderr.contains("unrecognized subcommand 'sho'"));
+    assert!(sink.stderr.contains("Invalid command"));
 }
 
 #[test]
@@ -934,17 +946,17 @@ fn repl_unrelated_lines_clear_native_pagination_context_unit() {
             current: vec!["page".to_string()],
             next: Some(vec!["trusted".to_string()]),
         });
-    assert!(
-        execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &history,
-            "not-a-real-command",
-            None,
-        )
-        .map(|executed| executed.result)
-        .is_err()
-    );
+    let mut sink = crate::app::BufferedUiSink::default();
+    let executed = execute_repl_plugin_line(
+        &mut state.runtime,
+        &mut state.session,
+        &state.clients,
+        &history,
+        "not-a-real-command",
+        Some(&mut sink),
+    )
+    .expect("failure should render through the sink");
+    assert_ne!(executed.exit_code, 0);
+    assert!(sink.stderr.contains("not-a-real-command"));
     assert_eq!(state.session.native_context.pagination(), None);
 }
