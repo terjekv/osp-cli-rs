@@ -138,3 +138,29 @@ pub(crate) fn parse_cursor_position_report(bytes: &[u8]) -> Option<(u16, u16)> {
         .ok()?;
     Some((col, row))
 }
+
+/// Writes a yes/no question to stderr and reads stdin. Only `y` or `yes`
+/// (case insensitive) confirms; EOF declines. The caller owns consent policy.
+pub fn confirm(question: &str) -> io::Result<bool> {
+    let answer = ask(&format!("{question} [y/N] "))?;
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+/// Asks the reader to type a phrase exactly. EOF declines.
+/// The caller must decide whether prompting is permitted and required.
+pub fn confirm_phrase(phrase: &str) -> io::Result<bool> {
+    let answer = ask(&format!("Type '{phrase}' to confirm: "))?;
+    Ok(!answer.is_empty() && answer.trim() == phrase)
+}
+
+fn ask(question: &str) -> io::Result<String> {
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(question.as_bytes())?;
+    stderr.flush()?;
+    let mut answer = String::new();
+    read_line(&mut answer)?;
+    Ok(answer)
+}

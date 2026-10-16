@@ -30,6 +30,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -142,6 +143,20 @@ impl<'a> NativeCommandContext<'a> {
     /// Whether this invocation transforms its result with output pipe stages.
     pub fn has_output_pipeline(&self) -> bool {
         self.output_pipeline
+    }
+
+    /// Whether a REPL invocation may read a confirmation from its terminal.
+    /// One-shot commands, JSON output and output pipelines never prompt.
+    pub fn may_prompt(&self) -> bool {
+        !matches!(self.command_scope, crate::core::CommandScope::OneShot)
+            && self.human_output()
+            && std::io::stdin().is_terminal()
+            && std::io::stderr().is_terminal()
+    }
+
+    fn human_output(&self) -> bool {
+        !self.output_pipeline
+            && self.runtime_hints.format != crate::core::output::OutputFormat::Json
     }
 
     /// Attaches explicit elevation intent to this execution only.

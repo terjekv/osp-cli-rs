@@ -41,6 +41,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - **Breaking:** Remove the unused `repl debug-complete --menu history` diagnostic
   and history-menu debug APIs. Ctrl-R continues to use the live history picker.
 
+- Native REPL contexts expose whether prompting is allowed; one-shot
+  invocations never qualify. Confirmation input helpers leave consent policy
+  with the caller.
+
 - Redact sensitive names consistently in config, plugin environment values and
   error details, including cookies, authorization and underscore-delimited keys.
 
