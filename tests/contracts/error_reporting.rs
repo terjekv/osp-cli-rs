@@ -48,9 +48,9 @@ fn write_non_zero_plugin(dir: &Path) -> std::path::PathBuf {
         &plugin_path,
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"boom","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"boom","about":"boom plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"boom plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi
@@ -160,10 +160,9 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
 
     let output = run_osp_with_plugin_path(&["-vv", "boom"], None, Some(dir.path()));
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("plugin command failed"));
-    assert!(stderr.contains("plugin boom exited with status 7"));
+    assert!(stderr.contains("boom exited with status 7"));
     assert!(stderr.contains("boom-from-stderr"));
     assert!(!stderr.contains("Stack backtrace"));
 }

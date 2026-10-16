@@ -30,7 +30,7 @@ use crate::cli::invocation::{
     InvocationOptions, ScannedCliArgs, extend_with_invocation_help, scan_cli_argv,
 };
 use crate::cli::{Cli, Commands};
-use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
+use crate::plugin::CommandCatalogEntry;
 
 #[cfg(test)]
 pub(crate) use super::assembly::rebuild_repl_state;
@@ -40,12 +40,6 @@ pub(crate) use super::dispatch::{
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
 pub(crate) use super::timing::{TimingSummary, format_timing_badge};
-pub(crate) use crate::plugin::config::{PluginConfigEntry, PluginConfigScope};
-#[cfg(test)]
-pub(crate) use crate::plugin::config::{
-    collect_plugin_config_env, config_value_to_plugin_env, plugin_config_env_name,
-};
-
 pub(crate) const CMD_PLUGINS: &str = "plugins";
 pub(crate) const CMD_DOCTOR: &str = "doctor";
 pub(crate) const CMD_CONFIG: &str = "config";
@@ -70,7 +64,6 @@ pub(crate) struct ReplCommandSpec {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedInvocation {
     pub(crate) ui: UiState,
-    pub(crate) plugin_provider: Option<String>,
     pub(crate) help_level: HelpLevel,
 }
 
@@ -101,7 +94,6 @@ impl From<&UiState> for ErrorDisplaySettings {
 pub(crate) enum ErrorContext {
     NativeExecution,
     Config,
-    Plugin,
     Operation(&'static str),
 }
 
@@ -110,7 +102,6 @@ impl std::fmt::Display for ErrorContext {
         f.write_str(match self {
             Self::NativeExecution => "native command execution failed",
             Self::Config => "config resolution failed",
-            Self::Plugin => "plugin command failed",
             Self::Operation(text) => text,
         })
     }
@@ -137,7 +128,6 @@ struct KnownErrorChain<'a> {
     boxed_context: Option<&'a BoxedContextError>,
     clap: Option<&'a clap::Error>,
     config: Option<&'a crate::config::ConfigError>,
-    plugin: Option<&'a PluginDispatchError>,
 }
 
 impl<'a> KnownErrorChain<'a> {
@@ -146,7 +136,6 @@ impl<'a> KnownErrorChain<'a> {
             boxed_context: find_error_in_chain::<BoxedContextError>(err),
             clap: find_error_in_chain::<clap::Error>(err),
             config: find_error_in_chain::<crate::config::ConfigError>(err),
-            plugin: find_error_in_chain::<PluginDispatchError>(err),
         }
     }
 }
@@ -425,6 +414,61 @@ fn handle_clap_parse_error(
                 let auth =
                     AuthState::for_policy(app.access_policy.clone(), help_context.config.as_ref());
                 add_native_command_help(&mut body, &app.native_commands, &auth);
+                if let Some(config) = &help_context.config {
+                    let matches = crate::cli::passive_command(command.clone())
+                        .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
+                        .ok();
+                    let mut launch = super::LaunchContext::default();
+                    if let Some(matches) = &matches {
+                        launch.plugin_dirs = matches
+                            .try_get_many::<std::path::PathBuf>("plugin_dirs")
+                            .ok()
+                            .flatten()
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                            .collect();
+                        let flag = |name| {
+                            matches
+                                .try_get_one::<bool>(name)
+                                .ok()
+                                .flatten()
+                                .copied()
+                                .unwrap_or(false)
+                        };
+                        launch.runtime_load = crate::cli::runtime_load_options_from_flags(
+                            flag("no_env"),
+                            flag("no_config_file"),
+                            flag("defaults_only"),
+                        );
+                    }
+                    let plugins = super::assembly::build_plugin_manager(config, &launch);
+                    let natives = app
+                        .native_commands
+                        .catalog()
+                        .into_iter()
+                        .map(|e| e.name)
+                        .collect::<std::collections::HashSet<_>>();
+                    let entries = plugins
+                        .command_catalog()
+                        .into_iter()
+                        .filter(|entry| {
+                            !natives.contains(&entry.name)
+                                && !crate::cli::builtin_command_names().contains(&entry.name)
+                                && auth.is_external_command_visible(&entry.name)
+                        })
+                        .map(|entry| DocumentEntry {
+                            name: entry.name,
+                            description: entry.about,
+                        })
+                        .collect::<Vec<_>>();
+                    if !entries.is_empty() {
+                        body.blocks.push(DocBlock::section(
+                            "Plugins",
+                            vec![DocBlock::Entries { entries }],
+                        ));
+                    }
+                }
             }
             let mut filtered = body.filtered_for_help_level(help_context.help_level);
             let dsl_help = stages.iter().find_map(|raw| {
@@ -626,8 +670,21 @@ pub(crate) fn authorized_command_catalog_for(
     clients: &AppClients,
     native_catalog: Vec<CommandCatalogEntry>,
 ) -> Vec<CommandCatalogEntry> {
-    let mut all = clients.plugins().command_catalog();
-    all.extend(native_catalog);
+    let mut all = native_catalog;
+    let mut names = all
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<std::collections::HashSet<_>>();
+    all.extend(
+        clients
+            .plugins()
+            .command_catalog()
+            .into_iter()
+            .filter(|entry| {
+                !crate::cli::builtin_command_names().contains(&entry.name)
+                    && names.insert(entry.name.clone())
+            }),
+    );
     all.sort_by(|left, right| left.name.cmp(&right.name));
     all.into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
@@ -677,15 +734,9 @@ pub(crate) fn resolve_invocation_ui(
             ),
             ui.debug_level.saturating_add(invocation.debug).min(3),
         ),
-        plugin_provider: invocation.plugin_provider.clone(),
         help_level: help_level(config, invocation.verbose, invocation.quiet),
     }
 }
-
-pub(crate) fn enrich_dispatch_error(err: PluginDispatchError) -> miette::Report {
-    report_std_error_with_context(err, crate::app::host::ErrorContext::Plugin)
-}
-
 /// Maps a reported error to the CLI exit code family used by OSP.
 pub fn classify_exit_code(err: &miette::Report) -> i32 {
     let known = KnownErrorChain::inspect(err);
@@ -914,42 +965,6 @@ fn known_error_hint(
     known: &KnownErrorChain<'_>,
     scope: &crate::core::CommandScope,
 ) -> Option<String> {
-    if let Some(plugin_err) = known.plugin {
-        return Some(match plugin_err {
-            PluginDispatchError::CommandNotFound { .. } => {
-                format!("run `{}` and set --plugin-dir or OSP_PLUGIN_PATH", scope.command("plugins list"))
-            }
-            PluginDispatchError::CommandAmbiguous { .. } => {
-                format!("rerun with --plugin-provider <plugin-id> or persist a default with `{}`", scope.command("plugins select-provider <command> <plugin-id>"))
-            }
-            PluginDispatchError::ProviderNotFound { .. } => {
-                format!("pick one of the available providers from `{}` or `{}`", scope.command("plugins commands"), scope.command("plugins doctor"))
-            }
-            PluginDispatchError::ProviderUnhealthy { .. } => {
-                format!("inspect the provider issue with `{}`", scope.command("plugins doctor"))
-            }
-            PluginDispatchError::InvalidEnvironment { .. } => {
-                "inspect the colliding extensions.plugins.*.env keys and remove the normalization conflict".to_string()
-            }
-            PluginDispatchError::ExecuteFailed { .. } => {
-                "verify the plugin executable exists and is executable".to_string()
-            }
-            PluginDispatchError::TimedOut { .. } => {
-                "increase extensions.plugins.timeout_ms or inspect the plugin executable".to_string()
-            }
-            PluginDispatchError::OutputTooLarge { .. } => {
-                "reduce the plugin response size or return a narrower result".to_string()
-            }
-            PluginDispatchError::NonZeroExit { .. } => {
-                format!("inspect the plugin stderr output or run `{}`", scope.command("plugins doctor"))
-            }
-            PluginDispatchError::InvalidJsonResponse { .. }
-            | PluginDispatchError::InvalidResponsePayload { .. } => {
-                "inspect the plugin response contract and stderr output".to_string()
-            }
-        });
-    }
-
     if let Some(config_err) = known.config {
         return Some(match config_err {
             crate::config::ConfigError::UnknownProfile { .. } => {
@@ -1049,10 +1064,6 @@ fn clap_error_action(
 }
 
 fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> String {
-    if let Some(plugin_err) = known.plugin {
-        return plugin_err.to_string();
-    }
-
     if let Some(config_err) = known.config {
         return config_err.to_string();
     }

@@ -221,8 +221,14 @@ pub(crate) fn execute_repl_plugin_line(
         let _ = history.with(|store| store.remember_command(&resolved));
     }
     state.session.finish_repl_line();
-    let refresh_completion = state.session.native_context.take_completion_refresh_request()
-        | state.clients.native_commands().take_completion_refresh_request();
+    let refresh_completion = state
+        .session
+        .native_context
+        .take_completion_refresh_request()
+        | state
+            .clients
+            .native_commands()
+            .take_completion_refresh_request();
     match execution {
         Ok(mut executed) => {
             if refresh_completion {

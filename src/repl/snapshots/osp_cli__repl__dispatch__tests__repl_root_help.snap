@@ -10,7 +10,7 @@ Usage: [INVOCATION_OPTIONS] COMMAND [ARGS]...
   help              Show this command overview.
   last              Replay the last result (--raw before pipes).
   source            Run commands from files.
-  plugins           Inspect and manage plugin providers
+  plugins           Inspect and manage plugins
   doctor            Run diagnostics checks
   theme             Inspect and apply themes
   config            Inspect and edit runtime config

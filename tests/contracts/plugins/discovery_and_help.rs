@@ -1,385 +1,77 @@
 #[test]
 #[cfg(unix)]
 fn unknown_domain_command_shows_command_hint_contract() {
-    let home = make_temp_dir("osp-cli-no-plugin-home");
-    let empty_plugins = make_temp_dir("osp-cli-empty-plugins");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("PATH", "/usr/bin:/bin")
-        .env("OSP_PLUGIN_PATH", &empty_plugins)
-        .env("OSP_BUNDLED_PLUGIN_DIR", &empty_plugins)
-        .args(["ldap", "user", "oistes"]);
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown command ldap"))
-        .stderr(predicate::str::contains("Try: run osp help to list commands"));
+    let home = make_temp_dir("plugins-unknown");
+    plugin_command(&home, &home, &["missing"]).assert().failure().stderr(predicate::str::contains("unknown command missing").and(predicate::str::contains("list commands")));
 }
 
 #[test]
 #[cfg(unix)]
-fn errors_remain_visible_at_double_quiet_contract() {
-    let home = make_temp_dir("osp-cli-no-plugin-home-quiet");
-    let empty_plugins = make_temp_dir("osp-cli-empty-plugins-quiet");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("PATH", "/usr/bin:/bin")
-        .env("OSP_PLUGIN_PATH", &empty_plugins)
-        .env("OSP_BUNDLED_PLUGIN_DIR", &empty_plugins)
-        .args(["-qq", "ldap", "user", "oistes"]);
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown command ldap"));
-}
-
-#[cfg(unix)]
-#[test]
 fn external_plugin_help_is_passed_through_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-help");
-    let _plugin_path = write_hello_plugin(&dir);
-    let home = make_temp_dir("osp-cli-plugin-help-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["hello", "--help"]);
-    let help_flag = cmd.assert().success().get_output().clone();
-    let help_flag_stdout =
-        String::from_utf8(help_flag.stdout).expect("help stdout should be utf-8");
-    assert_snapshot_text!("external_plugin_help_stdout", help_flag_stdout.clone());
-
-    let mut cmd_help_subcommand = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd_help_subcommand
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["hello", "help"]);
-    let help_subcommand = cmd_help_subcommand.assert().success().get_output().clone();
-    let help_subcommand_stdout =
-        String::from_utf8(help_subcommand.stdout).expect("help stdout should be utf-8");
-    assert_eq!(help_subcommand_stdout, help_flag_stdout);
+    let home = make_temp_dir("plugins-help");
+    let dir = home.join("plugins");
+    write_plugin(&dir, "hello", Some(json!({"output": "json", "about": "Greet people"})), "import argparse\np=argparse.ArgumentParser(prog='osp hello', description='Greet people')\np.add_argument('--loud', action='store_true')\np.parse_args()\n");
+    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout(predicate::str::starts_with("usage: osp hello").and(predicate::str::contains("--loud"))).stderr("");
+    plugin_command(&home, &dir, &["hello", "-h"]).assert().success().stdout(predicate::str::starts_with("usage: osp hello"));
+    plugin_command(&home, &dir, &["--help"]).assert().success().stdout(predicate::str::contains("Greet people"));
 }
 
-#[cfg(unix)]
 #[test]
+#[cfg(unix)]
 fn external_plugin_help_keeps_raw_stderr_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-help-stderr");
-    let _plugin_path = write_help_stderr_plugin(&dir);
-    let home = make_temp_dir("osp-cli-plugin-help-stderr-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["hello", "--help"]);
-    let output = cmd.assert().success().get_output().clone();
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf-8");
-    assert_snapshot_text!("external_plugin_help_stderr_stdout", stdout);
-    assert_snapshot_text!("external_plugin_help_stderr_stderr", stderr);
+    let home = make_temp_dir("plugins-help-stderr");
+    let dir = home.join("plugins");
+    write_plugin(&dir, "hello", None, "print('hello help'); print('help note', file=sys.stderr)\n");
+    plugin_command(&home, &dir, &["hello", "--help"]).assert().success().stdout("hello help\n").stderr("help note\n");
 }
 
-#[cfg(unix)]
 #[test]
-fn ignores_non_plugin_extension_files_contract() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = make_temp_dir("osp-cli-ignore-script");
-    let script_path = dir.join("osp-ignore.sh");
-    std::fs::write(&script_path, "#!/bin/sh\necho should-not-run\n")
-        .expect("script should be written");
-    let mut perms = std::fs::metadata(&script_path)
-        .expect("metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&script_path, perms).expect("script should be executable");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.env("PATH", "/usr/bin:/bin")
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "list"]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("osp-ignore.sh").not());
+#[cfg(unix)]
+fn first_plugin_wins_and_builtins_are_shadowed_contract() {
+    let home = make_temp_dir("plugins-order");
+    let first = home.join("first");
+    let later = home.join("later");
+    write_plugin(&first, "hello", None, "print('first')\n");
+    hello(&later);
+    write_plugin(&first, "config", None, "print('not builtin')\n");
+    plugin_command(&home, &later, &["--plugin-dir", first.to_str().unwrap(), "hello"]).assert().success().stdout("first\n");
+    let rows = json_stdout(&mut plugin_command(&home, &later, &["--plugin-dir", first.to_str().unwrap(), "plugins", "list", "--json"]));
+    assert!(rows.as_array().unwrap().iter().any(|row| row["name"] == "config" && row["status"] == "shadowed by builtin config"));
+    assert!(rows.as_array().unwrap().iter().any(|row| row["name"] == "hello" && row["status"].as_str().unwrap().starts_with("shadowed by ")));
+    plugin_command(&home, &first, &["config", "--help"]).assert().success().stdout(predicate::str::contains("not builtin").not());
 }
 
-#[cfg(unix)]
 #[test]
-fn bundled_plugin_requires_manifest_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-bundled-missing-manifest");
-    let _plugin_path = write_hello_plugin(&dir);
-    let home = make_temp_dir("osp-cli-plugin-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["plugins", "list"]);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("bundled manifest.toml not found"))
-        .stdout(predicate::str::contains("healthy:"))
-        .stdout(predicate::str::contains("source:"))
-        .stdout(predicate::str::contains("bundled"));
+#[cfg(unix)]
+fn path_plugins_work_without_describe_and_describe_errors_stay_runnable_contract() {
+    let home = make_temp_dir("plugins-path");
+    let dir = home.join("plugins");
+    let marker = home.join("ran");
+    write_plugin(&dir, "plain", None, &format!("from pathlib import Path\nPath({:?}).touch()\nprint('plain')\n", marker.display().to_string()));
+    let path = format!("{}:/usr/bin:/bin", dir.display());
+    let rows = json_stdout(plugin_command(&home, &home, &["plugins", "list", "--json"]).env("PATH", &path));
+    assert_eq!(rows[0]["source"], "path");
+    assert!(!marker.exists(), "plain executables must not run during listing");
+    plugin_command(&home, &home, &["plain"]).env("PATH", path).assert().success().stdout("plain\n");
+    let broken = write_plugin(&dir, "broken", Some(json!({})), "print('still runs')\n");
+    std::fs::write(broken, "#!/bin/sh\nif [ \"$1\" = --osp-describe ]; then echo invalid; else echo 'still runs'; fi\n").unwrap();
+    let rows = json_stdout(&mut plugin_command(&home, &dir, &["doctor", "plugins", "--json"]));
+    assert!(rows[0]["status"].as_str().unwrap().starts_with("describe error: invalid describe JSON:"));
+    plugin_command(&home, &dir, &["broken"]).assert().success().stdout("still runs\n");
 }
 
-#[cfg(unix)]
 #[test]
-fn bundled_manifest_controls_default_enable_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-bundled-manifest");
-    let _plugin_path = write_hello_plugin(&dir);
-    write_manifest(
-        &dir,
-        r#"
-protocol_version = 1
-
-[[plugin]]
-id = "hello"
-exe = "osp-hello"
-version = "0.1.0"
-enabled_by_default = false
-commands = ["hello"]
-"#,
-    );
-    let home = make_temp_dir("osp-cli-plugin-home");
-
-    let mut first = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    first
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["hello"]);
-    first.assert().failure().stderr(predicate::str::contains(
-        "unknown command hello",
-    ));
-
-    let mut enable = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    enable
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["plugins", "enable", "hello"]);
-    enable
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("enabled command: hello"));
-
-    let mut second = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    second
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["hello"]);
-    second
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("hello-from-plugin"));
-}
-
 #[cfg(unix)]
-#[test]
-fn bundled_manifest_mismatch_marks_plugin_unhealthy_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-bundled-manifest-mismatch");
-    let _plugin_path = write_hello_plugin(&dir);
-    write_manifest(
-        &dir,
-        r#"
-protocol_version = 1
-
-[[plugin]]
-id = "hello"
-exe = "osp-hello"
-version = "0.1.0"
-enabled_by_default = true
-commands = ["ldap"]
-"#,
-    );
-    let home = make_temp_dir("osp-cli-plugin-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["plugins", "list"]);
-    cmd.assert().success().stdout(predicate::str::contains(
-        "manifest commands mismatch for hello",
-    ));
-}
-
-#[cfg(unix)]
-#[test]
-fn bundled_manifest_id_stays_visible_when_describe_id_mismatches_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-bundled-id-mismatch");
-    let _plugin_path = write_describe_mismatch_plugin(&dir);
-    write_manifest(
-        &dir,
-        r#"
-protocol_version = 1
-
-[[plugin]]
-id = "hello"
-exe = "osp-hello"
-version = "0.1.0"
-enabled_by_default = true
-commands = ["hello"]
-"#,
-    );
-    let home = make_temp_dir("osp-cli-plugin-bundled-id-mismatch-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    let output = cmd
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_BUNDLED_PLUGIN_DIR", &dir)
-        .args(["--json", "plugins", "list"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    let payload = parse_json_stdout(&output.stdout);
-    assert!(
-        payload
-            .as_array()
-            .expect("plugins list should render a JSON array")
-            .iter()
-            .any(|row| {
-                row["plugin_id"] == "hello"
-                    && row["issue"].as_str().is_some_and(|issue| {
-                        issue.contains("manifest id mismatch: expected hello, got wrong")
-                    })
-            }),
-        "expected manifest id mismatch row in payload: {payload}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn duplicate_plugin_ids_keep_one_winner_and_shadow_later_copies_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-duplicate-ids");
-    write_mismatched_id_plugin(&dir, "alpha-bin", "shared-id", "alpha");
-    write_mismatched_id_plugin(&dir, "beta-bin", "shared-id", "beta");
-    let home = make_temp_dir("osp-cli-plugin-duplicate-ids-home");
-
-    let mut list = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    let list_output = list
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["--json", "plugins", "list"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    let list_payload = parse_json_stdout(&list_output.stdout);
-    let rows = list_payload
-        .as_array()
-        .expect("plugins list should render a JSON array");
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row["plugin_id"] == "shared-id"));
-    assert_eq!(rows.iter().filter(|row| row["healthy"] == true).count(), 1);
-    assert_eq!(rows.iter().filter(|row| row["healthy"] == false).count(), 1);
-    assert!(rows.iter().any(|row| {
-        row["healthy"] == false
-            && row["issue"]
-                .as_str()
-                .is_some_and(|issue| issue.contains("duplicate plugin id `shared-id` shadowed by"))
-    }));
-    assert!(rows.iter().any(|row| {
-        row["healthy"] == true
-            && row["commands"].as_array().is_some_and(|commands| {
-                commands.contains(&serde_json::Value::String("alpha".to_string()))
-            })
-    }));
-
-    let mut commands = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    let commands_output = commands
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["--json", "plugins", "commands"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    let commands_payload = parse_json_stdout(&commands_output.stdout);
-    let row = first_json_row(&commands_payload, "plugins commands duplicate winner view");
-    assert_eq!(row["name"], "alpha");
-    assert_eq!(row["provider"], "shared-id");
-    assert_eq!(row["source"], "env");
-    assert_eq!(row["conflicted"], false);
-    assert_eq!(row["requires_selection"], false);
-
-    let mut winner = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    winner
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["alpha"]);
-    winner
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("ignored"));
-
-    let mut shadowed = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    shadowed
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["beta"]);
-    shadowed
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown command beta"));
-}
-
-#[cfg(unix)]
-#[test]
-fn plugin_min_osp_version_mismatch_marks_plugin_unhealthy_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-min-osp-version");
-    let _plugin_path = write_plugin_with_min_version(&dir, "future", "9.9.9");
-    let home = make_temp_dir("osp-cli-plugin-min-osp-version-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    let output = cmd
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["--json", "plugins", "list"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    let payload = parse_json_stdout(&output.stdout);
-    assert!(
-        payload
-            .as_array()
-            .expect("plugins list should render a JSON array")
-            .iter()
-            .any(|row| {
-                row["plugin_id"] == "future"
-                    && row["healthy"] == false
-                    && row["issue"]
-                        .as_str()
-                        .is_some_and(|issue| issue.contains("requires osp >="))
-            }),
-        "expected min-version failure row in payload: {payload}"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn plugins_commands_surface_session_requirements_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-session-auth");
-    let _plugin_path = write_session_auth_plugin(&dir);
-    let home = make_temp_dir("osp-cli-plugin-session-auth-home");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    let output = cmd
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["--json", "plugins", "commands"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    let payload = parse_json_stdout(&output.stdout);
-    let row = first_json_row(&payload, "plugins commands session auth view");
-    assert_eq!(row["name"], "secure");
-    assert_eq!(row["auth_visibility"], "authenticated");
-    assert_eq!(row["auth_hint"], "auth; run: token: osp valid");
-    assert_eq!(
-        row["run_session"],
-        serde_json::json!({
-            "credentials": [{"state":"valid","service":"osp"}]
-        })
-    );
+fn bundled_plugin_runs_without_manifest_contract() {
+    let home = make_temp_dir("plugins-bundled");
+    let bundled = home.join("bundled");
+    hello(&bundled);
+    let rows = json_stdout(plugin_command(&home, &home, &["plugins", "list", "--json"])
+        .env("OSP_BUNDLED_PLUGIN_DIR", &bundled));
+    assert_eq!(rows[0]["name"], "hello");
+    assert_eq!(rows[0]["source"], "bundled");
+    assert_eq!(rows[0]["status"], "ok");
+    plugin_command(&home, &home, &["hello", "bob"])
+        .env("OSP_BUNDLED_PLUGIN_DIR", bundled).assert().success()
+        .stdout(predicate::str::contains("hello bob"));
 }

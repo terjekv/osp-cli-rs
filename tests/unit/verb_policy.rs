@@ -49,18 +49,7 @@ fn builtin_command_verbs_are_consistent() {
     assert_subcommands(
         &cmd,
         "plugins",
-        set(&[
-            "list",
-            "commands",
-            "config",
-            "refresh",
-            "enable",
-            "disable",
-            "clear-state",
-            "select-provider",
-            "clear-provider",
-            "doctor",
-        ]),
+        set(&["list", "refresh", "enable", "disable"]),
     );
     assert_subcommands(&cmd, "notifications", set(&["preview"]));
     assert_subcommands(&cmd, "theme", set(&["list", "show", "use"]));

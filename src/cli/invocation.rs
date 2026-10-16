@@ -22,15 +22,7 @@ pub(crate) struct InvocationFlag {
     is_set: fn(&InvocationOptions) -> bool,
 }
 
-impl InvocationFlag {
-    pub(crate) fn consumes(&self, spelling: &str) -> bool {
-        spelling == self.long
-            || self
-                .short
-                .is_some_and(|short| spelling == format!("-{short}"))
-            || self.aliases.iter().any(|alias| spelling == alias.long)
-    }
-}
+impl InvocationFlag {}
 
 pub(crate) struct InvocationAlias {
     pub(crate) long: &'static str,
@@ -217,17 +209,6 @@ pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
         },
         is_set: |_| false,
     },
-    InvocationFlag {
-        long: "--plugin-provider",
-        short: None,
-        value_name: Some("PLUGIN_ID"),
-        choices: Vec::new,
-        aliases: &[],
-        help: "Select provider for this invocation",
-        completion_help: Some("Select plugin provider for this invocation"),
-        set: |o, v, source| set_plugin_provider(&mut o.plugin_provider, v, source),
-        is_set: |o| o.plugin_provider.is_some(),
-    },
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -239,7 +220,6 @@ pub(crate) struct InvocationOptions {
     pub(crate) verbose: u8,
     pub(crate) quiet: u8,
     pub(crate) debug: u8,
-    pub(crate) plugin_provider: Option<String>,
 }
 
 pub(crate) struct ScannedCliArgs {
@@ -293,9 +273,6 @@ impl InvocationOptions {
                     value.as_str()
                 )
             })?;
-        }
-        if let Some(value) = other.plugin_provider {
-            set_plugin_provider(&mut self.plugin_provider, &value, "--plugin-provider")?;
         }
         self.verbose = self.verbose.saturating_add(other.verbose);
         self.quiet = self.quiet.saturating_add(other.quiet);
@@ -438,17 +415,6 @@ fn parse_option<T: Copy>(
     *slot = parsed;
     result
 }
-
-fn set_plugin_provider(slot: &mut Option<String>, value: &str, source: &str) -> Result<()> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Err(miette!("{source} expects a non-empty value"));
-    }
-    set_once(slot, value.to_string(), |_| {
-        format!("`{source}` specified more than once")
-    })
-}
-
 fn invocation_help_entries(level: HelpLevel) -> Vec<DocumentEntry> {
     let mut entries = Vec::new();
     for flag in INVOCATION_FLAGS {
@@ -606,15 +572,7 @@ mod tests {
 
     #[test]
     fn scan_command_tokens_covers_host_flags_aliases_clusters_and_trace_unit() {
-        let scanned = scan(&[
-            "ldap",
-            "user",
-            "oistes",
-            "--json",
-            "-vv",
-            "--plugin-provider",
-            "uio-ldap",
-        ]);
+        let scanned = scan(&["ldap", "user", "oistes", "--json", "-vv"]);
         assert_eq!(scanned.tokens, vec!["ldap", "user", "oistes"]);
         assert_eq!(
             scanned.invocation,
@@ -626,7 +584,6 @@ mod tests {
                 verbose: 2,
                 quiet: 0,
                 debug: 0,
-                plugin_provider: Some("uio-ldap".to_string()),
             }
         );
 
@@ -689,15 +646,7 @@ mod tests {
                 vec!["ldap", "--json", "--format", "json"],
                 "conflicting output format flags",
             ),
-            (
-                vec!["ldap", "--plugin-provider", "one", "--plugin-provider=two"],
-                "specified more than once",
-            ),
             (vec!["ldap", "--render-mode", "wat"], "unknown render mode"),
-            (
-                vec!["ldap", "--plugin-provider", "   "],
-                "expects a non-empty value",
-            ),
             (vec!["ldap", "--format"], "`--format` expects a value"),
             (vec!["ldap", "--color"], "`--color` expects a value"),
             (
@@ -767,7 +716,6 @@ mod tests {
         let hidden = hidden_invocation_completion_flags(&InvocationOptions::default());
         assert!(!hidden.contains("--guide"));
         assert!(hidden.contains("--json"));
-        assert!(hidden.contains("--plugin-provider"));
         assert!(hidden.contains("--debug"));
 
         let verbose = hidden_invocation_completion_flags(&InvocationOptions {
@@ -775,20 +723,17 @@ mod tests {
             ..InvocationOptions::default()
         });
         assert!(!verbose.contains("--json"));
-        assert!(!verbose.contains("--plugin-provider"));
         assert!(!verbose.contains("--debug"));
 
         let used_one_shots = hidden_invocation_completion_flags(&InvocationOptions {
             verbose: 1,
             format: Some(OutputFormat::Json),
-            plugin_provider: Some("ldap".to_string()),
             ..InvocationOptions::default()
         });
         assert!(used_one_shots.contains("--format"));
         assert!(!used_one_shots.contains("--guide"));
         assert!(used_one_shots.contains("--json"));
         assert!(used_one_shots.contains("--table"));
-        assert!(used_one_shots.contains("--plugin-provider"));
         assert!(!used_one_shots.contains("--debug"));
 
         let scanned = scan_cli_argv(&[

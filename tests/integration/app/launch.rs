@@ -24,9 +24,9 @@ fn write_named_plugin(dir: &std::path::Path, name: &str) {
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{name}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{name}","about":"{name} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{name} plugin","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -50,7 +50,7 @@ fn app_state_builder_uses_launch_context_for_plugin_roots_and_path_discovery() {
     write_named_plugin(explicit_dir.path(), "explicit-probe");
     write_named_plugin(path_dir.path(), "path-probe");
 
-    let config = resolved_config(&[("extensions.plugins.discovery.path", "true")]);
+    let config = resolved_config(&[]);
     let launch = LaunchContext::default()
         .with_plugin_dir(explicit_dir.path().to_path_buf())
         .with_config_root(Some(config_root.path().to_path_buf()))
@@ -78,17 +78,9 @@ fn app_state_builder_uses_launch_context_for_plugin_roots_and_path_discovery() {
             Some(cache_root.path())
         );
 
-        let plugins = state.clients.plugins().list_plugins();
-        assert!(
-            plugins
-                .iter()
-                .any(|plugin| plugin.plugin_id == "explicit-probe")
-        );
-        assert!(
-            plugins
-                .iter()
-                .any(|plugin| plugin.plugin_id == "path-probe")
-        );
+        let plugins = state.clients.plugins().list();
+        assert!(plugins.iter().any(|plugin| plugin.name == "explicit-probe"));
+        assert!(plugins.iter().any(|plugin| plugin.name == "path-probe"));
     });
 }
 

@@ -884,11 +884,6 @@ impl NativeCommandRegistry {
                         .map(|child| child.get_name().to_string())
                         .collect(),
                     completion,
-                    provider: None,
-                    providers: Vec::new(),
-                    conflicted: false,
-                    requires_selection: false,
-                    selected_explicitly: false,
                     source: CommandSource::Native,
                 }
             })

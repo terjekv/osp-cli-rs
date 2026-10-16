@@ -85,7 +85,7 @@ fn document_intent_is_explicit_and_ordinary_records_remain_data_unit() {
 #[test]
 fn document_markdown_surfaces_sections_and_keeps_entry_rows_unit() {
     let document = Document::from_help_text(
-        "Usage: history <COMMAND>\n\nCommands:\n  list     List history entries\n  plugins  Inspect and manage plugin providers\n\nOptions:\n  -h, --help  Print help\n",
+        "Usage: history <COMMAND>\n\nCommands:\n  list     List history entries\n  plugins  Inspect and manage plugins\n\nOptions:\n  -h, --help  Print help\n",
     );
     let mut settings = settings(OutputFormat::Markdown);
     for width in [None, Some(90)] {

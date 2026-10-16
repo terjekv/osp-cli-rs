@@ -792,9 +792,9 @@ fn write_route_probe_plugin(dir: &std::path::Path, plugin_id: &str, command_name
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{command_name} route probe","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{command_name} route probe","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -803,7 +803,6 @@ cat <<JSON
 {{"protocol_version":1,"ok":true,"data":[{{"profile":"${{OSP_PROFILE:-}}","selected_command":"${{OSP_COMMAND:-}}","arg0":"${{1:-}}","arg1":"${{2:-}}"}}],"error":null,"meta":{{"format_hint":"json"}}}}
 JSON
 "#,
-        plugin_id = plugin_id,
         command_name = command_name,
     );
     write_executable_script(&plugin_path, &script);

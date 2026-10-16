@@ -293,9 +293,6 @@ fn invocation_prefilled_flags(
     if invocation.debug > 0 {
         out.insert("--debug".to_string(), Vec::new());
     }
-    if let Some(provider) = invocation.plugin_provider.clone() {
-        out.insert("--plugin-provider".to_string(), vec![provider]);
-    }
 
     out
 }

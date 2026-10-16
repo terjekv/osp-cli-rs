@@ -129,9 +129,9 @@ fn write_hello_plugin(dir: &std::path::Path) -> std::path::PathBuf {
     let plugin_path = dir.join("osp-hello");
     let plugin_script = r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"hello","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"hello","about":"hello plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"hello plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi

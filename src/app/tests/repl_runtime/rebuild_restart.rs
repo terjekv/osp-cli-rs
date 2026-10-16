@@ -75,40 +75,6 @@ fn rebuild_repl_state_preserves_session_render_defaults_unit() {
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Table);
     });
 }
-
-#[cfg_attr(miri, ignore = "path/plugin filesystem integration test")]
-#[test]
-fn rebuild_repl_state_preserves_path_discovery_enabled_by_config_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
-    let path_root = make_temp_dir("osp-cli-repl-path-discovery");
-    let plugins_dir = path_root.join("plugins");
-    std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-    let _plugin = write_pipeline_test_plugin(&plugins_dir);
-
-    let original_path = std::env::var_os("PATH");
-    let joined_path = std::env::join_paths(
-        std::iter::once(plugins_dir.clone())
-            .chain(original_path.iter().flat_map(std::env::split_paths)),
-    )
-    .expect("PATH should join");
-    unsafe { std::env::set_var("PATH", joined_path) };
-
-    let mut state = make_test_state(Vec::new());
-    state
-        .session
-        .config_overrides
-        .set("extensions.plugins.discovery.path", true);
-
-    let next = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
-    let plugins = next.clients.plugins().list_plugins();
-    assert!(plugins.iter().any(|plugin| plugin.plugin_id == "hello"));
-
-    match original_path {
-        Some(value) => unsafe { std::env::set_var("PATH", value) },
-        None => unsafe { std::env::remove_var("PATH") },
-    }
-}
-
 #[cfg_attr(miri, ignore = "plugin restart filesystem/process integration test")]
 #[test]
 fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
@@ -119,8 +85,7 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
         state
             .clients
             .plugins()
-            .set_command_state("hello", crate::plugin::state::PluginCommandState::Disabled)
-            .expect("command should disable");
+            .set_disabled(["hello".to_string()]);
         assert!(state.clients.plugins().command_catalog().is_empty());
 
         let history = make_test_history(&mut state);

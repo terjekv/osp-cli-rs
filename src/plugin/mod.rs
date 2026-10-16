@@ -9,5 +9,9 @@ pub(crate) mod env;
 pub mod manager;
 pub(crate) mod run;
 
-pub use manager::{CommandCatalogEntry, CommandSource, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS,
-    Plugin, PluginDispatchContext, PluginManager, PluginSource};
+pub use manager::{
+    CommandCatalogEntry, CommandSource, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, Plugin, PluginManager,
+    PluginSource,
+};
+
+pub(crate) use manager::PluginDispatchContext;

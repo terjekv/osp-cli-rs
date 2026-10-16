@@ -9,9 +9,9 @@ fn repl_plugin_error_payload_is_handled_as_error_unit() {
         &plugin_path,
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"fail","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"fail","about":"fail","subcommands":[],"args":[],"flags":{}}]}
+{"about":"fail","subcommands":[],"args":[],"flags":{},"output":"json"}
 JSON
   exit 0
 fi
@@ -50,16 +50,10 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
     let history = make_test_history(&mut state);
     let stages = vec!["message".to_string()];
 
-    let dispatch_context =
-        super::super::plugin_dispatch_context_for_runtime(&state.runtime, &state.clients, None);
-    let response = state
-        .clients
-        .plugins()
-        .dispatch("hello", &[], &dispatch_context)
-        .expect("plugin dispatch should succeed");
-    let result = super::super::cli_result_from_plugin_response(response, &stages)
-        .and_then(|result| super::super::command_output::apply_stages_to_cli_result(result, &stages))
-        .expect("plugin response should prepare");
+    let invocation = crate::app::resolve_invocation_ui(state.runtime.config.resolved(), &state.runtime.ui, &Default::default());
+    let result = crate::app::external::run_external_command_with_help_renderer(
+        &mut state, &["hello".into()], &invocation, Document::from_help_text, None,
+    ).and_then(|result| crate::app::command_output::apply_stages_to_cli_result(result, &stages)).expect("CLI plugin output should prepare");
     assert_eq!(result.exit_code, 0);
     assert!(result.failure_report.is_none());
     let crate::app::CommandBody::Output(prepared) = result.body else {
@@ -79,44 +73,6 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         crate::repl::ReplResult::Print(text) => {
             assert_eq!(text.trim(), cli_rendered.trim());
             assert!(text.contains("hello-from-plugin"));
-        }
-        other => panic!("unexpected repl result: {other:?}"),
-    }
-
-}
-
-#[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
-#[test]
-fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
-    let dir = make_temp_dir("osp-cli-repl-provider-override");
-    let _alpha = write_provider_test_plugin(&dir, "alpha-provider", "hello", "alpha");
-    let _beta = write_provider_test_plugin(&dir, "beta-provider", "hello", "beta");
-    let mut state = make_test_state(vec![dir.to_path_buf()]);
-    state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
-
-    let mut sink = BufferedUiSink::default();
-    repl_dispatch::execute_repl_plugin_line(
-        &mut state,
-        &history,
-        "hello", Some(&mut sink),)
-    .expect("ambiguity should render through the sink");
-    let message = &sink.stderr;
-    assert!(
-        message.contains("provided by multiple plugins")
-            || message.contains("requires provider selection"),
-        "unexpected ambiguity message: {message}",
-    );
-
-    let repl_rendered = repl_dispatch::execute_repl_plugin_line(
-        &mut state,
-        &history,
-        "--plugin-provider beta-provider hello", None,).map(|executed| executed.result)
-    .expect("repl command should honor one-shot provider override");
-    match repl_rendered {
-        crate::repl::ReplResult::Print(text) => {
-            assert!(text.contains("beta-from-plugin"));
-            assert!(!text.contains("alpha-from-plugin"));
         }
         other => panic!("unexpected repl result: {other:?}"),
     }

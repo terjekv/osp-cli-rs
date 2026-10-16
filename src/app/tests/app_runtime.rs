@@ -551,49 +551,6 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
     ignore = "forensic backtrace rendering uses std backtrace display"
 )]
 #[test]
-fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
-    let settings = RenderSettings::test_plain(OutputFormat::Auto);
-    let report = enrich_dispatch_error(PluginDispatchError::NonZeroExit {
-        plugin_id: "ldap".to_string(),
-        status_code: 7,
-        stderr: "backend exploded".to_string(),
-    });
-
-    let rendered = render_report_message(&report, MessageLevel::Success, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7: backend exploded"));
-    assert!(rendered.contains("Try: inspect the plugin stderr"));
-    assert!(!rendered.contains("run again with -v"));
-
-    let rendered = render_report_message(&report, MessageLevel::Info, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7"));
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(!rendered.contains("Try:"));
-
-    let rendered = render_report_message(&report, MessageLevel::Trace, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7"));
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(!rendered.contains("Try:"));
-    assert!(!rendered.contains("Stack backtrace"));
-
-    let rendered = render_report_message(&report, MessageLevel::Trace, &settings);
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(!rendered.contains("Stack backtrace"));
-
-    let report = crate::app::host::report_report_with_context(
-        miette::miette!("unknown theme: missing-theme"),
-        crate::app::host::ErrorContext::Operation(
-            "failed to derive host runtime inputs for startup",
-        ),
-    );
-    let rendered = render_report_message(&report, MessageLevel::Success, &settings);
-    assert!(rendered.contains("unknown theme: missing-theme"));
-    assert!(!rendered.starts_with("failed to derive host runtime inputs for startup"));
-}
-
-#[test]
 fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
     let config = test_config(&[]);
     let ui = crate::app::UiState::new(
@@ -1010,9 +967,7 @@ fn exit_code_classification_reserves_specific_codes_for_usage_unit() {
         .expect_err("config resolution should fail");
         assert_eq!(classify_exit_code(&config_report), EXIT_CODE_ERROR);
 
-        let plugin_report = enrich_dispatch_error(PluginDispatchError::CommandNotFound {
-            command: "ldap".to_string(),
-        });
+        let plugin_report = miette::miette!("unknown plugin ldap");
         assert_eq!(classify_exit_code(&plugin_report), EXIT_CODE_ERROR);
     });
 }

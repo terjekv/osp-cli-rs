@@ -78,8 +78,14 @@ pub struct PluginDescribe {
 }
 impl PluginDescribe {
     pub(crate) fn command(self, name: &str) -> DescribeCommandV1 {
-        let mut command = DescribeCommandV1 { name: name.into(), about: self.about,
-            auth: self.auth, args: self.args, flags: self.flags, subcommands: self.subcommands };
+        let mut command = DescribeCommandV1 {
+            name: name.into(),
+            about: self.about,
+            auth: self.auth,
+            args: self.args,
+            flags: self.flags,
+            subcommands: self.subcommands,
+        };
         command.inherit_auth_from_parents();
         command
     }
@@ -544,15 +550,7 @@ pub(crate) fn canonical_plugin_command_name(command: &str) -> Result<String, Str
 }
 
 impl DescribeCommandV1 {
-    /// Resolves the command path and delegated-help intent in one grammar pass.
-    ///
-    /// Plugin descriptions do not carry enough information to reproduce every
-    /// parser feature a plugin may use. The host therefore only treats help as
-    /// delegated when it can prove the shape from the description: zero or
-    /// more described subcommands followed by one terminal `help`, `--help`,
-    /// or `-h` token. Options and positional operands before the marker are
-    /// normal execution, so they cannot turn a guarded command into a
-    /// visibility-only request.
+    /// Resolves described options and subcommands for authorization checks.
     pub(crate) fn resolve_invocation(&self, args: &[String]) -> DescribeInvocation {
         let mut segments = vec![self.name.clone()];
         let mut current = self;
@@ -560,29 +558,14 @@ impl DescribeCommandV1 {
         let mut positional_index = 0;
         let mut open_multi_positional = false;
         let mut index = 0;
-        let mut exact_help_shape = true;
 
         while let Some(token) = args.get(index) {
             if token == "--" {
                 break;
             }
 
-            // A help token is delegated only when it is the final token. This
-            // intentionally excludes `--help value` and `help value`, whose
-            // meaning belongs to the plugin's own parser.
-            if token == "help" && current.args.get(positional_index).is_some() {
-                return DescribeInvocation {
-                    path: CommandPath::new(segments),
-                    delegated_help: false,
-                    ambiguous: !current.subcommands.is_empty(),
-                };
-            }
-            if matches!(token.as_str(), "help" | "--help" | "-h") {
-                return DescribeInvocation {
-                    path: CommandPath::new(segments),
-                    delegated_help: exact_help_shape && index + 1 == args.len(),
-                    ambiguous: index + 1 != args.len() && !current.subcommands.is_empty(),
-                };
+            if matches!(token.as_str(), "--help" | "-h") {
+                break;
             }
 
             if let Some(subcommand) = current
@@ -597,7 +580,6 @@ impl DescribeCommandV1 {
                 if open_multi_positional || current.args.get(positional_index).is_some() {
                     return DescribeInvocation {
                         path: CommandPath::new(segments),
-                        delegated_help: false,
                         ambiguous: true,
                     };
                 }
@@ -620,7 +602,6 @@ impl DescribeCommandV1 {
                     && !token.starts_with("--")
                     && token.chars().count() > 2);
             if let Some(flag) = flag {
-                exact_help_shape = false;
                 if !flag.flag_only && !has_attached_value {
                     // Missing option values are ambiguous; do not try to
                     // interpret a later token as a subcommand or help flag.
@@ -642,7 +623,6 @@ impl DescribeCommandV1 {
             }
 
             if let Some(argument) = current.args.get(positional_index) {
-                exact_help_shape = false;
                 positional_index += 1;
                 index += 1;
                 if argument.multi {
@@ -671,7 +651,6 @@ impl DescribeCommandV1 {
 
         DescribeInvocation {
             path: CommandPath::new(segments),
-            delegated_help: false,
             ambiguous: match args.get(index) {
                 None => false,
                 Some(token) if token == "--" => args.get(index + 1).is_some(),
@@ -701,8 +680,6 @@ impl DescribeCommandV1 {
 pub(crate) struct DescribeInvocation {
     /// Best-known canonical command path for policy evaluation.
     pub(crate) path: CommandPath,
-    /// Whether the exact delegated-help contract was proven.
-    pub(crate) delegated_help: bool,
     /// Whether an unknown token could hide a nested command path.
     pub(crate) ambiguous: bool,
 }
@@ -903,7 +880,7 @@ fn clap_suggestions(arg: &clap::Arg) -> Vec<DescribeSuggestionV1> {
         .collect()
 }
 
-fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
+pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
     if canonical_plugin_command_name(&command.name)? != command.name {
         return Err("command name must not have leading or trailing whitespace".to_string());
     }
@@ -966,56 +943,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCommandV1,
-        DescribeCredentialRequirementV1, DescribeSessionRequirementsV1, DescribeV1,
-        DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1, ResponseMetaV1, ResponseV1,
-        canonical_plugin_command_name,
+        DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCredentialRequirementV1,
+        DescribeSessionRequirementsV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
+        ResponseMetaV1, ResponseV1, canonical_plugin_command_name,
     };
     use serde_json::json;
-
     #[test]
     fn protocol_validation_names_the_invalid_field_unit() {
-        let describe = json!({
-            "protocol_version": PLUGIN_PROTOCOL_V1,
-            "plugin_id": "vm",
-            "plugin_version": "1.0.0",
-            "commands": [{
-                "name": "vm",
-                "auth": {"feature_flags": ["beta"], "visible_session": {"credentials": [{"state": "present", "service": "orch"}]}},
-                "flags": {"--size": {"suggestions": [{"value": "small"}]}},
-                "args": [{"suggestions": [{"value": "db01"}]}],
-                "subcommands": [{"name": "list"}]
-            }]
-        });
-        let validate_describe = |value: serde_json::Value| {
-            serde_json::from_value::<DescribeV1>(value)
-                .expect("describe fixture should deserialize")
-                .validate_v1()
-        };
-        assert_eq!(validate_describe(describe.clone()), Ok(()));
-        for (pointer, value, field) in [
-            ("/protocol_version", json!(2), "protocol version"),
-            ("/plugin_id", json!("env"), "reserved"),
-            ("/plugin_id", json!("VM"), "plugin_id"),
-            ("/commands/0/subcommands/0/name", json!(" "), "command name"),
-            ("/commands/0/flags", json!({"size": {}}), "flag `size`"),
-            (
-                "/commands/0/flags/--size/suggestions/0/value",
-                json!(" "),
-                "flag `--size` suggestions",
-            ),
-            (
-                "/commands/0/args/0/suggestions/0/value",
-                json!(""),
-                "argument",
-            ),
-        ] {
-            let mut invalid = describe.clone();
-            *invalid.pointer_mut(pointer).expect("fixture path") = value;
-            let error = validate_describe(invalid).expect_err(pointer);
-            assert!(error.contains(field), "{pointer}: {error}");
-        }
-
         let response = json!({
             "protocol_version": PLUGIN_PROTOCOL_V1,
             "ok": true,
@@ -1177,194 +1111,11 @@ mod tests {
                 .contains("must use lowercase ASCII letters")
         );
     }
-
-    #[test]
-    fn describe_validation_rejects_mixed_case_command_names_unit() {
-        let describe = DescribeV1 {
-            protocol_version: PLUGIN_PROTOCOL_V1,
-            plugin_id: "demo".to_string(),
-            plugin_version: "0.1.0".to_string(),
-            min_osp_version: None,
-            commands: vec![DescribeCommandV1 {
-                name: "Ldap".to_string(),
-                about: String::new(),
-                auth: None,
-                args: Vec::new(),
-                flags: BTreeMap::new(),
-                subcommands: Vec::new(),
-            }],
-        };
-
-        assert!(
-            describe
-                .validate_v1()
-                .expect_err("mixed-case command names should be rejected")
-                .contains("must use lowercase ASCII letters")
-        );
-    }
-
-    #[test]
-    fn resolve_invocation_follows_described_subcommands_and_values_unit() {
-        let mut root_flags = BTreeMap::new();
-        root_flags.insert(
-            "--format".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: false,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let mut approval_flags = BTreeMap::new();
-        approval_flags.insert(
-            "--verbose".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: true,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let command = DescribeCommandV1 {
-            name: "orch".to_string(),
-            about: String::new(),
-            auth: None,
-            args: Vec::new(),
-            flags: root_flags,
-            subcommands: vec![DescribeCommandV1 {
-                name: "approval".to_string(),
-                about: String::new(),
-                auth: None,
-                args: vec![super::DescribeArgV1::default()],
-                flags: approval_flags,
-                subcommands: vec![DescribeCommandV1 {
-                    name: "decide".to_string(),
-                    about: String::new(),
-                    auth: None,
-                    args: Vec::new(),
-                    flags: BTreeMap::new(),
-                    subcommands: Vec::new(),
-                }],
-            }],
-        };
-
-        assert!(!command.resolve_invocation(&[]).ambiguous);
-        assert!(
-            command
-                .resolve_invocation(&["--format".to_string()])
-                .ambiguous
-        );
-        assert!(
-            command
-                .resolve_invocation(&["--".to_string(), "approval".to_string()])
-                .ambiguous
-        );
-        assert!(!command.resolve_invocation(&["--".to_string()]).ambiguous);
-        assert_eq!(
-            command
-                .resolve_invocation(&[
-                    "--format".to_string(),
-                    "json".to_string(),
-                    "approval".to_string(),
-                    "--verbose".to_string(),
-                    "ticket-123".to_string(),
-                    "decide".to_string(),
-                ])
-                .path
-                .as_slice(),
-            &[
-                "orch".to_string(),
-                "approval".to_string(),
-                "decide".to_string(),
-            ]
-        );
-        assert!(
-            command
-                .resolve_invocation(&["approval".to_string(), "--help".to_string()])
-                .delegated_help
-        );
-        assert_eq!(
-            command
-                .resolve_invocation(&[
-                    "--format=json".to_string(),
-                    "APPROVAL".to_string(),
-                    "--help".to_string(),
-                ])
-                .path
-                .as_slice(),
-            &["orch".to_string(), "approval".to_string()]
-        );
-
-        let ambiguous = DescribeCommandV1 {
-            args: vec![super::DescribeArgV1::default()],
-            ..command
-        };
-        assert!(
-            ambiguous
-                .resolve_invocation(&["approval".to_string()])
-                .ambiguous
-        );
-    }
-
-    #[test]
-    fn help_intent_respects_described_values_and_option_terminator_unit() {
-        let mut flags = BTreeMap::new();
-        flags.insert(
-            "--label".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: false,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let command = DescribeCommandV1 {
-            name: "demo".to_string(),
-            about: String::new(),
-            auth: None,
-            args: vec![super::DescribeArgV1::default()],
-            flags,
-            subcommands: Vec::new(),
-        };
-
-        assert!(
-            command
-                .resolve_invocation(&["--help".to_string()])
-                .delegated_help
-        );
-        assert!(
-            !command
-                .resolve_invocation(&["--label".to_string(), "--help".to_string(),])
-                .delegated_help
-        );
-        assert!(
-            !command
-                .resolve_invocation(&["--".to_string(), "--help".to_string(),])
-                .delegated_help
-        );
-
-        let command_with_two_args = DescribeCommandV1 {
-            args: vec![
-                super::DescribeArgV1::default(),
-                super::DescribeArgV1::default(),
-            ],
-            ..command
-        };
-        assert!(
-            !command_with_two_args
-                .resolve_invocation(&["ordinary".to_string(), "help".to_string()])
-                .delegated_help
-        );
-
-        let command_with_one_arg = DescribeCommandV1 {
-            args: vec![super::DescribeArgV1::default()],
-            ..command_with_two_args
-        };
-        assert!(
-            !command_with_one_arg
-                .resolve_invocation(&["help".to_string()])
-                .delegated_help
-        );
-    }
 }
 
 #[cfg(test)]
 mod clap_tests {
-    use super::{DescribeCommandV1, DescribeV1, DescribeValueTypeV1};
+    use super::{DescribeCommandV1, DescribeValueTypeV1};
     use clap::{Arg, ArgAction, Command, ValueHint};
 
     #[test]
@@ -1389,11 +1140,7 @@ mod clap_tests {
                 ),
         );
 
-        let describe =
-            DescribeV1::from_clap_command("ldap", "0.1.0", Some("0.1.0".to_string()), command);
-
-        assert_eq!(describe.commands.len(), 1);
-        let ldap = &describe.commands[0];
+        let ldap = DescribeCommandV1::from_clap(command);
         assert_eq!(ldap.name, "ldap");
         assert_eq!(ldap.subcommands.len(), 1);
 

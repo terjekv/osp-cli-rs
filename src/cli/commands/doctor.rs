@@ -36,7 +36,8 @@ pub(crate) fn run_doctor_command(
             None,
         )),
         DoctorCommands::Plugins => Ok(CommandOutput::output(
-            rows_to_output_result(plugins_cmd::plugin_rows(clients, true)), None,
+            rows_to_output_result(plugins_cmd::plugin_rows(clients, true)),
+            None,
         )),
         DoctorCommands::Last => Ok(render_last_failure_document(
             ui,
@@ -97,8 +98,7 @@ fn run_doctor_all(
         config_cmd::config_diagnostics_rows(runtime, session, ui),
     ));
 
-    let report = clients.plugins().doctor();
-    sections.push(("plugins", plugins_cmd::doctor_rows(&report)));
+    sections.push(("plugins", plugins_cmd::plugin_rows(clients, true)));
 
     sections.push(("theme", theme_doctor_rows(&runtime.themes)));
 

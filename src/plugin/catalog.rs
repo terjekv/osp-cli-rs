@@ -1,7 +1,7 @@
 //! Shared recursive authorization metadata collection.
-use std::collections::BTreeMap;
 use crate::core::command_policy::CommandPath;
-use crate::core::plugin::{DescribeCommandV1, DescribeCommandAuthV1};
+use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1};
+use std::collections::BTreeMap;
 
 pub(crate) fn collect_command_auth(
     registry: &mut BTreeMap<CommandPath, DescribeCommandAuthV1>,

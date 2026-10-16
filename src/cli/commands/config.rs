@@ -508,10 +508,7 @@ fn run_config_set(
                 std::fs::read_to_string(&path)
                     .into_diagnostic()
                     .wrap_err_with(|| {
-                        format!(
-                            "failed to read config value from {}",
-                            path.display()
-                        )
+                        format!("failed to read config value from {}", path.display())
                     })?
             };
             content.trim_end_matches(['\r', '\n']).to_owned()

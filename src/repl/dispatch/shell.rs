@@ -231,7 +231,6 @@ pub(super) fn enter_repl_shell(
         &state.runtime.auth,
         &state.clients,
         command,
-        invocation.plugin_provider.as_deref(),
         &invocation.ui.render_settings.runtime.command_scope,
     )?;
     ensure_shell_entry_dispatchable(
@@ -261,23 +260,15 @@ pub(super) fn enter_repl_shell(
 fn ensure_shell_entry_dispatchable(
     catalog: &[crate::plugin::CommandCatalogEntry],
     command: &str,
-    scope: &crate::core::CommandScope,
+    _scope: &crate::core::CommandScope,
 ) -> Result<()> {
     let matching = catalog
         .iter()
         .filter(|entry| entry.name == command)
         .collect::<Vec<_>>();
-    let Some(entry) = matching.first().copied() else {
+    let Some(_) = matching.first().copied() else {
         return Err(miette!("no command provides `{command}`"));
     };
-
-    if entry.requires_selection {
-        return Err(miette!(
-            "command `{command}` requires provider selection; available: {}; use --plugin-provider <plugin-id> or `{}`",
-            entry.providers.join(", "),
-            scope.command(&format!("plugins select-provider {command} <plugin-id>"))
-        ));
-    }
 
     Ok(())
 }
@@ -360,16 +351,10 @@ mod tests {
     use crate::ui::messages::MessageLevel;
     use clap::Command;
     #[cfg(unix)]
-    use std::fs;
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
-    use std::path::Path;
     #[cfg(all(unix, miri))]
     use std::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(all(unix, not(miri)))]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     struct NativeLdapHelpCommand;
 
     impl NativeCommand for NativeLdapHelpCommand {
@@ -455,57 +440,6 @@ mod tests {
         }
         .build()
     }
-
-    #[cfg(unix)]
-    fn make_temp_dir(prefix: &str) -> std::path::PathBuf {
-        #[cfg(not(miri))]
-        let unique = format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        );
-        #[cfg(miri)]
-        let unique = {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-            format!(
-                "{prefix}-{}-{}",
-                std::process::id(),
-                NEXT_ID.fetch_add(1, Ordering::Relaxed)
-            )
-        };
-        let dir = std::env::temp_dir().join(unique);
-        fs::create_dir_all(&dir).expect("temp dir should be created");
-        dir
-    }
-
-    #[cfg(unix)]
-    fn write_provider_test_plugin(dir: &Path, plugin_id: &str, command: &str) {
-        let plugin_path = dir.join(format!("osp-{plugin_id}"));
-        let script = format!(
-            r#"#!/bin/sh
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":null,"commands":[{{"name":"{command}","about":"{plugin_id} provider","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"provider":"{plugin_id}"}},"error":null,"messages":[],"meta":{{"format_hint":"table","columns":["provider"]}}}}
-JSON
-"#
-        );
-        fs::write(&plugin_path, script).expect("plugin script should be written");
-        let mut perms = fs::metadata(&plugin_path)
-            .expect("plugin metadata should be readable")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&plugin_path, perms).expect("plugin should be executable");
-    }
-
     fn render_root_help_line(state: &mut AppState, line: &str) -> String {
         let invocation = base_repl_invocation(&state.runtime);
         let mut sink = BufferedUiSink::default();
@@ -721,51 +655,6 @@ JSON
         }
         assert_eq!(state.session.scope.commands(), &["ldap".to_string()]);
     }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "plugin filesystem integration test")]
-    #[test]
-    fn ambiguous_plugin_shell_entry_fails_before_scope_mutation_unit() {
-        let root = make_temp_dir("osp-cli-repl-shell-ambiguous-plugin");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "hello");
-        write_provider_test_plugin(&plugins_dir, "beta", "hello");
-        let plugin_manager = crate::plugin::PluginManager::new(vec![plugins_dir]);
-        let mut state = app_state_with_parts(plugin_manager, NativeCommandRegistry::default());
-        let invocation = base_repl_invocation(&state.runtime);
-        let mut sink = BufferedUiSink::default();
-
-        let err = enter_repl_shell(&mut state, "hello", &invocation, &mut sink)
-            .expect_err("ambiguous plugin shell entry should fail");
-        assert!(err.to_string().contains("requires provider selection"));
-        assert!(state.session.scope.is_root());
-
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "plugin filesystem integration test")]
-    #[test]
-    fn native_and_plugin_shell_collision_fails_before_scope_mutation_unit() {
-        let root = make_temp_dir("osp-cli-repl-shell-native-collision");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
-        let plugin_manager = crate::plugin::PluginManager::new(vec![plugins_dir]);
-        let native = NativeCommandRegistry::new().with_command(NativeLdapHelpCommand);
-        let mut state = app_state_with_parts(plugin_manager, native);
-        let invocation = base_repl_invocation(&state.runtime);
-        let mut sink = BufferedUiSink::default();
-
-        let err = enter_repl_shell(&mut state, "ldap", &invocation, &mut sink)
-            .expect_err("native/plugin collision should fail");
-        assert!(err.to_string().contains("ambiguous across command sources"));
-        assert!(state.session.scope.is_root());
-
-        fs::remove_dir_all(root).ok();
-    }
-
     #[test]
     fn root_help_shortcut_supports_dsl_stages_unit() {
         let mut state = app_state();

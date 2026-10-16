@@ -8,7 +8,6 @@
 
 use crate::config::{ConfigValue, ResolvedConfig};
 use crate::core::runtime::{RuntimeHints, RuntimeTerminalKind};
-use crate::plugin::config::{PluginConfigScope, config_value_to_plugin_env};
 use crate::plugin::{DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchContext};
 use crate::ui::RenderRuntime;
 use crate::ui::theme::normalize_theme_name;
@@ -17,9 +16,7 @@ use miette::{Result, miette};
 use std::io::IsTerminal;
 use terminal_size::{Width, terminal_size};
 
-use super::{
-    AppClients, AppRuntime, ConfigState, ResolvedInvocation, RuntimeContext, TerminalKind, UiState,
-};
+use super::{AppRuntime, ResolvedInvocation, RuntimeContext, TerminalKind, UiState};
 
 pub(crate) fn resolve_known_theme_name(value: &str, catalog: &ThemeCatalog) -> Result<String> {
     let normalized = normalize_theme_name(value);
@@ -51,13 +48,6 @@ pub(crate) fn plugin_process_timeout(config: &ResolvedConfig) -> std::time::Dura
         DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS,
     ) as u64)
 }
-
-pub(crate) fn plugin_path_discovery_enabled(config: &ResolvedConfig) -> bool {
-    config
-        .get_bool("extensions.plugins.discovery.path")
-        .unwrap_or(false)
-}
-
 pub(crate) fn build_render_runtime(terminal_env: Option<&str>) -> RenderRuntime {
     RenderRuntime {
         command_scope: Default::default(),
@@ -68,34 +58,27 @@ pub(crate) fn build_render_runtime(terminal_env: Option<&str>) -> RenderRuntime 
         locale_utf8: locale_utf8_hint_from_env(),
     }
 }
-
-#[cfg(test)]
-pub(crate) fn plugin_dispatch_context_for_runtime(
-    runtime: &AppRuntime,
-    clients: &AppClients,
-    invocation: Option<&ResolvedInvocation>,
-) -> PluginDispatchContext {
-    build_plugin_dispatch_context(
-        &runtime.context,
-        &runtime.config,
-        clients,
-        &runtime.ui,
-        invocation,
-    )
-}
-
 pub(in crate::app) fn plugin_dispatch_context_for(
     runtime: &AppRuntime,
-    clients: &AppClients,
     invocation: Option<&ResolvedInvocation>,
 ) -> PluginDispatchContext {
-    build_plugin_dispatch_context(
-        &runtime.context,
-        &runtime.config,
-        clients,
-        &runtime.ui,
-        invocation,
-    )
+    let ui = invocation.map(|value| &value.ui).unwrap_or(&runtime.ui);
+    let env = crate::plugin::env::config_env(runtime.config.resolved());
+    PluginDispatchContext {
+        runtime_hints: runtime_hints(
+            &runtime.context,
+            runtime.config.resolved().active_profile(),
+            ui,
+        ),
+        user: runtime
+            .config
+            .resolved()
+            .get_string("user.name")
+            .map(ToOwned::to_owned)
+            .or_else(|| std::env::var("USER").ok()),
+        shared_env: env.shared,
+        plugin_env: env.commands,
+    }
 }
 
 pub(in crate::app) fn runtime_hints_for_invocation(
@@ -107,85 +90,6 @@ pub(in crate::app) fn runtime_hints_for_invocation(
         runtime.config.resolved().active_profile(),
         &invocation.ui,
     )
-}
-
-fn build_plugin_dispatch_context(
-    context: &RuntimeContext,
-    config: &ConfigState,
-    clients: &AppClients,
-    runtime_ui: &UiState,
-    invocation: Option<&ResolvedInvocation>,
-) -> PluginDispatchContext {
-    let config_env = clients.plugin_config_env(config);
-    let ui = invocation.map(|value| &value.ui).unwrap_or(runtime_ui);
-    let provider_override = invocation.and_then(|value| value.plugin_provider.clone());
-    let shared_entries = config_env.effective_entries("");
-    let shared_env_issues = shared_entries
-        .iter()
-        .filter(|entry| entry.scope == PluginConfigScope::Shared)
-        .filter_map(plugin_env_issue_text)
-        .collect::<Vec<_>>();
-
-    PluginDispatchContext::new(runtime_hints(
-        context,
-        config.resolved().active_profile(),
-        ui,
-    ))
-    .with_shared_env(
-        shared_entries
-            .iter()
-            .filter(|entry| entry.scope == PluginConfigScope::Shared && entry.issue.is_none())
-            .map(|entry| {
-                (
-                    entry.env_key.clone(),
-                    config_value_to_plugin_env(&entry.value),
-                )
-            })
-            .collect::<Vec<_>>(),
-    )
-    .with_shared_env_issues(shared_env_issues)
-    .with_plugin_env(
-        config_env
-            .by_plugin_id
-            .keys()
-            .map(|plugin_id| {
-                let entries = config_env.effective_entries(plugin_id);
-                (
-                    plugin_id.clone(),
-                    entries
-                        .into_iter()
-                        .filter(|entry| {
-                            entry.scope == PluginConfigScope::Plugin && entry.issue.is_none()
-                        })
-                        .map(|entry| (entry.env_key, config_value_to_plugin_env(&entry.value)))
-                        .collect(),
-                )
-            })
-            .collect(),
-    )
-    .with_plugin_env_issues(
-        config_env
-            .by_plugin_id
-            .keys()
-            .filter_map(|plugin_id| {
-                let issues = config_env
-                    .effective_entries(plugin_id)
-                    .iter()
-                    .filter(|entry| entry.scope == PluginConfigScope::Plugin)
-                    .filter_map(plugin_env_issue_text)
-                    .collect::<Vec<_>>();
-                (!issues.is_empty()).then_some((plugin_id.clone(), issues))
-            })
-            .collect(),
-    )
-    .with_provider_override(provider_override)
-}
-
-fn plugin_env_issue_text(entry: &crate::plugin::config::PluginConfigEntry) -> Option<String> {
-    entry
-        .issue
-        .as_ref()
-        .map(|issue| format!("{} from {}: {}", entry.env_key, entry.config_key, issue))
 }
 
 fn runtime_hints(context: &RuntimeContext, active_profile: &str, ui: &UiState) -> RuntimeHints {

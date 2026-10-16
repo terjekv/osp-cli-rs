@@ -577,34 +577,6 @@ fn compact_root_completion_suggestions_prioritize_core_commands_unit() {
         ["help", "exit", "quit", "config", "theme", "plugins"]
     );
 }
-
-#[test]
-fn repl_surface_exposes_selected_provider_for_conflicts_unit() {
-    let state = make_completion_state();
-    let surface = surface::build_repl_surface(
-        repl_view(&state.runtime, &state.session),
-        &sample_conflicted_catalog(),
-    );
-
-    let overview = surface
-        .overview_entries
-        .iter()
-        .find(|entry| entry.name == "hello")
-        .expect("hello overview should exist");
-    assert!(overview.summary.contains("provider selection required"));
-    assert!(overview.summary.contains("--plugin-provider"));
-    assert!(overview.summary.contains("beta-provider (user)"));
-
-    let spec = surface
-        .specs
-        .iter()
-        .find(|entry| entry.name == "hello")
-        .expect("hello command spec should exist");
-    let tooltip = spec.tooltip.as_deref().expect("tooltip should exist");
-    assert!(tooltip.contains("provider selection required"));
-    assert!(tooltip.contains("beta-provider (user)"));
-}
-
 #[test]
 fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
     let state = make_completion_state();
@@ -621,14 +593,8 @@ fn repl_surface_keeps_policy_details_in_tooltips_not_the_overview_unit() {
             }),
             subcommands: vec!["approval".to_string()],
             completion: crate::completion::CompletionNode::new("orch"),
-            provider: Some("orch".to_string()),
-            providers: vec!["orch (explicit)".to_string()],
-            conflicted: false,
-            requires_selection: false,
-            selected_explicitly: false,
-            source: crate::plugin::CommandSource::Plugin(Some(
-                crate::plugin::PluginSource::Explicit,
-            )),
+
+            source: crate::plugin::CommandSource::Plugin(crate::plugin::PluginSource::Explicit),
         }],
     );
 

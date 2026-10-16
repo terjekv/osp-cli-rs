@@ -241,16 +241,15 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
             BuiltinKey {
                 key: "extensions.plugins.timeout_ms",
                 schema: SchemaEntry::positive_integer()
-                    .with_doc("Plugin process timeout in milliseconds"),
+                    .with_doc("Plugin describe timeout in milliseconds"),
                 default: Some(ConfigValue::from(
                     crate::plugin::DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS as i64,
                 )),
             },
             BuiltinKey {
-                key: "extensions.plugins.discovery.path",
-                schema: SchemaEntry::boolean()
-                    .with_doc("Whether plugin discovery should scan PATH"),
-                default: Some(ConfigValue::from(false)),
+                key: "extensions.plugins.disabled",
+                schema: SchemaEntry::string_list().with_doc("Disabled plugin names"),
+                default: Some(ConfigValue::from(Vec::<String>::new())),
             },
             BuiltinKey {
                 key: "repl.prompt",

@@ -8,15 +8,14 @@ use miette::Result;
 
 use crate::config::ResolvedConfig;
 use crate::plugin::PluginManager;
-use crate::plugin::state::PluginCommandPreferences;
 use crate::ui::RenderSettings;
 use crate::ui::theme::DEFAULT_THEME_NAME;
 use crate::ui::theme_catalog::ThemeCatalog;
 
 use super::{
     AppSession, LaunchContext, RuntimeContext, UiState, build_logging_config, build_render_runtime,
-    debug_level_from_config, plugin_path_discovery_enabled, plugin_process_timeout,
-    resolve_known_theme_name, verbosity_from_config,
+    debug_level_from_config, plugin_process_timeout, resolve_known_theme_name,
+    verbosity_from_config,
 };
 
 /// Render-settings baseline to use when deriving host-facing UI state.
@@ -167,7 +166,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
                 )
             })?;
             let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-            let plugins = build_plugin_manager(&config, &launch, None);
+            let plugins = build_plugin_manager(&config, &launch);
             let ui = derive_ui_state(
                 &context,
                 &config,
@@ -216,16 +215,8 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
             if !settings.format_explicit && config.get_string("ui.format").is_none() {
                 settings.format = crate::core::output::OutputFormat::Auto;
             }
-            let preferences = current
-                .clients
-                .plugins()
-                .command_preferences_snapshot()
-                .rebased(
-                    &PluginCommandPreferences::from_resolved(runtime.config.resolved()),
-                    PluginCommandPreferences::from_resolved(&config),
-                );
             let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-            let plugins = build_plugin_manager(&config, &runtime.launch, Some(&preferences));
+            let plugins = build_plugin_manager(&config, &runtime.launch);
             let ui = derive_ui_state(
                 &runtime.context,
                 &config,
@@ -262,7 +253,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
         .then(|| tracing::info_span!(target: "osp_startup", "host state assembly").entered());
     let should_log_theme_issues = themes.is_none();
     let themes = themes.unwrap_or_else(|| crate::ui::theme_catalog::load_theme_catalog(&config));
-    let plugins = plugins.unwrap_or_else(|| build_plugin_manager(&config, &launch, None));
+    let plugins = plugins.unwrap_or_else(|| build_plugin_manager(&config, &launch));
     if should_log_theme_issues {
         crate::ui::theme_catalog::log_theme_issues(&themes.issues);
     }
@@ -398,20 +389,18 @@ pub(crate) fn derive_ui_state(
 pub(crate) fn build_plugin_manager(
     config: &ResolvedConfig,
     launch: &LaunchContext,
-    preferences_override: Option<&PluginCommandPreferences>,
 ) -> PluginManager {
     let manager = PluginManager::new(launch.plugin_dirs.clone())
         .with_roots(launch.config_root.clone(), launch.cache_root.clone())
         .with_default_roots(!launch.runtime_load.is_defaults_only())
         .with_bundled_roots(!launch.runtime_load.is_defaults_only())
-        .with_process_timeout(plugin_process_timeout(config))
-        .with_path_discovery(plugin_path_discovery_enabled(config))
-        .with_command_preferences(
-            crate::plugin::state::PluginCommandPreferences::from_resolved(config),
-        );
-    if let Some(preferences) = preferences_override {
-        manager.replace_command_preferences(preferences.clone());
-    }
+        .with_path_discovery(!launch.runtime_load.is_defaults_only())
+        .with_process_timeout(plugin_process_timeout(config));
+    manager.set_disabled(
+        config
+            .get_string_list("extensions.plugins.disabled")
+            .unwrap_or_default(),
+    );
     manager
 }
 
@@ -443,10 +432,7 @@ pub(crate) fn rebuild_repl_state(current: &super::AppState) -> Result<super::App
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        RenderSettingsSeed, build_plugin_manager, derive_render_settings_or_fallback,
-        derive_ui_state,
-    };
+    use super::{RenderSettingsSeed, derive_render_settings_or_fallback, derive_ui_state};
     use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 
@@ -528,23 +514,6 @@ mod tests {
         assert_eq!(state.clients.plugins().process_timeout().as_millis(), 42);
         assert!(state.session.history_enabled);
     }
-
-    #[test]
-    fn build_plugin_manager_applies_launch_roots_and_preference_override_unit() {
-        let config = resolved(&[]);
-        let launch = LaunchContext::default();
-        let mut preferences = crate::plugin::state::PluginCommandPreferences::default();
-        preferences.set_provider("ldap user", "demo");
-
-        let manager = build_plugin_manager(&config, &launch, Some(&preferences));
-        assert_eq!(
-            manager
-                .command_preferences_snapshot()
-                .preferred_provider_for("ldap user"),
-            Some("demo")
-        );
-    }
-
     #[test]
     fn derive_render_settings_or_fallback_preserves_existing_seed_runtime_facts_unit() {
         let config = resolved(&[("theme.name", "missing-theme")]);

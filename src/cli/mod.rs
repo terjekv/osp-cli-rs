@@ -21,7 +21,7 @@
 //! clap grammar for builtins and shared flags
 //!      │
 //!      ├── [ invocation ] one-shot execution/render flags (`--format`, `-v`,
-//!      │                  `--plugin-provider`, ...)
+//!      │                  rendering options, ...)
 //!      ├── [ pipeline ]   alias-aware command token parsing plus DSL stages
 //!      └── [ commands ]   built-in command handlers once parsing is complete
 //!      │
@@ -159,7 +159,7 @@ pub enum Commands {
     #[command(hide = true)]
     /// Show or clear values remembered in this REPL session.
     Context(ContextArgs),
-    /// Inspect and manage plugin providers.
+    /// Inspect and manage plugins.
     Plugins(PluginsArgs),
     /// Run diagnostics checks.
     Doctor(DoctorArgs),
@@ -493,7 +493,6 @@ pub struct ConfigReadOutputArgs {
     #[arg(long = "raw")]
     pub raw: bool,
 }
-
 
 /// Top-level config command arguments.
 #[derive(Args)]
@@ -934,10 +933,14 @@ pub(crate) fn repl_only_commands() -> [clap::Command; 5] {
     ]
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "all callers name built-ins declared by InlineCommandCli"
-)]
+pub(crate) fn builtin_command_names() -> Vec<String> {
+    InlineCommandCli::command()
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .collect()
+}
+
+#[expect(clippy::expect_used, reason = "callers name declared builtins")]
 pub(crate) fn builtin_command(name: &str) -> clap::Command {
     InlineCommandCli::command()
         .find_subcommand(name)

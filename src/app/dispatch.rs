@@ -217,13 +217,8 @@ pub(crate) fn resolve_external_command_source(
     auth: &AuthState,
     clients: &AppClients,
     command: &str,
-    provider_override: Option<&str>,
     scope: &crate::core::CommandScope,
 ) -> Result<ExternalCommandSource> {
-    if provider_override.is_some() {
-        return Ok(ExternalCommandSource::Plugin);
-    }
-
     check_access(
         &CommandPath::new([command]),
         "command",
@@ -233,7 +228,6 @@ pub(crate) fn resolve_external_command_source(
     let catalog = invocation_command_catalog(auth, clients, command)?;
     let matching = matching_external_command_entries(&catalog, command);
     let has_native = matching.iter().any(|entry| is_native_command_entry(entry));
-    let has_plugin = matching.iter().any(|entry| !is_native_command_entry(entry));
 
     if matching.is_empty() {
         return Err(match closest_external_command(&catalog, command) {
@@ -248,29 +242,6 @@ pub(crate) fn resolve_external_command_source(
                 scope.command("help")
             ),
         });
-    }
-
-    if has_native && has_plugin {
-        let labels = matching
-            .iter()
-            .map(|entry| external_command_source_label(entry))
-            .collect::<Vec<_>>();
-        return Err(miette!(
-            "command `{command}` is ambiguous across command sources: {}",
-            labels.join(", ")
-        ));
-    }
-
-    if has_plugin && !has_native && matching.iter().any(|entry| entry.requires_selection) {
-        let providers = matching
-            .iter()
-            .find(|entry| entry.requires_selection)
-            .map(|entry| entry.providers.join(", "))
-            .unwrap_or_default();
-        return Err(miette!(
-            "command `{command}` requires provider selection; available: {providers}; use --plugin-provider <plugin-id> or `{}`",
-            scope.command(&format!("plugins select-provider {command} <plugin-id>"))
-        ));
     }
 
     if has_native {
@@ -299,31 +270,12 @@ fn invocation_command_catalog(
     clients: &AppClients,
     command: &str,
 ) -> Result<Vec<CommandCatalogEntry>> {
-    let mut catalog =
-        super::authorized_command_catalog_for(auth, clients, clients.native_commands().catalog());
-    if matching_external_command_entries(&catalog, command).is_empty()
-        && auth.is_external_command_visible(command)
-        && let Some(dispatch_catalog) = clients.plugins().command_catalog_for_dispatch()
-    {
-        catalog.extend(
-            dispatch_catalog
-                .into_iter()
-                .filter(|entry| auth.is_external_command_visible(&entry.name)),
-        );
-        catalog.sort_by(|left, right| left.name.cmp(&right.name));
-    }
-    Ok(catalog)
-}
-
-pub(crate) fn external_command_source_label(entry: &CommandCatalogEntry) -> String {
-    if entry.requires_selection {
-        return format!("plugin providers: {}", entry.providers.join(", "));
-    }
-
-    match (&entry.provider, entry.source.plugin_source()) {
-        (Some(provider), Some(source)) => format!("{provider} ({source})"),
-        _ => "native integration".to_string(),
-    }
+    let _ = command;
+    Ok(super::authorized_command_catalog_for(
+        auth,
+        clients,
+        clients.native_commands().catalog(),
+    ))
 }
 
 fn is_native_command_entry(entry: &CommandCatalogEntry) -> bool {

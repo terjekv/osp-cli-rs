@@ -29,7 +29,7 @@ use super::dispatch::{
 };
 use super::sink::{ProgressUiSink, UiSink};
 use super::{
-    CommandOutput, ResolvedInvocation, cli_result_from_plugin_response, enrich_dispatch_error,
+    CommandOutput, ResolvedInvocation, cli_result_from_plugin_response,
     plugin_dispatch_context_for, run_inline_builtin_command, run_progress_command_with_ui,
     runtime_hints_for_invocation,
 };
@@ -208,7 +208,6 @@ fn dispatch_external_invocation(
         &state.runtime.auth,
         &state.clients,
         &command,
-        invocation.plugin_provider.as_deref(),
         &invocation.ui.render_settings.runtime.command_scope,
     )? {
         ExternalCommandSource::Native => {
@@ -888,11 +887,7 @@ fn plan_external_invocation(
 
     Ok(ExternalParse::Invocation(Box::new(
         ParsedExternalInvocation {
-            tokens: rewrite_shellable_root_help_tokens(
-                parsed.tokens,
-                runtime.config.resolved(),
-                invocation.plugin_provider.as_deref(),
-            ),
+            tokens: rewrite_shellable_root_help_tokens(parsed.tokens, runtime.config.resolved()),
             stages: parsed.stages,
             apply_output_stages,
             inline_command,
@@ -917,12 +912,7 @@ fn parse_invocation_elevation(tokens: &[String]) -> Result<(Vec<String>, Invocat
 fn rewrite_shellable_root_help_tokens(
     tokens: Vec<String>,
     config: &crate::config::ResolvedConfig,
-    provider_override: Option<&str>,
 ) -> Vec<String> {
-    if provider_override.is_some() {
-        return tokens;
-    }
-
     if tokens.len() == 1
         && let Some(command) = tokens.first()
         && is_repl_shellable_command(config, command)
@@ -937,88 +927,88 @@ fn run_external_plugin_command(
     command: &str,
     parsed: &ParsedExternalInvocation,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> Document,
+    _guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
 ) -> Result<CommandOutput> {
-    let (_, args) = parsed
-        .tokens
-        .split_first()
-        .ok_or_else(|| miette!("missing external command"))?;
-    let (path, dispatch_auth, help_requested) = state
+    let plugin = state
         .clients
         .plugins()
-        .resolved_command_path_and_auth(command, args, invocation.plugin_provider.as_deref())
-        .map_err(|error| miette!(error.to_string()))?;
-    mark_repl_command_accepted(accepted);
-    let access_requirement = if help_requested {
+        .find(command)
+        .ok_or_else(|| miette!("unknown plugin `{command}`"))?;
+    let args = &parsed.tokens[1..];
+    let help = args
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"));
+    let resolved = plugin.command().resolve_invocation(args);
+    if resolved.ambiguous && !help {
+        return Err(miette!(
+            "cannot resolve plugin command `{command}`: describe metadata does not cover its arguments"
+        ));
+    }
+    let path = resolved.path;
+    let requirement = if help {
         ExternalPathAccessRequirement::Visible
     } else {
         ExternalPathAccessRequirement::Runnable
     };
-    let passive_auth = state.runtime.auth.replace_command_auth(dispatch_auth);
-    let result = (|| {
-        before_external_run(
-            &mut state.runtime,
-            &path,
-            access_requirement,
-            "plugin command",
-        )?;
-        ensure_external_access(&state.runtime, &path, access_requirement, "plugin command")?;
-
-        tracing::info!(
-            command = %path.as_slice().join(" "),
-            "dispatching external command"
-        );
-
-        if access_requirement == ExternalPathAccessRequirement::Visible {
-            let dispatch_context =
-                plugin_dispatch_context_for(&state.runtime, &state.clients, Some(invocation));
-            let raw = state
-                .clients
-                .plugins()
-                .dispatch_passthrough(command, args, &dispatch_context)
-                .map_err(enrich_dispatch_error)?;
-            let mut result = if !raw.stdout.is_empty() {
-                let mut document = guide_help(&raw.stdout);
-                state
-                    .runtime
-                    .auth
-                    .filter_help_document(&mut document, path.as_slice());
-                CommandOutput::document(document)
-            } else {
-                CommandOutput::exit(raw.status_code)
-            };
-            if !raw.stderr.is_empty() {
-                result.stderr_text = raw.stderr;
+    before_external_run(&mut state.runtime, &path, requirement, "plugin command")?;
+    ensure_external_access(&state.runtime, &path, requirement, "plugin command")?;
+    mark_repl_command_accepted(accepted);
+    let capture = !help
+        && (plugin
+            .describe
+            .as_ref()
+            .is_some_and(|d| d.output.as_deref() == Some("json"))
+            || !parsed.stages.is_empty()
+            || invocation.ui.render_settings.format_explicit);
+    let context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
+    let raw = crate::plugin::run::run(&plugin, args, &context, capture)?;
+    let mut result = if let Some(bytes) = raw.stdout {
+        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(value) if value.get("protocol_version").is_some() => {
+                let response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
+                    .map_err(|error| miette!("invalid plugin response: {error}"))?;
+                response.validate_v1().map_err(|error| miette!("{error}"))?;
+                if response.ok
+                    && let Some(entries) = response.context.as_ref()
+                {
+                    let context = state
+                        .session
+                        .native_context
+                        .for_command(path.as_slice().join(" "));
+                    for (kind, value) in entries {
+                        context.set_context_value(kind.clone(), value.clone());
+                    }
+                }
+                cli_result_from_plugin_response(response, &[])?
             }
-            result.exit_code = raw.status_code;
-            return Ok(result);
-        }
-
-        let dispatch_context =
-            plugin_dispatch_context_for(&state.runtime, &state.clients, Some(invocation));
-        let response = state
-            .clients
-            .plugins()
-            .dispatch(command, args, &dispatch_context)
-            .map_err(enrich_dispatch_error)?;
-
-        if response.ok
-            && let Some(entries) = response.context.as_ref()
-        {
-            let context = state
-                .session
-                .native_context
-                .for_command(path.as_slice().join(" "));
-            for (kind, value) in entries {
-                context.set_context_value(kind.clone(), value.clone());
+            Ok(value) => CommandOutput::output(
+                crate::core::output_model::OutputResult::from_rows(
+                    crate::core::output_model::rows_from_value(value),
+                ),
+                None,
+            ),
+            Err(_) if !parsed.stages.is_empty() => {
+                return Err(miette!(
+                    "`{command}` printed text, not JSON; pipes need JSON output"
+                ));
             }
+            Err(_) => CommandOutput::text(String::from_utf8_lossy(&bytes)),
         }
-
-        cli_result_from_plugin_response(response, &parsed.stages)
-    })();
-    state.runtime.auth.replace_command_auth(passive_auth);
-    result
+    } else {
+        CommandOutput::exit(raw.status)
+    };
+    if raw.status != 0 {
+        result.exit_code = raw.status;
+        result.preserve_process_output = result.failure_report.is_none();
+        if capture {
+            result
+                .stderr_text
+                .push_str(&format!("{command} exited with status {}\n", raw.status));
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -1049,16 +1039,11 @@ mod tests {
     use crate::ui::RenderSettings;
     use clap::Command;
     #[cfg(unix)]
-    use std::fs;
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
-    use std::path::Path;
     #[cfg(all(unix, miri))]
     use std::sync::atomic::{AtomicU64, Ordering};
     #[cfg(all(unix, not(miri)))]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     #[derive(Clone, Copy)]
     enum NativeOutcomeKind {
         Help,
@@ -1267,8 +1252,7 @@ mod tests {
             .resolve(ResolveOptions::default())
             .expect("test config should resolve");
         let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-        let mut auth = AuthState::default();
-        auth.replace_command_auth(native_commands.command_auth());
+        let auth = AuthState::from_commands(&plugins, &native_commands);
         let runtime = AppRuntime::new(
             RuntimeContext::new(None, TerminalKind::Cli, None),
             ConfigState::new(config.clone()),
@@ -1368,57 +1352,6 @@ mod tests {
             panic!("aliased nested command should not execute when auth denies it")
         }
     }
-
-    #[cfg(unix)]
-    fn make_temp_dir(prefix: &str) -> std::path::PathBuf {
-        #[cfg(not(miri))]
-        let unique = format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        );
-        #[cfg(miri)]
-        let unique = {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-            format!(
-                "{prefix}-{}-{}",
-                std::process::id(),
-                NEXT_ID.fetch_add(1, Ordering::Relaxed)
-            )
-        };
-        let dir = std::env::temp_dir().join(unique);
-        fs::create_dir_all(&dir).expect("temp dir should be created");
-        dir
-    }
-
-    #[cfg(unix)]
-    fn write_provider_test_plugin(dir: &Path, plugin_id: &str, command: &str) {
-        let plugin_path = dir.join(format!("osp-{plugin_id}"));
-        let script = format!(
-            r#"#!/bin/sh
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":null,"commands":[{{"name":"{command}","about":"{plugin_id} provider","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"provider":"{plugin_id}"}},"error":null,"messages":[],"meta":{{"format_hint":"json","columns":["provider"]}}}}
-JSON
-"#
-        );
-        fs::write(&plugin_path, script).expect("plugin script should be written");
-        let mut perms = fs::metadata(&plugin_path)
-            .expect("plugin metadata should be readable")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&plugin_path, perms).expect("plugin should be executable");
-    }
-
     #[test]
     fn external_builtin_help_passthrough_is_handled_unit() {
         let state = make_test_state_with_native(None);
@@ -1807,153 +1740,5 @@ JSON
         )
         .expect_err("hidden command help must remain inaccessible");
         assert_eq!(error.to_string(), "Use the product's operator profile");
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_rejects_native_plugin_source_collisions_unit() {
-        let root = make_temp_dir("osp-cli-external-native-collision");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
-
-        let mut state = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::new().with_command(TestNativeCommand {
-                kind: NativeOutcomeKind::Response,
-            }),
-        );
-        let invocation = resolve_invocation_ui(
-            state.runtime.config.resolved(),
-            &state.runtime.ui,
-            &InvocationOptions::default(),
-        );
-
-        let err = run_external_command_with_help_renderer(
-            &mut state,
-            &["ldap".to_string()],
-            &invocation,
-            Document::from_help_text,
-            None,
-        )
-        .expect_err("native/plugin collision should fail");
-
-        assert!(err.to_string().contains("ambiguous across command sources"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_requires_provider_selection_before_plugin_run_unit() {
-        let root = make_temp_dir("osp-cli-external-provider-selection");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "shared");
-        write_provider_test_plugin(&plugins_dir, "beta", "shared");
-
-        let mut state = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::default(),
-        );
-        let invocation = resolve_invocation_ui(
-            state.runtime.config.resolved(),
-            &state.runtime.ui,
-            &InvocationOptions::default(),
-        );
-
-        let err = run_external_command_with_help_renderer(
-            &mut state,
-            &["shared".to_string()],
-            &invocation,
-            Document::from_help_text,
-            None,
-        )
-        .expect_err("ambiguous plugin command should fail before dispatch");
-
-        assert!(err.to_string().contains("requires provider selection"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_provider_override_routes_plugin_over_native_unit() {
-        let root = make_temp_dir("osp-cli-external-provider-override");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
-
-        let mut state = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::new().with_command(TestNativeCommand {
-                kind: NativeOutcomeKind::Response,
-            }),
-        );
-        let invocation = resolve_invocation_ui(
-            state.runtime.config.resolved(),
-            &state.runtime.ui,
-            &InvocationOptions {
-                plugin_provider: Some("alpha".to_string()),
-                ..InvocationOptions::default()
-            },
-        );
-
-        let result = run_external_command_with_help_renderer(
-            &mut state,
-            &["ldap".to_string()],
-            &invocation,
-            Document::from_help_text,
-            None,
-        )
-        .expect("provider override should route to plugin");
-
-        let rows = match result.body {
-            crate::app::CommandBody::Output(output) => {
-                output.as_rows().expect("expected row output").to_vec()
-            }
-            other => panic!("expected structured output, got {other:?}"),
-        };
-        assert_eq!(rows, vec![crate::row! { "provider" => "alpha" }]);
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_matches_plugin_commands_case_insensitively_unit() {
-        let root = make_temp_dir("osp-cli-external-plugin-case-insensitive");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "shared");
-
-        let mut state = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::default(),
-        );
-        let invocation = resolve_invocation_ui(
-            state.runtime.config.resolved(),
-            &state.runtime.ui,
-            &InvocationOptions::default(),
-        );
-
-        let result = run_external_command_with_help_renderer(
-            &mut state,
-            &["SHARED".to_string()],
-            &invocation,
-            Document::from_help_text,
-            None,
-        )
-        .expect("mixed-case plugin command should dispatch");
-
-        let rows = match result.body {
-            crate::app::CommandBody::Output(output) => {
-                output.as_rows().expect("expected row output").to_vec()
-            }
-            other => panic!("expected structured output, got {other:?}"),
-        };
-        assert_eq!(rows, vec![crate::row! { "provider" => "alpha" }]);
-        fs::remove_dir_all(root).ok();
     }
 }

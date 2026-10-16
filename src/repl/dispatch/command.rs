@@ -245,12 +245,9 @@ pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
         Commands::Plugins(args)
             if matches!(
                 args.command,
-                PluginsCommands::Enable(_)
-                    | PluginsCommands::Disable(_)
-                    | PluginsCommands::ClearState(_)
+                PluginsCommands::Enable { .. }
+                    | PluginsCommands::Disable { .. }
                     | PluginsCommands::Refresh
-                    | PluginsCommands::SelectProvider(_)
-                    | PluginsCommands::ClearProvider(_)
             ) =>
         {
             false

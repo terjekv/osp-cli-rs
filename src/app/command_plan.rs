@@ -88,16 +88,7 @@ pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
                 supports_dsl: true,
             };
         }
-        Commands::Plugins(args) => (
-            CMD_PLUGINS,
-            matches!(
-                args.command,
-                PluginsCommands::List
-                    | PluginsCommands::Commands
-                    | PluginsCommands::Doctor
-                    | PluginsCommands::Config(_)
-            ),
-        ),
+        Commands::Plugins(args) => (CMD_PLUGINS, matches!(args.command, PluginsCommands::List)),
         Commands::Doctor(args) => (
             CMD_DOCTOR,
             matches!(

@@ -57,16 +57,16 @@ pub(crate) fn write_executable_script(path: &Path, script: &str) {
 pub(crate) fn write_table_plugin(
     dir: &Path,
     plugin_id: &str,
-    command_name: &str,
+    _command_name: &str,
     message: &str,
 ) -> PathBuf {
     let plugin_path = dir.join(format!("osp-{plugin_id}"));
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -76,7 +76,6 @@ cat <<'JSON'
 JSON
 "#,
         plugin_id = plugin_id,
-        command_name = command_name,
         message = message,
     );
     write_executable_script(&plugin_path, &script);
@@ -87,7 +86,7 @@ JSON
 pub(crate) fn write_nonzero_plugin(
     dir: &Path,
     plugin_id: &str,
-    command_name: &str,
+    _command_name: &str,
     status_code: i32,
     stderr: &str,
 ) -> PathBuf {
@@ -95,9 +94,9 @@ pub(crate) fn write_nonzero_plugin(
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -106,7 +105,6 @@ echo "{stderr}" >&2
 exit {status_code}
 "#,
         plugin_id = plugin_id,
-        command_name = command_name,
         stderr = stderr,
         status_code = status_code,
     );
@@ -115,14 +113,15 @@ exit {status_code}
 }
 
 #[cfg(unix)]
-pub(crate) fn write_timeout_plugin(dir: &Path, plugin_id: &str, command_name: &str) -> PathBuf {
+pub(crate) fn write_timeout_plugin(dir: &Path, plugin_id: &str, _command_name: &str) -> PathBuf {
     let plugin_path = dir.join(format!("osp-{plugin_id}"));
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
+  sleep 1
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -133,7 +132,6 @@ cat <<'JSON'
 JSON
 "#,
         plugin_id = plugin_id,
-        command_name = command_name,
     );
     write_executable_script(&plugin_path, &script);
     plugin_path

@@ -60,6 +60,8 @@ impl CommandBody {
 #[derive(Debug)]
 pub(crate) struct CommandOutput {
     pub(crate) exit_code: i32,
+    /// External process status must not replace captured output with an envelope.
+    pub(crate) preserve_process_output: bool,
     pub(crate) messages: MessageBuffer,
     pub(crate) body: CommandBody,
     pub(crate) format_hint: Option<OutputFormat>,
@@ -73,6 +75,7 @@ impl CommandOutput {
     pub(crate) fn exit(exit_code: i32) -> Self {
         Self {
             exit_code,
+            preserve_process_output: false,
             messages: MessageBuffer::default(),
             body: CommandBody::None,
             format_hint: None,
@@ -260,7 +263,10 @@ pub(crate) fn run_cli_command(
     result: &CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
-    if ui.render_settings.format == OutputFormat::Json && result.exit_code != 0 {
+    if ui.render_settings.format == OutputFormat::Json
+        && result.exit_code != 0
+        && !result.preserve_process_output
+    {
         let data = result.body.json_value();
         let messages = result.messages.entries().iter()
             .map(|entry| serde_json::json!({"level": entry.level.as_str(), "text": entry.text.as_str()}))
@@ -293,6 +299,9 @@ pub(crate) fn run_cli_command(
             {
                 sink.write_stderr(&format!("{backtrace}\n"));
             }
+        }
+        if !result.stderr_text.is_empty() {
+            sink.write_stderr(&result.stderr_text);
         }
         return Ok(result.exit_code);
     }

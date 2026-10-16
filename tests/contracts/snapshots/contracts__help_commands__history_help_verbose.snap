@@ -47,6 +47,5 @@ Usage: osp history [OPTIONS] <COMMAND>
   -v, --verbose                               Increase message verbosity
   -q, --quiet                                 Decrease message verbosity
   -d, --debug                                 Increase developer log verbosity
-  --plugin-provider <PLUGIN_ID>               Select provider for this invocation
 
 These flags may appear anywhere before -- and affect only the current command.

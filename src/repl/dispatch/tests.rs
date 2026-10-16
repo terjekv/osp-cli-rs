@@ -176,12 +176,9 @@ fn repl_restart_detection_covers_mutating_commands_unit() {
     );
 
     let plugins_enable = Commands::Plugins(PluginsArgs {
-        command: PluginsCommands::Enable(crate::cli::PluginCommandStateArgs {
-            target: crate::cli::PluginCommandTargetArgs {
-                command: "orch".to_string(),
-                scope: crate::cli::PluginScopeArgs::default(),
-            },
-        }),
+        command: PluginsCommands::Enable {
+            name: "orch".to_string(),
+        },
     });
     let plugins_enable_effects = command_side_effects(&plugins_enable);
     assert!(plugins_enable_effects.restart_repl);
@@ -776,7 +773,7 @@ fn repl_command_spec_covers_repl_variant_and_builtin_dsl_matrix_unit() {
     assert!(!repl.supports_dsl);
 
     let plugins = repl_command_spec(&Commands::Plugins(PluginsArgs {
-        command: PluginsCommands::Doctor,
+        command: PluginsCommands::List,
     }));
     assert!(plugins.supports_dsl);
 

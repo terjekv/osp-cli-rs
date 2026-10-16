@@ -9,7 +9,6 @@ use crate::completion::{CompletionNode, SuggestionEntry, ValueType};
 use crate::config::{ConfigSchema, SchemaValueType};
 use crate::core::document::HelpLevel;
 use clap::CommandFactory;
-use std::collections::BTreeSet;
 
 use crate::app::help::help_level;
 use crate::app::{
@@ -304,9 +303,6 @@ fn command_spec_from_catalog(entry: &CommandCatalogEntry) -> Option<CompletionNo
         let base = spec.tooltip.as_deref().unwrap_or("Plugin command");
         spec.tooltip = Some(format!("{base} [{auth_hint}]"));
     }
-    if entry.conflicted || entry.requires_selection {
-        spec.tooltip = Some(provider_selection_summary(entry, spec.tooltip.as_deref()));
-    }
 
     Some(spec)
 }
@@ -314,8 +310,6 @@ fn command_spec_from_catalog(entry: &CommandCatalogEntry) -> Option<CompletionNo
 fn plugin_overview_entry(entry: &CommandCatalogEntry) -> ReplOverviewEntry {
     let summary = if entry.about.trim().is_empty() {
         "Plugin command".to_string()
-    } else if entry.conflicted || entry.requires_selection {
-        provider_selection_summary(entry, Some(&entry.about))
     } else {
         entry.about.clone()
     };
@@ -324,46 +318,6 @@ fn plugin_overview_entry(entry: &CommandCatalogEntry) -> ReplOverviewEntry {
         summary,
     }
 }
-
-fn provider_selection_summary(entry: &CommandCatalogEntry, base: Option<&str>) -> String {
-    let base = base
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Plugin command");
-    if entry.requires_selection {
-        return format!(
-            "{base} (provider selection required; available: {}; use --plugin-provider <plugin-id> or `plugins select-provider {} <plugin-id>`)",
-            entry.providers.join(", "),
-            entry.name,
-        );
-    }
-
-    let selected_label = match (&entry.provider, entry.source.plugin_source()) {
-        (Some(provider), Some(source)) => format!("{provider} ({source})"),
-        _ => return base.to_string(),
-    };
-    let alternatives = entry
-        .providers
-        .iter()
-        .filter(|label| label.as_str() != selected_label.as_str())
-        .cloned()
-        .collect::<Vec<_>>();
-    let selection_reason = if entry.selected_explicitly {
-        "selected explicitly"
-    } else {
-        "resolved uniquely"
-    };
-
-    if alternatives.is_empty() {
-        format!("{base} (using {selected_label}; {selection_reason})")
-    } else {
-        format!(
-            "{base} (using {selected_label}; {selection_reason}; alternatives: {})",
-            alternatives.join(", ")
-        )
-    }
-}
-
 fn clap_command_spec(command: &clap::Command, help_layout: HelpLayout) -> CompletionNode {
     let mut spec =
         CompletionNode::from_clap(command).sort(command_sort_key(command.get_name(), help_layout));
@@ -390,23 +344,6 @@ fn plugins_command_spec(
     catalog: &[CommandCatalogEntry],
     help_layout: HelpLayout,
 ) -> CompletionNode {
-    let plugin_ids = catalog
-        .iter()
-        .flat_map(|entry| {
-            entry
-                .provider
-                .iter()
-                .cloned()
-                .chain(entry.providers.iter().filter_map(|label| {
-                    label
-                        .split_once(" (")
-                        .map(|(plugin_id, _)| plugin_id.to_string())
-                }))
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
     let command_names = catalog
         .iter()
         .filter(|entry| matches!(entry.source, crate::plugin::CommandSource::Plugin(_)))
@@ -418,14 +355,7 @@ fn plugins_command_spec(
         // Plugin mutations intentionally expose only their target arguments.
         child.flags.clear();
         for arg in &mut child.args {
-            if matches!(child.name.as_str(), "enable" | "disable") {
-                arg.name = Some("plugin_id".to_string());
-            }
-            arg.suggestions = if arg.name.as_deref() == Some("plugin_id") {
-                plugin_ids.clone()
-            } else {
-                command_names.clone()
-            };
+            arg.suggestions = command_names.clone();
         }
     }
     spec

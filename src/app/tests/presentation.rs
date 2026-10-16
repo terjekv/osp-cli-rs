@@ -69,15 +69,15 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
     assert!(unicode.contains("Options"));
 
     let austere = make_completion_state_with_entries(&[("ui.presentation", "austere")]);
-    let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins commands` to list plugin-provided commands.\n";
+    let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins list` to list plugin-provided commands.\n";
     let rendered = repl_help::render_repl_help_with_chrome(
         repl_view(&austere.runtime, &austere.session),
         footer,
     );
     assert!(rendered.contains("Options"));
-    assert!(rendered.contains("Use `osp plugins commands`"));
-    assert!(rendered.contains("\n\nUse `osp plugins commands`"));
-    assert!(!rendered.contains("\n\n\nUse `osp plugins commands`"));
+    assert!(rendered.contains("Use `osp plugins list`"));
+    assert!(rendered.contains("\n\nUse `osp plugins list`"));
+    assert!(!rendered.contains("\n\n\nUse `osp plugins list`"));
 }
 
 #[cfg_attr(miri, ignore = "insta snapshot test spawns cargo metadata")]

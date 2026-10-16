@@ -36,7 +36,6 @@ use crate::core::command_policy::{
 use crate::core::plugin::DescribeCommandAuthV1;
 use crate::native::NativeCommandRegistry;
 use crate::plugin::PluginManager;
-use crate::plugin::config::{PluginConfigEntry, PluginConfigEnv, PluginConfigEnvCache};
 use crate::ui::RenderSettings;
 use crate::ui::messages::MessageLevel;
 use crate::ui::theme_catalog::ThemeCatalog;
@@ -400,7 +399,6 @@ pub struct AppClients {
     plugins: PluginManager,
     /// In-process registry of native commands.
     native_commands: NativeCommandRegistry,
-    plugin_config_env: PluginConfigEnvCache,
 }
 
 impl AppClients {
@@ -409,7 +407,6 @@ impl AppClients {
         Self {
             plugins,
             native_commands,
-            plugin_config_env: PluginConfigEnvCache::default(),
         }
     }
 
@@ -421,18 +418,6 @@ impl AppClients {
     /// Returns the shared registry of native commands.
     pub fn native_commands(&self) -> &NativeCommandRegistry {
         &self.native_commands
-    }
-
-    pub(crate) fn plugin_config_env(&self, config: &ConfigState) -> PluginConfigEnv {
-        self.plugin_config_env.collect(config)
-    }
-
-    pub(crate) fn plugin_config_entries(
-        &self,
-        config: &ConfigState,
-        plugin_id: &str,
-    ) -> Vec<PluginConfigEntry> {
-        self.plugin_config_env(config).effective_entries(plugin_id)
     }
 }
 
@@ -566,7 +551,13 @@ impl AuthState {
         plugins: &PluginManager,
         native_commands: &NativeCommandRegistry,
     ) -> Self {
+        let builtins = crate::cli::builtin_command_names();
         let mut command_auth = plugins.command_auth();
+        command_auth.retain(|path, _| {
+            path.as_slice().first().is_none_or(|root| {
+                !builtins.contains(root) && native_commands.command(root).is_none()
+            })
+        });
         command_auth.extend(native_commands.command_auth());
         Self {
             command_auth,
@@ -581,14 +572,6 @@ impl AuthState {
             .map(|policy| policy.session_facts())
             .unwrap_or_default()
     }
-
-    pub(crate) fn replace_command_auth(
-        &mut self,
-        auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,
-    ) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
-        std::mem::replace(&mut self.command_auth, auth)
-    }
-
     pub(crate) fn refresh_native_auth(
         &mut self,
         description: &crate::core::plugin::DescribeCommandV1,

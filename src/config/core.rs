@@ -535,8 +535,6 @@ pub struct ConfigSchema {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DynamicSchemaKeyKind {
-    PluginCommandState,
-    PluginCommandProvider,
     UserDisplayName,
     ReplBinding,
 }
@@ -727,6 +725,12 @@ impl ConfigSchema {
     }
 
     fn is_extension_key(&self, key: &str) -> bool {
+        if let Some(rest) = key.strip_prefix("extensions.plugins.") {
+            return rest.starts_with("env.")
+                || rest
+                    .split_once(".env.")
+                    .is_some_and(|(name, value)| !name.is_empty() && !value.is_empty());
+        }
         key.starts_with("extensions.")
     }
 
@@ -1858,17 +1862,10 @@ fn adapt_dynamic_value_for_schema(
     kind: DynamicSchemaKeyKind,
 ) -> Result<ConfigValue, ConfigError> {
     let adapted = match kind {
-        DynamicSchemaKeyKind::PluginCommandState
-        | DynamicSchemaKeyKind::PluginCommandProvider
-        | DynamicSchemaKeyKind::UserDisplayName
-        | DynamicSchemaKeyKind::ReplBinding => {
+        DynamicSchemaKeyKind::UserDisplayName | DynamicSchemaKeyKind::ReplBinding => {
             adapt_value_for_schema(key, value, &SchemaEntry::string())?
         }
     };
-
-    if matches!(kind, DynamicSchemaKeyKind::PluginCommandState) {
-        validate_allowed_values(key, &adapted, Some(&["enabled", "disabled"]))?;
-    }
 
     if matches!(kind, DynamicSchemaKeyKind::ReplBinding) {
         validate_allowed_values(
@@ -1913,16 +1910,7 @@ fn dynamic_schema_key_kind(key: &str) -> Option<DynamicSchemaKeyKind> {
         return (!user.trim().is_empty() && !user.contains('.'))
             .then_some(DynamicSchemaKeyKind::UserDisplayName);
     }
-    let remainder = normalized.strip_prefix("plugins.")?;
-    let (command, field) = remainder.rsplit_once('.')?;
-    if command.trim().is_empty() {
-        return None;
-    }
-    match field {
-        "state" => Some(DynamicSchemaKeyKind::PluginCommandState),
-        "provider" => Some(DynamicSchemaKeyKind::PluginCommandProvider),
-        _ => None,
-    }
+    None
 }
 
 fn validate_plugin_config_key(key: &str) -> Result<(), ConfigError> {
@@ -1930,16 +1918,15 @@ fn validate_plugin_config_key(key: &str) -> Result<(), ConfigError> {
         return Ok(());
     };
 
-    // `env` is the shared-config namespace. It is intentionally not a valid
-    // plugin id, so this first segment can never mean two different things.
+    // Shared values use `env.*`; command values use `<name>.env.*`.
     if remainder.starts_with("env.") {
         return Ok(());
     }
 
-    let Some((plugin_id, env_name)) = remainder.split_once(".env.") else {
+    let Some((command, env_name)) = remainder.split_once(".env.") else {
         return Ok(());
     };
-    crate::core::plugin::canonical_plugin_id(plugin_id).map_err(|reason| {
+    crate::core::plugin::canonical_plugin_command_name(command).map_err(|reason| {
         ConfigError::InvalidConfigKey {
             key: key.to_string(),
             reason,

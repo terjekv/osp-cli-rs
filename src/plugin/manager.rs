@@ -1,13 +1,13 @@
 //! Executable inventory, first-found command lookup, and host metadata.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Duration;
 use crate::completion::CompletionNode;
 use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, PluginDescribe};
 use crate::core::runtime::RuntimeHints;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// Default limit for optional describe subprocesses, in milliseconds.
 pub const DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS: usize = 10_000;
@@ -28,7 +28,13 @@ pub enum PluginSource {
 }
 impl std::fmt::Display for PluginSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self { Self::Explicit => "explicit", Self::Environment => "env", Self::User => "user", Self::Bundled => "bundled", Self::Path => "path" })
+        f.write_str(match self {
+            Self::Explicit => "explicit",
+            Self::Environment => "env",
+            Self::User => "user",
+            Self::Bundled => "bundled",
+            Self::Path => "path",
+        })
     }
 }
 
@@ -50,9 +56,14 @@ pub struct Plugin {
 }
 impl Plugin {
     pub(crate) fn command(&self) -> DescribeCommandV1 {
-        self.describe.clone().unwrap_or_default().command(&self.name)
+        self.describe
+            .clone()
+            .unwrap_or_default()
+            .command(&self.name)
     }
-    fn available(&self) -> bool { self.status == "ok" || self.issue.is_some() }
+    fn available(&self) -> bool {
+        self.status == "ok" || self.issue.is_some()
+    }
 }
 
 /// Execution origin of a command catalog entry.
@@ -82,20 +93,22 @@ pub struct CommandCatalogEntry {
 }
 impl CommandCatalogEntry {
     /// Short authorization hint for help listings.
-    pub fn auth_hint(&self) -> Option<String> { self.auth.as_ref().and_then(|auth| auth.hint()) }
+    pub fn auth_hint(&self) -> Option<String> {
+        self.auth.as_ref().and_then(|auth| auth.hint())
+    }
 }
 
 /// Environment supplied by the host in addition to the inherited environment.
 #[derive(Debug, Clone, Default)]
-pub struct PluginDispatchContext {
+pub(crate) struct PluginDispatchContext {
     /// Rendering and session hints.
-    pub runtime_hints: RuntimeHints,
+    pub(crate) runtime_hints: RuntimeHints,
     /// Effective user identity.
-    pub user: Option<String>,
+    pub(crate) user: Option<String>,
     /// Shared config environment values.
-    pub shared_env: Vec<(String, String)>,
+    pub(crate) shared_env: Vec<(String, String)>,
     /// Per-command config values, applied after shared values.
-    pub plugin_env: HashMap<String, Vec<(String, String)>>,
+    pub(crate) plugin_env: HashMap<String, Vec<(String, String)>>,
 }
 
 /// Discovers executable commands and caches optional metadata.
@@ -114,26 +127,60 @@ pub struct PluginManager {
 impl PluginManager {
     /// Searches explicit roots, environment roots, user and bundled roots, then PATH.
     pub fn new(explicit_dirs: Vec<PathBuf>) -> Self {
-        Self { explicit_dirs, config_root: None, cache_root: None, process_timeout: Duration::from_millis(DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS as u64), allow_path_discovery: true, allow_default_roots: true, allow_bundled_roots: true, disabled: Mutex::default(), snapshot: Mutex::default() }
+        Self {
+            explicit_dirs,
+            config_root: None,
+            cache_root: None,
+            process_timeout: Duration::from_millis(DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS as u64),
+            allow_path_discovery: true,
+            allow_default_roots: true,
+            allow_bundled_roots: true,
+            disabled: Mutex::default(),
+            snapshot: Mutex::default(),
+        }
     }
     /// Overrides config and cache roots for an embedded host.
-    pub fn with_roots(mut self, config_root: Option<PathBuf>, cache_root: Option<PathBuf>) -> Self { self.config_root = config_root; self.cache_root = cache_root; self }
+    pub fn with_roots(mut self, config_root: Option<PathBuf>, cache_root: Option<PathBuf>) -> Self {
+        self.config_root = config_root;
+        self.cache_root = cache_root;
+        self
+    }
     /// Controls user and environment roots for isolated hosts.
-    pub fn with_default_roots(mut self, enabled: bool) -> Self { self.allow_default_roots = enabled; self }
+    pub fn with_default_roots(mut self, enabled: bool) -> Self {
+        self.allow_default_roots = enabled;
+        self
+    }
     /// Controls installation roots for isolated hosts.
-    pub fn with_bundled_roots(mut self, enabled: bool) -> Self { self.allow_bundled_roots = enabled; self }
+    pub fn with_bundled_roots(mut self, enabled: bool) -> Self {
+        self.allow_bundled_roots = enabled;
+        self
+    }
     /// Controls inherited PATH scanning for isolated hosts.
-    pub fn with_path_discovery(mut self, enabled: bool) -> Self { self.allow_path_discovery = enabled; self }
+    pub fn with_path_discovery(mut self, enabled: bool) -> Self {
+        self.allow_path_discovery = enabled;
+        self
+    }
     /// Sets the describe-only time limit; command runs have no timeout.
-    pub fn with_process_timeout(mut self, timeout: Duration) -> Self { self.process_timeout = timeout; self }
+    pub fn with_process_timeout(mut self, timeout: Duration) -> Self {
+        self.process_timeout = timeout;
+        self
+    }
     /// Returns the describe time limit.
-    pub fn process_timeout(&self) -> Duration { self.process_timeout }
+    pub fn process_timeout(&self) -> Duration {
+        self.process_timeout
+    }
     /// Returns explicit launch roots.
-    pub fn explicit_dirs(&self) -> &[PathBuf] { &self.explicit_dirs }
+    pub fn explicit_dirs(&self) -> &[PathBuf] {
+        &self.explicit_dirs
+    }
     /// Returns the configured user root override.
-    pub fn config_root(&self) -> Option<&Path> { self.config_root.as_deref() }
+    pub fn config_root(&self) -> Option<&Path> {
+        self.config_root.as_deref()
+    }
     /// Returns the configured cache root override.
-    pub fn cache_root(&self) -> Option<&Path> { self.cache_root.as_deref() }
+    pub fn cache_root(&self) -> Option<&Path> {
+        self.cache_root.as_deref()
+    }
     /// Replaces disabled command names and invalidates the in-memory inventory.
     pub fn set_disabled(&self, names: impl IntoIterator<Item = String>) {
         // Match discovery's lock order.
@@ -142,25 +189,63 @@ impl PluginManager {
         *snapshot = None;
     }
     /// Lists every discovered executable, including disabled and shadowed entries.
-    pub fn list(&self) -> Vec<Plugin> { self.discover() }
+    pub fn list(&self) -> Vec<Plugin> {
+        self.discover()
+    }
     /// Finds the first enabled executable for a command.
-    pub fn find(&self, name: &str) -> Option<Plugin> { self.list().into_iter().find(|p| p.name.eq_ignore_ascii_case(name) && p.available()) }
+    ///
+    /// ```
+    /// use osp_cli::plugin::PluginManager;
+    /// let manager = PluginManager::new(Vec::new())
+    ///     .with_default_roots(false).with_bundled_roots(false)
+    ///     .with_path_discovery(false);
+    /// assert!(manager.find("hello").is_none());
+    /// ```
+    pub fn find(&self, name: &str) -> Option<Plugin> {
+        self.list()
+            .into_iter()
+            .find(|p| p.name.eq_ignore_ascii_case(name) && p.available())
+    }
     /// Drops both the in-memory inventory and the persisted describe cache.
+    ///
+    /// ```
+    /// use osp_cli::plugin::PluginManager;
+    /// let manager = PluginManager::new(Vec::new())
+    ///     .with_default_roots(false).with_bundled_roots(false)
+    ///     .with_path_discovery(false);
+    /// manager.refresh();
+    /// assert!(manager.list().is_empty());
+    /// ```
     pub fn refresh(&self) {
         let mut snapshot = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(path) = self.describe_cache_path() { let _ = std::fs::remove_file(path); }
+        if let Some(path) = self.describe_cache_path() {
+            let _ = std::fs::remove_file(path);
+        }
         *snapshot = None;
     }
     /// Builds metadata for the first enabled executable for each command name.
     pub fn command_catalog(&self) -> Vec<CommandCatalogEntry> {
-        self.list().into_iter().filter(Plugin::available).map(|plugin| {
-            let command = plugin.command();
-            CommandCatalogEntry { name: command.name.clone(), about: command.about.clone(), auth: command.auth.clone(), subcommands: command.subcommands.iter().map(|s| s.name.clone()).collect(), completion: CompletionNode::from_describe(&command), source: CommandSource::Plugin(plugin.source) }
-        }).collect()
+        self.list()
+            .into_iter()
+            .filter(Plugin::available)
+            .map(|plugin| {
+                let command = plugin.command();
+                CommandCatalogEntry {
+                    name: command.name.clone(),
+                    about: command.about.clone(),
+                    auth: command.auth.clone(),
+                    subcommands: command.subcommands.iter().map(|s| s.name.clone()).collect(),
+                    completion: CompletionNode::from_describe(&command),
+                    source: CommandSource::Plugin(plugin.source),
+                }
+            })
+            .collect()
     }
     pub(crate) fn command_auth(&self) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
         let mut auth = BTreeMap::new();
-        for plugin in self.list().into_iter().filter(Plugin::available) { super::catalog::collect_command_auth(&mut auth, &plugin.command(), &[]); }
+        for plugin in self.list().into_iter().filter(Plugin::available) {
+            super::catalog::collect_command_auth(&mut auth, &plugin.command(), &[]);
+        }
         auth
     }
 }

@@ -1,16 +1,14 @@
 use super::command_output::{apply_output_stages, run_cli_command};
 use super::help::parse_help_render_overrides;
 use super::{
-    CommandOutput, EXIT_CODE_ERROR, EXIT_CODE_USAGE, PluginConfigEntry, PluginConfigScope,
-    RunAction, RuntimeConfigRequest, build_cli_session_layer, build_dispatch_plan,
-    classify_exit_code, collect_plugin_config_env, config_value_to_plugin_env,
-    enrich_dispatch_error, is_sensitive_key, plugin_config_env_name, plugin_path_discovery_enabled,
-    plugin_process_timeout, render_report_message, resolve_invocation_ui,
-    resolve_render_settings_with_hint, run_inline_builtin_command,
+    CommandOutput, EXIT_CODE_ERROR, EXIT_CODE_USAGE, RunAction, RuntimeConfigRequest,
+    build_cli_session_layer, build_dispatch_plan, classify_exit_code, is_sensitive_key,
+    render_report_message, resolve_invocation_ui, resolve_render_settings_with_hint,
+    run_inline_builtin_command,
 };
 use super::{
-    authorized_command_catalog_for, command_output, plugin_dispatch_context_for_runtime,
-    resolve_runtime_config, run_from, run_from_with_sink,
+    authorized_command_catalog_for, command_output, resolve_runtime_config, run_from,
+    run_from_with_sink,
 };
 use crate::app::sink::BufferedUiSink;
 use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
@@ -24,10 +22,7 @@ use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
     ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
-use crate::plugin::{
-    CommandCatalogEntry, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchError, PluginManager,
-    PluginSource,
-};
+use crate::plugin::{CommandCatalogEntry, PluginManager, PluginSource};
 use crate::repl;
 use crate::repl::{HistoryConfig, HistoryShellContext, SharedHistory};
 use crate::repl::{completion, dispatch as repl_dispatch, help as repl_help, surface};
@@ -44,7 +39,6 @@ use std::ffi::OsString;
 mod app_runtime;
 mod cli_dispatch;
 mod command_surfaces;
-mod plugin_config;
 mod presentation;
 mod repl_completion;
 #[cfg(unix)]
@@ -248,12 +242,8 @@ fn sample_catalog() -> Vec<CommandCatalogEntry> {
             .collect(),
             ..crate::completion::CompletionNode::default()
         },
-        provider: Some("mock-provider".to_string()),
-        providers: vec!["mock-provider (explicit)".to_string()],
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
+
+        source: crate::plugin::CommandSource::Plugin(PluginSource::Explicit),
     }]
 }
 
@@ -304,12 +294,8 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
             .collect(),
             ..crate::completion::CompletionNode::default()
         },
-        provider: Some("mock-provider".to_string()),
-        providers: vec!["mock-provider (explicit)".to_string()],
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: crate::plugin::CommandSource::Plugin(Some(PluginSource::Explicit)),
+
+        source: crate::plugin::CommandSource::Plugin(PluginSource::Explicit),
     }];
     catalog[0]
         .completion
@@ -336,30 +322,6 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
     }));
     catalog
 }
-
-fn sample_conflicted_catalog() -> Vec<CommandCatalogEntry> {
-    vec![CommandCatalogEntry {
-        name: "hello".to_string(),
-        about: "hello plugin".to_string(),
-        auth: None,
-        subcommands: Vec::new(),
-        completion: crate::completion::CompletionNode {
-            name: "hello".to_string(),
-            tooltip: Some("hello plugin".to_string()),
-            ..crate::completion::CompletionNode::default()
-        },
-        provider: None,
-        providers: vec![
-            "alpha-provider (env)".to_string(),
-            "beta-provider (user)".to_string(),
-        ],
-        conflicted: true,
-        requires_selection: true,
-        selected_explicitly: false,
-        source: crate::plugin::CommandSource::Plugin(None),
-    }]
-}
-
 fn layer_value<'a>(layer: &'a ConfigLayer, key: &str) -> Option<&'a ConfigValue> {
     layer
         .entries()
@@ -510,9 +472,9 @@ fn write_pipeline_test_plugin(dir: &std::path::Path) -> std::path::PathBuf {
             &plugin_path,
             r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"hello","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"hello","about":"hello plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"hello plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi
@@ -530,44 +492,6 @@ JSON
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
     plugin_path
 }
-
-#[cfg(unix)]
-fn write_provider_test_plugin(
-    dir: &std::path::Path,
-    plugin_id: &str,
-    command_name: &str,
-    message: &str,
-) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"message":"{message}-from-plugin"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
-JSON
-"#,
-        plugin_id = plugin_id,
-        command_name = command_name,
-        message = message,
-    );
-    std::fs::write(&plugin_path, script).expect("plugin script should be written");
-    let mut perms = std::fs::metadata(&plugin_path)
-        .expect("metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
-    plugin_path
-}
-
 #[cfg(unix)]
 fn make_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
     crate::tests::make_temp_dir(prefix)

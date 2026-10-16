@@ -44,7 +44,7 @@ fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
         .args(["boom"])
         .assert()
         .failure()
-        .code(1)
+        .code(7)
         .get_output()
         .clone();
 
@@ -54,42 +54,34 @@ fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
         String::from_utf8_lossy(&output.stdout)
     );
     let stderr = stderr_utf8(output.stderr);
-    assert!(stderr.contains("plugin boom exited with status 7"));
+    assert!(stderr.contains("boom exited with status 7"));
     assert!(stderr.contains("backend exploded"));
 }
 
 #[cfg(unix)]
 #[test]
-fn external_plugin_timeout_surfaces_timeout_to_the_user() {
+fn describe_timeout_does_not_limit_plugin_runs() {
     let home = make_temp_dir("osp-e2e-plugin-timeout-home");
     let plugins = make_temp_dir("osp-e2e-plugin-timeout-plugins");
-    let _plugin = write_timeout_plugin(&plugins, "hang", "hang");
+    write_timeout_plugin(&plugins, "hang", "hang");
     write_config(
         home.path(),
-        r#"
-[default]
-profile.default = "default"
-extensions.plugins.timeout_ms = 50
-"#,
+        "[default]\nprofile.default = 'default'\nextensions.plugins.timeout_ms = 50\n",
     );
-
     let output = osp_command(home.path())
+        .env("OSP_PLUGIN_PATH", plugins.path())
+        .args(["plugins", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("describe timed out after 50 ms"));
+    osp_command(home.path())
         .env("OSP_PLUGIN_PATH", plugins.path())
         .args(["hang"])
         .assert()
-        .failure()
-        .code(1)
-        .get_output()
-        .clone();
-
-    assert!(
-        output.stdout.is_empty(),
-        "stdout should stay empty: {}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let stderr = stderr_utf8(output.stderr);
-    assert!(stderr.contains("plugin hang timed out after 50 ms"));
-    assert!(stderr.contains("extensions.plugins.timeout_ms"));
+        .success()
+        .stdout(predicates::str::contains("late"));
 }
 
 #[cfg(unix)]
@@ -102,9 +94,9 @@ fn uncached_path_plugin_auth_is_enforced_before_first_dispatch() {
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"guarded","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"guarded","about":"guarded plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"guarded plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -122,7 +114,6 @@ JSON
         r#"
 [default]
 profile.default = "default"
-extensions.plugins.discovery.path = true
 "#,
     );
     let path = std::env::join_paths([
@@ -161,14 +152,14 @@ fn visible_but_denied_plugin_help_is_available_while_execution_is_blocked() {
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"guarded-help","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"guarded-help","about":"guarded help plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"guarded help plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
 
-if [ "$2" = "--help" ] || [ "$2" = "help" ]; then
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
   echo "Usage: osp guarded-help"
   exit 0
 fi
@@ -208,7 +199,7 @@ JSON
 
 #[cfg(unix)]
 #[test]
-fn option_looking_plugin_argument_cannot_turn_denied_execution_into_help() {
+fn plugin_option_terminator_preserves_run_authorization() {
     let home = make_temp_dir("osp-e2e-plugin-option-looking-home");
     let plugins = make_temp_dir("osp-e2e-plugin-option-looking-plugins");
     let execution_marker = home.path().join("plugin-executed");
@@ -216,9 +207,9 @@ fn option_looking_plugin_argument_cannot_turn_denied_execution_into_help() {
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"option-looking","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"option-looking","about":"guarded plugin","auth":{{"visibility":"authenticated"}},"args":[{{"name":"first"}},{{"name":"second"}}],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"guarded plugin","auth":{{"visibility":"authenticated"}},"args":[{{"name":"first"}},{{"name":"second"}}],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -233,7 +224,7 @@ exit 0
 
     let output = osp_command(home.path())
         .env("OSP_PLUGIN_PATH", plugins.path())
-        .args(["option-looking", "--unknown-value", "--help"])
+        .args(["option-looking", "--", "--help"])
         .assert()
         .failure()
         .get_output()
@@ -268,9 +259,9 @@ fn plugin_child_inherits_parent_auth_policy_before_process_start() {
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"inherited-auth","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"inherited-auth","about":"parent-auth plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[{{"name":"child","about":"inherited child","args":[],"flags":{{}},"subcommands":[]}}]}}]}}
+{{"about":"parent-auth plugin","auth":{{"visibility":"authenticated"}},"args":[],"flags":{{}},"subcommands":[{{"name":"child","about":"inherited child","args":[],"flags":{{}},"subcommands":[]}}],"output":"json"}}
 JSON
   exit 0
 fi

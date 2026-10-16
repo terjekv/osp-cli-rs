@@ -1,210 +1,51 @@
 #[test]
+#[cfg(unix)]
 fn plugins_list_and_doctor_contract() {
-    let mut list = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    list.args(["plugins", "list"]);
-    list.assert().success();
-
-    let mut commands = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    commands.args(["plugins", "commands"]);
-    commands.assert().success();
-
-    let mut doctor = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    doctor.args(["plugins", "doctor"]);
-    doctor.assert().success();
+    let home = make_temp_dir("plugins-list");
+    let dir = home.join("plugins");
+    hello(&dir);
+    let rows = json_stdout(&mut plugin_command(&home, &dir, &["plugins", "list", "--json"]));
+    assert_eq!(rows[0]["name"], "hello");
+    assert_eq!(rows[0]["about"], "Greet people");
+    assert_eq!(rows[0]["status"], "ok");
+    assert_eq!(rows[0]["source"], "env");
+    assert!(rows[0]["path"].as_str().unwrap().ends_with("osp-hello"));
+    assert_eq!(json_stdout(&mut plugin_command(&home, &dir, &["doctor", "plugins", "--json"])), json!([]));
 }
 
 #[test]
-fn debug_flag_enables_developer_logs_contract() {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.env_remove("RUST_LOG").args(["-dd", "plugins", "list"]);
-    cmd.assert()
-        .success()
-        .stderr(predicate::str::contains("resolving runtime config"))
-        .stderr(predicate::str::contains("osp session initialized"));
-}
-
-#[test]
+#[cfg(unix)]
 fn plugins_enable_and_disable_contract() {
-    let home = make_temp_dir("osp-cli-plugin-test");
-    let dir = make_temp_dir("osp-cli-plugin-toggle");
-    let _plugin = write_named_plugin(&dir, "hello", "hello");
-
-    let mut enable = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    enable
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "enable", "hello"]);
-    enable
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("enabled command: hello"));
-
-    let config_path = home.join(".config").join("osp").join("config.toml");
-    let config = parse_toml_file(&config_path);
-    assert_eq!(
-        config["profile"]["default"]["plugins"]["hello"]["state"]
-            .as_str()
-            .expect("plugin state should be a string"),
-        "enabled"
-    );
-
-    let mut disable = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    disable
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "disable", "hello"]);
-    disable
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("disabled command: hello"));
-
-    let updated = parse_toml_file(&config_path);
-    assert_eq!(
-        updated["profile"]["default"]["plugins"]["hello"]["state"]
-            .as_str()
-            .expect("updated plugin state should be a string"),
-        "disabled"
-    );
+    let home = make_temp_dir("plugins-toggle");
+    let dir = home.join("plugins");
+    hello(&dir);
+    write_plugin(&dir, "other", None, "print('other runs')\n");
+    plugin_command(&home, &dir, &["plugins", "disable", "hello"]).assert().success().stderr(predicate::str::contains("disabled plugin: hello"));
+    let rows = json_stdout(&mut plugin_command(&home, &dir, &["plugins", "list", "--json"]));
+    assert_eq!(rows[0]["status"], "disabled");
+    plugin_command(&home, &dir, &["hello"]).assert().failure().stderr(predicate::str::contains("unknown command"));
+    plugin_command(&home, &dir, &["other"]).assert().success().stdout("other runs\n");
+    let config = std::fs::read_to_string(home.join(".config/osp/config.toml")).unwrap();
+    assert!(config.contains("disabled"));
+    assert!(config.contains("hello"));
+    plugin_command(&home, &dir, &["plugins", "enable", "hello"]).assert().success().stderr(predicate::str::contains("enabled plugin: hello"));
+    plugin_command(&home, &dir, &["hello"]).assert().success().stdout(predicate::str::contains("hello world"));
 }
 
 #[test]
+#[cfg(unix)]
 fn quiet_hides_success_messages_contract() {
-    let home = make_temp_dir("osp-cli-plugin-quiet-test");
-    let dir = make_temp_dir("osp-cli-plugin-quiet-toggle");
-    let _plugin = write_named_plugin(&dir, "hello", "hello");
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["-q", "plugins", "enable", "hello"]);
-    cmd.assert().success().stderr(predicate::str::is_empty());
+    let home = make_temp_dir("plugins-quiet");
+    let dir = home.join("plugins");
+    hello(&dir);
+    plugin_command(&home, &dir, &["plugins", "disable", "hello", "-q"]).assert().success().stderr("");
 }
 
 #[test]
+#[cfg(unix)]
 fn plugins_refresh_reports_success_contract() {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.args(["plugins", "refresh"]);
-    cmd.assert()
-        .success()
-        .stderr(predicate::str::contains("refreshed plugin discovery cache"));
-}
-
-#[test]
-#[cfg(unix)]
-fn profile_override_reports_unknown_profile_contract() {
-    let home = make_temp_dir("osp-cli-profile-override-home");
-    write_config(
-        &home,
-        r#"
-[default]
-profile.default = "uio"
-
-[profile.uio]
-ui.format = "table"
-
-[profile.tsd]
-ui.format = "json"
-"#,
-    );
-
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.envs(crate::test_env::isolated_env(&home))
-        .env("PATH", "/usr/bin:/bin")
-        .args(["--profile", "prod", "plugins", "list"]);
-    cmd.assert()
-        .failure()
-        .stderr(predicate::str::contains("unknown profile 'prod'"));
-
-}
-
-#[cfg(unix)]
-#[test]
-fn enabling_one_plugin_does_not_disable_other_default_enabled_plugins_contract() {
-    let dir = make_temp_dir("osp-cli-plugin-enable-overrides");
-    let _alpha = write_named_plugin(&dir, "alpha", "alpha");
-    let _beta = write_named_plugin(&dir, "beta", "beta");
-    let home = make_temp_dir("osp-cli-plugin-enable-overrides-home");
-
-    let mut enable = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    enable
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "enable", "alpha"]);
-    enable
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("enabled command: alpha"));
-
-    let mut clear = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    clear
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "clear-state", "alpha"]);
-    clear
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("cleared command state for alpha"));
-
-    // Clearing is idempotent: repeating it succeeds without inventing state.
-    let mut clear_again = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    clear_again
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "clear-state", "alpha"]);
-    clear_again.assert().success();
-
-    let mut beta = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    beta.envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["beta"]);
-    beta.assert()
-        .success()
-        .stdout(predicate::str::contains("beta-from-plugin"));
-
-}
-
-#[test]
-fn plugins_enable_with_terminal_scope_and_clear_state_contract() {
-    let home = make_temp_dir("osp-cli-plugin-terminal-scope");
-    let dir = make_temp_dir("osp-cli-plugin-terminal-toggle");
-    let _plugin = write_named_plugin(&dir, "hello", "hello");
-
-    let mut enable = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    enable
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "enable", "hello", "--terminal", "repl"]);
-    enable.assert().success();
-
-    let config_path = home.join(".config").join("osp").join("config.toml");
-    let config = parse_toml_file(&config_path);
-    assert_eq!(
-        config["terminal"]["repl"]["profile"]["default"]["plugins"]["hello"]["state"]
-            .as_str()
-            .expect("terminal-scoped plugin state should be a string"),
-        "enabled"
-    );
-
-    let mut clear = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    clear
-        .envs(crate::test_env::isolated_env(&home))
-        .env("OSP_PLUGIN_PATH", &dir)
-        .args(["plugins", "clear-state", "hello", "--terminal", "repl"]);
-    clear
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("cleared command state for hello"));
-
-    let updated = parse_toml_file(&config_path);
-    assert!(
-        updated
-            .get("terminal")
-            .and_then(|table| table.get("repl"))
-            .and_then(|table| table.get("profile"))
-            .and_then(|table| table.get("default"))
-            .and_then(|table| table.get("plugins"))
-            .and_then(|table| table.get("hello"))
-            .is_none(),
-        "expected terminal-scoped plugin state to be cleared"
-    );
+    let home = make_temp_dir("plugins-refresh");
+    let dir = home.join("plugins");
+    hello(&dir);
+    plugin_command(&home, &dir, &["plugins", "refresh"]).assert().success().stderr(predicate::str::contains("refreshed plugin discovery cache"));
 }
