@@ -66,6 +66,15 @@ pub enum UiVerbosity {
 }
 
 impl UiVerbosity {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 5] = [
+        Self::Error,
+        Self::Warning,
+        Self::Success,
+        Self::Info,
+        Self::Trace,
+    ];
+
     /// Returns the canonical string representation for this verbosity level.
     pub fn as_str(self) -> &'static str {
         match self {

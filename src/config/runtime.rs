@@ -677,9 +677,7 @@ mod tests {
     };
     use crate::config::{
         ConfigLayer, ConfigValue, DEFAULT_PROFILE_NAME, DEFAULT_REPL_HISTORY_MAX_ENTRIES,
-        DEFAULT_REPL_HISTORY_MENU_ROWS, DEFAULT_REPL_INTRO, DEFAULT_UI_CHROME_FRAME,
-        DEFAULT_UI_MESSAGES_LAYOUT, DEFAULT_UI_PRESENTATION, DEFAULT_UI_TABLE_BORDER,
-        DEFAULT_UI_WIDTH, Scope,
+        DEFAULT_REPL_HISTORY_MENU_ROWS, Scope,
     };
 
     fn find_value<'a>(layer: &'a ConfigLayer, key: &str) -> Option<&'a ConfigValue> {
@@ -725,7 +723,7 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "repl.intro"),
-            Some(&ConfigValue::String(DEFAULT_REPL_INTRO.to_string()))
+            Some(&ConfigValue::String("full".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "repl.history.max_entries"),
@@ -737,11 +735,11 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "ui.width"),
-            Some(&ConfigValue::Integer(DEFAULT_UI_WIDTH))
+            Some(&ConfigValue::Integer(72))
         );
         assert_eq!(
             find_value(&defaults, "ui.presentation"),
-            Some(&ConfigValue::String(DEFAULT_UI_PRESENTATION.to_string()))
+            Some(&ConfigValue::String("expressive".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.help.level"),
@@ -749,7 +747,7 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "ui.messages.layout"),
-            Some(&ConfigValue::String(DEFAULT_UI_MESSAGES_LAYOUT.to_string()))
+            Some(&ConfigValue::String("grouped".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.message.verbosity"),
@@ -757,11 +755,11 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "ui.chrome.frame"),
-            Some(&ConfigValue::String(DEFAULT_UI_CHROME_FRAME.to_string()))
+            Some(&ConfigValue::String("top".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.table.border"),
-            Some(&ConfigValue::String(DEFAULT_UI_TABLE_BORDER.to_string()))
+            Some(&ConfigValue::String("square".to_string()))
         );
         let path = match find_value(&defaults, "repl.history.path") {
             Some(ConfigValue::String(value)) => value.as_str(),

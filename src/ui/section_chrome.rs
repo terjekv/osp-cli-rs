@@ -44,6 +44,16 @@ pub enum RuledSectionPolicy {
 }
 
 impl SectionFrameStyle {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 6] = [
+        Self::None,
+        Self::Top,
+        Self::Bottom,
+        Self::TopBottom,
+        Self::Square,
+        Self::Round,
+    ];
+
     /// Parses the section-frame spellings accepted by configuration.
     ///
     /// # Examples
@@ -66,15 +76,38 @@ impl SectionFrameStyle {
             _ => None,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::TopBottom => "top-bottom",
+            Self::Square => "square",
+            Self::Round => "round",
+        }
+    }
 }
 
 impl RuledSectionPolicy {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 2] = [Self::PerSection, Self::Shared];
+
     /// Parses the ruled-section policy spellings accepted by configuration.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "per-section" | "independent" | "separate" => Some(Self::PerSection),
             "shared" | "stacked" | "list" => Some(Self::Shared),
             _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PerSection => "per-section",
+            Self::Shared => "shared",
         }
     }
 }

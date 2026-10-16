@@ -111,6 +111,7 @@
 //! - other modules should not hand-roll config merging or scope filtering
 
 mod bootstrap;
+mod builtin;
 mod core;
 mod defaults;
 mod error;

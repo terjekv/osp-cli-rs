@@ -83,6 +83,9 @@ pub struct PresentationEffect {
 }
 
 impl UiPresentation {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Expressive, Self::Compact, Self::Austere];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "expressive" => Some(Self::Expressive),
@@ -93,6 +96,11 @@ impl UiPresentation {
     }
 
     pub fn as_config_value(self) -> &'static str {
+        self.as_str()
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Expressive => "expressive",
             Self::Compact => "compact",
@@ -127,6 +135,9 @@ pub enum TableBorderOverride {
 }
 
 impl TableBorderOverride {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::Inherit, Self::None, Self::Square, Self::Round];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "inherit" => Some(Self::Inherit),
@@ -143,6 +154,16 @@ impl TableBorderOverride {
             Self::None => TableBorderStyle::None,
             Self::Square => TableBorderStyle::Square,
             Self::Round => TableBorderStyle::Round,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inherit => "inherit",
+            Self::None => "none",
+            Self::Square => "square",
+            Self::Round => "round",
         }
     }
 }
@@ -287,6 +308,9 @@ impl RenderSettings {
 }
 
 impl TableOverflow {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::None, Self::Clip, Self::Ellipsis, Self::Wrap];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "visible" => Some(Self::None),
@@ -296,15 +320,37 @@ impl TableOverflow {
             _ => None,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Clip => "clip",
+            Self::Ellipsis => "ellipsis",
+            Self::Wrap => "wrap",
+        }
+    }
 }
 
 impl TableBorderStyle {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::None, Self::Square, Self::Round];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "plain" => Some(Self::None),
             "square" | "box" | "boxed" => Some(Self::Square),
             "round" | "rounded" => Some(Self::Round),
             _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Square => "square",
+            Self::Round => "round",
         }
     }
 }

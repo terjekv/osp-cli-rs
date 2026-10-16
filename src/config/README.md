@@ -5,15 +5,16 @@ source wins, and which file edits are allowed. Runtime resolution, `config
 explain` and `config set --save` all go through the same code, so they cannot
 disagree.
 
-Imports `core` and `normalize`, plus one plugin timeout constant in
-`defaults.rs`. It does not render anything and does not know about the REPL.
+Builtin declarations reuse the owning output and REPL enum vocabularies and
+the plugin timeout constant. This module does not render output.
 
 ## Layout
 
 | File | Owns |
 |---|---|
-| `core.rs` | Keys, values, layers, scopes, and the schema of builtin keys |
-| `defaults.rs` | Builtin default values |
+| `core.rs` | Keys, values, layers, scopes, and schema validation |
+| `builtin.rs` | Builtin key declarations: schema, docs, bootstrap rules, and defaults |
+| `defaults.rs` | Computed defaults, shared runtime fallbacks, and layer assembly |
 | `loader.rs` | Source loaders (file, env `OSP__…`, secrets, in-memory) and the pipeline |
 | `bootstrap.rs` | Choosing the active profile and terminal once per resolution |
 | `selector.rs` | Scope precedence: profile+terminal > profile > terminal > global |
@@ -31,10 +32,11 @@ module as is. They do not keep a parallel config model.
 
 **Add a builtin key**
 
-1. Default value in `defaults.rs` (`LiteralDefault`).
-2. Schema entry in `core.rs` (`insert_builtin_schema_key`). Use
-   `with_allowed_values` when the set is closed; `config set <key> ⇥` then
-   completes the values.
+1. Declare the key in `builtin.rs` with its schema, doc, bootstrap rule, and
+   optional literal default. Reuse the owning enum's `ALL` and `as_str()` for
+   canonical values; keep explicit schema lists when they include aliases. `config set <key> ⇥`
+   then completes those values.
+2. Keep computed user, path, and theme defaults in `defaults.rs`.
 3. Read it where it is used, through the resolved config.
 4. Document it in `docs/CONFIG.md` or the owning area's doc.
 

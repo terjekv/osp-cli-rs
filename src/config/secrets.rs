@@ -30,6 +30,9 @@ pub enum SecretBackendKind {
 }
 
 impl SecretBackendKind {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 2] = [Self::Toml, Self::Keyring];
+
     /// Parses a resolved config value.
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         match value.trim().to_ascii_lowercase().as_str() {

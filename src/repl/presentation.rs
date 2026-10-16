@@ -42,6 +42,9 @@ pub(crate) enum ReplInputMode {
 }
 
 impl ReplIntroStyle {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::None, Self::Minimal, Self::Compact, Self::Full];
+
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "off" => Some(Self::None),
@@ -51,15 +54,37 @@ impl ReplIntroStyle {
             _ => None,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Compact => "compact",
+            Self::Full => "full",
+        }
+    }
 }
 
 impl ReplInputMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Interactive, Self::Basic];
+
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Some(Self::Auto),
             "interactive" | "full" => Some(Self::Interactive),
             "basic" | "plain" => Some(Self::Basic),
             _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Interactive => "interactive",
+            Self::Basic => "basic",
         }
     }
 }

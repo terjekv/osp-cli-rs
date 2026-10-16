@@ -30,6 +30,16 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 6] = [
+        Self::Auto,
+        Self::Json,
+        Self::Table,
+        Self::Markdown,
+        Self::Mreg,
+        Self::Value,
+    ];
+
     /// Returns the canonical config and CLI spelling for this format.
     ///
     /// # Examples
@@ -89,6 +99,9 @@ pub enum RenderMode {
 }
 
 impl RenderMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Plain, Self::Rich];
+
     /// Returns the canonical config and CLI spelling for this render mode.
     ///
     /// # Examples
@@ -139,6 +152,9 @@ pub enum ColorMode {
 }
 
 impl ColorMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Always, Self::Never];
+
     /// Returns the canonical config and CLI spelling for this color mode.
     ///
     /// # Examples
@@ -189,6 +205,9 @@ pub enum UnicodeMode {
 }
 
 impl UnicodeMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Always, Self::Never];
+
     /// Returns the canonical config and CLI spelling for this unicode mode.
     ///
     /// # Examples

@@ -24,6 +24,9 @@ pub enum HelpLevel {
 }
 
 impl HelpLevel {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::None, Self::Tiny, Self::Normal, Self::Verbose];
+
     /// Parses a configured help level.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -32,6 +35,16 @@ impl HelpLevel {
             "normal" => Some(Self::Normal),
             "verbose" => Some(Self::Verbose),
             _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Tiny => "tiny",
+            Self::Normal => "normal",
+            Self::Verbose => "verbose",
         }
     }
 }
