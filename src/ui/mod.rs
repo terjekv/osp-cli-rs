@@ -69,7 +69,6 @@ pub(crate) use text::{
     crop_display_width, display_width, sanitize_human_text, visible_inline_text,
 };
 pub use theme::DEFAULT_THEME_NAME;
-pub use theme_catalog as theme_loader;
 
 const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
 

@@ -267,7 +267,6 @@ mod startup_trace;
 pub mod ui;
 
 pub use crate::app::{App, run_from, run_process};
-pub use crate::core::command_policy;
 pub use crate::native::{
     InvocationElevation, NativeCommand, NativeCommandContext, NativeCommandOutcome,
     NativeCommandRegistry, NativePagination, NativeProgressEvent, NativeProgressSink,

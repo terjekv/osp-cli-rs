@@ -209,7 +209,7 @@ pub(super) fn enter_repl_shell(
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    let path = crate::command_policy::CommandPath::new([command]);
+    let path = crate::core::command_policy::CommandPath::new([command]);
     before_external_run(
         &mut state.runtime,
         &path,

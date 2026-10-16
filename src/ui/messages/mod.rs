@@ -6,7 +6,7 @@ use crate::ui::section_chrome::RuledSectionPolicy;
 use crate::ui::settings::{RenderProfile, RenderSettings, resolve_settings};
 use crate::ui::style::StyleToken;
 
-pub use crate::core::MessageLevel;
+pub(crate) use crate::core::MessageLevel;
 
 impl MessageLevel {
     pub fn title(self) -> &'static str {

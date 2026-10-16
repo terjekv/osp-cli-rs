@@ -14,7 +14,7 @@
 //!   shapes
 //! - [`crate::core::plugin`] defines the stable wire DTOs shared with external plugins
 //! - [`crate::core::row`] is the common row representation used by commands, DSL, and UI
-//! - [`crate::core::shell_words`] and [`crate::core::fuzzy`] provide small reusable
+//! - `crate::core::shell_words` and [`crate::core::fuzzy`] provide small reusable
 //!   parsing/matching
 //!   primitives
 //!
@@ -51,7 +51,9 @@ pub mod row;
 /// Runtime-mode and verbosity primitives.
 pub mod runtime;
 /// Shell-like tokenization helpers.
-pub mod shell_words;
+pub(crate) mod shell_words;
 
 /// Message severity and runtime verbosity shared with plugin responses.
 pub use runtime::MessageLevel;
+
+pub use shell_words::escape_for_shell;

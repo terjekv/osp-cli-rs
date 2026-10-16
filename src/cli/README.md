@@ -26,7 +26,7 @@ commands or render; that is `app`. It imports widely (`app`, `config`, `core`,
 1. Add a variant to `Commands` in `mod.rs` with its clap args.
 2. Write the handler in `commands/<name>.rs`, returning structured output.
 3. Add the dispatch arm in `app/builtin.rs`. Builtins remain public; external
-   access belongs to `app::access::AccessPolicy`.
+   access belongs to `app::AccessPolicy`.
 4. Check REPL completion picks it up: `osp repl debug-complete --line '<name> '`.
 
 Product-specific commands do not go here. A wrapper crate registers them as

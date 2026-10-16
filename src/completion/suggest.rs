@@ -693,7 +693,7 @@ fn entry_to_suggestion(entry: &SuggestionEntry, match_score: u32) -> Suggestion 
 ///
 /// ```
 /// use osp_cli::completion::closest_values;
-/// use osp_cli::completion::model::ValueCatalog;
+/// use osp_cli::completion::ValueCatalog;
 ///
 /// let yours = ValueCatalog::default();
 /// yours.replace(vec!["oistes-test07.uio.no".into(), "oistes-test01.uio.no".into()]);

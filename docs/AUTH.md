@@ -7,7 +7,7 @@ APIs remain authoritative for every operation.
 ## Product hook
 
 Install one `App::with_access_policy(policy)` implementation of
-`osp_cli::app::access::AccessPolicy`:
+`osp_cli::app::AccessPolicy`:
 
 - `configure(config)` refreshes local product state before visibility is read,
   including root help and REPL rebuilds. The shared `AuthState` attachment

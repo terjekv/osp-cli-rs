@@ -119,13 +119,13 @@ pub enum QuoteStyle {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::shell_words::{QuoteStyle, quote_for_shell};
 ///
 /// assert_eq!(quote_for_shell("O'Brien", QuoteStyle::Single), "'O'\\''Brien'");
 /// assert_eq!(quote_for_shell("hello world", QuoteStyle::Double), "\"hello world\"");
 /// ```
-pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
+pub(crate) fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
     match style {
         QuoteStyle::Single => quote_single(value, "'\\''"),
         QuoteStyle::Double => quote_double(value),
@@ -141,7 +141,7 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
 /// # Examples
 ///
 /// ```
-/// use osp_cli::core::shell_words::escape_for_shell;
+/// use osp_cli::core::escape_for_shell;
 ///
 /// assert_eq!(
 ///     escape_for_shell("team docs/file name.txt"),
@@ -219,6 +219,21 @@ fn is_unquoted_safe(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::core::shell_words::{QuoteStyle, quote_for_shell};
+
+        assert_eq!(
+            quote_for_shell("O'Brien", QuoteStyle::Single),
+            "'O'\\''Brien'"
+        );
+        assert_eq!(
+            quote_for_shell("hello world", QuoteStyle::Double),
+            "\"hello world\""
+        );
+    }
+
     use super::{QuoteStyle, escape_for_shell, quote_for_shell};
 
     #[test]

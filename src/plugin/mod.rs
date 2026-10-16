@@ -6,7 +6,7 @@
 pub(crate) mod catalog;
 pub(crate) mod discovery;
 pub(crate) mod env;
-pub mod manager;
+mod manager;
 pub(crate) mod run;
 
 pub use manager::{

@@ -1,7 +1,7 @@
 //! Session facts and access decisions for declared command authentication.
 //!
 //! Plugin wire metadata is evaluated directly. Products own acquisition and
-//! additional visibility through `app::access::AccessPolicy`.
+//! additional visibility through `app::AccessPolicy`.
 
 use super::plugin::{
     DescribeCommandAuthV1, DescribeCredentialRequirementV1, DescribeVisibilityModeV1,

@@ -7,7 +7,8 @@ use serde_json::json;
 
 #[test]
 fn contextual_messages_preserve_event_order_and_theme_controls() {
-    use osp_cli::ui::messages::{MessageBuffer, MessageLevel};
+    use osp_cli::core::MessageLevel;
+    use osp_cli::ui::messages::MessageBuffer;
     let mut messages = MessageBuffer::new();
     messages.warning("Task still running.");
     messages.push_titled(

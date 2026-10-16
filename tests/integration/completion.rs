@@ -75,7 +75,7 @@ fn completion_tree(context_scope: ContextScope) -> osp_cli::completion::Completi
 
 #[test]
 fn completion_engine_merges_global_context_flags_from_later_tokens() {
-    let catalogue = osp_cli::completion::model::ValueCatalog::default();
+    let catalogue = osp_cli::completion::ValueCatalog::default();
     let mut tree = completion_tree(ContextScope::Global);
     tree.root
         .children

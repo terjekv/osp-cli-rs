@@ -70,7 +70,7 @@ use crate::ui::messages::{MessageLevel, adjust_verbosity};
 use std::ffi::OsString;
 use std::sync::Arc;
 
-pub mod access;
+mod access;
 pub(crate) mod assembly;
 pub(crate) mod bootstrap;
 pub(crate) mod builtin;
@@ -305,7 +305,7 @@ impl App {
     ///
     /// ```
     /// use osp_cli::App;
-    /// use osp_cli::app::access::{AccessPolicy, Visibility};
+    /// use osp_cli::app::{AccessPolicy, Visibility};
     /// struct ProductAccess;
     /// impl AccessPolicy for ProductAccess {
     ///     fn visibility(&self, path: &[String]) -> Visibility {

@@ -311,7 +311,7 @@ impl UiState {
     /// ```
     /// use osp_cli::app::UiState;
     /// use osp_cli::ui::RenderSettings;
-    /// use osp_cli::ui::messages::MessageLevel;
+    /// use osp_cli::core::MessageLevel;
     /// use osp_cli::core::output::OutputFormat;
     ///
     /// let ui = UiState::new(

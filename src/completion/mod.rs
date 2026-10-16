@@ -31,22 +31,22 @@
 
 mod context;
 /// High-level orchestration that combines parsing, context resolution, and suggestion ranking.
-pub mod engine;
+mod engine;
 /// Shared completion data structures passed between the parser and suggester.
-pub mod model;
+mod model;
 /// Tokenization and cursor-aware command-line parsing.
-pub mod parse;
+mod parse;
 /// Suggestion ranking and output shaping from parsed cursor state.
-pub mod suggest;
+mod suggest;
 /// Declarative completion-tree builders derived from command and config metadata.
-pub mod tree;
+mod tree;
 
 pub use engine::CompletionEngine;
 pub use model::{
     ArgNode, CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
     CompletionTree, ContextScope, CursorState, DynamicCompletion, FlagCompletions, FlagHints,
     FlagNode, FlagOccurrence, MatchKind, ParsedLine, QuoteStyle, Suggestion, SuggestionEntry,
-    SuggestionOutput, TailItem, ValueType,
+    SuggestionOutput, TailItem, ValueCatalog, ValueType,
 };
 pub use parse::{CommandLineParser, ParsedCursorLine, TokenSpan};
 pub use suggest::{SuggestionEngine, closest_values};

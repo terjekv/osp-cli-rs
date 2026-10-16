@@ -268,7 +268,7 @@ struct NativeParse {
     args: Vec<String>,
     grammar: clap::Command,
     matches: std::result::Result<clap::ArgMatches, clap::Error>,
-    path: crate::command_policy::CommandPath,
+    path: crate::core::command_policy::CommandPath,
     render_help: bool,
 }
 
@@ -397,7 +397,7 @@ fn run_native_invocation(
                 "elevation prefix is unsupported for native command `{name}`"
             ));
         }
-        let input_path = crate::command_policy::CommandPath::new(
+        let input_path = crate::core::command_policy::CommandPath::new(
             std::iter::once(name.to_string()).chain(args.iter().cloned()),
         );
         before_external_dispatch(&mut state.runtime, &input_path, "command")?;
@@ -519,14 +519,14 @@ fn mark_repl_command_rejected(accepted: &mut Option<&mut bool>) {
 fn native_path_from_matches(
     command: &str,
     matches: &clap::ArgMatches,
-) -> crate::command_policy::CommandPath {
+) -> crate::core::command_policy::CommandPath {
     let mut segments = vec![command.to_string()];
     let mut current = matches;
     while let Some((subcommand, submatches)) = current.subcommand() {
         segments.push(subcommand.to_string());
         current = submatches;
     }
-    crate::command_policy::CommandPath::new(segments)
+    crate::core::command_policy::CommandPath::new(segments)
 }
 
 fn native_resolved_path(
@@ -534,7 +534,7 @@ fn native_resolved_path(
     name: &str,
     args: &[String],
     matches: Option<&clap::ArgMatches>,
-) -> crate::command_policy::CommandPath {
+) -> crate::core::command_policy::CommandPath {
     if let Some(matches) = matches {
         return native_path_from_matches(name, matches);
     }
@@ -547,7 +547,7 @@ fn native_resolved_path(
     crate::cli::passive_command(grammar.clone())
         .try_get_matches_from(std::iter::once(name).chain(tokens))
         .map(|matches| native_path_from_matches(name, &matches))
-        .unwrap_or_else(|_| crate::command_policy::CommandPath::new([name]))
+        .unwrap_or_else(|_| crate::core::command_policy::CommandPath::new([name]))
 }
 
 pub(crate) fn run_repl_action(
