@@ -53,6 +53,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - **Breaking:** Remove the unused `Cli::bootstrap_from` preflight parser.
 
+- **Breaking:** Replace `StartupHook` and `CommandAccessRecovery` with
+  `App::with_access_policy` (`AccessPolicy`) for product visibility, startup,
+  execution preparation and live session facts. Remove recovery requests and
+  outcomes. The hook survives REPL rebuilds and runs before native metadata
+  preparation; help, completion and builtins do not acquire credentials.
+
 - **Breaking:** Remove `osp_cli::guide` and its guide view, section, and entry
   types. Use `core::document::Document` and semantic blocks instead; guide
   restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use

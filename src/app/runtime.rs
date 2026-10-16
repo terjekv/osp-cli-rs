@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::access_recovery::CommandAccessRecovery;
+use super::access::{AccessPolicy, Visibility};
 use super::host::ErrorDetail;
 use crate::config::{ConfigLayer, ResolvedConfig, RuntimeLoadOptions};
 use crate::core::command_policy::{
@@ -465,7 +465,6 @@ pub struct AppRuntime {
     /// Launch-time inputs used to assemble caches and external services.
     pub(crate) launch: LaunchContext,
     product_defaults: ConfigLayer,
-    access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
 }
 
 impl AppRuntime {
@@ -486,7 +485,6 @@ impl AppRuntime {
             themes,
             launch,
             product_defaults: ConfigLayer::default(),
-            access_recovery: None,
         }
     }
 
@@ -539,20 +537,18 @@ impl AppRuntime {
         self.product_defaults = product_defaults;
     }
 
-    pub(crate) fn access_recovery(&self) -> Option<Arc<dyn CommandAccessRecovery>> {
-        self.access_recovery.clone()
+    pub(crate) fn access_policy(&self) -> Option<Arc<dyn AccessPolicy>> {
+        self.auth.access_policy.clone()
     }
 
-    pub(crate) fn set_access_recovery(
-        &mut self,
-        access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
-    ) {
-        self.access_recovery = access_recovery;
+    pub(crate) fn set_access_policy(&mut self, policy: Option<Arc<dyn AccessPolicy>>) {
+        self.auth.access_policy = policy;
     }
 }
 
 /// Authorization and command-visibility state derived from configuration.
 pub struct AuthState {
+    access_policy: Option<Arc<dyn AccessPolicy>>,
     builtins_allowlist: Option<HashSet<String>>,
     external_allowlist: Option<HashSet<String>>,
     policy_context: CommandPolicyContext,
@@ -564,6 +560,7 @@ impl AuthState {
     /// Builds authorization state from the resolved configuration.
     pub fn from_resolved(config: &ResolvedConfig) -> Self {
         Self {
+            access_policy: None,
             builtins_allowlist: parse_allowlist(config.get_string("auth.visible.builtins")),
             // Non-builtin top-level commands currently still use the historical
             // `auth.visible.plugins` key. That surface now covers both external
@@ -589,6 +586,37 @@ impl AuthState {
             merge_policy_registries(plugin_policy, native_commands.command_policy_registry());
         auth.replace_external_policy(external_policy);
         auth
+    }
+
+    /// Returns live authentication and credential facts.
+    pub fn session_facts(&self) -> crate::command_policy::SessionFacts {
+        self.access_policy
+            .as_ref()
+            .map(|policy| policy.session_facts())
+            .unwrap_or_else(|| crate::command_policy::SessionFacts {
+                authenticated: self.policy_context.authenticated,
+                credentials: self.policy_context.credentials.clone(),
+            })
+    }
+
+    pub(crate) fn effective_policy_context(&self) -> CommandPolicyContext {
+        let mut context = self.policy_context.clone();
+        let facts = self.session_facts();
+        context.authenticated = facts.authenticated;
+        context.credentials = facts.credentials;
+        context
+    }
+
+    fn product_hidden(&self, path: &CommandPath) -> Option<CommandAccess> {
+        let policy = self.access_policy.as_ref()?;
+        for end in 1..=path.as_slice().len() {
+            if let Visibility::Hidden(message) = policy.visibility(&path.as_slice()[..end]) {
+                return Some(CommandAccess::hidden(
+                    crate::command_policy::AccessReason::HiddenByProduct(message),
+                ));
+            }
+        }
+        None
     }
 
     /// Returns the context used when evaluating command policies.
@@ -643,21 +671,19 @@ impl AuthState {
 
     /// Evaluates access for an external command.
     pub fn external_command_access(&self, command: &str) -> CommandAccess {
-        command_access_for(
-            command,
-            &self.external_allowlist,
-            &self.external_policy,
-            &self.policy_context,
-        )
+        self.external_command_path_access(&CommandPath::new([command]))
     }
 
     /// Evaluates access for an external command path.
     pub fn external_command_path_access(&self, path: &CommandPath) -> CommandAccess {
+        if let Some(access) = self.product_hidden(path) {
+            return access;
+        }
         command_access_for_path(
             path,
             &self.external_allowlist,
             &self.external_policy,
-            &self.policy_context,
+            &self.effective_policy_context(),
         )
     }
 
@@ -666,7 +692,15 @@ impl AuthState {
         path: &CommandPath,
         policy: &CommandPolicyRegistry,
     ) -> CommandAccess {
-        command_access_for_path(path, &self.external_allowlist, policy, &self.policy_context)
+        if let Some(access) = self.product_hidden(path) {
+            return access;
+        }
+        command_access_for_path(
+            path,
+            &self.external_allowlist,
+            policy,
+            &self.effective_policy_context(),
+        )
     }
 
     /// Returns whether a built-in command should be shown to the user.
@@ -675,6 +709,62 @@ impl AuthState {
     }
 
     /// Returns whether an external command should be shown to the user.
+    pub(crate) fn filter_command_spec(
+        &self,
+        command: &mut crate::completion::CommandSpec,
+        prefix: &[String],
+    ) {
+        let mut path = prefix.to_vec();
+        path.push(command.name.clone());
+        command.subcommands.retain(|child| {
+            let path = CommandPath::new(
+                path.iter()
+                    .cloned()
+                    .chain(std::iter::once(child.name.clone())),
+            );
+            self.external_command_path_access(&path).is_visible()
+        });
+        for child in &mut command.subcommands {
+            self.filter_command_spec(child, &path);
+        }
+    }
+
+    pub(crate) fn filter_help_document(
+        &self,
+        document: &mut crate::core::document::Document,
+        path: &[String],
+    ) {
+        fn filter(
+            auth: &AuthState,
+            blocks: &mut [crate::core::document::DocBlock],
+            path: &[String],
+            commands: bool,
+        ) {
+            use crate::core::document::DocBlock;
+            for block in blocks {
+                match block {
+                    DocBlock::Section { title, blocks, .. } => {
+                        filter(auth, blocks, path, title.eq_ignore_ascii_case("commands"))
+                    }
+                    DocBlock::Entries { entries } if commands => entries.retain(|entry| {
+                        let Some(name) = entry.name.split_whitespace().next() else {
+                            return true;
+                        };
+                        let child = CommandPath::new(
+                            path.iter()
+                                .cloned()
+                                .chain(std::iter::once(name.to_string())),
+                        );
+                        auth.external_command_path_access(&child).is_visible()
+                    }),
+                    _ => {}
+                }
+            }
+        }
+        filter(self, &mut document.blocks, path, false);
+    }
+
+    /// Returns whether the external command is visible under combined access.
     pub fn is_external_command_visible(&self, command: &str) -> bool {
         self.external_command_access(command).is_visible()
     }

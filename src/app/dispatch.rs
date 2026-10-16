@@ -9,9 +9,6 @@ use std::collections::BTreeSet;
 
 use miette::{Result, miette};
 
-use crate::app::access_recovery::{
-    AccessRecoveryOutcome, AccessRecoveryRequest, CommandAccessKind,
-};
 use crate::app::{AppClients, AuthState, TerminalKind};
 use crate::cli::{Cli, Commands, ConfigCommands};
 use crate::core::command_policy::{
@@ -158,14 +155,9 @@ pub(crate) fn ensure_builtin_access(
     session: &mut crate::app::AppSession,
     command: &str,
 ) -> Result<()> {
-    ensure_command_access_with_recovery(
-        runtime,
-        session,
-        CommandAccessKind::Builtin,
-        command,
-        "command",
-        |auth| auth.builtin_access(command),
-    )
+    ensure_command_access_for(runtime, session, false, command, "command", |auth| {
+        auth.builtin_access(command)
+    })
 }
 
 pub(crate) fn ensure_external_command_access(
@@ -173,14 +165,9 @@ pub(crate) fn ensure_external_command_access(
     session: &mut crate::app::AppSession,
     command: &str,
 ) -> Result<()> {
-    ensure_command_access_with_recovery(
-        runtime,
-        session,
-        CommandAccessKind::External,
-        command,
-        "plugin command",
-        |auth| auth.external_command_access(command),
-    )
+    ensure_command_access_for(runtime, session, true, command, "plugin command", |auth| {
+        auth.external_command_access(command)
+    })
 }
 
 pub(crate) fn ensure_external_path_access(
@@ -197,14 +184,11 @@ pub(crate) fn ensure_external_path_access(
             kind,
             runtime.auth().external_command_path_access(path),
         ),
-        ExternalPathAccessRequirement::Runnable => ensure_command_access_with_recovery(
-            runtime,
-            session,
-            CommandAccessKind::External,
-            &command,
-            kind,
-            |auth| auth.external_command_path_access(path),
-        ),
+        ExternalPathAccessRequirement::Runnable => {
+            ensure_command_access_for(runtime, session, true, &command, kind, |auth| {
+                auth.external_command_path_access(path)
+            })
+        }
     }
 }
 
@@ -225,14 +209,11 @@ pub(crate) fn ensure_external_path_access_with_policy(
                 .auth()
                 .external_command_path_access_with_policy(path, policy),
         ),
-        ExternalPathAccessRequirement::Runnable => ensure_command_access_with_recovery(
-            runtime,
-            session,
-            CommandAccessKind::External,
-            &command,
-            kind,
-            |auth| auth.external_command_path_access_with_policy(path, policy),
-        ),
+        ExternalPathAccessRequirement::Runnable => {
+            ensure_command_access_for(runtime, session, true, &command, kind, |auth| {
+                auth.external_command_path_access_with_policy(path, policy)
+            })
+        }
     }
 }
 
@@ -414,6 +395,9 @@ impl MissingCommandCapabilities {
 }
 
 fn ensure_command_access(command: &str, kind: &'static str, access: CommandAccess) -> Result<()> {
+    if let Some(AccessReason::HiddenByProduct(Some(message))) = access.reasons.first() {
+        return Err(miette!("{message}"));
+    }
     if access.is_runnable() {
         return Ok(());
     }
@@ -450,47 +434,41 @@ fn ensure_command_visibility(
     ensure_command_access(command, kind, access)
 }
 
-fn ensure_command_access_with_recovery(
+pub(crate) fn before_external_run(
     runtime: &mut crate::app::AppRuntime,
-    session: &mut crate::app::AppSession,
-    command_kind: CommandAccessKind,
+    path: &CommandPath,
+    requirement: ExternalPathAccessRequirement,
+    kind: &'static str,
+) -> Result<()> {
+    ensure_command_visibility(
+        &path.as_slice().join(" "),
+        kind,
+        runtime.auth().external_command_path_access(path),
+    )?;
+    if requirement == ExternalPathAccessRequirement::Runnable
+        && let Some(policy) = runtime.access_policy()
+    {
+        policy.before_run(path.as_slice(), runtime)?;
+    }
+    Ok(())
+}
+
+fn ensure_command_access_for(
+    runtime: &mut crate::app::AppRuntime,
+    _session: &mut crate::app::AppSession,
+    _external: bool,
     command: &str,
     kind: &'static str,
     access_for: impl Fn(&AuthState) -> CommandAccess,
 ) -> Result<()> {
-    if let Some(recovery) = runtime.access_recovery() {
-        recovery.refresh(runtime)?;
-    }
-    let access = access_for(runtime.auth());
-    if access.is_runnable() {
-        return Ok(());
-    }
-
-    if let Some(recovery) = runtime.access_recovery() {
-        let request = AccessRecoveryRequest::new(
-            runtime.context.terminal_kind(),
-            command_kind,
-            command,
-            access.clone(),
-        );
-        if matches!(
-            recovery.try_recover(&request, runtime, session)?,
-            AccessRecoveryOutcome::Recovered
-        ) {
-            let recovered = access_for(runtime.auth());
-            if recovered.is_runnable() {
-                return Ok(());
-            }
-            return ensure_command_access(command, kind, recovered);
-        }
-    }
-
-    ensure_command_access(command, kind, access)
+    ensure_command_access(command, kind, access_for(runtime.auth()))
 }
 
 fn render_access_reason(reason: &AccessReason) -> String {
     match reason {
-        AccessReason::HiddenByPolicy => "is hidden by current auth policy".to_string(),
+        AccessReason::HiddenByProduct(_) | AccessReason::HiddenByPolicy => {
+            "is hidden by current auth policy".to_string()
+        }
         AccessReason::DisabledByProduct => "is disabled by current product policy".to_string(),
         AccessReason::Unauthenticated => "requires authentication".to_string(),
         AccessReason::MissingCapabilities => "requires additional capabilities".to_string(),
@@ -548,7 +526,9 @@ fn access_reason_action(reason: &AccessReason) -> String {
         AccessReason::ProfileUnavailable(profile) => {
             format!("switch from profile `{profile}` to an eligible profile, then retry")
         }
-        AccessReason::HiddenByPolicy | AccessReason::DisabledByProduct => {
+        AccessReason::HiddenByProduct(_)
+        | AccessReason::HiddenByPolicy
+        | AccessReason::DisabledByProduct => {
             "ask the command owner to enable access, then retry".to_string()
         }
     }

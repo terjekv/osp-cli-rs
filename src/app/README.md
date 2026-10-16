@@ -24,7 +24,7 @@ modules should not import `app`; the one current exception is
 | `external.rs` | Native and plugin commands, including help and progress |
 | `command_output.rs` | Shaping the final result before rendering |
 | `help.rs`, `config_explain.rs` | Help rendering policy; `config explain` output |
-| `access_recovery.rs` | Hooks a wrapper uses to recover from missing access (e.g. log in) |
+| `access.rs` | Hooks a wrapper uses to recover from missing access (e.g. log in) |
 | `facts.rs` | Pure facts derived from host state, shared by several surfaces |
 | `sink.rs`, `timing.rs`, `logging.rs` | Output sinks, timing badges, developer logging |
 
@@ -41,7 +41,7 @@ modules should not import `app`; the one current exception is
 ## Common changes
 
 - **Wrapper needs a new hook:** prefer a small trait or builder option here
-  over the wrapper reaching into internals; `access_recovery.rs` is the model.
+  over the wrapper reaching into internals; `access.rs` is the model.
 - **Command chosen wrongly:** `dispatch.rs`, then `osp plugins doctor` for
   provider conflicts.
 

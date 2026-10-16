@@ -620,14 +620,12 @@ fn prepare_host_run(
             .runtime
             .auth
             .replace_builtin_policy(app.builtin_policy.clone());
-        state
-            .runtime
-            .set_access_recovery(app.access_recovery.clone());
+        state.runtime.set_access_policy(app.access_policy.clone());
     }
     {
         let _phase = crate::startup_trace::phase("startup hook");
-        if let Some(startup_hook) = &app.startup_hook {
-            startup_hook.prepare(&mut state.runtime)?;
+        if let Some(policy) = &app.access_policy {
+            policy.startup(&mut state.runtime)?;
         }
     }
     let invocation_ui = resolve_invocation_ui(
@@ -673,6 +671,17 @@ pub(crate) fn authorized_command_catalog_for(
     all.sort_by(|left, right| left.name.cmp(&right.name));
     all.into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
+        .map(|mut entry| {
+            auth.filter_command_spec(&mut entry.completion, &[]);
+            entry.subcommands.retain(|name| {
+                entry
+                    .completion
+                    .subcommands
+                    .iter()
+                    .any(|child| child.name == *name)
+            });
+            entry
+        })
         .collect()
 }
 

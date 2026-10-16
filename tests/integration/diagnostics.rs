@@ -1,5 +1,5 @@
 use crate::temp_support::make_temp_dir;
-use osp_cli::app::{AppRuntime, BufferedUiSink, StartupHook};
+use osp_cli::app::{AccessPolicy, AppRuntime, BufferedUiSink};
 use osp_cli::config::{
     ConfigLayer, ConfigSchema, LoaderPipeline, ResolveOptions, SchemaEntry, StaticLayerLoader,
     TomlFileLoader,
@@ -11,8 +11,8 @@ use serde_json::json;
 
 struct ProductSessionBootstrap;
 
-impl StartupHook for ProductSessionBootstrap {
-    fn prepare(&self, runtime: &mut AppRuntime) -> miette::Result<()> {
+impl AccessPolicy for ProductSessionBootstrap {
+    fn startup(&self, runtime: &mut AppRuntime) -> miette::Result<()> {
         let host_config = runtime.config_state().resolved();
         let path = host_config
             .get_string("extensions.site.session.path")
@@ -81,7 +81,7 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
     let app = osp_cli::App::new()
         .with_product_defaults(product_defaults)
         .with_builtin_policy(policy)
-        .with_startup_hook(ProductSessionBootstrap);
+        .with_access_policy(ProductSessionBootstrap);
 
     let read_args = [
         "osp",

@@ -26,9 +26,9 @@ use crate::repl::is_repl_shellable_command;
 
 use super::command_output::{PreparedPluginOutput, apply_output_stages};
 use super::dispatch::{
-    ExternalCommandSource, ExternalPathAccessRequirement, canonical_external_command_name,
-    ensure_external_path_access, ensure_external_path_access_with_policy,
-    resolve_external_command_source,
+    ExternalCommandSource, ExternalPathAccessRequirement, before_external_run,
+    canonical_external_command_name, ensure_external_path_access,
+    ensure_external_path_access_with_policy, resolve_external_command_source,
 };
 use super::sink::{ProgressUiSink, UiSink};
 use super::{
@@ -272,6 +272,28 @@ fn run_external_command_with_help_renderer_and_progress_inner(
             let mut native_parse = native_command.command().try_get_matches_from(
                 std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
             );
+            let help_requested = native_parse
+                .as_ref()
+                .is_err_and(|error| is_native_help_error(error.kind()))
+                || canonical_args.first().is_some_and(|arg| arg == "help")
+                || canonical_args
+                    .iter()
+                    .take_while(|arg| arg.as_str() != "--")
+                    .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version"));
+            let initial_path = native_parse
+                .as_ref()
+                .map(|matches| native_path_from_matches(&command, matches))
+                .unwrap_or_else(|_| description.resolve_invocation(&canonical_args).path);
+            before_external_run(
+                runtime,
+                &initial_path,
+                if help_requested {
+                    ExternalPathAccessRequirement::Visible
+                } else {
+                    ExternalPathAccessRequirement::Runnable
+                },
+                "command",
+            )?;
             let mut refreshed_policy = None;
             if native_parse
                 .as_ref()
@@ -396,7 +418,11 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                             "native help metadata refresh failed; using cached help"
                         ),
                     }
-                    return parsed.finish(CliCommandResult::document(guide_help(&help)));
+                    let mut document = guide_help(&help);
+                    runtime
+                        .auth
+                        .filter_help_document(&mut document, path.as_slice());
+                    return parsed.finish(CliCommandResult::document(document));
                 }
                 if path_ambiguous
                     || described_path_has_subcommands(&description, &path)
@@ -577,7 +603,11 @@ fn run_native_command(
         runtime_hints_for_invocation(runtime, input.invocation),
     )
     .with_invocation_elevation(input.elevation)
-    .with_session_context(session.native_context.for_command(input.command_path));
+    .with_session_context(
+        session
+            .native_context
+            .for_command(input.command_path.clone()),
+    );
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
     }
@@ -606,7 +636,16 @@ fn run_native_command(
     }
 
     match execution? {
-        NativeCommandOutcome::Help(text) => Ok(CliCommandResult::document(guide_help(&text))),
+        NativeCommandOutcome::Help(text) => {
+            let mut document = guide_help(&text);
+            let path = input
+                .command_path
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            runtime.auth.filter_help_document(&mut document, &path);
+            Ok(CliCommandResult::document(document))
+        }
         NativeCommandOutcome::Exit(code) => Ok(CliCommandResult::exit(code)),
         NativeCommandOutcome::Response(response) => render_native_response_with_context(
             *response,
@@ -885,6 +924,7 @@ fn run_external_plugin_command(
     } else {
         ExternalPathAccessRequirement::Runnable
     };
+    before_external_run(runtime_state, &path, access_requirement, "plugin command")?;
     ensure_external_path_access_with_policy(
         runtime_state,
         session,
@@ -907,7 +947,11 @@ fn run_external_plugin_command(
             .dispatch_passthrough(command, args, &dispatch_context)
             .map_err(enrich_dispatch_error)?;
         let mut result = if !raw.stdout.is_empty() {
-            CliCommandResult::document(guide_help(&raw.stdout))
+            let mut document = guide_help(&raw.stdout);
+            runtime_state
+                .auth
+                .filter_help_document(&mut document, path.as_slice());
+            CliCommandResult::document(document)
         } else {
             CliCommandResult::exit(raw.status_code)
         };

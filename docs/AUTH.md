@@ -1,166 +1,44 @@
-# Auth And Command Policy
+# Authentication and command access
 
-`osp-cli` now has a generic auth and command-policy mechanism in the core
-crate.
+The library owns command discovery, visibility and dispatch. A product owns
+identity, credential acquisition and service-specific session state. Backend
+APIs remain authoritative for every operation.
 
-This document is about the upstream mechanism, not any site-specific auth
-model.
+## Product hook
 
-Read this file when you are integrating auth or command visibility into a
-downstream distribution. If you are just trying to understand why one command
-is hidden or blocked at runtime, start with:
+Install one `App::with_access_policy(policy)` implementation of
+`osp_cli::app::access::AccessPolicy`:
 
-- `osp plugins commands`
-- `osp plugins doctor`
-- the command/provider docs for your downstream distribution
+- `visibility(path)` returns `Visibility::Shown` or `Hidden(message)`. Paths use
+  canonical command names. Hiding a parent hides its descendants in help,
+  completion, REPL overviews and dispatch. An explicit hidden-command invocation
+  reports the supplied message verbatim, or the standard hidden-policy message.
+- `startup(runtime)` runs once after resolved configuration and runtime assembly,
+  for both CLI and REPL. It does not run again after a REPL configuration rebuild.
+- `before_run(path, runtime)` runs once for an external native or plugin execution,
+  after visibility is checked and before declared runnable requirements. It never
+  runs for builtins, help or completion. Products may acquire credentials here.
+- `session_facts()` returns live `SessionFacts`: an authenticated flag and named
+  `CredentialState` records. It must not prompt or perform acquisition. Access
+  checks, doctor and prompt rendering read these facts directly.
 
-## Scope
+All methods have public, tokenless defaults. The hook is `Send + Sync`, and the
+same instance survives REPL rebuilds. Products should share their credential
+owner with native integrations instead of copying tokens into the host.
 
-Upstream owns:
+Native dispatch invokes the execution hook before refreshing invocation metadata.
+Help and completion never acquire credentials.
 
-- generic command-policy types and evaluation
-- generic plugin auth metadata in `--describe`
-- generic visibility vs runnability handling
-- generic UI hints derived from policy metadata
+## Declared command policy
 
-Upstream does not own:
+`CommandPolicyRegistry` evaluates command metadata with a `CommandPolicyContext`.
+Products may still supply builtin policies and static context for profile,
+capability, feature, strength and freshness requirements. Live authenticated and
+credential facts from `AccessPolicy` replace those two fields during external
+access checks. Product visibility is combined with declared visibility.
 
-- netgroup lookup
-- directory or IdP integration
-- site-specific capability vocabularies
-- site-specific command authorization decisions
+## Session diagnostics
 
-Those belong in downstream distributions such as `osp-cli-uio`.
-
-## Why This Exists
-
-The host evaluates two questions for each command:
-
-- should this command be shown to the user?
-- should this command be runnable right now?
-
-That answer must work consistently across:
-
-- command dispatch
-- help and command listings
-- completion
-- REPL overviews
-
-A shared policy evaluation keeps command visibility consistent across these
-features. The product supplies its own authentication model.
-
-## Core Model
-
-The upstream split is:
-
-- `AuthState`: the host's runtime authentication state
-- `CommandPolicyContext`: policy-facing projection of host auth state
-- `CommandPolicyRegistry`: command-path keyed policy registry
-- `CommandAccess`: evaluated result with visibility and runnability
-
-`AuthState` owns the host's live auth/runtime view. `CommandPolicyContext` is
-the reduced, evaluation-oriented input derived from it for command policy
-decisions.
-
-This keeps credential acquisition, authorization normalization, and command UX
-policy as separate concerns.
-
-## Session Diagnostics
-
-`osp --json doctor` reports the session's observed credential facts in
-`session[0].credentials`. Each record contains the service name, a boolean
-`valid`, and `ttl_seconds` (a nonnegative integer, or `null` when unknown):
-
-```json
-[{"service": "product", "valid": true, "ttl_seconds": 1800}]
-```
-
-The configured `CommandAccessRecovery` refreshes policy facts before doctor
-runs. The report uses the supplied remaining lifetime; doctor does not fetch
-or age credentials itself. Human output derives readable labels from the same
-facts, while JSON consumers can inspect validity and lifetime directly.
-
-## What Users Actually Experience
-
-The user-facing effect is simple:
-
-- some commands are visible and runnable
-- some commands are visible but blocked
-- some commands are hidden entirely
-
-Visible-but-blocked is important. It lets the product show that a command
-exists without pretending the current session is allowed to run it.
-
-## Visibility And Runnability
-
-`osp-cli` distinguishes:
-
-- visibility: should the command appear in help, completion, or listings?
-- runnability: should execution be allowed right now?
-
-A command can be visible but not runnable, for example when it requires
-authentication or capabilities that are not currently present.
-
-The host uses the same access result for:
-
-- command dispatch
-- plugin command listings
-- completion
-- REPL overview and completion surfaces
-
-For external commands, dispatch resolves the real command path first and then
-evaluates access on that resolved path. Nested command policy is not supposed
-to stop at the first token.
-
-Command-policy evaluation governs product visibility and general runnability,
-but backend and resource-level authorization remains authoritative.
-
-Rule of thumb:
-
-- command policy decides whether the command surface should expose the command
-- backend authorization still decides whether the actual operation is allowed
-
-Those are related, but not the same job.
-
-## Plugin Metadata
-
-Plugins can attach auth metadata to `DescribeCommandV1`:
-
-```json
-{
-  "name": "approve",
-  "auth": {
-    "visibility": "capability_gated",
-    "required_capabilities": ["orch.approval.decide"],
-    "feature_flags": ["orch"]
-  }
-}
-```
-
-This metadata is generic. Upstream carries and evaluates it, but does not
-define what `orch.approval.decide` means.
-
-## UI Hints
-
-Plugin listings and REPL summaries show compact auth hints such as:
-
-- `[auth]`
-- `[cap: orch.approval.decide]`
-- `[cap: orch.approval.decide; feature: orch]`
-
-These are meant to improve discovery and operator debugging without embedding
-downstream-specific policy logic in the upstream core.
-
-Those hints are intentionally small. They are there to help the operator
-understand "why is this gated?" without turning upstream into a site-specific
-policy encyclopedia.
-
-## Downstream Use
-
-A downstream distribution should:
-
-1. build its own auth/session model
-2. derive capabilities from its own identity sources
-3. populate `CommandPolicyContext`
-4. register or augment builtin and plugin command policies
-5. rely on upstream evaluation for visibility and runnability
+Doctor reads current credentials from `session_facts()` without acquisition.
+Credential records contain `service`, `valid` and `ttl_seconds`; existing session
+summary fields remain available. Backend APIs remain authoritative.

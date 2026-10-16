@@ -74,7 +74,7 @@ use crate::ui::render_messages_without_config;
 use std::ffi::OsString;
 use std::sync::Arc;
 
-pub(crate) mod access_recovery;
+pub mod access;
 pub(crate) mod assembly;
 pub(crate) mod bootstrap;
 pub(crate) mod builtin;
@@ -97,10 +97,7 @@ pub(crate) mod sink;
 mod tests;
 pub(crate) mod timing;
 
-pub use access_recovery::{
-    AccessRecoveryOutcome, AccessRecoveryRequest, CommandAccessKind, CommandAccessRecovery,
-    StartupHook,
-};
+pub use access::{AccessPolicy, Visibility};
 pub(crate) use bootstrap::*;
 pub(crate) use builtin::*;
 pub(crate) use command_output::*;
@@ -135,8 +132,7 @@ pub(crate) struct AppDefinition {
     config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
     policy_context: CommandPolicyContext,
     builtin_policy: CommandPolicyRegistry,
-    access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
-    startup_hook: Option<Arc<dyn StartupHook>>,
+    access_policy: Option<Arc<dyn AccessPolicy>>,
 }
 
 impl AppDefinition {
@@ -169,13 +165,8 @@ impl AppDefinition {
         self
     }
 
-    fn with_access_recovery(mut self, access_recovery: Arc<dyn CommandAccessRecovery>) -> Self {
-        self.access_recovery = Some(access_recovery);
-        self
-    }
-
-    fn with_startup_hook(mut self, startup_hook: Arc<dyn StartupHook>) -> Self {
-        self.startup_hook = Some(startup_hook);
+    fn with_access_policy(mut self, policy: Arc<dyn AccessPolicy>) -> Self {
+        self.access_policy = Some(policy);
         self
     }
 }
@@ -311,28 +302,25 @@ impl App {
         self
     }
 
-    /// Replaces the product-owned denied-access recovery hook.
+    /// Installs product visibility, startup, acquisition and live session facts.
     ///
-    /// Wrapper crates should use this when denied command access may be
-    /// recoverable by refreshing a product-owned session, such as prompting
-    /// for login and then retrying the command once.
-    pub fn with_access_recovery<R>(mut self, access_recovery: R) -> Self
-    where
-        R: CommandAccessRecovery + 'static,
-    {
-        self.definition = self
-            .definition
-            .with_access_recovery(Arc::new(access_recovery));
-        self
-    }
-
-    /// Installs a product-owned hook that runs after final startup config
-    /// resolution and before command dispatch.
-    pub fn with_startup_hook<R>(mut self, startup_hook: R) -> Self
-    where
-        R: StartupHook + 'static,
-    {
-        self.definition = self.definition.with_startup_hook(Arc::new(startup_hook));
+    /// ```
+    /// use osp_cli::App;
+    /// use osp_cli::app::access::{AccessPolicy, Visibility};
+    /// struct ProductAccess;
+    /// impl AccessPolicy for ProductAccess {
+    ///     fn visibility(&self, path: &[String]) -> Visibility {
+    ///         if path.first().is_some_and(|name| name == "internal") {
+    ///             Visibility::Hidden(Some("Use the product's operator profile".into()))
+    ///         } else {
+    ///             Visibility::Shown
+    ///         }
+    ///     }
+    /// }
+    /// let app = App::new().with_access_policy(ProductAccess);
+    /// ```
+    pub fn with_access_policy<P: AccessPolicy + 'static>(mut self, policy: P) -> Self {
+        self.definition = self.definition.with_access_policy(Arc::new(policy));
         self
     }
 
@@ -692,24 +680,9 @@ impl AppBuilder {
         self
     }
 
-    /// Replaces the product-owned denied-access recovery hook.
-    pub fn with_access_recovery<R>(mut self, access_recovery: R) -> Self
-    where
-        R: CommandAccessRecovery + 'static,
-    {
-        self.definition = self
-            .definition
-            .with_access_recovery(Arc::new(access_recovery));
-        self
-    }
-
-    /// Installs a product-owned hook that runs after final startup config
-    /// resolution and before command dispatch.
-    pub fn with_startup_hook<R>(mut self, startup_hook: R) -> Self
-    where
-        R: StartupHook + 'static,
-    {
-        self.definition = self.definition.with_startup_hook(Arc::new(startup_hook));
+    /// Installs product visibility, startup, acquisition and live session facts.
+    pub fn with_access_policy<P: AccessPolicy + 'static>(mut self, policy: P) -> Self {
+        self.definition = self.definition.with_access_policy(Arc::new(policy));
         self
     }
 

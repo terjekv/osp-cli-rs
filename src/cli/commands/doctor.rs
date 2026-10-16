@@ -127,9 +127,8 @@ impl CredentialDiagnostics<'_> {
 }
 
 fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult> {
-    let credentials = context
-        .auth
-        .policy_context()
+    let facts = context.auth.session_facts();
+    let credentials = facts
         .credentials
         .iter()
         .map(|(service, state)| CredentialDiagnostics { service, state })
@@ -173,7 +172,7 @@ fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult>
 }
 
 fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_>]) -> Vec<Row> {
-    let context = auth.policy_context();
+    let context = auth.effective_policy_context();
     let invalid_credentials = context
         .credentials
         .values()

@@ -22,7 +22,7 @@ use crate::plugin::state::PluginCommandPreferences;
 use crate::ui::RenderSettings;
 
 use super::{
-    AppClients, AppRuntime, AppSession, CommandAccessRecovery, LaunchContext, RuntimeConfigRequest,
+    AccessPolicy, AppClients, AppRuntime, AppSession, LaunchContext, RuntimeConfigRequest,
     RuntimeContext, resolve_runtime_config,
 };
 
@@ -34,7 +34,7 @@ pub(crate) struct ReplStateRebuilder {
     product_defaults: ConfigLayer,
     policy_context: CommandPolicyContext,
     builtin_policy: CommandPolicyRegistry,
-    access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
+    access_policy: Option<Arc<dyn AccessPolicy>>,
     render_settings: RenderSettings,
     native_commands: NativeCommandRegistry,
     plugin_preferences: PluginCommandPreferences,
@@ -55,7 +55,7 @@ impl ReplStateRebuilder {
             product_defaults: runtime.product_defaults().clone(),
             policy_context: runtime.auth.policy_context().clone(),
             builtin_policy: runtime.auth.builtin_policy().clone(),
-            access_recovery: runtime.access_recovery(),
+            access_policy: runtime.access_policy(),
             render_settings: runtime.ui.render_settings.clone(),
             native_commands: clients.native_commands().clone(),
             plugin_preferences: clients.plugins().command_preferences_snapshot(),
@@ -112,7 +112,7 @@ impl ReplStateRebuilder {
         next.runtime
             .auth
             .replace_builtin_policy(self.builtin_policy);
-        next.runtime.set_access_recovery(self.access_recovery);
+        next.runtime.set_access_policy(self.access_policy);
         next.session.restore_rebuild_state(self.preserved_session);
         Ok((next.runtime, next.session, next.clients))
     }

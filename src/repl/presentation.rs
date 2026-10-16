@@ -320,7 +320,7 @@ fn resolve_intro_placeholder(
                 .to_string();
         }
         "session.user_label" => {
-            return if view.auth.policy_context().authenticated {
+            return if view.auth.session_facts().authenticated {
                 "Logged in as"
             } else {
                 "User"
@@ -328,7 +328,7 @@ fn resolve_intro_placeholder(
             .to_string();
         }
         "session.user_value" => {
-            return if view.auth.policy_context().authenticated {
+            return if view.auth.session_facts().authenticated {
                 effective_user(view)
             } else {
                 "Not authenticated"

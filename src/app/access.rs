@@ -1,0 +1,42 @@
+//! Product-owned visibility, startup and session acquisition.
+
+use super::AppRuntime;
+use crate::core::command_policy::SessionFacts;
+
+/// Product verdict about offering an external command path.
+pub enum Visibility {
+    /// Offer the command subject to its declared authentication requirements.
+    Shown,
+    /// Hide the command everywhere, using the optional message on dispatch.
+    Hidden(Option<String>),
+}
+
+/// Product access decisions shared by native commands and external plugins.
+///
+/// Visibility and session facts must be side-effect free: help, completion,
+/// the prompt and doctor read them without acquiring credentials.
+pub trait AccessPolicy: Send + Sync {
+    /// Whether the canonical command path is offered to the current identity.
+    fn visibility(&self, _path: &[String]) -> Visibility {
+        Visibility::Shown
+    }
+
+    /// Runs once after startup state assembly, never on REPL rebuilds.
+    fn startup(&self, _runtime: &mut AppRuntime) -> miette::Result<()> {
+        Ok(())
+    }
+
+    /// Runs once before an external execution and any metadata refresh.
+    ///
+    /// The path is canonical when the cached grammar resolves it. If dynamic
+    /// grammar must be refreshed first, the path is the known command prefix.
+    /// Builtins, help and completion never call this hook.
+    fn before_run(&self, _path: &[String], _runtime: &mut AppRuntime) -> miette::Result<()> {
+        Ok(())
+    }
+
+    /// Returns current session and credential facts for access, doctor and prompts.
+    fn session_facts(&self) -> SessionFacts {
+        SessionFacts::default()
+    }
+}

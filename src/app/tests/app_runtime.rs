@@ -107,13 +107,11 @@ impl crate::NativeCommand for CompletionRefreshingNativeCommand {
     }
 }
 
-struct AuthenticatedBuiltinRecovery;
-
 #[derive(Clone, Default)]
 struct StartupResolutionProbe(Arc<Mutex<Vec<(String, crate::app::TerminalKind)>>>);
 
-impl crate::app::StartupHook for StartupResolutionProbe {
-    fn prepare(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
+impl crate::app::AccessPolicy for StartupResolutionProbe {
+    fn startup(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
         self.0
             .lock()
             .expect("startup probe should not be poisoned")
@@ -126,30 +124,6 @@ impl crate::app::StartupHook for StartupResolutionProbe {
                 runtime.context().terminal_kind(),
             ));
         Ok(())
-    }
-}
-
-impl crate::app::CommandAccessRecovery for AuthenticatedBuiltinRecovery {
-    fn refresh(&self, _runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
-        Ok(())
-    }
-
-    fn try_recover(
-        &self,
-        request: &crate::app::AccessRecoveryRequest,
-        runtime: &mut crate::app::AppRuntime,
-        _session: &mut crate::app::AppSession,
-    ) -> miette::Result<crate::app::AccessRecoveryOutcome> {
-        if request.command_kind != crate::app::CommandAccessKind::Builtin
-            || request.command != "config"
-        {
-            return Ok(crate::app::AccessRecoveryOutcome::NoChange);
-        }
-
-        runtime.set_policy_context(
-            crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-        );
-        Ok(crate::app::AccessRecoveryOutcome::Recovered)
     }
 }
 
@@ -278,7 +252,7 @@ fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
             let mut sink = BufferedUiSink::default();
             let exit = crate::app::App::builder()
                 .with_product_defaults(product_defaults.clone())
-                .with_startup_hook(probe.clone())
+                .with_access_policy(probe.clone())
                 .build()
                 .run_with_sink(args, &mut sink)
                 .expect("prepared command should run");
@@ -317,8 +291,8 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
         #[derive(Clone)]
         struct SubjectHook(Arc<Mutex<Option<String>>>);
 
-        impl crate::app::StartupHook for SubjectHook {
-            fn prepare(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
+        impl crate::app::AccessPolicy for SubjectHook {
+            fn startup(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
                 runtime.set_authenticated_subject(Some("alice"));
                 *self.0.lock().expect("subject probe should not be poisoned") = runtime
                     .context()
@@ -331,7 +305,7 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
         let subject = Arc::new(Mutex::new(None));
         let mut sink = BufferedUiSink::default();
         let exit = crate::app::App::builder()
-            .with_startup_hook(SubjectHook(subject.clone()))
+            .with_access_policy(SubjectHook(subject.clone()))
             .build()
             .run_with_sink(["osp", "config", "get", "profile.active"], &mut sink)
             .expect("startup subject command should run");
@@ -453,31 +427,6 @@ fn app_builder_builtin_policy_flows_through_public_builder_surface_unit() {
         assert_eq!(allowed_exit, 0);
         assert!(allowed_sink.stdout.contains("theme.name"));
         assert!(allowed_sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
-fn app_builder_access_recovery_retries_denied_builtin_command_unit() {
-    with_test_xdg_env(|| {
-        let mut builtin_policy = crate::core::command_policy::CommandPolicyRegistry::new();
-        builtin_policy.register(
-            crate::core::command_policy::CommandPolicy::new(
-                crate::core::command_policy::CommandPath::new(["config"]),
-            )
-            .visibility(crate::core::command_policy::VisibilityMode::Authenticated),
-        );
-
-        let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy)
-            .with_access_recovery(AuthenticatedBuiltinRecovery)
-            .build_with_sink(&mut sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_eq!(exit, 0);
-        assert!(sink.stdout.contains("theme.name"));
-        assert!(sink.stderr.is_empty());
     });
 }
 

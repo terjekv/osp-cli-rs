@@ -157,6 +157,16 @@ impl CredentialState {
     }
 }
 
+/// Live session facts supplied by the product access hook.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionFacts {
+    /// Whether the product has an authenticated session.
+    pub authenticated: bool,
+    /// Named credentials currently observed by the product, keyed by trimmed
+    /// lowercase service names.
+    pub credentials: BTreeMap<String, CredentialState>,
+}
+
 /// Requirement applied to one named credential or token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
@@ -627,6 +637,8 @@ pub enum CommandRunnable {
 pub enum AccessReason {
     /// The policy explicitly hides the command.
     HiddenByPolicy,
+    /// The product hides this canonical command path.
+    HiddenByProduct(Option<String>),
     /// Product configuration disables the command entirely.
     DisabledByProduct,
     /// Authentication is required before the command may run.
