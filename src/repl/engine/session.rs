@@ -204,6 +204,7 @@ where
             }
         };
 
+        crate::repl::notices::begin_foreground();
         let result =
             handle_interactive_signal(signal, editor, history_store, appearance, submission)?;
         crate::repl::notices::finish_foreground();

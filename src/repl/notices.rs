@@ -13,13 +13,18 @@ struct Notices {
     printer: Option<ExternalPrinter<String>>,
     pending: Vec<String>,
     basic: bool,
+    foreground: bool,
     owner: Option<ReplSession>,
 }
 
 impl Notices {
     fn post(&mut self, line: String) {
         let line = inline(&line);
-        if self.basic {
+        if self.foreground {
+            if self.pending.len() < 8 {
+                self.pending.push(line);
+            }
+        } else if self.basic {
             eprintln!("\n{line}");
         } else if let Some(printer) = &self.printer {
             let _ = printer.sender().try_send(line);
@@ -47,6 +52,7 @@ static NOTICES: Mutex<Notices> = Mutex::new(Notices {
     printer: None,
     pending: Vec::new(),
     basic: false,
+    foreground: false,
     owner: None,
 });
 
@@ -149,6 +155,7 @@ impl Drop for SessionOwner {
         let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
         if self.0.is_current(&notices) {
             notices.owner = None;
+            notices.foreground = false;
             notices.printer = None;
             notices.pending.clear();
         }
@@ -208,7 +215,21 @@ pub(crate) fn request_foreground_bell(
     }
 }
 
+pub(crate) fn begin_foreground() {
+    NOTICES.lock().unwrap_or_else(|e| e.into_inner()).foreground = true;
+}
+
 pub(crate) fn finish_foreground() {
+    let pending = {
+        let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
+        notices.foreground = false;
+        std::mem::take(&mut notices.pending)
+    };
+    // There is no live prompt between command output and the next input read.
+    // Sending these through ExternalPrinter would redraw the old prompt over them.
+    for line in pending {
+        eprintln!("{line}");
+    }
     crate::repl::bell::finish();
 }
 

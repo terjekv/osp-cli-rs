@@ -13,6 +13,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Rebuild native completion at safe prompt boundaries after background refresh
   and cold discovery, including subsequent execution or rendering failures.
 
+- Hold foreground REPL notices until command output finishes, so the editor's
+  next redraw cannot erase them.
+
 - Add master-controlled terminal bell requests and `notifications preview` in
   rich human REPL sessions, with a ten-second limit.
 
