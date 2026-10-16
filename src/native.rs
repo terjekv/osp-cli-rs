@@ -82,6 +82,7 @@ pub struct NativeCommandContext<'a> {
     /// Session-scoped native context that may be surfaced by the host REPL.
     pub session_context: NativeSessionContext,
     command_scope: crate::core::CommandScope,
+    diagnostics: Option<&'a crate::diagnostics::DiagnosticSink>,
     progress: Option<&'a dyn NativeProgressSink>,
     pub(crate) output_pipeline: bool,
 }
@@ -95,9 +96,21 @@ impl<'a> NativeCommandContext<'a> {
             invocation_elevation: InvocationElevation::Ordinary,
             session_context: NativeSessionContext::default(),
             command_scope: Default::default(),
+            diagnostics: None,
             progress: None,
             output_pipeline: false,
         }
+    }
+
+    /// Attaches command-local sanitized service evidence.
+    pub fn with_diagnostic_sink(mut self, sink: &'a crate::diagnostics::DiagnosticSink) -> Self {
+        self.diagnostics = Some(sink);
+        self
+    }
+
+    /// Returns this command's evidence sink, when hosted.
+    pub fn diagnostics(&self) -> Option<&'a crate::diagnostics::DiagnosticSink> {
+        self.diagnostics
     }
 
     /// Sets where this invocation's reader types suggested commands.

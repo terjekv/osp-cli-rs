@@ -16,6 +16,7 @@ impl MessageLevel {
             MessageLevel::Success => "Success",
             MessageLevel::Info => "Info",
             MessageLevel::Trace => "Trace",
+            MessageLevel::Evidence => "Evidence",
         }
     }
 
@@ -26,6 +27,7 @@ impl MessageLevel {
             MessageLevel::Success => 2,
             MessageLevel::Info => 3,
             MessageLevel::Trace => 4,
+            MessageLevel::Evidence => 5,
         }
     }
 
@@ -35,7 +37,8 @@ impl MessageLevel {
             1 => MessageLevel::Warning,
             2 => MessageLevel::Success,
             3 => MessageLevel::Info,
-            _ => MessageLevel::Trace,
+            4 => MessageLevel::Trace,
+            _ => MessageLevel::Evidence,
         }
     }
 
@@ -49,7 +52,7 @@ impl MessageLevel {
             MessageLevel::Warning => StyleToken::Warning,
             MessageLevel::Success => StyleToken::Success,
             MessageLevel::Info => StyleToken::Info,
-            MessageLevel::Trace => StyleToken::Trace,
+            MessageLevel::Trace | MessageLevel::Evidence => StyleToken::Trace,
         }
     }
 }
@@ -197,7 +200,7 @@ pub(crate) fn message_layout_from_config(config: &ResolvedConfig) -> MessageLayo
 
 pub fn adjust_verbosity(base: MessageLevel, verbose: u8, quiet: u8) -> MessageLevel {
     let rank =
-        (i16::from(base.as_rank()) + i16::from(verbose) - i16::from(quiet)).clamp(0, 4) as i8;
+        (i16::from(base.as_rank()) + i16::from(verbose) - i16::from(quiet)).clamp(0, 5) as i8;
     MessageLevel::from_rank(rank)
 }
 

@@ -843,6 +843,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         messages: Vec::new(),
         context: None,
         meta: ResponseMetaV1 {
+            detail_columns: Vec::new(),
             format_hint: Some("table".to_string()),
             columns: Some(vec!["uid".to_string()]),
             column_align: Vec::new(),

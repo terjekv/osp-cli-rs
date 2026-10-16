@@ -93,6 +93,7 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2 }]),
             Some(&ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["name".to_string(), "count".to_string()]),
                 column_align: vec![ColumnAlignmentV1::Left, ColumnAlignmentV1::Right],
@@ -121,6 +122,7 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2, "status": "ok", "notes": "ready" }]),
             Some(&ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),

@@ -75,17 +75,30 @@ pub enum MessageLevel {
     Info,
     /// Show trace-level output.
     Trace,
+    /// Show evidence behind requests and cache decisions.
+    Evidence,
 }
 
 impl MessageLevel {
     /// All variants in canonical configuration order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Error,
         Self::Warning,
         Self::Success,
         Self::Info,
         Self::Trace,
+        Self::Evidence,
     ];
+
+    /// Numeric command detail exported to executable plugins (0 through 3).
+    pub fn command_verbosity(self) -> u8 {
+        match self {
+            Self::Error | Self::Warning | Self::Success => 0,
+            Self::Info => 1,
+            Self::Trace => 2,
+            Self::Evidence => 3,
+        }
+    }
 
     /// Returns the canonical string representation for this verbosity level.
     pub fn as_str(self) -> &'static str {
@@ -95,6 +108,7 @@ impl MessageLevel {
             MessageLevel::Success => "success",
             MessageLevel::Info => "info",
             MessageLevel::Trace => "trace",
+            MessageLevel::Evidence => "evidence",
         }
     }
 
@@ -116,6 +130,7 @@ impl MessageLevel {
             "success" => Some(MessageLevel::Success),
             "info" => Some(MessageLevel::Info),
             "trace" => Some(MessageLevel::Trace),
+            "evidence" => Some(MessageLevel::Evidence),
             _ => None,
         }
     }
@@ -250,6 +265,7 @@ impl RuntimeHints {
         Self::from_env_iter(
             [
                 ENV_OSP_UI_VERBOSITY,
+                "OSP_COMMAND_VERBOSITY",
                 ENV_OSP_DEBUG_LEVEL,
                 ENV_OSP_FORMAT,
                 ENV_OSP_COLOR,
@@ -326,10 +342,16 @@ impl RuntimeHints {
             .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string()))
             .collect::<HashMap<String, String>>();
 
-        let ui_verbosity = values
+        let mut ui_verbosity = values
             .get(ENV_OSP_UI_VERBOSITY)
             .and_then(|value| MessageLevel::parse(value))
             .unwrap_or(MessageLevel::Success);
+        if values
+            .get("OSP_COMMAND_VERBOSITY")
+            .is_some_and(|v| v == "3")
+        {
+            ui_verbosity = MessageLevel::Evidence;
+        }
         let debug_level = values
             .get(ENV_OSP_DEBUG_LEVEL)
             .and_then(|value| value.trim().parse::<u8>().ok())
@@ -401,7 +423,19 @@ impl RuntimeHints {
     /// ```
     pub fn env_pairs(&self) -> Vec<(&'static str, String)> {
         let mut out = vec![
-            (ENV_OSP_UI_VERBOSITY, self.ui_verbosity.as_str().to_string()),
+            (
+                ENV_OSP_UI_VERBOSITY,
+                if self.ui_verbosity >= MessageLevel::Trace {
+                    "trace"
+                } else {
+                    self.ui_verbosity.as_str()
+                }
+                .to_string(),
+            ),
+            (
+                "OSP_COMMAND_VERBOSITY",
+                self.ui_verbosity.command_verbosity().to_string(),
+            ),
             (ENV_OSP_DEBUG_LEVEL, self.debug_level.min(3).to_string()),
             (ENV_OSP_FORMAT, self.format.as_str().to_string()),
             (ENV_OSP_COLOR, self.color.as_str().to_string()),

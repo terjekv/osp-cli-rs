@@ -1093,6 +1093,7 @@ mod tests {
                         }],
                         context: None,
                         meta: ResponseMetaV1 {
+                            detail_columns: Vec::new(),
                             format_hint: Some("json".to_string()),
                             columns: None,
                             column_align: Vec::new(),
@@ -1210,6 +1211,7 @@ mod tests {
                 messages: Vec::new(),
                 context: None,
                 meta: ResponseMetaV1 {
+                    detail_columns: Vec::new(),
                     format_hint: Some("json".to_string()),
                     columns: None,
                     column_align: Vec::new(),
@@ -1391,6 +1393,7 @@ mod tests {
             }],
             context: None,
             meta: ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("json".to_string()),
                 columns: None,
                 column_align: Vec::new(),

@@ -114,6 +114,7 @@ impl NativeCommand for NativeProbeCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["active_profile".to_string(), "theme".to_string()]),
                 column_labels: Vec::new(),
@@ -298,6 +299,7 @@ impl NativeCommand for CuratedOrchRowsCommand {
             ],
             context: None,
             meta: ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),
@@ -361,6 +363,7 @@ impl NativeCommand for SiteStatusCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                detail_columns: Vec::new(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["enabled".to_string(), "banner".to_string()]),
                 column_labels: Vec::new(),

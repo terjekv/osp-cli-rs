@@ -94,7 +94,7 @@ pub(crate) fn intro_style_with_verbosity(
         MessageLevel::Error | MessageLevel::Warning => -3,
         MessageLevel::Success => 0,
         MessageLevel::Info => 1,
-        MessageLevel::Trace => 2,
+        MessageLevel::Trace | MessageLevel::Evidence => 2,
     };
     rank = (rank + delta).clamp(0, 3);
     match rank {

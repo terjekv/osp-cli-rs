@@ -483,6 +483,9 @@ pub struct ResponseMetaV1 {
     /// output is human-facing; canonical JSON and pipeline rows stay in data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presentation_lines: Vec<String>,
+    /// Native-only human supplements, rendered on stderr without changing payload data.
+    #[serde(skip)]
+    pub detail_columns: Vec<String>,
     /// Human-only lines to append when a progress block cannot be replaced.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub progress_append: Vec<String>,
@@ -528,6 +531,7 @@ pub enum ColumnAlignmentV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMessageV1 {
     /// Severity level for the message.
+    #[serde(with = "message_level_v1")]
     pub level: MessageLevel,
     /// Human-readable message text.
     pub text: String,
@@ -547,6 +551,31 @@ pub(crate) fn canonical_plugin_command_name(command: &str) -> Result<String, Str
         ));
     }
     Ok(command.to_string())
+}
+
+mod message_level_v1 {
+    use super::MessageLevel;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        level: &MessageLevel,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(if *level >= MessageLevel::Trace {
+            "trace"
+        } else {
+            level.as_str()
+        })
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<MessageLevel, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        MessageLevel::parse(&value)
+            .filter(|level| *level <= MessageLevel::Trace)
+            .ok_or_else(|| serde::de::Error::custom("unsupported plugin message level"))
+    }
 }
 
 impl DescribeCommandV1 {

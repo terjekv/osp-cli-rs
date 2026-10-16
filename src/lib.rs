@@ -254,6 +254,8 @@ pub mod completion;
 pub mod config;
 /// Shared command, output, row, and protocol primitives.
 pub mod core;
+/// Allowlisted command-local diagnostic events.
+pub mod diagnostics;
 /// Canonical pipeline parsing and execution.
 pub mod dsl;
 /// External plugin discovery, protocol, and dispatch support.
