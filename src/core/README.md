@@ -1,7 +1,7 @@
 # core
 
 Small shared types that must mean the same thing everywhere: a row, a command
-result, a command description, the plugin wire DTOs, shell quoting and fuzzy
+result, a command description, the plugin wire DTOs, shell syntax and fuzzy
 matching. Everything else builds on these.
 
 Imports nothing else from the crate, and must stay that way. A type belongs
@@ -19,7 +19,7 @@ one feature. `core` is not a place for helpers without a home.
 | `command_policy.rs` | Whether a command is visible or allowed in the current context |
 | `plugin.rs` | Plugin protocol DTOs (`DescribeV1`, `ResponseV1`) and validation |
 | `runtime.rs` | Runtime hints passed to native and plugin commands |
-| `shell_words.rs`, `fuzzy.rs` | Quoting for display; the fuzzy matcher used by completion |
+| `shell_words.rs`, `fuzzy.rs` | Shell scanning and quoting; the fuzzy matcher used by completion |
 
 ## Common changes
 

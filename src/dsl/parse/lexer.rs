@@ -1,5 +1,7 @@
 use std::{error::Error, fmt};
 
+use crate::core::shell_words::{LexEnd, LexEventKind, LexState, scan_shell};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
@@ -67,124 +69,34 @@ impl fmt::Display for LexerError {
 
 impl Error for LexerError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
-    Normal,
-    SingleQuote,
-    DoubleQuote,
-    EscapeNormal,
-    EscapeDouble,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ScanTransition {
-    Structural,
-    NormalChar(char),
-    QuotedChar(char),
-    EscapedChar(char),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct QuoteScanner {
-    state: State,
-    base_offset: usize,
-    single_quote_start: usize,
-    double_quote_start: usize,
-}
-
-impl QuoteScanner {
-    fn new(base_offset: usize) -> Self {
-        Self {
-            state: State::Normal,
-            base_offset,
-            single_quote_start: 0,
-            double_quote_start: 0,
-        }
-    }
-
-    fn is_normal(&self) -> bool {
-        matches!(self.state, State::Normal)
-    }
-
-    fn advance(&mut self, index: usize, ch: char) -> ScanTransition {
-        match self.state {
-            State::Normal => match ch {
-                '\\' => {
-                    self.state = State::EscapeNormal;
-                    ScanTransition::Structural
-                }
-                '\'' => {
-                    self.single_quote_start = self.base_offset + index;
-                    self.state = State::SingleQuote;
-                    ScanTransition::Structural
-                }
-                '"' => {
-                    self.double_quote_start = self.base_offset + index;
-                    self.state = State::DoubleQuote;
-                    ScanTransition::Structural
-                }
-                _ => ScanTransition::NormalChar(ch),
-            },
-            State::SingleQuote => {
-                if ch == '\'' {
-                    self.state = State::Normal;
-                    ScanTransition::Structural
-                } else {
-                    ScanTransition::QuotedChar(ch)
-                }
-            }
-            State::DoubleQuote => {
-                if ch == '"' {
-                    self.state = State::Normal;
-                    ScanTransition::Structural
-                } else if ch == '\\' {
-                    self.state = State::EscapeDouble;
-                    ScanTransition::Structural
-                } else {
-                    ScanTransition::QuotedChar(ch)
-                }
-            }
-            State::EscapeNormal => {
-                self.state = State::Normal;
-                ScanTransition::EscapedChar(ch)
-            }
-            State::EscapeDouble => {
-                self.state = State::DoubleQuote;
-                ScanTransition::EscapedChar(ch)
-            }
-        }
-    }
-
-    fn finish(&self, input_len: usize) -> Result<(), LexerError> {
-        match self.state {
-            State::Normal => Ok(()),
-            State::SingleQuote => Err(LexerError::UnterminatedSingleQuote {
-                start: self.single_quote_start,
-            }),
-            State::DoubleQuote => Err(LexerError::UnterminatedDoubleQuote {
-                start: self.double_quote_start,
-            }),
-            State::EscapeNormal | State::EscapeDouble => Err(LexerError::TrailingEscape {
-                index: self.base_offset + input_len,
-            }),
-        }
+fn finish_scan(end: LexEnd, input_len: usize, base_offset: usize) -> Result<(), LexerError> {
+    match end.state {
+        LexState::Normal => Ok(()),
+        LexState::SingleQuote => Err(LexerError::UnterminatedSingleQuote {
+            start: base_offset + end.quote_start,
+        }),
+        LexState::DoubleQuote => Err(LexerError::UnterminatedDoubleQuote {
+            start: base_offset + end.quote_start,
+        }),
+        LexState::EscapeNormal | LexState::EscapeDouble => Err(LexerError::TrailingEscape {
+            index: base_offset + input_len,
+        }),
     }
 }
 
 /// Split a full `command | stage | stage` string while respecting quotes.
 pub fn split_pipeline(input: &str) -> Result<Vec<StageSegment>, LexerError> {
     let mut out = Vec::new();
-    let mut scanner = QuoteScanner::new(0);
     let mut segment_start = 0usize;
 
-    for (index, ch) in input.char_indices() {
-        if matches!(scanner.advance(index, ch), ScanTransition::NormalChar('|')) {
-            push_segment(input, segment_start, index, &mut out);
-            segment_start = index + ch.len_utf8();
+    let end = scan_shell(input, |event| {
+        if event.kind == LexEventKind::Pipe {
+            push_segment(input, segment_start, event.index, &mut out);
+            segment_start = event.end;
         }
-    }
+    });
 
-    scanner.finish(input.len())?;
+    finish_scan(end, input.len(), 0)?;
     push_segment(input, segment_start, input.len(), &mut out);
     Ok(out)
 }
@@ -221,38 +133,33 @@ fn tokenize_delimited_words(
     base_offset: usize,
     is_delimiter: impl Fn(char) -> bool,
 ) -> Result<Vec<Token>, LexerError> {
-    let mut scanner = QuoteScanner::new(base_offset);
     let mut words = Vec::new();
     let mut current = String::new();
     let mut token_start: Option<usize> = None;
 
-    for (index, ch) in input.char_indices() {
-        if scanner.is_normal() && is_delimiter(ch) {
+    let end = scan_shell(input, |event| {
+        let ch = event.ch;
+        if event.state_before == LexState::Normal && is_delimiter(ch) {
             finish_word(
                 &mut words,
                 &mut current,
                 &mut token_start,
-                index,
+                event.index,
                 base_offset,
             );
-            continue;
+            return;
         }
 
-        if scanner.is_normal() && token_start.is_none() {
-            token_start = Some(index);
+        token_start.get_or_insert(event.index);
+        match event.kind {
+            LexEventKind::Text(ch) => current.push(ch),
+            // Pipes remain word text here; only split_pipeline owns boundaries.
+            LexEventKind::Pipe | LexEventKind::Separator => current.push(ch),
+            LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
         }
+    });
 
-        match scanner.advance(index, ch) {
-            ScanTransition::NormalChar(ch)
-            | ScanTransition::QuotedChar(ch)
-            | ScanTransition::EscapedChar(ch) => {
-                current.push(ch);
-            }
-            ScanTransition::Structural => {}
-        }
-    }
-
-    scanner.finish(input.len())?;
+    finish_scan(end, input.len(), base_offset)?;
     finish_word(
         &mut words,
         &mut current,
@@ -301,7 +208,6 @@ fn split_word_token(token: Token, segment: &StageSegment, out: &mut Vec<Token>) 
         return;
     }
 
-    let mut scanner = QuoteScanner::new(token.span.start);
     let mut split_happened = false;
     let mut current_text = String::new();
     let mut current_raw_start = None;
@@ -312,39 +218,41 @@ fn split_word_token(token: Token, segment: &StageSegment, out: &mut Vec<Token>) 
         current_text.push_str(&raw[..prefix]);
         cursor = prefix;
     }
-    while cursor < raw.len() {
-        if scanner.is_normal()
-            && let Some((op, width)) = parse_operator_at(raw, cursor)
+    scan_shell(raw, |event| {
+        if event.index < cursor {
+            return;
+        }
+        if event.state_before == LexState::Normal
+            && let Some((op, width)) = parse_operator_at(raw, event.index)
         {
             push_split_word(
                 out,
                 token.span.start,
                 current_raw_start.take(),
-                cursor,
+                event.index,
                 &mut current_text,
             );
             out.push(Token {
                 kind: TokenKind::Op(op),
                 span: Span {
-                    start: token.span.start + cursor,
-                    end: token.span.start + cursor + width,
+                    start: token.span.start + event.index,
+                    end: token.span.start + event.index + width,
                 },
-                text: raw[cursor..cursor + width].to_string(),
+                text: raw[event.index..event.index + width].to_string(),
             });
             split_happened = true;
-            cursor += width;
-            continue;
+            cursor = event.index + width;
+            return;
         }
-        let ch = raw[cursor..].chars().next().unwrap();
-        current_raw_start.get_or_insert(cursor);
-        match scanner.advance(cursor, ch) {
-            ScanTransition::NormalChar(ch)
-            | ScanTransition::QuotedChar(ch)
-            | ScanTransition::EscapedChar(ch) => current_text.push(ch),
-            ScanTransition::Structural => {}
+        current_raw_start.get_or_insert(event.index);
+        match event.kind {
+            LexEventKind::Text(ch) => current_text.push(ch),
+            LexEventKind::Pipe | LexEventKind::Separator => {
+                current_text.push_str(&raw[event.index..event.end]);
+            }
+            LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
         }
-        cursor += ch.len_utf8();
-    }
+    });
 
     if !split_happened {
         out.push(token);

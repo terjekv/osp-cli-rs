@@ -14,6 +14,8 @@
 use crate::completion::model::{CommandLine, CursorState, FlagOccurrence, ParsedLine, QuoteStyle};
 use std::collections::BTreeMap;
 
+use crate::core::shell_words::{LexEvent, LexEventKind, LexState, scan_shell};
+
 /// Token value with byte offsets into the original input line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenSpan {
@@ -26,94 +28,10 @@ pub struct TokenSpan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexState {
-    Normal,
-    SingleQuote,
-    DoubleQuote,
-    EscapeNormal,
-    EscapeDouble,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexEventKind {
-    Separator,
-    Pipe,
-    QuoteStart,
-    QuoteEnd,
-    EscapeStart,
-    Text(char),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FlagArity {
     FlagOnly,
     SingleValue,
     MultipleValues,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LexEvent {
-    index: usize,
-    end: usize,
-    state_before: LexState,
-    kind: LexEventKind,
-}
-
-fn scan_shell(input: &str, mut visit: impl FnMut(LexEvent)) -> LexState {
-    let mut state = LexState::Normal;
-    for (index, ch) in input.char_indices() {
-        let state_before = state;
-        let kind = match state {
-            LexState::Normal if ch.is_whitespace() => LexEventKind::Separator,
-            LexState::Normal => match ch {
-                '|' => LexEventKind::Pipe,
-                '\\' => {
-                    state = LexState::EscapeNormal;
-                    LexEventKind::EscapeStart
-                }
-                '\'' => {
-                    state = LexState::SingleQuote;
-                    LexEventKind::QuoteStart
-                }
-                '"' => {
-                    state = LexState::DoubleQuote;
-                    LexEventKind::QuoteStart
-                }
-                _ => LexEventKind::Text(ch),
-            },
-            LexState::SingleQuote if ch == '\'' => {
-                state = LexState::Normal;
-                LexEventKind::QuoteEnd
-            }
-            LexState::SingleQuote => LexEventKind::Text(ch),
-            LexState::DoubleQuote => match ch {
-                '"' => {
-                    state = LexState::Normal;
-                    LexEventKind::QuoteEnd
-                }
-                '\\' => {
-                    state = LexState::EscapeDouble;
-                    LexEventKind::EscapeStart
-                }
-                _ => LexEventKind::Text(ch),
-            },
-            LexState::EscapeNormal => {
-                state = LexState::Normal;
-                LexEventKind::Text(ch)
-            }
-            LexState::EscapeDouble => {
-                state = LexState::DoubleQuote;
-                LexEventKind::Text(ch)
-            }
-        };
-        visit(LexEvent {
-            index,
-            end: index + ch.len_utf8(),
-            state_before,
-            kind,
-        });
-    }
-    state
 }
 
 /// Parsed line assembly after tokenization.
@@ -440,7 +358,8 @@ impl CommandLineParser {
             }
             LexEventKind::Text(ch) => current.push(ch),
             LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
-        });
+        })
+        .state;
 
         if state == LexState::Normal {
             push_current(&mut out, &mut current);
@@ -475,7 +394,8 @@ impl CommandLineParser {
                 current_start.get_or_insert(event.index);
             }
             LexEventKind::QuoteEnd => {}
-        });
+        })
+        .state;
 
         if state == LexState::Normal {
             push_current_span(&mut out, &mut current, &mut current_start, line.len());
@@ -577,7 +497,8 @@ impl CommandLineParser {
             | LexEventKind::QuoteStart
             | LexEventKind::QuoteEnd
             | LexEventKind::EscapeStart => active.observe(event),
-        });
+        })
+        .state;
         self.build_cursor_state(prefix, safe_cursor, active.cursor_state(safe_cursor, state))
     }
 
@@ -632,7 +553,8 @@ impl CommandLineParser {
                 | LexEventKind::QuoteEnd
                 | LexEventKind::EscapeStart => active.observe(event),
             }
-        });
+        })
+        .state;
 
         if safe_cursor == line.len() && cursor_tokens.is_none() {
             cursor_tokens = Some(snapshot_tokens(&out, &active.value));
@@ -801,7 +723,7 @@ fn is_number(text: &str) -> bool {
 
 #[cfg(test)]
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
-    quote_style_for_state(scan_shell(text, |_| {}))
+    quote_style_for_state(scan_shell(text, |_| {}).state)
 }
 
 #[cfg(test)]

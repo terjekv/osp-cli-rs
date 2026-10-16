@@ -1,8 +1,106 @@
-//! Small shell-quoting helpers for display and reuse.
+//! Shared shell syntax scanning and quoting for command-entry surfaces.
 //!
-//! These helpers exist for output surfaces such as history, completion, and
-//! debug displays that need shell-safe text without depending on a full shell
-//! parser.
+//! Completion and the DSL share quote, escape, whitespace, and pipe events with
+//! byte spans. Callers own word assembly, incomplete-input recovery, and DSL
+//! operators. POSIX command-word decoding stays with `shell-words`: comments,
+//! line continuations, whitespace, and double-quote escapes differ there.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LexState {
+    Normal,
+    SingleQuote,
+    DoubleQuote,
+    EscapeNormal,
+    EscapeDouble,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LexEventKind {
+    Separator,
+    Pipe,
+    QuoteStart,
+    QuoteEnd,
+    EscapeStart,
+    Text(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LexEvent {
+    pub(crate) index: usize,
+    pub(crate) end: usize,
+    pub(crate) state_before: LexState,
+    pub(crate) kind: LexEventKind,
+    pub(crate) ch: char,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LexEnd {
+    pub(crate) state: LexState,
+    pub(crate) quote_start: usize,
+}
+
+/// Visits shell syntax without deciding how callers assemble or recover words.
+pub(crate) fn scan_shell(input: &str, mut visit: impl FnMut(LexEvent)) -> LexEnd {
+    let mut state = LexState::Normal;
+    let mut quote_start = 0;
+    for (index, ch) in input.char_indices() {
+        let state_before = state;
+        let kind = match state {
+            LexState::Normal if ch.is_whitespace() => LexEventKind::Separator,
+            LexState::Normal => match ch {
+                '|' => LexEventKind::Pipe,
+                '\\' => {
+                    state = LexState::EscapeNormal;
+                    LexEventKind::EscapeStart
+                }
+                '\'' => {
+                    state = LexState::SingleQuote;
+                    LexEventKind::QuoteStart
+                }
+                '"' => {
+                    state = LexState::DoubleQuote;
+                    LexEventKind::QuoteStart
+                }
+                _ => LexEventKind::Text(ch),
+            },
+            LexState::SingleQuote if ch == '\'' => {
+                state = LexState::Normal;
+                LexEventKind::QuoteEnd
+            }
+            LexState::SingleQuote => LexEventKind::Text(ch),
+            LexState::DoubleQuote => match ch {
+                '"' => {
+                    state = LexState::Normal;
+                    LexEventKind::QuoteEnd
+                }
+                '\\' => {
+                    state = LexState::EscapeDouble;
+                    LexEventKind::EscapeStart
+                }
+                _ => LexEventKind::Text(ch),
+            },
+            LexState::EscapeNormal => {
+                state = LexState::Normal;
+                LexEventKind::Text(ch)
+            }
+            LexState::EscapeDouble => {
+                state = LexState::DoubleQuote;
+                LexEventKind::Text(ch)
+            }
+        };
+        if kind == LexEventKind::QuoteStart {
+            quote_start = index;
+        }
+        visit(LexEvent {
+            index,
+            end: index + ch.len_utf8(),
+            state_before,
+            kind,
+            ch,
+        });
+    }
+    LexEnd { state, quote_start }
+}
 
 /// Quoting style to use when formatting a shell argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
