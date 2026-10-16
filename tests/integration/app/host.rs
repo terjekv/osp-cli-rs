@@ -13,12 +13,9 @@ use osp_cli::{
 };
 use serde_json::json;
 
-use super::support::{env_lock, parse_json_output, write_executable_script};
+use super::support::{parse_json_output, write_executable_script};
 
 fn with_config_path<T>(config_toml: &str, callback: impl FnOnce() -> T) -> T {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = make_temp_dir("osp-cli-app-host-config");
     let config_path = temp.path().join("config.toml");
     std::fs::write(&config_path, config_toml).expect("config should be written");
@@ -734,8 +731,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
     #[cfg(unix)]
     {
         use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-        use std::io::Read;
-        let redirected = std::process::Command::new(std::env::current_exe().unwrap())
+        let redirected = assert_cmd::Command::new(std::env::current_exe().unwrap())
+            .timeout(std::time::Duration::from_secs(20))
             .args([
                 "--exact",
                 "app::host::app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows",
@@ -771,17 +768,9 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             ]);
             command.env("OSP_LIVE_OUTPUT_CONTRACT_CHILD", "1");
             command.env("PAGER", pager);
-            let mut child = pair
-                .slave
-                .spawn_command(command)
-                .expect("start terminal host");
-            drop(pair.slave);
-            let mut reader = pair.master.try_clone_reader().unwrap();
-            let mut captured = String::new();
-            reader
-                .read_to_string(&mut captured)
-                .expect("read terminal output");
-            assert!(child.wait().unwrap().success(), "{captured}");
+            let (captured, status) =
+                crate::pty_support::capture(pair, command, std::time::Duration::from_secs(20));
+            assert!(status.success(), "{captured}");
             assert!(captured.contains("running: db01.uio.no"));
             assert!(captured.contains("completed: db01.uio.no"));
             assert!(captured.contains("4 CPU / 8 GiB"), "{captured}");
@@ -898,6 +887,9 @@ fn app_value_api_layers_product_defaults_and_process_style_failures() {
 
 #[test]
 fn app_host_passes_default_and_selected_profiles_into_native_context() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"
@@ -1008,6 +1000,9 @@ fn app_host_projects_native_commands_into_repl_completion_surface() {
 #[cfg(unix)]
 #[test]
 fn app_host_routes_attached_and_separate_profile_flags_the_same_for_external_commands() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"
@@ -1089,6 +1084,9 @@ theme.name = "dracula"
 #[cfg(unix)]
 #[test]
 fn app_host_keeps_unknown_leading_token_as_command_instead_of_profile() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"

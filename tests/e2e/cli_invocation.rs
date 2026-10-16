@@ -11,6 +11,9 @@ use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
 #[test]
 fn process_level_profile_selection_affects_builtin_command_output() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-cli-profile-home");
     write_config(
         home.path(),
@@ -55,6 +58,9 @@ theme.name = "dracula"
 #[cfg(unix)]
 #[test]
 fn repl_history_capture_and_maintenance_survive_processes_with_profile_scope() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-history-lifecycle-home");
     let history = home.path().join("operator-history.jsonl");
     write_config(
@@ -196,6 +202,9 @@ theme.name = "dracula"
 #[cfg(unix)]
 #[test]
 fn explicit_config_path_env_is_respected_by_real_binary() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-cli-config-path-home");
     write_config(
         home.path(),
@@ -238,6 +247,9 @@ theme.name = "dracula"
 #[cfg(unix)]
 #[test]
 fn closed_stdout_pipe_is_a_normal_process_exit() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     use std::process::{Command, Stdio};
 
     let home = make_temp_dir("osp-e2e-cli-closed-pipe-home");

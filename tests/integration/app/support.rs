@@ -1,11 +1,5 @@
 #[cfg(unix)]
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-
-pub(super) fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 pub(crate) fn parse_json_output(
     label: &str,
@@ -23,10 +17,6 @@ pub(crate) fn parse_json_output(
 
 #[cfg(unix)]
 pub(super) fn with_path_prefix<T>(prefix: &Path, callback: impl FnOnce() -> T) -> T {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
     let previous = std::env::var_os("PATH");
     let joined = std::env::join_paths(
         std::iter::once(prefix.to_path_buf())

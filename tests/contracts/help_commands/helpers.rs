@@ -17,7 +17,7 @@ fn run_with_config(config_path: &std::path::Path, args: &[&str]) -> String {
     let home = config_path
         .parent()
         .expect("config path should live under an isolated temp home");
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(home))
         .env("PATH", "/usr/bin:/bin")
@@ -42,7 +42,7 @@ fn run_with_config_stderr(
     let home = config_path
         .parent()
         .expect("config path should live under an isolated temp home");
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let env = xdg_config_home.map_or_else(
         || crate::test_env::isolated_env(home),
         |path| crate::test_env::isolated_env_with_config_home(home, path),
@@ -76,7 +76,7 @@ fn run_with_config_tty(config_path: &std::path::Path, args: &[&str]) -> String {
         bin.display(),
         args.join(" ")
     );
-    let mut cmd = Command::new("script");
+    let mut cmd = crate::test_env::command("script");
     let output = cmd
         .args(["-qfec", &command, "/dev/null"])
         .assert()

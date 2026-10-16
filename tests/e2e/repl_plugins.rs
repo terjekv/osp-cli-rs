@@ -52,6 +52,9 @@ JSON
 #[cfg(unix)]
 #[test]
 fn repl_shell_entry_and_exit_refresh_the_prompt_scope() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let plugins = make_temp_dir("osp-cli-pty-shell-prompt-plugins");
     let _plugin = write_provider_plugin(&plugins, "orch", "orch", "orch");
     let mut session = spawn_repl(&plugins);

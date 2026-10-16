@@ -11,6 +11,9 @@ use crate::support::{
 #[cfg(unix)]
 #[test]
 fn repl_startup_intro_uses_the_configured_rich_tty_path() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let config = r#"
 [default]
 profile.default = "default"

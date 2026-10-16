@@ -11,6 +11,9 @@ use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
 #[test]
 fn external_plugin_happy_path_runs_through_real_binary_process() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-happy-home");
     let plugins = make_temp_dir("osp-e2e-plugin-happy-plugins");
     let _plugin = write_table_plugin(&plugins, "hello", "hello", "hello-from-plugin");
@@ -35,6 +38,9 @@ fn external_plugin_happy_path_runs_through_real_binary_process() {
 #[cfg(unix)]
 #[test]
 fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-nonzero-home");
     let plugins = make_temp_dir("osp-e2e-plugin-nonzero-plugins");
     let _plugin = write_nonzero_plugin(&plugins, "boom", "boom", 7, "backend exploded");
@@ -61,6 +67,9 @@ fn external_plugin_nonzero_exit_surfaces_stderr_and_nonzero_status() {
 #[cfg(unix)]
 #[test]
 fn describe_timeout_does_not_limit_plugin_runs() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-timeout-home");
     let plugins = make_temp_dir("osp-e2e-plugin-timeout-plugins");
     write_timeout_plugin(&plugins, "hang", "hang");
@@ -87,6 +96,9 @@ fn describe_timeout_does_not_limit_plugin_runs() {
 #[cfg(unix)]
 #[test]
 fn uncached_path_plugin_auth_is_enforced_before_first_dispatch() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-path-auth-home");
     let plugins = make_temp_dir("osp-e2e-plugin-path-auth-plugins");
     let execution_marker = home.path().join("plugin-executed");
@@ -145,6 +157,9 @@ profile.default = "default"
 #[cfg(unix)]
 #[test]
 fn visible_but_denied_plugin_help_is_available_while_execution_is_blocked() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-visible-help-home");
     let plugins = make_temp_dir("osp-e2e-plugin-visible-help-plugins");
     let execution_marker = home.path().join("plugin-executed");
@@ -200,6 +215,9 @@ JSON
 #[cfg(unix)]
 #[test]
 fn plugin_option_terminator_preserves_run_authorization() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-option-looking-home");
     let plugins = make_temp_dir("osp-e2e-plugin-option-looking-plugins");
     let execution_marker = home.path().join("plugin-executed");
@@ -252,6 +270,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn plugin_child_inherits_parent_auth_policy_before_process_start() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-plugin-inherited-auth-home");
     let plugins = make_temp_dir("osp-e2e-plugin-inherited-auth-plugins");
     let execution_marker = home.path().join("plugin-executed");

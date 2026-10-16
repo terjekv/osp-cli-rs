@@ -1,12 +1,10 @@
-use std::process::Command;
-
 use crate::temp_support::make_temp_dir;
 use crate::test_env::isolated_env;
 
 #[test]
 fn one_shot_json_trace_reports_config_and_execution_contract() {
     let home = make_temp_dir("osp-cli-startup-trace");
-    let mut command = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut command = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")

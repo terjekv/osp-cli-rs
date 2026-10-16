@@ -42,6 +42,9 @@ fn json_result(session: &ReplPtySession, start: usize) -> serde_json::Value {
 #[cfg(unix)]
 #[test]
 fn repl_tab_completes_single_match_and_exits() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     session.type_text("ex");
@@ -71,6 +74,9 @@ fn repl_tab_completes_single_match_and_exits() {
 #[cfg(unix)]
 #[test]
 fn repl_tab_accepts_single_visible_completion() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     session.type_text("the");
@@ -109,6 +115,9 @@ fn repl_tab_accepts_single_visible_completion() {
 #[cfg(unix)]
 #[test]
 fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     session.type_text("theme show ");
@@ -167,6 +176,9 @@ fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_close_menu_keeps_typed_input() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     let start = session.output_len();

@@ -66,6 +66,9 @@ fn help_body(text: &str) -> String {
 #[cfg(unix)]
 #[test]
 fn repl_help_alias_and_verbose_help_route_to_the_canonical_help_surface_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let (_, alias_plain) = run_repl_command("help history", false);
     let (_, canonical_plain) = run_repl_command("history --help", false);
     assert_eq!(help_body(&alias_plain), help_body(&canonical_plain));
@@ -81,6 +84,9 @@ fn repl_help_alias_and_verbose_help_route_to_the_canonical_help_surface_end_to_e
 #[cfg(unix)]
 #[test]
 fn repl_help_alias_rejects_invalid_targets_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     for command in ["help help", "help --help"] {
         let (_, plain) = run_repl_command(command, false);
         assert!(
@@ -97,6 +103,9 @@ fn repl_help_alias_rejects_invalid_targets_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_invalid_subcommand_suggests_the_valid_command_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let (_, plain) = run_repl_command("config sho", false);
     assert!(plain.contains("Unknown command"), "output={plain:?}");
     assert!(
@@ -117,6 +126,9 @@ fn repl_invalid_subcommand_suggests_the_valid_command_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_help_alias_keeps_the_colored_tty_path_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let (alias_raw, alias_plain) = run_repl_command("help history", true);
     let (canonical_raw, canonical_plain) = run_repl_command("history --help", true);
     assert!(alias_raw.contains("\u{1b}["), "output={alias_raw:?}");

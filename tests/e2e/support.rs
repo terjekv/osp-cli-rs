@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 pub(crate) fn osp_command(home: &Path) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.env_clear()
+    cmd.timeout(Duration::from_secs(20))
+        .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("TERM", "xterm-256color")
         .env("LANG", "C.UTF-8")
@@ -209,6 +210,8 @@ pub(crate) struct ReplPtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     // PTY reads can split UTF-8 characters; retain bytes until taking a view.
     output: Arc<Mutex<Vec<u8>>>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    deadline: Instant,
     _home: TestTempDir,
     _plugins: Option<TestTempDir>,
 }
@@ -217,8 +220,6 @@ pub(crate) struct ReplPtySession {
 pub(crate) struct PtyCommandOutput {
     pub(crate) stdout: String,
     pub(crate) status: portable_pty::ExitStatus,
-    _home: TestTempDir,
-    _plugins: TestTempDir,
 }
 
 #[cfg(unix)]
@@ -271,20 +272,8 @@ pub(crate) fn run_osp_command_in_pty(
     let mut cmd = osp_pty_command_builder(&home, &plugins, color_mode);
     cmd.args(args);
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn osp");
-    drop(pair.slave);
-
-    let mut reader = pair.master.try_clone_reader().expect("clone reader");
-    let mut stdout = String::new();
-    reader.read_to_string(&mut stdout).expect("read pty stdout");
-    let status = child.wait().expect("wait for child");
-
-    PtyCommandOutput {
-        stdout,
-        status,
-        _home: home,
-        _plugins: plugins,
-    }
+    let (stdout, status) = crate::pty_support::capture(pair, cmd, Duration::from_secs(20));
+    PtyCommandOutput { stdout, status }
 }
 
 #[cfg(unix)]
@@ -331,7 +320,6 @@ impl ReplPtySession {
             // should not depend on cursor-probe timing.
             cmd.env("OSP__REPL__INPUT_MODE", "interactive");
         }
-        let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
         let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("take writer")));
 
@@ -339,7 +327,18 @@ impl ReplPtySession {
         let output_clone = Arc::clone(&output);
         let writer_clone = Arc::clone(&writer);
         let cursor_position_reports = config.cursor_position_reports;
-        std::thread::spawn(move || {
+        let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
+        drop(pair.slave);
+        let mut session = Self {
+            child,
+            writer,
+            output,
+            reader: None,
+            deadline: Instant::now() + Duration::from_secs(30),
+            _home: home,
+            _plugins: plugins_temp,
+        };
+        session.reader = Some(std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
             let cpr_request = [0x1b, 0x5b, 0x36, 0x6e];
             let mut cpr_prefix = 0;
@@ -371,15 +370,9 @@ impl ReplPtySession {
                     Err(_) => break,
                 }
             }
-        });
+        }));
 
-        Self {
-            child,
-            writer,
-            output,
-            _home: home,
-            _plugins: plugins_temp,
-        }
+        session
     }
 
     pub(crate) fn output_len(&self) -> usize {
@@ -422,7 +415,7 @@ impl ReplPtySession {
     pub(crate) fn type_text(&mut self, text: &str) {
         let start = self.output_len();
         self.write_bytes(text.as_bytes());
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = (Instant::now() + Duration::from_secs(3)).min(self.deadline);
         loop {
             let output = self.output_since(start);
             // Cooked terminal echo can precede editor startup after a reload.
@@ -448,7 +441,7 @@ impl ReplPtySession {
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = (Instant::now() + timeout).min(self.deadline);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
@@ -463,8 +456,25 @@ impl ReplPtySession {
         }
     }
 
+    pub(crate) fn wait_for_editor_since(&self, start: usize, timeout: Duration) -> bool {
+        let deadline = (Instant::now() + timeout).min(self.deadline);
+        loop {
+            let output = self.output_since(start);
+            if let Some((_, frame)) = output.rsplit_once("\x1b[?25l")
+                && frame.contains("\x1b[J")
+                && frame.contains("\x1b[?25h")
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     pub(crate) fn wait_for_plain_output(&self, needle: &str, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = (Instant::now() + timeout).min(self.deadline);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
@@ -485,7 +495,7 @@ impl ReplPtySession {
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = (Instant::now() + timeout).min(self.deadline);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
@@ -504,7 +514,7 @@ impl ReplPtySession {
     }
 
     pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = (Instant::now() + timeout).min(self.deadline);
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => return true,
@@ -519,8 +529,17 @@ impl ReplPtySession {
     }
 
     pub(crate) fn kill(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.process_id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 

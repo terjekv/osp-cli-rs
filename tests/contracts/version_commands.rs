@@ -1,9 +1,8 @@
-use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[test]
 fn cli_reports_workspace_version_with_long_flag_contract() {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.arg("--version");
 
     cmd.assert()
@@ -16,7 +15,7 @@ fn cli_reports_workspace_version_with_long_flag_contract() {
 
 #[test]
 fn cli_reports_workspace_version_with_short_flag_contract() {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.arg("-V");
 
     cmd.assert()

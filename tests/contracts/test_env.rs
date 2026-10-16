@@ -28,3 +28,11 @@ pub(crate) fn isolated_env_with_config_home(
     env[1].1 = xdg_config_home.into();
     env
 }
+
+/// Construct a bounded CLI contract process.
+#[allow(dead_code)]
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> assert_cmd::Command {
+    let mut command = assert_cmd::Command::new(program);
+    command.timeout(std::time::Duration::from_secs(30));
+    command
+}

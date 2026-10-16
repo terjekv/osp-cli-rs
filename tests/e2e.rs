@@ -45,3 +45,9 @@ mod repl_prompt;
 
 #[path = "e2e/repl_smoke.rs"]
 mod repl_smoke;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "support/pty.rs"]
+mod pty_support;

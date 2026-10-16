@@ -36,3 +36,9 @@ mod plugin_manager;
 
 #[path = "integration/repl/mod.rs"]
 mod repl;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "support/pty.rs"]
+mod pty_support;

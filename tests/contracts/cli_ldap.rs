@@ -176,7 +176,7 @@ impl LdapPluginFixture {
     }
 
     fn osp(&self) -> Command {
-        let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+        let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
         cmd.envs(crate::test_env::isolated_env(&self.home_dir))
             .env("OSP_PLUGIN_PATH", &self.plugin_dir)
             .env("PATH", "/usr/bin:/bin");

@@ -5,9 +5,8 @@ use crate::support::{ReplPtyConfig, ReplPtySession};
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
-use std::io::Write;
 #[cfg(unix)]
-use std::process::{Command, Stdio};
+use assert_cmd::Command;
 #[cfg(unix)]
 use std::time::Duration;
 #[cfg(unix)]
@@ -57,6 +56,9 @@ fn assert_theme_result(session: &ReplPtySession, start: usize, id: &str, name: &
 #[cfg(unix)]
 #[test]
 fn repl_starts_runs_help_and_exits_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
 
     let start = session.output_len();
@@ -120,7 +122,7 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
             let start = session.output_len();
             session.write_bytes(if command.is_empty() { b"\r" } else { b"\x03" });
             assert!(
-                session.wait_for_output_since(start, "\x1b[?25h", Duration::from_secs(3)),
+                session.wait_for_editor_since(start, Duration::from_secs(3)),
                 "editor should resume after the history picker; output:\n{}",
                 session.output_snapshot(8000),
             );
@@ -193,6 +195,9 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
     assert!(
         session.wait_for_plain_output("default>", Duration::from_secs(10)),
@@ -239,6 +244,9 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
 #[cfg(unix)]
 #[test]
 fn repl_without_cursor_position_reports_falls_back_without_blocking() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let started = Instant::now();
     let mut session =
         ReplPtySession::spawn(ReplPtyConfig::default().without_cursor_position_reports());
@@ -273,6 +281,9 @@ fn repl_without_cursor_position_reports_falls_back_without_blocking() {
 #[cfg(unix)]
 #[test]
 fn repl_basic_mode_runs_help_and_exit_without_a_tty_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-cli-basic-home");
     let plugins = make_temp_dir("osp-cli-basic-plugins");
 
@@ -289,18 +300,9 @@ fn repl_basic_mode_runs_help_and_exit_without_a_tty_end_to_end() {
         .env("OSP__REPL__INPUT_MODE", "basic")
         .env("OSP_PLUGIN_PATH", &plugins)
         .env("OSP_BUNDLED_PLUGIN_DIR", &plugins)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin should be piped")
-                .write_all(b"help\nexit\n")?;
-            child.wait_with_output()
-        })
+        .write_stdin(b"help\nexit\n")
+        .timeout(std::time::Duration::from_secs(20))
+        .output()
         .expect("basic repl should run");
 
     assert!(
@@ -340,6 +342,9 @@ fn wait_for_repl_json(session: &ReplPtySession, start: usize) -> serde_json::Val
 #[cfg(unix)]
 #[test]
 fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
     assert!(session.wait_for_plain_output("default>", Duration::from_secs(10)));
     let failed_command = "theme show dracula | Z";

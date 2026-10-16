@@ -1,6 +1,5 @@
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
-use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[cfg(unix)]
@@ -24,7 +23,7 @@ ui.format = "json"
     let plugin_dir = make_temp_dir("osp-cli-profile-plugin");
     write_hello_plugin(&plugin_dir);
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .env("OSP_PLUGIN_PATH", &plugin_dir)
@@ -52,7 +51,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--profile", "tsd", "plugins", "list"]);
@@ -79,7 +78,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["prod", "plugins", "list"]);
@@ -106,7 +105,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--profile", "uio", "tsd", "plugins", "list"]);

@@ -15,7 +15,7 @@ fn write_plugin(dir: &std::path::Path, name: &str, describe: Option<Value>, body
 
 #[cfg(unix)]
 fn plugin_command(home: &std::path::Path, dir: &std::path::Path, args: &[&str]) -> Command {
-    let mut command = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut command = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     command.env_clear().env("PATH", "/usr/bin:/bin").envs(crate::test_env::isolated_env(home))
         .env("OSP_PLUGIN_PATH", dir).args(args);
     command

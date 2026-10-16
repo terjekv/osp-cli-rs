@@ -14,6 +14,9 @@ fn spawn_repl_with_color() -> ReplPtySession {
 #[cfg(unix)]
 #[test]
 fn repl_highlights_commands_with_success_color() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl_with_color();
 
     let start = session.output_len();
@@ -36,6 +39,9 @@ fn repl_highlights_commands_with_success_color() {
 #[cfg(unix)]
 #[test]
 fn repl_help_history_highlights_help_keyword() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl_with_color();
 
     session.write_bytes(b"help history");

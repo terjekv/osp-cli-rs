@@ -23,6 +23,9 @@ fn run_debug_complete_json_in_pty(color_mode: ReplPtyColorMode) -> PtyCommandOut
 #[cfg(unix)]
 #[test]
 fn explicit_json_debug_complete_stays_plain_when_no_color_is_set() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let output = run_debug_complete_json_in_pty(ReplPtyColorMode::Plain);
     assert_eq!(output.status.exit_code(), 0, "command should succeed");
     assert!(!output.stdout.contains('\u{1b}'));
@@ -37,6 +40,9 @@ fn explicit_json_debug_complete_stays_plain_when_no_color_is_set() {
 #[cfg(unix)]
 #[test]
 fn explicit_json_debug_complete_stays_plain_even_in_colored_pty_env() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let output = run_debug_complete_json_in_pty(ReplPtyColorMode::Always);
     assert_eq!(output.status.exit_code(), 0, "command should succeed");
     assert!(!output.stdout.contains('\u{1b}'));

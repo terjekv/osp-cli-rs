@@ -1,6 +1,5 @@
 use crate::temp_support::make_temp_dir;
 use crate::test_env::isolated_env;
-use assert_cmd::Command;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -26,7 +25,7 @@ fn run_osp_with_plugin_path(
             .expect("config should be written");
     }
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("TERM", "xterm-256color")

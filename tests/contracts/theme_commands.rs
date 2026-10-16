@@ -15,7 +15,7 @@ fn first_row<'a>(payload: &'a Value, context: &str) -> &'a Value {
 
 #[cfg(unix)]
 fn osp_command(home: &std::path::Path) -> Command {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(home))
         .env("PATH", "/usr/bin:/bin");
     cmd

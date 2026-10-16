@@ -1,6 +1,6 @@
 use crate::temp_support::make_temp_dir;
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use assert_cmd::Command;
+use std::process::Output;
 
 fn run_basic_repl(input: &[u8]) -> Output {
     let home = make_temp_dir("osp-cli-repl-basic-home");
@@ -14,18 +14,9 @@ fn run_basic_repl(input: &[u8]) -> Output {
         .env("NO_COLOR", "1")
         .arg("--defaults-only")
         .arg("--quiet")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin should be piped")
-                .write_all(input)?;
-            child.wait_with_output()
-        })
+        .write_stdin(input)
+        .timeout(std::time::Duration::from_secs(20))
+        .output()
         .expect("basic repl should run")
 }
 

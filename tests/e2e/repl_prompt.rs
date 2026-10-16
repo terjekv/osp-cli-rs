@@ -18,6 +18,9 @@ fn spawn_repl_with_color(simple_prompt: bool) -> ReplPtySession {
 #[cfg(unix)]
 #[test]
 fn repl_prompt_prefix_uses_prompt_text_color() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl_with_color(false);
 
     let start = session.output_len();

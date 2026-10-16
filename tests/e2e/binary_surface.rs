@@ -8,6 +8,9 @@ use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
 #[test]
 fn binary_help_exits_zero_and_writes_stdout_only() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-binary-help");
     let output = osp_command(home.path())
         .arg("--help")
@@ -29,6 +32,9 @@ fn binary_help_exits_zero_and_writes_stdout_only() {
 #[cfg(unix)]
 #[test]
 fn binary_version_exits_zero_and_writes_stdout_only() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-binary-version");
     let output = osp_command(home.path())
         .arg("--version")
@@ -51,6 +57,9 @@ fn binary_version_exits_zero_and_writes_stdout_only() {
 #[cfg(unix)]
 #[test]
 fn binary_invalid_subcommand_exits_nonzero_and_writes_usage_to_stderr() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-binary-invalid-subcommand");
     let output = osp_command(home.path())
         .args(["config", "nope"])
@@ -74,6 +83,9 @@ fn binary_invalid_subcommand_exits_nonzero_and_writes_usage_to_stderr() {
 #[cfg(unix)]
 #[test]
 fn binary_builtin_json_command_exits_zero_and_keeps_stdout_machine_readable() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-e2e-binary-json-command");
     let output = osp_command(home.path())
         .args([

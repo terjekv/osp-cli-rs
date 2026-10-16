@@ -1,5 +1,4 @@
 use crate::{assert_snapshot_text, assert_snapshot_text_with};
-use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[cfg(unix)]

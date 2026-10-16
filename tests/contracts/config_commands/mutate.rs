@@ -13,7 +13,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut unset = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut unset = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = unset
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -30,7 +30,7 @@ ui.mode = "plain"
     assert_eq!(row["changed"], true);
     assert_eq!(row["previous"], "plain");
 
-    let mut get = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut get = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     get.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--json", "config", "get", "ui.mode"]);
@@ -55,7 +55,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -85,7 +85,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -119,7 +119,7 @@ repl.history.exclude = []
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -159,7 +159,7 @@ repl.history.exclude = []
     );
 
     let run = |args: &[&str]| {
-        Command::new(assert_cmd::cargo::cargo_bin!("osp"))
+        crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"))
             .envs(crate::test_env::isolated_env(&home))
             .env("PATH", "/usr/bin:/bin")
             .args(args)
@@ -464,7 +464,7 @@ profile.default = "tsd"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")

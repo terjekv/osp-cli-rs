@@ -87,7 +87,7 @@ candidates command osp config g
 candidates flag osp config get --s
 candidates value osp config get --presentation c
 "#;
-    let output = Command::new("bash")
+    let output = crate::test_env::command("bash")
         .env_clear()
         .envs(crate::test_env::isolated_env(home.path()))
         .env("PATH", "/usr/bin:/bin")

@@ -1,7 +1,6 @@
 use crate::output_support::strip_ansi;
 use crate::temp_support::make_temp_dir;
 use crate::test_env::isolated_env;
-use assert_cmd::Command;
 
 fn run_cli_stdout(args: &[&str]) -> String {
     run_cli_stdout_with_config(None, args)
@@ -9,7 +8,7 @@ fn run_cli_stdout(args: &[&str]) -> String {
 
 fn run_cli_stdout_with_config(config_toml: Option<&str>, args: &[&str]) -> String {
     let home = make_temp_dir("osp-cli-command-surfaces");
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("TERM", "xterm-256color")

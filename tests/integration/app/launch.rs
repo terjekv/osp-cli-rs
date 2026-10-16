@@ -43,6 +43,9 @@ JSON
 #[cfg(unix)]
 #[test]
 fn app_state_builder_uses_launch_context_for_plugin_roots_and_path_discovery() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let explicit_dir = make_temp_dir("osp-cli-launch-explicit");
     let path_dir = make_temp_dir("osp-cli-launch-path");
     let config_root = make_temp_dir("osp-cli-launch-config-root");

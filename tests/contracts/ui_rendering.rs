@@ -43,7 +43,7 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
 
 #[test]
 fn startup_is_a_compact_console_overview_not_a_pipe_manual() {
-    let output = assert_cmd::Command::new(assert_cmd::cargo::cargo_bin!("osp"))
+    let output = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"))
         .args([
             "--defaults-only",
             "--theme",
@@ -342,7 +342,7 @@ fn projected_cli_results_export_to_the_terminal_clipboard_contract() {
         .map(|arg| shell_words::quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
-    let output = assert_cmd::Command::new("script")
+    let output = crate::test_env::command("script")
         .env_clear()
         .envs(crate::test_env::isolated_env(home.path()))
         .env("PATH", "/usr/bin:/bin")
@@ -365,7 +365,7 @@ fn projected_cli_results_export_to_the_terminal_clipboard_contract() {
         + captured[payload_start..]
             .find('\x07')
             .expect("clipboard write should terminate");
-    let decoded = assert_cmd::Command::new("python3")
+    let decoded = crate::test_env::command("python3")
         .env_clear()
         .envs(crate::test_env::isolated_env(home.path()))
         .env("PATH", "/usr/bin:/bin")
