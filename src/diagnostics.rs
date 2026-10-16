@@ -8,6 +8,13 @@ use crate::core::MessageLevel;
 /// Reviewed service evidence submitted by an adapter.
 #[derive(Debug, Clone)]
 pub enum DiagnosticEvent {
+    /// Server operations not yet exposed by the curated command catalog.
+    CatalogGap {
+        /// Human service name.
+        service: &'static str,
+        /// HTTP methods and path templates, never request values.
+        operations: Vec<String>,
+    },
     /// First use of a configured service and its credential binding.
     Context {
         /// Human service name.
@@ -220,6 +227,7 @@ impl DiagnosticSink {
         let first = lines.len();
         let event_name = match &event {
             DiagnosticEvent::Context { .. } => "service.context",
+            DiagnosticEvent::CatalogGap { .. } => "service.catalog_gap",
             DiagnosticEvent::Exchange { .. } => "service.exchange",
             DiagnosticEvent::DirectorySearch { .. } => "directory.search",
             DiagnosticEvent::PluginOutcome { .. } => "plugin.outcome",
@@ -230,6 +238,28 @@ impl DiagnosticSink {
         };
         let mut insert = |level, text| lines.push((level, text));
         match event {
+            DiagnosticEvent::CatalogGap {
+                service,
+                operations,
+            } => {
+                let message = format!(
+                    "info: {} offers {} {} osp does not know yet ({}).\n",
+                    safe_text(service),
+                    operations.len(),
+                    if operations.len() == 1 {
+                        "operation"
+                    } else {
+                        "operations"
+                    },
+                    operations
+                        .iter()
+                        .map(|operation| safe_text(operation))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                tracing::info!(target: "osp::diagnostic", "{}", message.trim_end());
+                insert(MessageLevel::Info, message);
+            }
             DiagnosticEvent::Context {
                 service,
                 url,
