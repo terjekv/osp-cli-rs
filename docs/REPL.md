@@ -327,8 +327,9 @@ right-prompt slot. Rendering never performs network I/O. The host sanitizes
 control sequences and line breaks; Reedline measures terminal cells and omits
 the right prompt when it collides with input. Context and incognito remain;
 product attention takes priority over timing. Basic and JSON sessions omit it.
-A cached update is visible at the next editor paint. Without a meaningful
-transition notice, an idle prompt does not repaint until the next key.
+A cached update is visible at the next editor paint. The pinned Reedline reader blocks on terminal input: cache changes and queued
+transition notices appear at the next input event, rather than waking an idle
+reader. No fake input events or worker ANSI writes are used.
 
 ### Product actions and terminal ownership
 
@@ -347,8 +348,8 @@ keep their meanings.
 `start_repl(config, Some(ReplSession))` supplies a cancellable rich-editor lifetime.
 Basic selection and fallback report `None` for legacy startup behavior only;
 recurring attention and sound remain disabled.
-Workers use its bounded, sanitized `post_notice(kind, text)` aggregate sink and
-`wait(duration)` cancellation point. The host queues delivery while foreground
+Workers use its bounded, sanitized `post_notice(text)` sink and
+`wait(duration)` cancellation point. Reedline queues delivery while foreground
 commands, line prompts, raw menus, pagers or the history picker own the terminal.
 Rebuild, fallback and exit cancel the handle and discard queued product output.
 Workers must also validate their own credential generation before publication.
@@ -360,8 +361,8 @@ Workers must also validate their own credential generation before publication.
 exercises the same local sink without HTTP. It respects the master, rate limit
 and machine-output suppression. Native commands request semantic feedback with
 `NativeCommandContext::request_bell()`, flushed after foreground output. Workers
-may request a bell only through their current `ReplSession` while the editor owns
-input; sounds suppressed during another interaction are discarded.
+may request a best-effort bell through their current `ReplSession`. Background
+bells are immediate and subject to the same master policy and rate limit.
 
 BEL is best effort: the local terminal may play a sound, flash or ignore it,
 including over SSH and tmux. OSP never runs an audio subprocess or configures
