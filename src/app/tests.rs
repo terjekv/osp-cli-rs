@@ -99,16 +99,24 @@ fn make_completion_state_with_entries_and_native(
     for (key, value) in entries {
         defaults.set(*key, *value);
     }
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
     let options = ResolveOptions::default().with_terminal("repl");
-    let base = resolver
-        .resolve(options.clone())
-        .expect("base test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    let config = resolver
-        .resolve(options)
-        .expect("test config should resolve");
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options.clone())
+    .expect("base test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options)
+    .expect("test config should resolve");
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 
@@ -212,16 +220,24 @@ fn test_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
         defaults.set(*key, *value);
     }
 
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
     let options = ResolveOptions::default().with_terminal("cli");
-    let base = resolver
-        .resolve(options.clone())
-        .expect("base test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    resolver
-        .resolve(options)
-        .expect("test config should resolve")
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options.clone())
+    .expect("base test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options)
+    .expect("test config should resolve")
 }
 
 fn render_prompt_snapshot(entries: &[(&str, &str)]) -> String {
@@ -394,11 +410,16 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
         "/tmp/osp-repl-runtime-tests-history.jsonl",
     );
     defaults.set("theme.path", Vec::<String>::new());
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
-    let config = resolver
-        .resolve(ResolveOptions::default().with_terminal("repl"))
-        .expect("test config should resolve");
+    let layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(ResolveOptions::default().with_terminal("repl"))
+    .expect("test config should resolve");
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 

@@ -585,10 +585,13 @@ mod tests {
             file.set("auth.visible.plugins", items.join(","));
         }
 
-        let resolved = ConfigResolver::from_loaded_layers(LoadedLayers {
-            file,
-            ..LoadedLayers::default()
-        })
+        let resolved = ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                file,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("auth visibility config should resolve");
         AuthState::from_resolved(&resolved)

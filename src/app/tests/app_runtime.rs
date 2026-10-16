@@ -266,7 +266,11 @@ fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("profile.default", "default");
-        product_defaults.set_for_profile("production", "ui.format", "table");
+        product_defaults.insert(
+            "ui.format",
+            "table",
+            crate::config::Scope::profile("production"),
+        );
         product_defaults.set("theme.path", Vec::<String>::new());
 
         let probe = StartupResolutionProbe::default();

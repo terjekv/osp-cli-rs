@@ -552,12 +552,17 @@ mod tests {
         let mut file = ConfigLayer::default();
         file.set("theme.path", paths);
 
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
-        resolver.set_file(file);
-        resolver
-            .resolve(ResolveOptions::default().with_terminal("cli"))
-            .expect("theme test config should resolve")
+        let layers = crate::config::LoadedLayers {
+            defaults,
+            file,
+            ..crate::config::LoadedLayers::default()
+        };
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(ResolveOptions::default().with_terminal("cli"))
+        .expect("theme test config should resolve")
     }
 
     #[cfg_attr(miri, ignore = "theme file parsing integration test")]

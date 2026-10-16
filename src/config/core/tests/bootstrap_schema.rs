@@ -167,11 +167,11 @@ mod schema_value_contracts {
 
     #[test]
     fn runtime_resolution_rejects_non_positive_render_width() {
-        let mut resolver = ConfigResolver::default();
-        resolver.defaults_mut().set("profile.default", "default");
-        resolver.file_mut().set("ui.width", -1_i64);
+        let mut layers = crate::config::LoadedLayers::default();
+        layers.defaults.set("profile.default", "default");
+        layers.file.set("ui.width", -1_i64);
 
-        let error = resolver
+        let error = ConfigResolver::from_loaded_layers_with_schema(layers.clone(), crate::config::ConfigSchema::default())
             .resolve(ResolveOptions::default())
             .expect_err("persisted render width must be positive");
 

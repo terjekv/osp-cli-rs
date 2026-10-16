@@ -882,7 +882,11 @@ profile.default = "uio"
 fn app_value_api_layers_product_defaults_and_process_style_failures() {
     let mut product_defaults = ConfigLayer::default();
     product_defaults.set("extensions.site.enabled", true);
-    product_defaults.set_for_terminal("cli", "extensions.site.banner", "cli-wrapper");
+    product_defaults.insert(
+        "extensions.site.banner",
+        "cli-wrapper",
+        osp_cli::config::Scope::terminal("cli"),
+    );
 
     let app = App::new()
         .with_native_commands(site_status_registry())

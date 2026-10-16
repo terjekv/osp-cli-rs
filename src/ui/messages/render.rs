@@ -398,10 +398,13 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            defaults,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                defaults,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }

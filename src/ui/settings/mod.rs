@@ -834,10 +834,13 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            defaults,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                defaults,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }
@@ -851,16 +854,24 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
         let options = ResolveOptions::default().with_terminal("cli");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base test config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("test config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base test config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("test config should resolve")
     }
 
     fn resolved_config_with_session(
@@ -874,23 +885,31 @@ mod tests {
             defaults.set(*key, *value);
         }
 
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
 
         let mut session = ConfigLayer::default();
         for (key, value) in session_entries {
             session.set(*key, *value);
         }
-        resolver.set_session(session);
+        layers.session = session;
 
         let options = ResolveOptions::default().with_terminal("cli");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base test config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("test config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base test config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("test config should resolve")
     }
 
     #[test]

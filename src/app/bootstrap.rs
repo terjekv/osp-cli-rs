@@ -144,9 +144,9 @@ pub(crate) fn prepare_runtime_config(
         RuntimeConfigPaths::discover_with(request.runtime_load)
     };
     let options = runtime_resolve_options(&request);
-    let (mut resolver, base_resolved) = {
+    let (mut layers, base_resolved) = {
         let _phase = crate::startup_trace::phase("config resolution");
-        let resolver = build_runtime_pipeline(
+        let layers = build_runtime_pipeline(
             runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
             None,
             &paths,
@@ -154,15 +154,23 @@ pub(crate) fn prepare_runtime_config(
             None,
             request.session_layer,
         )
-        .resolver()?;
+        .load_layers()?;
+        let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        );
         let base_resolved = if raw {
             resolver.resolve_raw(options.clone())?
         } else {
             resolver.resolve(options.clone())?
         };
-        (resolver, base_resolved)
+        (layers, base_resolved)
     };
-    resolver.set_presentation(build_presentation_defaults_layer(&base_resolved));
+    layers.presentation = build_presentation_defaults_layer(&base_resolved);
+    let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
+        layers,
+        crate::config::ConfigSchema::default(),
+    );
 
     Ok(PreparedRuntimeConfig { resolver, options })
 }

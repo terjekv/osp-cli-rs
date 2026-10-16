@@ -270,7 +270,6 @@ impl ConfigLoader for EnvVarLoader {
 pub struct SecretsTomlLoader {
     path: PathBuf,
     missing_ok: bool,
-    strict_permissions: bool,
 }
 
 impl SecretsTomlLoader {
@@ -279,7 +278,6 @@ impl SecretsTomlLoader {
         Self {
             path,
             missing_ok: true,
-            strict_permissions: true,
         }
     }
 
@@ -294,12 +292,6 @@ impl SecretsTomlLoader {
         self.missing_ok = true;
         self
     }
-
-    /// Enables or disables permission checks before loading.
-    pub fn with_strict_permissions(mut self, strict: bool) -> Self {
-        self.strict_permissions = strict;
-        self
-    }
 }
 
 impl ConfigLoader for SecretsTomlLoader {
@@ -307,7 +299,6 @@ impl ConfigLoader for SecretsTomlLoader {
         tracing::debug!(
             path = %self.path.display(),
             missing_ok = self.missing_ok,
-            strict_permissions = self.strict_permissions,
             "loading TOML secrets layer"
         );
         if !self.path.exists() {
@@ -321,7 +312,7 @@ impl ConfigLoader for SecretsTomlLoader {
             });
         }
 
-        validate_secrets_permissions(&self.path, self.strict_permissions)?;
+        validate_secrets_permissions(&self.path)?;
 
         let raw = std::fs::read_to_string(&self.path).map_err(|err| ConfigError::FileRead {
             path: self.path.display().to_string(),
@@ -502,16 +493,10 @@ pub struct LoaderPipeline {
     defaults: Box<dyn ConfigLoader>,
     presentation: Option<Box<dyn ConfigLoader>>,
     file: Option<Box<dyn ConfigLoader>>,
-    secrets: Option<SecretsPipelineLoader>,
+    secrets: Option<crate::config::RuntimeSelectedSecretsLoader>,
     env: Option<Box<dyn ConfigLoader>>,
     cli: Option<Box<dyn ConfigLoader>>,
     session: Option<Box<dyn ConfigLoader>>,
-    schema: ConfigSchema,
-}
-
-enum SecretsPipelineLoader {
-    Fixed(Box<dyn ConfigLoader>),
-    Runtime(crate::config::RuntimeSelectedSecretsLoader),
 }
 
 impl LoaderPipeline {
@@ -531,7 +516,6 @@ impl LoaderPipeline {
             env: None,
             cli: None,
             session: None,
-            schema: ConfigSchema::default(),
         }
     }
 
@@ -553,20 +537,11 @@ impl LoaderPipeline {
         self
     }
 
-    /// Adds the secrets loader.
-    pub fn with_secrets<L>(mut self, loader: L) -> Self
-    where
-        L: ConfigLoader + 'static,
-    {
-        self.secrets = Some(SecretsPipelineLoader::Fixed(Box::new(loader)));
-        self
-    }
-
     pub(crate) fn with_runtime_secrets(
         mut self,
         loader: crate::config::RuntimeSelectedSecretsLoader,
     ) -> Self {
-        self.secrets = Some(SecretsPipelineLoader::Runtime(loader));
+        self.secrets = Some(loader);
         self
     }
 
@@ -597,12 +572,6 @@ impl LoaderPipeline {
         self
     }
 
-    /// Replaces the schema used during resolution.
-    pub fn with_schema(mut self, schema: ConfigSchema) -> Self {
-        self.schema = schema;
-        self
-    }
-
     /// Loads every configured source into concrete layers.
     ///
     /// This is the boundary between source I/O and config resolution.
@@ -624,10 +593,7 @@ impl LoaderPipeline {
             session,
         };
         layers.secrets = match self.secrets.as_ref() {
-            Some(SecretsPipelineLoader::Fixed(loader)) => load_layer("secrets", || loader.load())?,
-            Some(SecretsPipelineLoader::Runtime(loader)) => {
-                load_layer("secrets", || loader.load(&layers))?
-            }
+            Some(loader) => load_layer("secrets", || loader.load(&layers))?,
             None => ConfigLayer::default(),
         };
         tracing::debug!(
@@ -652,7 +618,7 @@ impl LoaderPipeline {
         let layers = self.load_layers()?;
         Ok(ConfigResolver::from_loaded_layers_with_schema(
             layers,
-            self.schema.clone(),
+            ConfigSchema::default(),
         ))
     }
 

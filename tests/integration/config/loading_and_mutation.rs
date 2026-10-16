@@ -71,10 +71,11 @@ fn config_file_mutation_round_trips_through_reload_and_explain() {
         .expect("env-backed config should resolve");
     assert_eq!(env_resolved.get_string("theme.name"), Some("nord"));
 
-    let explain = ConfigResolver::from_loaded_layers(
+    let explain = ConfigResolver::from_loaded_layers_with_schema(
         env_pipeline
             .load_layers()
             .expect("layers should load for explain"),
+        osp_cli::config::ConfigSchema::default(),
     )
     .explain_key("theme.name", options)
     .expect("theme explain should succeed");
@@ -237,7 +238,7 @@ ui.presentation = "compact"
         .expect("initial credential should persist");
 
     let mut schema = ConfigSchema::default();
-    schema.set_allow_extensions_namespace(false);
+
     schema.insert(
         "extensions.site.retry_ratio",
         SchemaEntry::float()
@@ -263,18 +264,16 @@ ui.presentation = "compact"
         ChainedLoader::new(SecretsTomlLoader::new(secrets_path.clone()).required())
             .with(EnvSecretsLoader::from_pairs([(tenant_origin, "uio")]))
     };
-    let pipeline = file_pipeline(&config_path)
-        .with_secrets(secret_loaders())
-        .with_env(EnvVarLoader::from_pairs([(
-            "OSP__EXTENSIONS__SITE__retry_ratio",
-            "0.75",
-        )]));
-    let mut resolver = pipeline.resolver().expect("client sources should load");
-    resolver.set_schema(schema);
+    let pipeline = file_pipeline(&config_path).with_env(EnvVarLoader::from_pairs([(
+        "OSP__EXTENSIONS__SITE__retry_ratio",
+        "0.75",
+    )]));
+    let mut layers = pipeline.load_layers().expect("client sources should load");
+    layers.secrets = secret_loaders().load().expect("secrets should load");
     let options = ResolveOptions::new()
         .with_profile("tsd")
         .with_terminal("cli");
-    let resolved = resolver
+    let resolved = ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
         .resolve(options.clone())
         .expect("client config should resolve");
     assert_eq!(
@@ -311,7 +310,7 @@ ui.presentation = "compact"
     };
     assert_eq!(format!("{secret:?}"), "[REDACTED]");
 
-    let endpoint = resolver
+    let endpoint = ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
         .explain_key("extensions.site.endpoint", options.clone())
         .expect("client endpoint provenance should explain");
     let endpoint_entry = endpoint.final_entry.unwrap();
@@ -346,13 +345,11 @@ ui.presentation = "compact"
         preview.previous,
         Some(ConfigValue::String("persisted-token-v1".to_string()))
     );
-    resolver.set_secrets(
-        secret_loaders()
-            .load()
-            .expect("preview should reload existing credential"),
-    );
+    layers.secrets = secret_loaders()
+        .load()
+        .expect("preview should reload existing credential");
     assert_eq!(
-        resolver
+        ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
             .resolve(options.clone())
             .unwrap()
             .get_string("extensions.site.token"),
@@ -368,25 +365,21 @@ ui.presentation = "compact"
         )
         .expect("credential rotation should persist");
     assert_eq!(persisted.previous, preview.previous);
-    resolver.set_secrets(
-        secret_loaders()
-            .load()
-            .expect("rotated credential should reload"),
-    );
+    layers.secrets = secret_loaders()
+        .load()
+        .expect("rotated credential should reload");
     assert_eq!(
-        resolver
-            .env_mut()
+        layers
+            .env
             .remove_scoped("extensions.site.retry_ratio", &Scope::global()),
         Some(ConfigValue::String("0.75".to_string()))
     );
-    resolver.schema_mut().insert(
+    schema.insert(
         "extensions.site.batch_size",
         SchemaEntry::positive_integer(),
     );
-    resolver
-        .presentation_mut()
-        .set("extensions.site.batch_size", 8_i64);
-    let reloaded = resolver
+    layers.presentation.set("extensions.site.batch_size", 8_i64);
+    let reloaded = ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
         .resolve(options.clone())
         .expect("updated client policy should resolve");
     assert_eq!(
@@ -406,13 +399,13 @@ ui.presentation = "compact"
     assert_eq!(reloaded.get_string("ui.presentation"), Some("compact"));
 
     assert_eq!(
-        resolver
-            .schema_mut()
-            .expected_type("extensions.site.retry_ratio"),
+        schema
+            .entries()
+            .find(|(key, _)| *key == "extensions.site.retry_ratio")
+            .map(|(_, entry)| entry.value_type()),
         Some(osp_cli::config::SchemaValueType::Float)
     );
-    let ratio_edit = resolver
-        .schema_mut()
+    let ratio_edit = schema
         .parse_input_value("extensions.site.retry_ratio", "2.25")
         .expect("the client editor should parse its schema-owned float value");
     assert_eq!(ratio_edit, ConfigValue::Float(2.25));
@@ -425,21 +418,20 @@ ui.presentation = "compact"
     )
     .expect("the typed client edit should persist in its real configuration document");
     assert_eq!(ratio_change.previous, Some(ConfigValue::Float(1.5)));
-    resolver.set_file(
-        TomlFileLoader::new(config_path.clone())
-            .required()
-            .load()
-            .expect("the persisted client edit should reload"),
-    );
-    let edited = resolver
+    layers.file = TomlFileLoader::new(config_path.clone())
+        .required()
+        .load()
+        .expect("the persisted client edit should reload");
+    let edited = ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
         .resolve(options.clone())
         .expect("the edited client policy should resolve");
     assert_eq!(edited.get("extensions.site.retry_ratio"), Some(&ratio_edit));
-    let ratio_entry = resolver
-        .explain_key("extensions.site.retry_ratio", options)
-        .expect("the client edit should retain file provenance")
-        .final_entry
-        .unwrap();
+    let ratio_entry =
+        ConfigResolver::from_loaded_layers_with_schema(layers.clone(), schema.clone())
+            .explain_key("extensions.site.retry_ratio", options)
+            .expect("the client edit should retain file provenance")
+            .final_entry
+            .unwrap();
     assert_eq!(ratio_entry.value, ratio_edit);
     assert_eq!(ratio_entry.source, ConfigSource::ConfigFile);
     assert_eq!(ratio_entry.scope, Scope::global());

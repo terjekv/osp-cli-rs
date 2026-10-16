@@ -16,19 +16,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::config::bootstrap::{
-    ResolutionFrame, explain_default_profile_bootstrap, explain_default_profile_key,
-    prepare_resolution,
-};
+use crate::config::bootstrap::{ResolutionFrame, explain_default_profile_key, prepare_resolution};
 use crate::config::explain::{
     build_runtime_explain, explain_layers_for_runtime_key, selected_value,
 };
 use crate::config::interpolate::{explain_interpolation, interpolate_all};
 use crate::config::selector::{LayerRef, ScopeSelector, SelectedLayerEntry};
 use crate::config::{
-    BootstrapConfigExplain, ConfigError, ConfigExplain, ConfigLayer, ConfigSchema, ConfigSource,
-    ConfigValue, LoadedLayers, ResolveOptions, ResolvedConfig, ResolvedValue, Scope, is_alias_key,
-    is_bootstrap_only_key,
+    ConfigError, ConfigExplain, ConfigLayer, ConfigSchema, ConfigSource, ConfigValue, LoadedLayers,
+    ResolveOptions, ResolvedConfig, ResolvedValue, Scope, is_alias_key, is_bootstrap_only_key,
 };
 
 /// Resolves layered config input into the runtime view seen by the rest of the
@@ -67,24 +63,9 @@ struct ResolvedMaps {
 }
 
 impl ConfigResolver {
-    /// Creates a resolver from pre-loaded config layers.
-    pub fn from_loaded_layers(layers: LoadedLayers) -> Self {
-        Self::from_loaded_layers_with_schema(layers, ConfigSchema::default())
-    }
-
     /// Creates a resolver from pre-loaded config layers and an explicit schema.
     pub fn from_loaded_layers_with_schema(layers: LoadedLayers, schema: ConfigSchema) -> Self {
         Self { layers, schema }
-    }
-
-    /// Replaces the schema used for validation and adaptation.
-    pub fn set_schema(&mut self, schema: ConfigSchema) {
-        self.schema = schema;
-    }
-
-    /// Returns mutable access to the active schema.
-    pub fn schema_mut(&mut self) -> &mut ConfigSchema {
-        &mut self.schema
     }
 
     /// Returns mutable access to the built-in defaults layer.
@@ -92,69 +73,9 @@ impl ConfigResolver {
         &mut self.layers.defaults
     }
 
-    /// Returns mutable access to the config file layer.
-    pub fn file_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.file
-    }
-
-    /// Returns mutable access to the presentation defaults layer.
-    pub fn presentation_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.presentation
-    }
-
-    /// Returns mutable access to the secrets layer.
-    pub fn secrets_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.secrets
-    }
-
-    /// Returns mutable access to the environment layer.
-    pub fn env_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.env
-    }
-
-    /// Returns mutable access to the CLI layer.
-    pub fn cli_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.cli
-    }
-
-    /// Returns mutable access to the session layer.
-    pub fn session_mut(&mut self) -> &mut ConfigLayer {
-        &mut self.layers.session
-    }
-
     /// Replaces the built-in defaults layer.
     pub fn set_defaults(&mut self, layer: ConfigLayer) {
         self.layers.defaults = layer;
-    }
-
-    /// Replaces the config file layer.
-    pub fn set_file(&mut self, layer: ConfigLayer) {
-        self.layers.file = layer;
-    }
-
-    /// Replaces the presentation defaults layer.
-    pub fn set_presentation(&mut self, layer: ConfigLayer) {
-        self.layers.presentation = layer;
-    }
-
-    /// Replaces the secrets layer.
-    pub fn set_secrets(&mut self, layer: ConfigLayer) {
-        self.layers.secrets = layer;
-    }
-
-    /// Replaces the environment layer.
-    pub fn set_env(&mut self, layer: ConfigLayer) {
-        self.layers.env = layer;
-    }
-
-    /// Replaces the CLI layer.
-    pub fn set_cli(&mut self, layer: ConfigLayer) {
-        self.layers.cli = layer;
-    }
-
-    /// Replaces the session layer.
-    pub fn set_session(&mut self, layer: ConfigLayer) {
-        self.layers.session = layer;
     }
 
     /// Resolves all configured layers into the final runtime config.
@@ -165,14 +86,14 @@ impl ConfigResolver {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::config::{ConfigResolver, LoadedLayers, ResolveOptions};
+    /// use osp_cli::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
     ///
     /// let mut layers = LoadedLayers::default();
     /// layers.defaults.set("profile.default", "default");
     /// layers.defaults.set("theme.name", "plain");
     /// layers.session.set("theme.name", "dracula");
     ///
-    /// let resolved = ConfigResolver::from_loaded_layers(layers)
+    /// let resolved = ConfigResolver::from_loaded_layers_with_schema(layers, ConfigSchema::default())
     ///     .resolve(ResolveOptions::default())
     ///     .unwrap();
     ///
@@ -230,14 +151,14 @@ impl ConfigResolver {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::config::{ConfigResolver, LoadedLayers, ResolveOptions};
+    /// use osp_cli::config::{ConfigResolver, ConfigSchema, LoadedLayers, ResolveOptions};
     ///
     /// let mut layers = LoadedLayers::default();
     /// layers.defaults.set("profile.default", "default");
     /// layers.defaults.set("theme.name", "plain");
     /// layers.cli.set("theme.name", "dracula");
     ///
-    /// let explain = ConfigResolver::from_loaded_layers(layers)
+    /// let explain = ConfigResolver::from_loaded_layers_with_schema(layers, ConfigSchema::default())
     ///     .explain_key("theme.name", ResolveOptions::default())
     ///     .unwrap();
     ///
@@ -281,22 +202,6 @@ impl ConfigResolver {
                 interpolation
             },
         ))
-    }
-
-    /// Explains bootstrap resolution for a bootstrap-only key.
-    pub fn explain_bootstrap_key(
-        &self,
-        key: &str,
-        options: ResolveOptions,
-    ) -> Result<BootstrapConfigExplain, ConfigError> {
-        if key.eq_ignore_ascii_case("profile.default") {
-            return explain_default_profile_bootstrap(self.layers(), options);
-        }
-
-        Err(ConfigError::InvalidConfigKey {
-            key: key.to_string(),
-            reason: "not a bootstrap key".to_string(),
-        })
     }
 
     /// Run the resolver's two actual phases:
@@ -502,99 +407,4 @@ fn should_preserve_selected_secret(
             .origin
             .as_deref()
             .is_some_and(|origin| origin.starts_with("OSP_SECRET__"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ConfigResolver;
-    use crate::config::{
-        ConfigError, ConfigLayer, ConfigSource, ConfigValue, ResolveOptions, Scope,
-    };
-
-    #[test]
-    fn resolver_layer_mutators_and_setters_are_callable_unit() {
-        let mut resolver = ConfigResolver::default();
-        resolver.defaults_mut().set("profile.default", "default");
-        resolver
-            .defaults_mut()
-            .set("theme.path", Vec::<String>::new());
-        resolver.file_mut().set("theme.name", "file");
-        resolver.secrets_mut().set("profile.default", "default");
-        resolver.env_mut().set("theme.name", "env");
-        resolver.cli_mut().set("theme.name", "cli");
-        resolver.session_mut().set("theme.name", "session");
-
-        let resolved = resolver
-            .resolve(ResolveOptions::default().with_terminal("cli"))
-            .expect("resolver should resolve");
-        assert_eq!(resolved.get_string("theme.name"), Some("session"));
-        assert_eq!(resolved.active_profile(), "default");
-
-        let mut replacement = ConfigLayer::default();
-        replacement.set("profile.default", "default");
-        replacement.set("theme.path", Vec::<String>::new());
-        replacement.set("theme.name", "replaced");
-        resolver.set_defaults(replacement);
-        resolver.set_file(ConfigLayer::default());
-        resolver.set_secrets(ConfigLayer::default());
-        resolver.set_env(ConfigLayer::default());
-        resolver.set_cli(ConfigLayer::default());
-        resolver.set_session(ConfigLayer::default());
-
-        let replaced = resolver
-            .resolve(ResolveOptions::default().with_terminal("cli"))
-            .expect("replacement config should resolve");
-        assert_eq!(replaced.get_string("theme.name"), Some("replaced"));
-
-        let mut resolver = ConfigResolver::default();
-        resolver.defaults_mut().set("profile.default", "default");
-        resolver
-            .defaults_mut()
-            .set("theme.path", Vec::<String>::new());
-        resolver.secrets_mut().insert_with_origin(
-            "extensions.demo.token",
-            ConfigValue::String("secret-token".to_string()).into_secret(),
-            Scope::global(),
-            Some("OSP_SECRET__AUTH__TOKEN"),
-        );
-        resolver.env_mut().insert_with_origin(
-            "extensions.demo.token",
-            ConfigValue::String("plain-token".to_string()),
-            Scope::global(),
-            Some("OSP__AUTH__TOKEN"),
-        );
-
-        let resolved = resolver
-            .resolve(ResolveOptions::default())
-            .expect("resolver should resolve");
-        let entry = resolved
-            .get_value_entry("extensions.demo.token")
-            .expect("extensions.demo.token should resolve");
-
-        assert!(entry.value.is_secret());
-        assert_eq!(
-            entry.value.reveal(),
-            &ConfigValue::String("secret-token".to_string())
-        );
-        assert_eq!(entry.source, ConfigSource::Secrets);
-
-        let err = ConfigResolver::default()
-            .explain_bootstrap_key("ui.theme", ResolveOptions::default())
-            .expect_err("non-bootstrap key should fail");
-        assert!(matches!(
-            err,
-            ConfigError::InvalidConfigKey { key, .. } if key == "ui.theme"
-        ));
-
-        let mut resolver = ConfigResolver::default();
-        resolver.defaults_mut().set("profile.default", "ops");
-        resolver
-            .defaults_mut()
-            .set("theme.path", Vec::<String>::new());
-        let resolved = resolver
-            .resolve(ResolveOptions::default())
-            .expect("selected profile without scoped entries should resolve");
-        assert_eq!(resolved.active_profile(), "ops");
-        assert!(resolved.known_profiles().contains("ops"));
-    }
 }

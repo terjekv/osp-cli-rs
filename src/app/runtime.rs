@@ -779,10 +779,13 @@ mod tests {
         for (key, value) in entries {
             file.set(*key, (*value).to_string());
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            file,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                file,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }

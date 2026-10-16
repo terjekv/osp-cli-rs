@@ -419,7 +419,7 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600);
-    validate_secrets_permissions(&path, true).expect("strict validation should pass");
+    validate_secrets_permissions(&path).expect("strict validation should pass");
 
     enum Fixture {
         GroupReadable,
@@ -427,26 +427,17 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
     }
 
     enum Expected {
-        Ok,
         Insecure(u32),
         FileRead,
     }
 
-    for (label, strict, fixture, expected) in [
+    for (label, fixture, expected) in [
         (
             "strict group-readable",
-            true,
             Fixture::GroupReadable,
             Expected::Insecure(0o640),
         ),
-        (
-            "non-strict group-readable",
-            false,
-            Fixture::GroupReadable,
-            Expected::Ok,
-        ),
-        ("non-strict missing", false, Fixture::Missing, Expected::Ok),
-        ("strict missing", true, Fixture::Missing, Expected::FileRead),
+        ("strict missing", Fixture::Missing, Expected::FileRead),
     ] {
         let mut owner = None;
         let path = match fixture {
@@ -460,8 +451,7 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
         };
         let _owner = owner;
 
-        match (expected, validate_secrets_permissions(&path, strict)) {
-            (Expected::Ok, Ok(())) => {}
+        match (expected, validate_secrets_permissions(&path)) {
             (
                 Expected::Insecure(expected_mode),
                 Err(ConfigError::InsecureSecretsPermissions { mode, .. }),

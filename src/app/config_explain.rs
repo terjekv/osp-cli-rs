@@ -623,7 +623,7 @@ mod tests {
         file: &[(&str, &str)],
         session: &[(&str, &str)],
     ) -> (ResolvedConfig, ConfigExplain) {
-        let mut resolver = ConfigResolver::default();
+        let mut layers = crate::config::LoadedLayers::default();
 
         let mut defaults_layer = ConfigLayer::default();
         defaults_layer.set("profile.default", "default");
@@ -632,31 +632,40 @@ mod tests {
         for (entry_key, value) in defaults {
             defaults_layer.set(*entry_key, *value);
         }
-        resolver.set_defaults(defaults_layer);
+        layers.defaults = defaults_layer;
 
         let mut file_layer = ConfigLayer::default();
         for (entry_key, value) in file {
             file_layer.set(*entry_key, *value);
         }
-        resolver.set_file(file_layer);
+        layers.file = file_layer;
 
         let mut session_layer = ConfigLayer::default();
         for (entry_key, value) in session {
             session_layer.set(*entry_key, *value);
         }
-        resolver.set_session(session_layer);
+        layers.session = session_layer;
 
         let options = ResolveOptions::default().with_terminal("repl");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        let config = resolver
-            .resolve(options.clone())
-            .expect("config should resolve");
-        let explain = resolver
-            .explain_key(key, options)
-            .expect("config explain should resolve");
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        let config = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("config should resolve");
+        let explain = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .explain_key(key, options)
+        .expect("config explain should resolve");
         (config, explain)
     }
 

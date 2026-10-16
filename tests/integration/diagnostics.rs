@@ -20,7 +20,7 @@ impl StartupHook for ProductSessionBootstrap {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", host_config.active_profile());
         let mut schema = ConfigSchema::default();
-        schema.set_allow_extensions_namespace(false);
+
         schema.insert(
             "extensions.site.session.authenticated",
             SchemaEntry::boolean().required(),
@@ -29,11 +29,14 @@ impl StartupHook for ProductSessionBootstrap {
             "extensions.site.session.capabilities",
             SchemaEntry::string_list().required(),
         );
-        let session = LoaderPipeline::new(StaticLayerLoader::new(defaults))
+        let layers = LoaderPipeline::new(StaticLayerLoader::new(defaults))
             .with_file(TomlFileLoader::new(path.into()).required())
-            .with_schema(schema)
-            .resolve(ResolveOptions::new())
+            .load_layers()
             .map_err(miette::Report::new)?;
+        let session =
+            osp_cli::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
+                .resolve(ResolveOptions::new())
+                .map_err(miette::Report::new)?;
         runtime.set_policy_context(
             CommandPolicyContext::default()
                 .authenticated(

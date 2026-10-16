@@ -531,7 +531,6 @@ impl SchemaEntry {
 #[derive(Debug, Clone)]
 pub struct ConfigSchema {
     entries: BTreeMap<String, SchemaEntry>,
-    allow_extensions_namespace: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -551,7 +550,6 @@ impl ConfigSchema {
     fn builtin() -> Self {
         let mut schema = Self {
             entries: BTreeMap::new(),
-            allow_extensions_namespace: true,
         };
         for builtin in super::builtin::builtin_keys() {
             schema.insert(builtin.key, builtin.schema.clone());
@@ -566,11 +564,6 @@ impl ConfigSchema {
     pub fn insert(&mut self, key: &'static str, entry: SchemaEntry) {
         self.entries
             .insert(key.to_string(), entry.with_canonical_key(key));
-    }
-
-    /// Enables or disables the `extensions.*` namespace shortcut.
-    pub fn set_allow_extensions_namespace(&mut self, value: bool) {
-        self.allow_extensions_namespace = value;
     }
 
     /// Returns whether the key is recognized by the schema.
@@ -649,14 +642,6 @@ impl ConfigSchema {
     pub fn doc_for_key(&self, key: &str) -> Option<&'static str> {
         let normalized = normalize_identifier(key);
         self.entries.get(&normalized).and_then(SchemaEntry::doc)
-    }
-
-    /// Returns the expected runtime type for a key.
-    pub fn expected_type(&self, key: &str) -> Option<SchemaValueType> {
-        self.entries
-            .get(key)
-            .map(|entry| entry.value_type)
-            .or_else(|| dynamic_schema_key_kind(key).map(|_| SchemaValueType::String))
     }
 
     /// Parses a raw string into the schema's typed config representation.
@@ -741,7 +726,7 @@ impl ConfigSchema {
     }
 
     fn is_extension_key(&self, key: &str) -> bool {
-        self.allow_extensions_namespace && key.starts_with("extensions.")
+        key.starts_with("extensions.")
     }
 
     fn is_alias_key(&self, key: &str) -> bool {
@@ -973,38 +958,6 @@ impl ConfigLayer {
         V: Into<ConfigValue>,
     {
         self.insert(key, value, Scope::global());
-    }
-
-    /// Inserts an entry scoped to a profile.
-    pub fn set_for_profile<K, V>(&mut self, profile: &str, key: K, value: V)
-    where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::profile(profile));
-    }
-
-    /// Inserts an entry scoped to a terminal.
-    pub fn set_for_terminal<K, V>(&mut self, terminal: &str, key: K, value: V)
-    where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::terminal(terminal));
-    }
-
-    /// Inserts an entry scoped to both profile and terminal.
-    pub fn set_for_profile_terminal<K, V>(
-        &mut self,
-        profile: &str,
-        terminal: &str,
-        key: K,
-        value: V,
-    ) where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::profile_terminal(profile, terminal));
     }
 
     /// Inserts an entry with an explicit scope.

@@ -45,17 +45,25 @@ fn make_state(entries: &[(&str, &str)]) -> AppState {
     for (key, value) in entries {
         session.set(*key, *value);
     }
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
-    resolver.set_session(session);
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        session,
+        ..crate::config::LoadedLayers::default()
+    };
     let options = ResolveOptions::default().with_terminal("repl");
-    let base = resolver
-        .resolve(options.clone())
-        .expect("base test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    let config = resolver
-        .resolve(options)
-        .expect("test config should resolve");
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options.clone())
+    .expect("base test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options)
+    .expect("test config should resolve");
 
     AppState::new(AppStateInit {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
@@ -823,16 +831,24 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
         "extensions.demo.items",
         vec!["1".to_string(), "2".to_string(), "3".to_string()],
     );
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
-    resolver.set_session(session);
-    let base = resolver
-        .resolve(ResolveOptions::default().with_terminal("repl"))
-        .expect("list test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    let config = resolver
-        .resolve(ResolveOptions::default().with_terminal("repl"))
-        .expect("list-aware config should resolve");
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        session,
+        ..crate::config::LoadedLayers::default()
+    };
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(ResolveOptions::default().with_terminal("repl"))
+    .expect("list test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(ResolveOptions::default().with_terminal("repl"))
+    .expect("list-aware config should resolve");
     let state = AppState::new(AppStateInit {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,

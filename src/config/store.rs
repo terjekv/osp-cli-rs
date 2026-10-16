@@ -863,15 +863,8 @@ fn config_value_to_toml(value: &ConfigValue) -> toml::Value {
 }
 
 #[cfg(unix)]
-pub(crate) fn validate_secrets_permissions(
-    path: &PathBuf,
-    strict: bool,
-) -> Result<(), ConfigError> {
+pub(crate) fn validate_secrets_permissions(path: &PathBuf) -> Result<(), ConfigError> {
     use std::os::unix::fs::PermissionsExt;
-
-    if !strict {
-        return Ok(());
-    }
 
     let metadata = std::fs::metadata(path).map_err(|err| ConfigError::FileRead {
         path: path.display().to_string(),
@@ -889,10 +882,7 @@ pub(crate) fn validate_secrets_permissions(
 }
 
 #[cfg(not(unix))]
-pub(crate) fn validate_secrets_permissions(
-    _path: &PathBuf,
-    _strict: bool,
-) -> Result<(), ConfigError> {
+pub(crate) fn validate_secrets_permissions(_path: &PathBuf) -> Result<(), ConfigError> {
     Ok(())
 }
 

@@ -14,7 +14,7 @@ use osp_cli::{
 fn site_defaults() -> ConfigLayer {
     let mut layer = ConfigLayer::default();
     layer.set("extensions.site.enabled", true);
-    layer.set_for_terminal("cli", "extensions.site.banner", "cli-wrapper");
+    layer.insert("extensions.site.banner", "cli-wrapper", osp_cli::config::Scope::terminal("cli"));
     layer
 }
 

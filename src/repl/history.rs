@@ -312,11 +312,16 @@ mod tests {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
-        let resolved = resolver
-            .resolve(ResolveOptions::default())
-            .expect("config should resolve");
+        let layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
+        let resolved = ConfigResolver::from_loaded_layers_with_schema(
+            layers,
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(ResolveOptions::default())
+        .expect("config should resolve");
 
         let patterns = repl_history_exclude_patterns(&resolved);
 
@@ -333,12 +338,17 @@ mod tests {
         defaults.set("theme.path", Vec::<String>::new());
         let mut session = ConfigLayer::default();
         session.set("repl.history.exclude", vec!["help".to_string()]);
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
-        resolver.set_session(session);
-        let resolved = resolver
-            .resolve(ResolveOptions::default())
-            .expect("config should resolve");
+        let layers = crate::config::LoadedLayers {
+            defaults,
+            session,
+            ..crate::config::LoadedLayers::default()
+        };
+        let resolved = ConfigResolver::from_loaded_layers_with_schema(
+            layers,
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(ResolveOptions::default())
+        .expect("config should resolve");
 
         let patterns = repl_history_exclude_patterns(&resolved);
         assert_eq!(
@@ -705,11 +715,16 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
-        resolver
-            .resolve(ResolveOptions::default())
-            .expect("config should resolve")
+        let layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers,
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(ResolveOptions::default())
+        .expect("config should resolve")
     }
 
     fn app_state(config: crate::config::ResolvedConfig) -> AppState {

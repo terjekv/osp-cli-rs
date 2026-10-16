@@ -225,7 +225,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
         state
             .session
             .config_overrides
-            .set_for_profile("default", "ui.format", "table");
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
@@ -263,7 +263,7 @@ fn repl_config_unset_dry_run_preserves_session_state_unit() {
         state
             .session
             .config_overrides
-            .set_for_profile("default", "ui.format", "table");
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 

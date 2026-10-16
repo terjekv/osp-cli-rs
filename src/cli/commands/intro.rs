@@ -80,17 +80,25 @@ mod tests {
         defaults.set("repl.history.path", "/tmp/osp-intro-history.jsonl");
         defaults.set("theme.path", Vec::<String>::new());
 
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
 
         let options = ResolveOptions::default().with_terminal("repl");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base REPL config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("presentation-seeded REPL config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base REPL config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("presentation-seeded REPL config should resolve")
     }
 
     fn intro_state() -> AppState {

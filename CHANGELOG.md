@@ -19,6 +19,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   `CommandLineParser::{analyze,compute_stub_quote}`,
   `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
 
+- **Breaking:** Remove test-only config resolver, layer, schema, and loader
+  mutation methods. Resolve prepared `LoadedLayers` with an explicit schema.
+
 - **Breaking:** Remove the unused config keys `session.cache.max_results`,
   `ui.prompt`, `ui.prompt.secrets`, and `base.dir`. Configurations containing
   these keys now fail as unknown keys.
