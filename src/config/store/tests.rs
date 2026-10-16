@@ -301,10 +301,10 @@ fn store_reports_invalid_toml_sections_and_blank_keys_for_set_and_unset_unit() {
     match err {
         ConfigError::LayerLoad {
             path: err_path,
-            source,
+            inner,
         } => {
             assert!(err_path.contains("config.toml"));
-            assert!(matches!(*source, ConfigError::TomlParse(_)));
+            assert!(matches!(*inner, ConfigError::TomlParse(_)));
         }
         other => panic!("unexpected error: {other:?}"),
     }
