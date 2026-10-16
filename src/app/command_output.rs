@@ -71,6 +71,7 @@ pub(crate) struct CommandOutput {
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
+    pub(crate) hint_command: Option<String>,
 }
 
 impl CommandOutput {
@@ -86,6 +87,7 @@ impl CommandOutput {
             presentation: CommandPresentation::default(),
             stderr_text: String::new(),
             failure_report: None,
+            hint_command: None,
         }
     }
 
@@ -741,7 +743,17 @@ pub(crate) fn render_repl_command(
     mut result: CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
+    if let Some(command) = &result.hint_command {
+        session.repl_feedback.remember_hint(command.clone());
+    }
     if result.failure_report.is_some() {
+        if let Some(command) = result
+            .failure_report
+            .as_ref()
+            .and_then(|report| super::host::report_hint_command(report, ui.verbosity))
+        {
+            session.repl_feedback.remember_hint(command);
+        }
         run_cli_command(config, ui, &result, sink)?;
         if let Some(report) = result.failure_report.take() {
             session.record_failure_report(

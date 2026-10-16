@@ -650,6 +650,7 @@ fn run_native_command(
         }
         .for_command(input.command_path.as_str()),
     );
+    context.repl_feedback = session.repl_feedback.clone();
     context.output_pipeline = !input.stages.is_empty();
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
@@ -1021,10 +1022,24 @@ fn run_external_plugin_command(
             Ok(value) if value.get("protocol_version").is_some() => {
                 let mut response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
                     .map_err(|_| {
-                    miette!("Invalid plugin response metadata.\nhint: Run osp doctor plugins.")
+                    miette::Report::new(
+                        invocation
+                            .ui
+                            .render_settings
+                            .runtime
+                            .command_scope
+                            .run_hint("Invalid plugin response metadata.", "doctor plugins", "."),
+                    )
                 })?;
                 response.validate_v1().map_err(|_| {
-                    miette!("Invalid plugin response metadata.\nhint: Run osp doctor plugins.")
+                    miette::Report::new(
+                        invocation
+                            .ui
+                            .render_settings
+                            .runtime
+                            .command_scope
+                            .run_hint("Invalid plugin response metadata.", "doctor plugins", "."),
+                    )
                 })?;
                 if response.ok
                     && let Some(entries) = response.context.as_ref()
@@ -1137,6 +1152,7 @@ fn run_external_plugin_command(
         result.exit_code = raw.status;
         result.preserve_process_output = result.failure_report.is_none();
         if result.failure_report.is_none() {
+            result.hint_command = Some("doctor plugins".into());
             result.stderr_text.push_str(&format!("error: Plugin {command} crashed (exit status {}).\nhint: Run osp doctor plugins.\n", raw.status));
         }
     }

@@ -400,3 +400,11 @@ exit or reload stops the batch, and nested source/each commands are refused.
 Use `help --all | uptime`, `help --all | F command ~ task`, `help --all --json`,
 or `help --all | Y` to filter, export, or copy the catalog. Hidden commands
 and positional/value completion entries are excluded.
+
+Alt+Enter inserts the command from the most recent structured `hint: Run …`
+into the input line. Press Enter to execute, or edit it first. The command is
+formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
+(the default), `F2` through `F12`, or `none`; duplicate bindings are rejected.
+Hints without a command do not replace the remembered command. Native commands
+produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
+retains recovery commands in errors. No terminal text is scraped.

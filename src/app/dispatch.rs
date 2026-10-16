@@ -240,10 +240,11 @@ pub(crate) fn resolve_external_command_source(
                     scope.command(&suggestion)
                 )
             }
-            None => miette!(
-                "Unknown command '{command}'.\nhint: Run {} to list commands.",
-                scope.command("help")
-            ),
+            None => miette::Report::new(scope.run_hint(
+                format!("Unknown command '{command}'."),
+                "help",
+                " to list commands.",
+            )),
         });
     }
 

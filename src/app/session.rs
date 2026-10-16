@@ -285,6 +285,8 @@ pub struct AppSession {
     pub prompt_timing: DebugTimingState,
     /// Session-scoped context exposed by native commands to the REPL host.
     pub native_context: NativeSessionContext,
+    /// Structured follow-up commands, independent of resource context.
+    pub repl_feedback: crate::repl::ReplFeedback,
     pub(crate) startup_prompt_timing_pending: bool,
     /// Current command shell within the REPL.
     pub scope: ReplScopeStack,
@@ -579,6 +581,7 @@ impl Default for AppSession {
             history_shell: HistoryShellContext::default(),
             prompt_timing: DebugTimingState::default(),
             native_context: NativeSessionContext::default(),
+            repl_feedback: Default::default(),
             startup_prompt_timing_pending: true,
             scope: ReplScopeStack::default(),
             last_success: None,

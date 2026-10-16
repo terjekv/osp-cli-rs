@@ -81,6 +81,8 @@ pub struct NativeCommandContext<'a> {
     pub invocation_elevation: InvocationElevation,
     /// Session-scoped native context that may be surfaced by the host REPL.
     pub session_context: NativeSessionContext,
+    /// Structured command hints and history entries for the hosting REPL.
+    pub repl_feedback: crate::repl::ReplFeedback,
     command_scope: crate::core::CommandScope,
     diagnostics: Option<&'a crate::diagnostics::DiagnosticSink>,
     progress: Option<&'a dyn NativeProgressSink>,
@@ -95,6 +97,7 @@ impl<'a> NativeCommandContext<'a> {
             runtime_hints,
             invocation_elevation: InvocationElevation::Ordinary,
             session_context: NativeSessionContext::default(),
+            repl_feedback: Default::default(),
             command_scope: Default::default(),
             diagnostics: None,
             progress: None,
@@ -127,6 +130,13 @@ impl<'a> NativeCommandContext<'a> {
     /// Renders a root-form command for the reader's current prompt.
     pub fn command(&self, line: &str) -> String {
         self.command_scope.command(line)
+    }
+
+    /// Produces a Run hint and retains its root-form command for editor recall.
+    /// The editor inserts the command only; Enter still controls execution.
+    pub fn run_hint(&self, command: &str, suffix: &str) -> String {
+        self.repl_feedback.remember_hint(command);
+        format!("hint: Run {}{suffix}", self.command(command))
     }
 
     /// Whether this invocation transforms its result with output pipe stages.

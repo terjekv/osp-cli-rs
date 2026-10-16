@@ -105,6 +105,23 @@ fn run_repl_cycle(
     run_repl(cycle.run_config, |event, history| {
         let line = match event {
             crate::repl::ReplEvent::Line(line) => line,
+            crate::repl::ReplEvent::Action("hint.insert") => {
+                crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
+                return Ok(state.session.repl_feedback.hint().map_or(
+                    crate::repl::ReplResult::Continue,
+                    |command| {
+                        crate::repl::ReplResult::ReplaceInput(
+                            state
+                                .runtime
+                                .ui
+                                .render_settings
+                                .runtime
+                                .command_scope
+                                .command(&command),
+                        )
+                    },
+                ));
+            }
             crate::repl::ReplEvent::Action(id) => {
                 return crate::app::external::run_repl_action(state, id)
                     .map_err(|err| anyhow::Error::from_boxed(err.into()));

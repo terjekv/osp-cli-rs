@@ -78,15 +78,17 @@ where
     let mut bindings = build_repl_keybindings();
     for action in &actions {
         if let Some(key) = action.key {
+            let (modifiers, code) = match key {
+                crate::repl::ReplActionKey::Function(key) => (KeyModifiers::NONE, KeyCode::F(key)),
+                crate::repl::ReplActionKey::AltEnter => (KeyModifiers::ALT, KeyCode::Enter),
+            };
             anyhow::ensure!(
-                bindings
-                    .find_binding(KeyModifiers::NONE, KeyCode::F(key))
-                    .is_none(),
-                "conflicting action key F{key}"
+                bindings.find_binding(modifiers, code).is_none(),
+                "conflicting action key {key}"
             );
             bindings.add_binding(
-                KeyModifiers::NONE,
-                KeyCode::F(key),
+                modifiers,
+                code,
                 ReedlineEvent::ExecuteHostCommand(format!("\0osp-action:{}", action.id)),
             );
         }
@@ -337,6 +339,13 @@ where
                     Ok(ReplResult::Print(output)) => {
                         print!("{output}");
                         None
+                    }
+                    Ok(ReplResult::ReplaceInput(command)) if id == "hint.insert" => {
+                        editor.run_edit_commands(&[
+                            EditCommand::Clear,
+                            EditCommand::InsertString(command),
+                        ]);
+                        return Ok(None);
                     }
                     Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
                     Ok(result) => Some(result),

@@ -244,6 +244,26 @@ pub(crate) fn execute_repl_plugin_line(
     if accepted && !is_repl_bang_request(&resolved) {
         let _ = history.with(|store| store.remember_command(&resolved));
     }
+    for command in state.session.repl_feedback.take_history() {
+        let command = state
+            .runtime
+            .ui
+            .render_settings
+            .runtime
+            .command_scope
+            .command(&command);
+        if let Err(error) = history
+            .with(|store| {
+                store.stage_command_line(&command)?;
+                store.finalize_execution(&command, &command, true)
+            })
+            .map_err(anyhow::Error::msg)
+            .and_then(|result| result)
+        {
+            sink.write_stderr(&format!("failed to update REPL history: {error}\n"));
+        }
+    }
+
     state.session.finish_repl_line();
     let refresh_completion = state
         .session
@@ -325,6 +345,9 @@ pub(crate) fn execute_repl_plugin_line(
             }
             let evidence = crate::app::host::report_evidence(&err, ui.verbosity);
             crate::app::sink::write_diagnostics(sink, &evidence.0, &ui.render_settings);
+            if let Some(command) = crate::app::host::report_hint_command(&err, ui.verbosity) {
+                state.session.repl_feedback.remember_hint(command);
+            }
             let rendered =
                 crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {

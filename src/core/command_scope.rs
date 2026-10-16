@@ -20,6 +20,21 @@ pub enum CommandScope {
 }
 
 impl CommandScope {
+    /// Creates a failure with an executable hint retained independently of text.
+    /// `suffix` supplies punctuation or an explanation after the command.
+    pub fn run_hint(&self, message: impl Into<String>, line: &str, suffix: &str) -> CommandHint {
+        CommandHint {
+            command: line
+                .trim()
+                .strip_prefix("osp ")
+                .unwrap_or(line.trim())
+                .to_string(),
+            message: message.into(),
+            display_command: self.command(line),
+            suffix: suffix.into(),
+        }
+    }
+
     /// Renders a root-form command for this prompt, accepting a leading `osp `.
     ///
     /// ```
@@ -61,3 +76,26 @@ impl CommandScope {
         }
     }
 }
+
+/// An error with a structurally retained suggested command.
+/// The command is root-form; display uses the reader's command scope.
+#[derive(Debug)]
+pub struct CommandHint {
+    pub(crate) command: String,
+    message: String,
+    display_command: String,
+    suffix: String,
+}
+
+impl std::fmt::Display for CommandHint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}\nhint: Run {}{}",
+            self.message, self.display_command, self.suffix
+        )
+    }
+}
+
+impl std::error::Error for CommandHint {}
+impl miette::Diagnostic for CommandHint {}

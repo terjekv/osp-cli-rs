@@ -155,6 +155,22 @@ pub(crate) fn resolved_product_actions(
     {
         return Ok(actions);
     }
+    let mut hint = crate::repl::ReplAction::resolve(
+        "hint.insert",
+        "Insert suggested command",
+        2,
+        runtime.config.resolved(),
+    )
+    .map_err(|e| miette::miette!("{e:#}"))?;
+    if runtime
+        .config
+        .resolved()
+        .get_string("repl.bindings.hint.insert")
+        .is_none()
+    {
+        hint.key = Some(crate::repl::ReplActionKey::AltEnter);
+    }
+    actions.push(hint);
     for entry in clients.native_commands().catalog() {
         if runtime
             .auth

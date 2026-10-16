@@ -302,7 +302,7 @@ fn resolve_intro_placeholder(
                 .filter_map(|action| {
                     action
                         .key
-                        .map(|key| format!("`F{key}` {}", action.label.to_ascii_lowercase()))
+                        .map(|key| format!("`{key}` {}", action.label.to_ascii_lowercase()))
                 })
                 .collect::<Vec<_>>()
                 .join(" · ");

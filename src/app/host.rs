@@ -984,6 +984,41 @@ fn known_error_hint(
     None
 }
 
+pub(crate) fn report_hint_command(
+    err: &miette::Report,
+    verbosity: crate::core::MessageLevel,
+) -> Option<String> {
+    if let Some(hint) = find_error_in_chain::<crate::core::CommandHint>(err) {
+        return Some(hint.command.clone());
+    }
+    if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
+    {
+        return backend
+            .error
+            .details
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|command| !command.chars().any(char::is_control))
+            .map(str::to_string);
+    }
+    if verbosity >= crate::core::MessageLevel::Info {
+        return None;
+    }
+    let known = KnownErrorChain::inspect(err);
+    let error = known.clap?;
+    if error
+        .get(clap::error::ContextKind::SuggestedSubcommand)
+        .is_some()
+    {
+        return None;
+    }
+    let path = known
+        .boxed_context
+        .and_then(|context| context.command_path.as_deref())
+        .unwrap_or("");
+    Some(format!("{path} --help").trim_start().to_string())
+}
+
 fn terse_clap_error(error: &clap::Error) -> String {
     let rendered = error.to_string();
     let mut lines = rendered

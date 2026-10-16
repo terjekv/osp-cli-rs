@@ -7,6 +7,14 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Alt+Enter inserts the most recent structured Run hint into the REPL input;
+  Enter still decides execution. Configure `repl.bindings.hint.insert` with
+  `Alt+Enter`, F2..F12 or `none`. Native commands can retain command hints and
+  history entries independently of resource context.
+- **Breaking:** `ReplAction.key` uses `ReplActionKey` to represent function
+  keys and Alt+Enter.
+
+
 - **Breaking:** `config get` rejects a missing explicitly selected config file
   instead of silently returning defaults.
 

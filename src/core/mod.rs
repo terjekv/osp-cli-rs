@@ -31,7 +31,7 @@
 pub(crate) mod clap_metadata;
 /// Reader-relative command suggestions.
 pub mod command_scope;
-pub use command_scope::CommandScope;
+pub use command_scope::{CommandHint, CommandScope};
 /// Visibility and access-policy evaluation for commands.
 pub mod command_policy;
 /// Ordered semantic document blocks shared by producers and renderers.

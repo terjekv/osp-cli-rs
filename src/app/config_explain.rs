@@ -30,10 +30,11 @@ pub(crate) fn config_explain_result(
 
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
-        push_missing_config_key_messages(&mut messages, config, &args.key);
+        let hint_command = push_missing_config_key_messages(&mut messages, config, &args.key);
         return Ok(CommandOutput {
             exit_code: 1,
             messages,
+            hint_command,
             body: crate::app::CommandBody::None,
             stderr_text: String::new(),
             failure_report: None,
@@ -459,7 +460,7 @@ pub(crate) fn push_missing_config_key_messages(
     messages: &mut MessageBuffer,
     config: &ResolvedConfig,
     key: &str,
-) {
+) -> Option<String> {
     if let Some((_, entry)) = ConfigSchema::default()
         .entries()
         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
@@ -473,7 +474,7 @@ pub(crate) fn push_missing_config_key_messages(
             "Configuration value is not set",
             message,
         );
-        return;
+        return None;
     }
     let suggestions = suggest_config_keys(config, key);
     messages.push_titled(
@@ -485,6 +486,7 @@ pub(crate) fn push_missing_config_key_messages(
         ),
     );
     let _ = suggestions;
+    Some("config list".into())
 }
 
 pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<String> {
