@@ -182,6 +182,12 @@ impl<'a> RenderRequest<'a> {
 /// assert!(rendered.contains("alice"));
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
+    if matches!(
+        request.settings.format,
+        OutputFormat::Csv | OutputFormat::Tsv
+    ) {
+        return emit::delimited::render(output, request.settings.format);
+    }
     let output = prepare_output_for_sink(output, request.settings, request.profile);
     let plan = plan_output(&output, request.settings, request.profile);
     let mut doc = if plan.format != OutputFormat::Json && !request.presentation_lines.is_empty() {

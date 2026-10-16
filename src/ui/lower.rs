@@ -130,7 +130,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         OutputFormat::Markdown => lower_markdown_doc(output),
         OutputFormat::Value => lower_value_doc(output),
         OutputFormat::Mreg => lower_mreg_doc(output),
-        OutputFormat::Auto => Doc::default(),
+        OutputFormat::Auto | OutputFormat::Csv | OutputFormat::Tsv => Doc::default(),
     };
     if plan.format != OutputFormat::Json {
         sanitize_doc(&mut doc);

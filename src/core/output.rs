@@ -19,6 +19,10 @@ pub enum OutputFormat {
     Auto,
     /// Emits JSON output.
     Json,
+    /// Emits comma-separated records with RFC 4180 quoting.
+    Csv,
+    /// Emits tab-separated records with RFC 4180 quoting.
+    Tsv,
     /// Renders tabular output.
     Table,
     /// Renders Markdown tables or documents.
@@ -31,9 +35,11 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// All variants in canonical configuration order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::Auto,
         Self::Json,
+        Self::Csv,
+        Self::Tsv,
         Self::Table,
         Self::Markdown,
         Self::Mreg,
@@ -54,6 +60,8 @@ impl OutputFormat {
         match self {
             OutputFormat::Auto => "auto",
             OutputFormat::Json => "json",
+            OutputFormat::Csv => "csv",
+            OutputFormat::Tsv => "tsv",
             OutputFormat::Table => "table",
             OutputFormat::Markdown => "md",
             OutputFormat::Mreg => "mreg",
@@ -78,6 +86,8 @@ impl OutputFormat {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Some(OutputFormat::Auto),
             "json" => Some(OutputFormat::Json),
+            "csv" => Some(OutputFormat::Csv),
+            "tsv" => Some(OutputFormat::Tsv),
             "table" => Some(OutputFormat::Table),
             "md" | "markdown" => Some(OutputFormat::Markdown),
             "mreg" => Some(OutputFormat::Mreg),

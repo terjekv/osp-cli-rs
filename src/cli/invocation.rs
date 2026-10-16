@@ -48,6 +48,14 @@ pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
         },
         aliases: &[
             InvocationAlias {
+                long: "--csv",
+                value: "csv",
+            },
+            InvocationAlias {
+                long: "--tsv",
+                value: "tsv",
+            },
+            InvocationAlias {
                 long: "--json",
                 value: "json",
             },
@@ -686,7 +694,7 @@ mod tests {
         assert!(rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|name| name.contains("auto|json|table"))
+                .is_some_and(|name| name.contains("auto|json|csv|tsv|table"))
         }));
 
         assert!(!should_show_invocation_help(&InvocationOptions::default()));

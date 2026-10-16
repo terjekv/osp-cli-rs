@@ -182,3 +182,9 @@ command messages, and `data` contains any failure payload. Unavailable details
 and data are `null`; absent messages are an empty array.
 
 Messages, warnings, and debug logs stay on `stderr`.
+
+Use `--csv` or `--tsv` for delimited records, with CRLF record endings and
+RFC 4180 quoting (double embedded quotes; quote delimiters and newlines).
+The header follows column order after `| P`; nested arrays and objects are
+compact JSON, and null/missing cells are empty. These formats emit no ANSI
+escapes and never use a pager.

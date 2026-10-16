@@ -670,7 +670,10 @@ fn pager_for_output(
     output: &CommandOutput,
     rendered: &str,
 ) -> Option<String> {
-    if config.get_string("ui.pager") != Some("auto")
+    if matches!(
+        resolve_render_settings_with_hint(&ui.render_settings, output.format_hint).format,
+        OutputFormat::Csv | OutputFormat::Tsv
+    ) || config.get_string("ui.pager") != Some("auto")
         || !ui.render_settings.runtime.stdout_is_tty
         || match &output.body {
             CommandBody::Json(_) => true,

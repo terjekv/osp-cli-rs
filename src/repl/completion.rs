@@ -604,7 +604,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.value.as_str())
                 .collect::<Vec<_>>(),
-            vec!["auto", "json", "table", "md", "mreg", "value"]
+            vec!["auto", "json", "csv", "tsv", "table", "md", "mreg", "value"]
         );
     }
 
