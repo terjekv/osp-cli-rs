@@ -101,8 +101,13 @@ Export selected fields with `P key,value`.
         "theme change should rebuild the authored intro; output:\n{}",
         session.output_snapshot(12_000),
     );
+    let rebuilt_start = changed
+        + session
+            .output_since(changed)
+            .find("Operator desk")
+            .expect("the rebuilt intro should precede its theme");
     assert!(
-        session.wait_for_plain_output_since(changed, "default>", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(rebuilt_start, "default>", Duration::from_secs(3)),
         "rebuilt intro should return to the editor; output:\n{}",
         session.output_snapshot(12_000),
     );
