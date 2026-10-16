@@ -45,7 +45,10 @@ fn observe_dispatch_kind(
         &state.clients,
         history,
         line,
-    ) {
+        None,
+    )
+    .map(|executed| executed.result)
+    {
         Ok(ReplResult::Continue) => ObservedDispatchKind::Blank,
         Ok(ReplResult::Exit(_)) => ObservedDispatchKind::Exit,
         Ok(ReplResult::Print(output)) if output.is_empty() => ObservedDispatchKind::Blank,
@@ -302,7 +305,9 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
         &state.clients,
         &history,
         "last",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("last should replay");
     assert!(matches!(
         processed,
@@ -315,7 +320,9 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
         &state.clients,
         &history,
         "last --raw",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("last raw should replay");
     assert!(matches!(
         raw,
@@ -412,7 +419,9 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
         &state.clients,
         &history,
         "!1",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("bare absolute history recall should succeed");
     assert_eq!(bare, ReplResult::ReplaceInput("config show".to_string()));
 
@@ -422,7 +431,9 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
         &state.clients,
         &history,
         "!1 --label \"two words\"",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("absolute history recall should succeed");
 
     assert_eq!(
@@ -451,7 +462,9 @@ fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
         &state.clients,
         &history,
         "!1 --json",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("scoped absolute history recall should succeed");
 
     assert_eq!(
@@ -600,7 +613,9 @@ fn staged_repl_line_validation_rejects_invalid_invocations_before_pipeline_execu
             &state.clients,
             &test_history(),
             line,
+            None,
         )
+        .map(|executed| executed.result)
         .expect_err("invalid staged line should fail before piping");
         assert!(err.to_string().contains(needle), "line: {line}");
     }
@@ -618,8 +633,10 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             &mut state.session,
             &state.clients,
             &history,
-            "quit"
+            "quit",
+            None,
         )
+        .map(|executed| executed.result)
         .expect("quit should exit from the REPL root"),
         ReplResult::Exit(0)
     ));
@@ -631,10 +648,12 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             &mut state.session,
             &state.clients,
             &history,
-            "   "
+            "   ",
+            None,
         )
+        .map(|executed| executed.result)
         .expect("blank lines should be ignored"),
-        ReplResult::Print(output) if output.is_empty()
+        ReplResult::Continue
     ));
 
     assert!(matches!(
@@ -643,8 +662,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             &mut state.session,
             &state.clients,
             &history,
-            "intro | H"
-        )
+            "intro | H", None,).map(|executed| executed.result)
         .expect("dsl help stage should short-circuit normal command execution"),
         ReplResult::Print(output)
             if output.contains("DSL Help")
@@ -657,8 +675,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             &mut state.session,
             &state.clients,
             &history,
-            "help"
-        )
+            "help", None,).map(|executed| executed.result)
         .expect("root help shortcut should render command help"),
         ReplResult::Print(output)
             if output.contains("Commands") && output.contains("config")
@@ -721,7 +738,9 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
         &state.clients,
         &history,
         "intro --wat | config",
+        None,
     )
+    .map(|executed| executed.result)
     .expect_err("invalid staged invocation should still fail");
     assert!(err.to_string().contains("--wat"));
 
@@ -740,7 +759,9 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
         &state.clients,
         &history,
         "config sho",
+        None,
     )
+    .map(|executed| executed.result)
     .expect_err("invalid subcommands should be reported as syntax errors");
     assert!(err.to_string().contains("unrecognized subcommand 'sho'"));
     assert!(err.to_string().contains("Try: use `config show`"));
@@ -901,7 +922,9 @@ fn repl_unrelated_lines_clear_native_pagination_context_unit() {
         &state.clients,
         &history,
         "help",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("help should render");
     assert_eq!(state.session.native_context.pagination(), None);
 
@@ -919,7 +942,9 @@ fn repl_unrelated_lines_clear_native_pagination_context_unit() {
             &state.clients,
             &history,
             "not-a-real-command",
+            None,
         )
+        .map(|executed| executed.result)
         .is_err()
     );
     assert_eq!(state.session.native_context.pagination(), None);

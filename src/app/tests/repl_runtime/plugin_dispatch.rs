@@ -36,10 +36,10 @@ JSON
         &mut state.session,
         &state.clients,
         &history,
-        "fail",
-    )
+        "fail", None,).map(|executed| executed.result)
     .expect_err("response ok=false should become repl error");
     assert!(err.to_string().contains("MOCK_ERR: mock failure"));
+
 }
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
@@ -59,9 +59,7 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         .dispatch("hello", &[], &dispatch_context)
         .expect("plugin dispatch should succeed");
     let result = super::super::cli_result_from_plugin_response(response, &stages)
-        .and_then(|result| {
-            super::super::command_output::apply_stages_to_cli_result(result, &stages)
-        })
+        .and_then(|result| super::super::command_output::apply_stages_to_cli_result(result, &stages))
         .expect("plugin response should prepare");
     assert_eq!(result.exit_code, 0);
     assert!(result.failure_report.is_none());
@@ -81,8 +79,7 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "hello | message",
-    )
+        "hello | message", None,).map(|executed| executed.result)
     .expect("repl command should succeed");
     match repl_rendered {
         crate::repl::ReplResult::Print(text) => {
@@ -91,6 +88,7 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
+
 }
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
@@ -108,8 +106,7 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "hello",
-    )
+        "hello", None,).map(|executed| executed.result)
     .expect_err("ambiguous plugin command should fail");
     let message = format!("{err:#}");
     assert!(
@@ -123,8 +120,7 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "--plugin-provider beta-provider hello",
-    )
+        "--plugin-provider beta-provider hello", None,).map(|executed| executed.result)
     .expect("repl command should honor one-shot provider override");
     match repl_rendered {
         crate::repl::ReplResult::Print(text) => {
@@ -133,4 +129,5 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
+
 }

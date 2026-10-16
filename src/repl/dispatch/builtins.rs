@@ -175,7 +175,7 @@ fn execute_source_command(
             }
         }
     }
-    Ok(ReplResult::Print(String::new()))
+    Ok(ReplResult::Continue)
 }
 
 /// Runs one sourced line, returning the result that stops the batch, if any.
@@ -197,7 +197,7 @@ fn execute_source_line(
         return Err(miette!("nested `source` commands are not supported"));
     }
     let executed =
-        super::execute_repl_plugin_line_with_sink(runtime, session, clients, history, line, sink)?;
+        super::execute_repl_plugin_line(runtime, session, clients, history, line, Some(sink))?;
     match executed.result {
         ReplResult::Continue => {}
         ReplResult::Print(rendered) => sink.write_stdout(&rendered),
@@ -256,7 +256,7 @@ fn execute_pagination_builtin(
         .collect::<Vec<_>>()
         .join(" ");
     let executed =
-        super::execute_repl_plugin_line_with_sink(runtime, session, clients, history, &line, sink);
+        super::execute_repl_plugin_line(runtime, session, clients, history, &line, Some(sink));
     session.native_context.finish_page_step();
     Ok(executed?.result)
 }

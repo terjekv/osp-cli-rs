@@ -366,7 +366,9 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
         &state.clients,
         &history,
         "refreshable refresh",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("native refresh command should run");
 
     assert!(matches!(
@@ -394,7 +396,9 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
         &state.clients,
         &history,
         "ldap user",
+        None,
     )
+    .map(|executed| executed.result)
     .expect_err("missing capability should deny the command");
     let immediate = error
         .to_string()
@@ -411,7 +415,9 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
         &state.clients,
         &history,
         line,
+        None,
     )
+    .map(|executed| executed.result)
     .expect("doctor last should render")
     {
         crate::repl::ReplResult::Print(output) => output,
@@ -456,7 +462,9 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
         &state.clients,
         &history,
         "ldap usr",
+        None,
     )
+    .map(|executed| executed.result)
     .expect_err("subcommand typo should fail");
     let immediate = error.to_string();
     assert!(immediate.contains("subcommand 'usr'"));
@@ -473,7 +481,9 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
         &state.clients,
         &history,
         line,
+        None,
     )
+    .map(|executed| executed.result)
     .expect("doctor last should render")
     {
         crate::repl::ReplResult::Print(output) => output,
@@ -512,7 +522,9 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
         &state.clients,
         &history,
         "ldap user",
+        None,
     )
+    .map(|executed| executed.result)
     .expect_err("missing username should fail");
     let immediate = error.to_string();
     assert!(immediate.contains("<USERNAME>"), "{immediate}");

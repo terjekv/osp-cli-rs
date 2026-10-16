@@ -106,7 +106,9 @@ fn run_repl_cycle(
             &state.clients,
             history,
             line,
+            None,
         )
+        .map(|executed| executed.result)
         .map_err(|err| anyhow::Error::from_boxed(err.into()))
     })
     .map_err(|err| crate::app::report_anyhow_with_context(err, "interactive REPL execution failed"))

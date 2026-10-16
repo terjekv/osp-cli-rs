@@ -35,10 +35,7 @@ use crate::ui::messages::{MessageBuffer, MessageLevel};
 use super::{ReplViewContext, completion, input};
 
 use builtins::{ReplBuiltin, execute_repl_builtin, is_repl_bang_request, parse_repl_builtin};
-use command::{
-    ExecutedReplCommand, ParsedReplDispatch, execute_repl_command_dispatch_with_acceptance,
-    parse_repl_invocation,
-};
+use command::{ParsedReplDispatch, execute_repl_command_dispatch, parse_repl_invocation};
 use shell::{ReplShortcutPlan, classify_repl_shortcut, execute_repl_shortcut};
 
 #[cfg(test)]
@@ -88,8 +85,8 @@ enum ReplTimingPlan {
     },
 }
 
-struct ExecutedReplLine {
-    result: ReplResult,
+pub(crate) struct ExecutedReplLine {
+    pub(crate) result: ReplResult,
     exit_code: i32,
     timing: ReplTimingPlan,
 }
@@ -130,19 +127,6 @@ impl ExecutedReplLine {
                 parse_finished,
                 execute_finished,
             },
-        }
-    }
-
-    fn command(parse_finished: Instant, executed: ExecutedReplCommand) -> Self {
-        match executed.execute_finished {
-            Some(execute_finished) => Self::invocation(
-                executed.result,
-                executed.exit_code,
-                executed.debug_verbosity,
-                parse_finished,
-                execute_finished,
-            ),
-            None => Self::parse_only(executed.result, executed.debug_verbosity),
         }
     }
 }
@@ -189,41 +173,11 @@ pub(crate) fn execute_repl_plugin_line(
     clients: &AppClients,
     history: &SharedHistory,
     line: &str,
-) -> Result<ReplResult> {
-    let mut sink = StdIoUiSink;
-    execute_repl_plugin_line_with_sink(runtime, session, clients, history, line, &mut sink)
-        .map(|executed| executed.result)
-}
-
-fn execute_repl_plugin_line_with_sink(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: &SharedHistory,
-    line: &str,
-    sink: &mut dyn UiSink,
+    sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
+    let mut stdio = StdIoUiSink;
+    let sink = sink.unwrap_or(&mut stdio);
     let mut accepted = false;
-    execute_repl_plugin_line_with_acceptance(
-        runtime,
-        session,
-        clients,
-        history,
-        line,
-        sink,
-        &mut accepted,
-    )
-}
-
-fn execute_repl_plugin_line_with_acceptance(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: &SharedHistory,
-    line: &str,
-    sink: &mut dyn UiSink,
-    accepted: &mut bool,
-) -> Result<ExecutedReplLine> {
     let started = Instant::now();
     let mut resolved = line.to_string();
     let mut keep_history = false;
@@ -243,18 +197,33 @@ fn execute_repl_plugin_line_with_acceptance(
             .is_ok_and(|parsed| {
                 !super::history_store::is_sensitive_config_set_tokens(&parsed.dispatch_tokens)
             });
-        execute_repl_plugin_line_inner(
-            runtime, session, clients, history, &resolved, sink, accepted,
+        if !matches!(resolved.trim(), "next" | "prev") {
+            session.native_context.clear_pagination();
+        }
+        let plan = classify_repl_line(runtime, session, &resolved)?;
+        let parse_finished = Instant::now();
+        execute_repl_line_plan(
+            ReplExecutionContext {
+                runtime,
+                session,
+                clients,
+                history,
+                sink,
+                accepted: &mut accepted,
+            },
+            &resolved,
+            plan,
+            parse_finished,
         )
     })();
     if let Err(err) = history
-        .with(|store| store.finalize_execution(line, &resolved, *accepted && keep_history))
+        .with(|store| store.finalize_execution(line, &resolved, accepted && keep_history))
         .map_err(anyhow::Error::msg)
         .and_then(|result| result)
     {
         sink.write_stderr(&format!("failed to update REPL history: {err}\n"));
     }
-    if *accepted && !is_repl_bang_request(&resolved) {
+    if accepted && !is_repl_bang_request(&resolved) {
         let _ = history.with(|store| store.remember_command(&resolved));
     }
     session.finish_repl_line();
@@ -300,10 +269,8 @@ fn execute_repl_plugin_line_with_acceptance(
                     &ui.render_settings,
                     ui.message_verbosity,
                 ));
-                let mut executed = ExecutedReplLine::flat(
-                    ReplResult::Print(String::new()),
-                    runtime.ui.debug_verbosity,
-                );
+                let mut executed =
+                    ExecutedReplLine::flat(ReplResult::Continue, runtime.ui.debug_verbosity);
                 executed.exit_code = crate::app::classify_exit_code(&err);
                 return Ok(executed);
             }
@@ -331,35 +298,6 @@ fn is_doctor_request(line: &str, config: &crate::config::ResolvedConfig) -> bool
         .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
         .and_then(|scanned| scanned.tokens.into_iter().next())
         .is_some_and(|command| command == crate::app::CMD_DOCTOR)
-}
-
-fn execute_repl_plugin_line_inner(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: &SharedHistory,
-    line: &str,
-    sink: &mut dyn UiSink,
-    accepted: &mut bool,
-) -> Result<ExecutedReplLine> {
-    if !matches!(line.trim(), "next" | "prev") {
-        session.native_context.clear_pagination();
-    }
-    let plan = classify_repl_line(runtime, session, line)?;
-    let parse_finished = Instant::now();
-    execute_repl_line_plan(
-        ReplExecutionContext {
-            runtime,
-            session,
-            clients,
-            history,
-            sink,
-            accepted,
-        },
-        line,
-        plan,
-        parse_finished,
-    )
 }
 
 fn classify_repl_line(
@@ -478,7 +416,7 @@ fn execute_repl_line_plan(
             Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity))
         }
         ReplLinePlan::Blank => Ok(ExecutedReplLine::flat(
-            ReplResult::Print(String::new()),
+            ReplResult::Continue,
             runtime.ui.debug_verbosity,
         )),
         ReplLinePlan::DslHelp { help } => {
@@ -500,17 +438,19 @@ fn execute_repl_line_plan(
                 ParsedReplDispatch::Invocation(invocation) => &invocation.effective.ui,
             };
             let error_display = crate::app::host::ErrorDisplaySettings::from(ui);
-            execute_repl_command_dispatch_with_acceptance(
-                runtime,
-                session,
-                clients,
-                Some(history),
+            execute_repl_command_dispatch(
+                ReplExecutionContext {
+                    runtime,
+                    session,
+                    clients,
+                    history,
+                    sink,
+                    accepted,
+                },
                 line,
                 *dispatch,
-                sink,
-                accepted,
+                parse_finished,
             )
-            .map(|executed| ExecutedReplLine::command(parse_finished, executed))
             .map_err(|err| crate::app::host::report_with_invocation(err, error_display))
         }
     }

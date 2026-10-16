@@ -29,38 +29,6 @@ pub(super) enum ParsedReplDispatch {
     Invocation(Box<ParsedReplInvocation>),
 }
 
-pub(super) struct ExecutedReplCommand {
-    pub(super) result: ReplResult,
-    pub(super) exit_code: i32,
-    pub(super) debug_verbosity: u8,
-    pub(super) execute_finished: Option<Instant>,
-}
-
-impl ExecutedReplCommand {
-    fn parse_only(result: ReplResult, debug_verbosity: u8) -> Self {
-        Self {
-            result,
-            exit_code: 0,
-            debug_verbosity,
-            execute_finished: None,
-        }
-    }
-
-    fn invocation(
-        result: ReplResult,
-        exit_code: i32,
-        debug_verbosity: u8,
-        execute_finished: Instant,
-    ) -> Self {
-        Self {
-            result,
-            exit_code,
-            debug_verbosity,
-            execute_finished: Some(execute_finished),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct CommandSideEffects {
     pub(super) restart_repl: bool,
@@ -336,37 +304,19 @@ pub(super) fn render_repl_command_output(
 }
 
 pub(super) fn execute_repl_command_dispatch(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: Option<&SharedHistory>,
+    ctx: super::ReplExecutionContext<'_, '_>,
     line: &str,
     dispatch: ParsedReplDispatch,
-    sink: &mut dyn UiSink,
-) -> Result<ExecutedReplCommand> {
-    let mut accepted = false;
-    execute_repl_command_dispatch_with_acceptance(
+    parse_finished: Instant,
+) -> Result<super::ExecutedReplLine> {
+    let super::ReplExecutionContext {
         runtime,
         session,
         clients,
         history,
-        line,
-        dispatch,
         sink,
-        &mut accepted,
-    )
-}
-
-pub(super) fn execute_repl_command_dispatch_with_acceptance(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: Option<&SharedHistory>,
-    line: &str,
-    dispatch: ParsedReplDispatch,
-    sink: &mut dyn UiSink,
-    accepted: &mut bool,
-) -> Result<ExecutedReplCommand> {
+        accepted,
+    } = ctx;
     match dispatch {
         ParsedReplDispatch::Help {
             result,
@@ -377,7 +327,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
             let rendered = render_repl_command_output(
                 runtime, session, line, &stages, *result, &effective, sink,
             )?;
-            Ok(ExecutedReplCommand::parse_only(
+            Ok(super::ExecutedReplLine::parse_only(
                 ReplResult::Print(rendered),
                 effective.ui.debug_verbosity,
             ))
@@ -389,9 +339,6 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 stages,
                 side_effects,
             } = *invocation;
-            let history = history.ok_or_else(|| {
-                miette!("REPL command execution requires history when running an invocation")
-            })?;
             let output = run_repl_command_with_progress(
                 runtime,
                 session,
@@ -411,7 +358,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 runtime, session, line, &stages, output, &effective, sink,
             )?;
             let refresh_completion = session.native_context.take_completion_refresh_request();
-            Ok(ExecutedReplCommand::invocation(
+            Ok(super::ExecutedReplLine::invocation(
                 finalize_repl_command(
                     rendered,
                     side_effects.restart_repl || refresh_completion,
@@ -419,6 +366,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 ),
                 exit_code,
                 effective.ui.debug_verbosity,
+                parse_finished,
                 execute_finished,
             ))
         }

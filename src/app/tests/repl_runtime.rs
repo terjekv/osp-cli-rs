@@ -57,7 +57,9 @@ fn repl_flag_prefixed_help_records_prompt_timing_badge_unit() {
         &state.clients,
         &history,
         "-ddd help config",
+        None,
     )
+    .map(|executed| executed.result)
     .expect("flag-prefixed help should render successfully");
 
     match rendered {

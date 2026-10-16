@@ -1,9 +1,7 @@
 use crate::repl::{ReplReloadKind, ReplResult};
 use miette::{Result, miette};
 
-use super::command::{
-    ParsedReplDispatch, execute_repl_command_dispatch, run_repl_external_command,
-};
+use super::command::run_repl_external_command;
 use crate::app;
 use crate::app::dispatch::{
     ExternalPathAccessRequirement, before_external_run, ensure_external_access,
@@ -303,24 +301,9 @@ pub(super) fn render_repl_help_for_scope(
     sink: &mut dyn UiSink,
 ) -> Result<String> {
     let result = repl_help_command_result_for_scope(runtime, session, clients, invocation)?;
-    match execute_repl_command_dispatch(
-        runtime,
-        session,
-        clients,
-        None,
-        line,
-        ParsedReplDispatch::Help {
-            result: Box::new(result),
-            effective: Box::new(invocation.clone()),
-            stages: stages.to_vec(),
-        },
-        sink,
-    )?
-    .result
-    {
-        ReplResult::Print(rendered) => Ok(rendered),
-        other => Err(miette!("unexpected REPL help result: {other:?}")),
-    }
+    super::command::render_repl_command_output(
+        runtime, session, line, stages, result, invocation, sink,
+    )
 }
 
 #[cfg(test)]

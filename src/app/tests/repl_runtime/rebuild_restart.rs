@@ -129,8 +129,7 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
             &mut state.session,
             &state.clients,
             &history,
-            "plugins enable hello",
-        )
+            "plugins enable hello", None,).map(|executed| executed.result)
         .expect("plugin enable should succeed");
         assert!(matches!(
             result,
@@ -161,8 +160,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "theme use dracula",
-    )
+        "theme use dracula", None,).map(|executed| executed.result)
     .expect("theme use should succeed");
     assert!(matches!(
         theme_result,
@@ -177,8 +175,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "config set ui.format json",
-    )
+        "config set ui.format json", None,).map(|executed| executed.result)
     .expect("config set should succeed");
     assert!(matches!(
         format_result,
@@ -193,8 +190,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "config unset ui.format",
-    )
+        "config unset ui.format", None,).map(|executed| executed.result)
     .expect("config unset should succeed");
     assert!(matches!(
         unset_format_result,
@@ -209,8 +205,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "config unset ui.format --dry-run",
-    )
+        "config unset ui.format --dry-run", None,).map(|executed| executed.result)
     .expect("dry-run config unset should succeed");
     assert!(matches!(
         dry_run_unset_result,
@@ -222,11 +217,10 @@ fn repl_reload_intent_matches_command_scope_unit() {
 fn repl_config_unset_rebuilds_runtime_state_unit() {
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
-        state.session.config_overrides.insert(
-            "ui.format",
-            "table",
-            crate::config::Scope::profile("default"),
-        );
+        state
+            .session
+            .config_overrides
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
@@ -236,8 +230,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
             &mut state.session,
             &state.clients,
             &history,
-            "config unset ui.format",
-        )
+            "config unset ui.format", None,).map(|executed| executed.result)
         .expect("config unset should succeed");
         assert!(matches!(
             result,
@@ -261,11 +254,10 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 fn repl_config_unset_dry_run_preserves_session_state_unit() {
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
-        state.session.config_overrides.insert(
-            "ui.format",
-            "table",
-            crate::config::Scope::profile("default"),
-        );
+        state
+            .session
+            .config_overrides
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
@@ -275,8 +267,7 @@ fn repl_config_unset_dry_run_preserves_session_state_unit() {
             &mut state.session,
             &state.clients,
             &history,
-            "config unset ui.format --dry-run",
-        )
+            "config unset ui.format --dry-run", None,).map(|executed| executed.result)
         .expect("dry-run config unset should succeed");
         assert!(matches!(result, crate::repl::ReplResult::Print(_)));
         assert_eq!(

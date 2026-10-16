@@ -11,8 +11,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "-q config get missing.key",
-    )
+        "-q config get missing.key", None,).map(|executed| executed.result)
     .expect("quiet config get should complete");
     assert_eq!(state.runtime.ui.message_verbosity, original_message);
     assert_eq!(state.runtime.ui.error_detail, original_error_detail);
@@ -23,8 +22,7 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "-v doctor last",
-    )
+        "-v doctor last", None,).map(|executed| executed.result)
     .expect("doctor last with verbosity override should complete");
     assert_eq!(state.runtime.ui.message_verbosity, original_message);
     assert_eq!(state.runtime.ui.error_detail, original_error_detail);
@@ -41,8 +39,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "exit",
-    )
+        "exit", None,).map(|executed| executed.result)
     .expect("root exit should be handled by host dispatch");
     assert_eq!(root_exit, crate::repl::ReplResult::Exit(0));
 
@@ -52,8 +49,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "exit",
-    )
+        "exit", None,).map(|executed| executed.result)
     .expect("shell exit should leave the current shell");
     match shell_exit {
         crate::repl::ReplResult::Restart {
@@ -78,8 +74,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "missing",
-    )
+        "missing", None,).map(|executed| executed.result)
     .expect_err("unknown command should fail");
     let err_text = err.to_string();
     assert!(err_text.contains("unknown command `missing`"));
@@ -188,8 +183,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         &mut state.session,
         &state.clients,
         &history,
-        "cache first",
-    )
+        "cache first", None,).map(|executed| executed.result)
     .expect("seed command should succeed");
     history
         .with(|store| store.save_command_line("cache first"))
@@ -200,8 +194,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         &mut state.session,
         &state.clients,
         &history,
-        "!!",
-    )
+        "!!", None,).map(|executed| executed.result)
     .expect("bang expansion should succeed");
     match expanded {
         crate::repl::ReplResult::Print(text) => {
@@ -246,8 +239,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         &mut state.session,
         &state.clients,
         &history,
-        "cache alpha",
-    )
+        "cache alpha", None,).map(|executed| executed.result)
     .expect("first seed command should succeed");
     history
         .with(|store| store.save_command_line("cache alpha"))
@@ -258,8 +250,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         &mut state.session,
         &state.clients,
         &history,
-        "cache beta",
-    )
+        "cache beta", None,).map(|executed| executed.result)
     .expect("second seed command should succeed");
     history
         .with(|store| store.save_command_line("cache beta"))
@@ -270,8 +261,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         &mut state.session,
         &state.clients,
         &history,
-        "!?alpha",
-    )
+        "!?alpha", None,).map(|executed| executed.result)
     .expect("contains bang expansion should succeed");
     match expanded {
         crate::repl::ReplResult::ReplaceInput(text) => {
@@ -303,8 +293,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "!?status",
-    )
+        "!?status", None,).map(|executed| executed.result)
     .expect("scoped bang search should succeed");
     match scoped_hit {
         crate::repl::ReplResult::ReplaceInput(text) => assert_eq!(text, "status"),
@@ -316,8 +305,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
         &mut state.session,
         &state.clients,
         &history,
-        "!?config",
-    )
+        "!?config", None,).map(|executed| executed.result)
     .expect("cross-shell bang miss should render feedback");
     match scoped_miss {
         crate::repl::ReplResult::Print(text) => {
