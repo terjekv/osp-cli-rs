@@ -913,7 +913,10 @@ impl Debug for HandlerDebug<'_> {
     }
 }
 
-fn known_error_hint(known: &KnownErrorChain<'_>, scope: &crate::core::CommandScope) -> Option<String> {
+fn known_error_hint(
+    known: &KnownErrorChain<'_>,
+    scope: &crate::core::CommandScope,
+) -> Option<String> {
     if let Some(plugin_err) = known.plugin {
         return Some(match plugin_err {
             PluginDispatchError::CommandNotFound { .. } => {

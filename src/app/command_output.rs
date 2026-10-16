@@ -263,7 +263,6 @@ pub(crate) fn run_cli_command(
     if ui.render_settings.format == OutputFormat::Json && result.exit_code != 0 {
         let data = result.body.json_value();
         let messages = result.messages.entries().iter()
-            .filter(|entry| entry.level <= ui.message_verbosity)
             .map(|entry| serde_json::json!({"level": entry.level.as_str(), "text": entry.text.as_str()}))
             .collect();
         let message = result
@@ -281,6 +280,24 @@ pub(crate) fn run_cli_command(
             messages,
             data,
         ));
+        if let Some(report) = &result.failure_report {
+            if ui.message_verbosity >= MessageLevel::Info {
+                sink.write_stderr(&format!(
+                    "{}\n",
+                    super::host::render_report_message(
+                        report,
+                        ui.message_verbosity,
+                        &ui.render_settings
+                    )
+                    .trim_end()
+                ));
+            }
+            if ui.debug_verbosity >= 2
+                && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
+            {
+                sink.write_stderr(&format!("{backtrace}\n"));
+            }
+        }
         return Ok(result.exit_code);
     }
     if !result.messages.is_empty() {

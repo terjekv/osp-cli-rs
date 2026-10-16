@@ -533,6 +533,13 @@ impl App {
                     render_process_error(&err, &error_render_settings, message_verbosity);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
+                    if message_verbosity >= MessageLevel::Info {
+                        sink.write_stderr(&format!(
+                            "{}\n",
+                            render_report_message(&err, message_verbosity, &error_render_settings)
+                                .trim_end()
+                        ));
+                    }
                 } else {
                     sink.write_stderr(&rendered);
                 }
@@ -826,7 +833,12 @@ pub(crate) fn render_process_error(
     settings: &crate::ui::RenderSettings,
     message_verbosity: MessageLevel,
 ) -> String {
-    let message = render_report_message(err, message_verbosity, settings);
+    let level = if settings.format == OutputFormat::Json {
+        MessageLevel::Success
+    } else {
+        message_verbosity
+    };
+    let message = render_report_message(err, level, settings);
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
         let code = match exit_code {

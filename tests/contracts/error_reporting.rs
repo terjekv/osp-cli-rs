@@ -199,3 +199,47 @@ fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     assert!(normalized.contains("invalid TOML starts here"));
     assert!(normalized.contains("Stack backtrace"));
 }
+
+#[test]
+fn json_stdout_is_independent_of_verbosity_boundary() {
+    for command in [
+        vec!["config", "get", "debug.level"],
+        vec!["--unknown-option"],
+    ] {
+        let mut args = vec!["--json"];
+        args.extend(command.iter().copied());
+        let expected = run_osp(&args, None);
+        assert_eq!(
+            expected.status.code(),
+            Some(if command[0] == "config" { 0 } else { 2 })
+        );
+        for flag in ["-v", "-vv", "-vvv"] {
+            let mut verbose = args.clone();
+            verbose.insert(0, flag);
+            let actual = run_osp(&verbose, None);
+            assert_eq!(actual.status.code(), expected.status.code());
+            assert_eq!(actual.stdout, expected.stdout, "{verbose:?}");
+        }
+    }
+}
+
+#[test]
+fn debug_flags_preserve_stdout_boundary() {
+    for command in [
+        vec!["config", "get", "debug.level"],
+        vec!["--json", "--unknown-option"],
+    ] {
+        let expected = run_osp(&command, None);
+        assert_eq!(
+            expected.status.code(),
+            Some(if command[0] == "config" { 0 } else { 2 })
+        );
+        for flag in ["-d", "-dd", "-dddd"] {
+            let mut debug = command.clone();
+            debug.insert(0, flag);
+            let actual = run_osp(&debug, None);
+            assert_eq!(actual.status.code(), expected.status.code());
+            assert_eq!(actual.stdout, expected.stdout, "{debug:?}");
+        }
+    }
+}

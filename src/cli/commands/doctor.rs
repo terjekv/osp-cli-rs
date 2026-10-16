@@ -337,11 +337,11 @@ mod tests {
         DoctorCommandContext, doctor_command, render_last_failure_document, run_doctor_command,
         theme_doctor_rows,
     };
-    use crate::core::MessageLevel;
     use crate::app::{AuthState, LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
+    use crate::core::MessageLevel;
     use crate::core::document::DocBlock;
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;

@@ -37,6 +37,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- JSON failure envelopes now stay identical across verbosity levels; requested
+  failure explanations and backtraces go to stderr.
+
 - **Breaking:** Failures use one detailed report at `-v` and above; `-vvv`
   saturates at `-vv`. Captured backtraces move to stderr at `-dd`, including
   `doctor last -dd`. Remove the public `ErrorDetail` API and UI field;
