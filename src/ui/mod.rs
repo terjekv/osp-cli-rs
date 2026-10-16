@@ -192,8 +192,10 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
     let plan = plan_output(&output, request.settings, request.profile);
     let mut doc = if plan.format != OutputFormat::Json && !request.presentation_lines.is_empty() {
         lower::lower_presentation_lines(request.presentation_lines, plan.settings.width)
-    } else if matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown)
-        && let Some(layout) = request.layout
+    } else if matches!(
+        plan.format,
+        OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+    ) && let Some(layout) = request.layout
         && let Some(document) = output
             .document
             .as_ref()

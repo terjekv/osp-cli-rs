@@ -17,6 +17,8 @@
 pub enum OutputFormat {
     /// Chooses a format based on the command result and terminal context.
     Auto,
+    /// Renders human documents with the shared document renderer.
+    Guide,
     /// Emits JSON output.
     Json,
     /// Emits comma-separated records with RFC 4180 quoting.
@@ -35,8 +37,9 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// All variants in canonical configuration order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Auto,
+        Self::Guide,
         Self::Json,
         Self::Csv,
         Self::Tsv,
@@ -59,6 +62,7 @@ impl OutputFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             OutputFormat::Auto => "auto",
+            OutputFormat::Guide => "guide",
             OutputFormat::Json => "json",
             OutputFormat::Csv => "csv",
             OutputFormat::Tsv => "tsv",
@@ -77,7 +81,7 @@ impl OutputFormat {
     /// ```
     /// use osp_cli::core::output::OutputFormat;
     ///
-    /// assert_eq!(OutputFormat::parse("guide"), None);
+    /// assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
     /// assert_eq!(OutputFormat::parse(" markdown "), Some(OutputFormat::Markdown));
     /// assert_eq!(OutputFormat::parse("MD"), Some(OutputFormat::Markdown));
     /// assert_eq!(OutputFormat::parse("wat"), None);
@@ -85,6 +89,7 @@ impl OutputFormat {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "auto" => Some(OutputFormat::Auto),
+            "guide" => Some(OutputFormat::Guide),
             "json" => Some(OutputFormat::Json),
             "csv" => Some(OutputFormat::Csv),
             "tsv" => Some(OutputFormat::Tsv),
@@ -268,7 +273,7 @@ mod tests {
         assert_eq!(OutputFormat::Markdown.as_str(), "md");
         assert_eq!(OutputFormat::Mreg.as_str(), "mreg");
         assert_eq!(OutputFormat::Value.as_str(), "value");
-        assert_eq!(OutputFormat::parse("guide"), None);
+        assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
         assert_eq!(OutputFormat::parse(" json "), Some(OutputFormat::Json));
         assert_eq!(OutputFormat::parse("auto"), Some(OutputFormat::Auto));
         assert_eq!(

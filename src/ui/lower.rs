@@ -63,7 +63,10 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
 
     if output.meta.document_rows
-        && matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown)
+        && matches!(
+            plan.format,
+            OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+        )
     {
         let mut doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
             Some(document) => lower_document(document, plan.format),
@@ -126,7 +129,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                     .unwrap_or_else(|_| "null".to_string()),
             })],
         },
-        OutputFormat::Table => lower_table_doc(output),
+        OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output),
         OutputFormat::Markdown => lower_markdown_doc(output),
         OutputFormat::Value => lower_value_doc(output),
         OutputFormat::Mreg => lower_mreg_doc(output),
@@ -304,7 +307,10 @@ fn lower_document_blocks(
                         SectionTitleChrome::Plain
                     } else if let Some((_, layout)) = help {
                         help_layout_title_chrome(layout)
-                    } else if matches!(format, OutputFormat::Auto | OutputFormat::Markdown) {
+                    } else if matches!(
+                        format,
+                        OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+                    ) {
                         SectionTitleChrome::Ruled
                     } else {
                         SectionTitleChrome::Plain

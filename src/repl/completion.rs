@@ -591,10 +591,10 @@ mod tests {
 
         inject_invocation_flags(&mut root);
 
-        assert!(!root.flags.contains_key("--guide"));
+        assert!(root.flags.contains_key("--guide"));
         assert!(root.flags.contains_key("--json"));
         assert!(root.flags.contains_key("--format"));
-        assert!(!root.children["ldap"].flags.contains_key("--guide"));
+        assert!(root.children["ldap"].flags.contains_key("--guide"));
         assert!(root.children["ldap"].flags.contains_key("--json"));
         assert!(root.children["ldap"].flags.contains_key("--format"));
         assert!(!root.children["exit"].flags.contains_key("--json"));
@@ -604,7 +604,9 @@ mod tests {
                 .iter()
                 .map(|entry| entry.value.as_str())
                 .collect::<Vec<_>>(),
-            vec!["auto", "json", "csv", "tsv", "table", "md", "mreg", "value"]
+            vec![
+                "auto", "guide", "json", "csv", "tsv", "table", "md", "mreg", "value"
+            ]
         );
     }
 

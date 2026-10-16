@@ -48,6 +48,10 @@ pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
         },
         aliases: &[
             InvocationAlias {
+                long: "--guide",
+                value: "guide",
+            },
+            InvocationAlias {
                 long: "--csv",
                 value: "csv",
             },
@@ -681,7 +685,7 @@ mod tests {
     fn invocation_help_hidden_completion_and_cli_argv_follow_visibility_and_flag_only_inputs_unit()
     {
         let rendered = invocation_help_view(crate::core::document::HelpLevel::Verbose).rows();
-        assert!(!rendered.iter().any(|row| {
+        assert!(rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|name| name.contains("--guide"))
@@ -694,7 +698,7 @@ mod tests {
         assert!(rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|name| name.contains("auto|json|csv|tsv|table"))
+                .is_some_and(|name| name.contains("auto|guide|json|csv|tsv|table"))
         }));
 
         assert!(!should_show_invocation_help(&InvocationOptions::default()));
@@ -722,7 +726,7 @@ mod tests {
         );
 
         let hidden = hidden_invocation_completion_flags(&InvocationOptions::default());
-        assert!(!hidden.contains("--guide"));
+        assert!(hidden.contains("--guide"));
         assert!(hidden.contains("--json"));
         assert!(hidden.contains("--debug"));
 
@@ -739,7 +743,7 @@ mod tests {
             ..InvocationOptions::default()
         });
         assert!(used_one_shots.contains("--format"));
-        assert!(!used_one_shots.contains("--guide"));
+        assert!(used_one_shots.contains("--guide"));
         assert!(used_one_shots.contains("--json"));
         assert!(used_one_shots.contains("--table"));
         assert!(!used_one_shots.contains("--debug"));

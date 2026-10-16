@@ -86,6 +86,13 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: None,
             },
             BuiltinKey {
+                key: "ui.guide.default_format",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(["guide", "inherit", "none"])
+                    .with_doc("Document rendering preference for help-like output"),
+                default: Some(ConfigValue::from("guide")),
+            },
+            BuiltinKey {
                 key: "ui.mode",
                 schema: SchemaEntry::string()
                     .with_allowed_values(

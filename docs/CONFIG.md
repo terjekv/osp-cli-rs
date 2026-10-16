@@ -359,6 +359,9 @@ These keys currently drive user-visible rendering and REPL presentation:
 - `ui.presentation`
   - `expressive | compact | austere`
 - `ui.format`
+- `ui.guide.default_format`
+  - `guide | inherit | none`; defaults to `guide`. Uses the document renderer
+    for help-like output; `inherit` and `none` follow the configured format.
 - `ui.mode`
 - `ui.color.mode`
 - `ui.unicode.mode`

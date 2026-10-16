@@ -194,6 +194,8 @@ pub struct RenderRuntime {
 pub struct RenderSettings {
     pub format: OutputFormat,
     pub format_explicit: bool,
+    /// Render semantic documents as guides unless an explicit format is selected.
+    pub guide_default_format: bool,
     pub mode: RenderMode,
     pub color: ColorMode,
     pub unicode: UnicodeMode,
@@ -218,6 +220,7 @@ impl Default for RenderSettings {
         Self {
             format: OutputFormat::Auto,
             format_explicit: false,
+            guide_default_format: true,
             mode: RenderMode::Auto,
             color: ColorMode::Auto,
             unicode: UnicodeMode::Auto,
@@ -362,6 +365,10 @@ pub(crate) fn apply_render_config_overrides(
         && let Some(parsed) = OutputFormat::parse(value)
     {
         settings.format = parsed;
+    }
+
+    if let Some(value) = config.get_string("ui.guide.default_format") {
+        settings.guide_default_format = value == "guide";
     }
 
     if let Some(value) = config.get_string("ui.mode")
@@ -634,7 +641,11 @@ impl RenderSettings {
 
         // Documents keep their layout unless a format is asked for explicitly.
         if output.meta.document_rows {
-            return OutputFormat::Auto;
+            return if self.guide_default_format {
+                OutputFormat::Auto
+            } else {
+                self.format
+            };
         }
 
         if let Some(recommended) = output.meta.render_recommendation {

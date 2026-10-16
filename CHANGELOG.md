@@ -301,12 +301,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   restoration and `OutputDocumentKind::Guide` are removed. Semantic hints use
   `OutputDocumentKind::Document` and `RenderRecommendation::Document`; output
   metadata carries explicit document-row identity and presentation hints.
-- **Breaking:** Remove the `guide` output format, `OutputFormat::Guide`, and
-  `--guide`. `ui.format = guide` is invalid, and plugin `OSP_FORMAT` hints no
-  longer include `guide`. Use `auto` for human document rendering.
-- **Breaking:** Remove the `ui.guide.default_format` config key and
-  `GuideDefaultFormat`; it no longer had any effect. Remove it from config
-  files, where it is now an unknown key.
+- Retain the public `guide` output format and `ui.guide.default_format`
+  configuration using the shared document renderer.
 - **Breaking:** Unstaged help and intro JSON now emit a `blocks` object. Pipes
   emit flat rows carrying `section` and entry descriptions; sorting and limiting
   retain their ordinary row meanings and never reconstruct a help envelope.

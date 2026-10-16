@@ -93,6 +93,7 @@ fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::Rend
     crate::ui::RenderSettings {
         format: crate::core::output::OutputFormat::Auto,
         format_explicit: true,
+        guide_default_format: true,
         mode: match resolved.backend {
             crate::ui::RenderBackend::Plain => crate::core::output::RenderMode::Plain,
             crate::ui::RenderBackend::Rich => crate::core::output::RenderMode::Rich,
