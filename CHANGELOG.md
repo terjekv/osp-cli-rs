@@ -19,6 +19,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   `CommandLineParser::{analyze,compute_stub_quote}`,
   `FlagNode::{multi,value_type}`, and `SuggestionEntry::{display,aliases}`.
 
+- Share scoped editing between config set and unset while preserving session,
+  TOML, secret-backend, dry-run, explain, and message behavior.
+
 - Build config explain facts once and format text from the same redacted data
   emitted as JSON, preserving both output contracts.
 

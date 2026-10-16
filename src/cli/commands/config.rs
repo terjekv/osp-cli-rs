@@ -23,7 +23,7 @@ use crate::cli::{
 #[cfg(unix)]
 use crate::config::secret_file_mode;
 use crate::config::{
-    ConfigLayer, ConfigSchema, ResolvedConfig, ResolvedValue, RuntimeConfigPaths,
+    ConfigLayer, ConfigSchema, ConfigValue, ResolvedConfig, ResolvedValue, RuntimeConfigPaths,
     RuntimeLoadOptions, RuntimeSecretStore, Scope, SecretBackendKind, TomlStoreEditOptions,
     is_bootstrap_only_key, set_scoped_value_in_toml, unset_scoped_value_in_toml,
     validate_bootstrap_value, validate_key_scope,
@@ -502,7 +502,7 @@ fn config_entry_row(
 }
 
 fn run_config_set(
-    context: ConfigCommandContext<'_>,
+    mut context: ConfigCommandContext<'_>,
     args: ConfigSetArgs,
 ) -> Result<CliCommandResult> {
     let requested_key = args.key.trim().to_ascii_lowercase();
@@ -578,13 +578,7 @@ fn run_config_set(
             }
         })
         .wrap_err("invalid bootstrap value")?;
-    let read = context.read();
-    let target = ConfigWriteTarget::from_args(&args.scope, &args.store).with_default(read);
-    let store = resolve_config_store(read, &target);
-    validate_store_key(store, &key)?;
-    let scopes = resolve_config_scopes(read, &target)
-        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
-    validate_write_scopes(&key, &scopes).into_diagnostic()?;
+    let (store, scopes) = resolve_edit_target(context.read(), &key, &args.scope, &args.store)?;
 
     tracing::debug!(
         key = %key,
@@ -595,7 +589,6 @@ fn run_config_set(
         "config set"
     );
 
-    let mut rows = Vec::new();
     let mut messages = MessageBuffer::default();
     if matches!(store, ConfigStore::Config) && is_sensitive_key(&key) {
         messages.warning("writing a sensitive key to config store; prefer --secrets");
@@ -611,106 +604,15 @@ fn run_config_set(
     } else {
         None
     };
-    let paths = config_write_paths(context.runtime_load, store)?;
-    for scope in &scopes {
-        let display_value = if matches!(store, ConfigStore::Secrets) {
-            value.clone().into_secret()
-        } else {
-            value.clone()
-        };
-        let mut row = RowBuilder::new();
-        row.insert("key", key.clone());
-        row.insert("value", config_value_to_json_for_key(&key, &display_value));
-        row.insert("scope", format_scope(scope));
-        row.insert("store", config_store_name(store));
-        row.insert("dry_run", args.dry_run);
-        if let Some(current) = &current {
-            row.insert("current", current.clone());
-        }
-
-        match store {
-            ConfigStore::Session => {
-                if !args.dry_run {
-                    context
-                        .config_overrides
-                        .replace_scoped(&key, value.clone(), scope.clone());
-                }
-                row.insert("path", serde_json::Value::Null);
-                row.insert("changed", true);
-            }
-            ConfigStore::Config => {
-                let target_path = paths
-                    .as_ref()
-                    .and_then(|paths| paths.config_file.as_deref())
-                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
-                tracing::trace!(
-                    key = %key,
-                    scope = %format_scope(scope),
-                    store = "config",
-                    path = %target_path.display(),
-                    dry_run = args.dry_run,
-                    "persisting config set"
-                );
-
-                let set_result = set_scoped_value_in_toml(
-                    target_path,
-                    &key,
-                    &value,
-                    scope,
-                    store_edit_options(ConfigStore::Config, args.dry_run),
-                )
-                .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!(
-                        "failed to persist config set for key `{key}` at {}",
-                        target_path.display()
-                    )
-                })?;
-
-                row.insert("path", target_path.display().to_string());
-                row.insert("changed", set_result.previous.as_ref() != Some(&value));
-                row.insert(
-                    "previous",
-                    set_result
-                        .previous
-                        .as_ref()
-                        .map(|previous| config_value_to_json_for_key(&key, previous))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Secrets => {
-                let paths = paths
-                    .as_ref()
-                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
-                let secret_store = selected_secret_store(context.config, paths)
-                    .into_diagnostic()
-                    .wrap_err("failed to select secrets backend")?;
-                let edit = secret_store
-                    .set_scoped(
-                        &key,
-                        &value,
-                        scope,
-                        store_edit_options(ConfigStore::Secrets, args.dry_run),
-                    )
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("failed to persist secret `{key}`"))?;
-                row.insert("path", edit.location);
-                row.insert("backend", edit.backend.as_str());
-                row.insert("changed", edit.previous.as_ref() != Some(&value));
-                row.insert(
-                    "previous",
-                    edit.previous
-                        .map(|previous| {
-                            let previous = previous.into_secret();
-                            config_value_to_json_for_key(&key, &previous)
-                        })
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-        }
-
-        rows.push(row.build());
-    }
+    let rows = apply_scoped_edit(
+        &mut context,
+        store,
+        &scopes,
+        &key,
+        Edit::Set(&value),
+        args.dry_run,
+        current,
+    )?;
 
     let output = if args.explain && !args.dry_run {
         let request = context.read().runtime_request();
@@ -782,20 +684,14 @@ fn run_config_set(
 }
 
 fn run_config_unset(
-    context: ConfigCommandContext<'_>,
+    mut context: ConfigCommandContext<'_>,
     args: ConfigUnsetArgs,
 ) -> Result<CliCommandResult> {
     let key = args.key.trim().to_ascii_lowercase();
     ConfigSchema::default()
         .validate_writable_key(&key)
         .into_diagnostic()?;
-    let read = context.read();
-    let target = ConfigWriteTarget::from_args(&args.scope, &args.store).with_default(read);
-    let store = resolve_config_store(read, &target);
-    validate_store_key(store, &key)?;
-    let scopes = resolve_config_scopes(read, &target)
-        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
-    validate_write_scopes(&key, &scopes).into_diagnostic()?;
+    let (store, scopes) = resolve_edit_target(context.read(), &key, &args.scope, &args.store)?;
 
     tracing::debug!(
         key = %key,
@@ -805,104 +701,16 @@ fn run_config_unset(
         "config unset"
     );
 
-    let mut rows = Vec::new();
     let mut messages = MessageBuffer::default();
-    let paths = config_write_paths(context.runtime_load, store)?;
-
-    for scope in &scopes {
-        let mut row = RowBuilder::new();
-        row.insert("key", key.clone());
-        row.insert("scope", format_scope(scope));
-        row.insert("store", config_store_name(store));
-        row.insert("dry_run", args.dry_run);
-
-        match store {
-            ConfigStore::Session => {
-                let previous = if args.dry_run {
-                    session_scoped_value(context.config_overrides, &key, scope)
-                } else {
-                    context.config_overrides.remove_scoped(&key, scope)
-                };
-                row.insert("path", serde_json::Value::Null);
-                row.insert("changed", previous.is_some());
-                row.insert(
-                    "previous",
-                    previous
-                        .map(|value| config_value_to_json_for_key(&key, &value))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Config => {
-                let target_path = paths
-                    .as_ref()
-                    .and_then(|paths| paths.config_file.as_deref())
-                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
-                tracing::trace!(
-                    key = %key,
-                    scope = %format_scope(scope),
-                    store = %config_store_name(store),
-                    path = %target_path.display(),
-                    dry_run = args.dry_run,
-                    "persisting config unset"
-                );
-
-                let edit_result = unset_scoped_value_in_toml(
-                    target_path,
-                    &key,
-                    scope,
-                    store_edit_options(ConfigStore::Config, args.dry_run),
-                )
-                .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!(
-                        "failed to persist config unset for key `{key}` at {}",
-                        target_path.display()
-                    )
-                })?;
-
-                row.insert("path", target_path.display().to_string());
-                row.insert("changed", edit_result.previous.is_some());
-                row.insert(
-                    "previous",
-                    edit_result
-                        .previous
-                        .as_ref()
-                        .map(|previous| config_value_to_json_for_key(&key, previous))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Secrets => {
-                let paths = paths
-                    .as_ref()
-                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
-                let secret_store = selected_secret_store(context.config, paths)
-                    .into_diagnostic()
-                    .wrap_err("failed to select secrets backend")?;
-                let edit = secret_store
-                    .unset_scoped(
-                        &key,
-                        scope,
-                        store_edit_options(ConfigStore::Secrets, args.dry_run),
-                    )
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("failed to remove secret `{key}`"))?;
-                row.insert("path", edit.location);
-                row.insert("backend", edit.backend.as_str());
-                row.insert("changed", edit.previous.is_some());
-                row.insert(
-                    "previous",
-                    edit.previous
-                        .map(|previous| {
-                            let previous = previous.into_secret();
-                            config_value_to_json_for_key(&key, &previous)
-                        })
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-        }
-
-        rows.push(row.build());
-    }
+    let rows = apply_scoped_edit(
+        &mut context,
+        store,
+        &scopes,
+        &key,
+        Edit::Unset,
+        args.dry_run,
+        None,
+    )?;
 
     let changed = rows
         .iter()
@@ -941,6 +749,167 @@ fn run_config_unset(
         stderr_text: None,
         failure_report: None,
     })
+}
+
+#[derive(Clone, Copy)]
+enum Edit<'a> {
+    Set(&'a ConfigValue),
+    Unset,
+}
+
+impl Edit<'_> {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Set(_) => "set",
+            Self::Unset => "unset",
+        }
+    }
+
+    fn changed(self, previous: Option<&ConfigValue>) -> bool {
+        match self {
+            Self::Set(value) => previous != Some(value),
+            Self::Unset => previous.is_some(),
+        }
+    }
+}
+
+fn resolve_edit_target(
+    read: ConfigReadContext<'_>,
+    key: &str,
+    scope: &ConfigScopeArgs,
+    store: &ConfigStoreArgs,
+) -> Result<(ConfigStore, Vec<Scope>)> {
+    let target = ConfigWriteTarget::from_args(scope, store).with_default(read);
+    let store = resolve_config_store(read, &target);
+    validate_store_key(store, key)?;
+    let scopes = resolve_config_scopes(read, &target)
+        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
+    validate_write_scopes(key, &scopes).into_diagnostic()?;
+    Ok((store, scopes))
+}
+
+fn apply_scoped_edit(
+    context: &mut ConfigCommandContext<'_>,
+    store: ConfigStore,
+    scopes: &[Scope],
+    key: &str,
+    edit: Edit<'_>,
+    dry_run: bool,
+    current: Option<serde_json::Value>,
+) -> Result<Vec<Row>> {
+    let paths = config_write_paths(context.runtime_load, store)?;
+    let mut rows = Vec::new();
+    for scope in scopes {
+        let mut row = RowBuilder::new();
+        row.insert("key", key);
+        if let Edit::Set(value) = edit {
+            let display_value = if matches!(store, ConfigStore::Secrets) {
+                value.clone().into_secret()
+            } else {
+                value.clone()
+            };
+            row.insert("value", config_value_to_json_for_key(key, &display_value));
+        }
+        row.insert("scope", format_scope(scope));
+        row.insert("store", config_store_name(store));
+        row.insert("dry_run", dry_run);
+        if let Some(current) = &current {
+            row.insert("current", current.clone());
+        }
+
+        let previous = match store {
+            ConfigStore::Session => {
+                row.insert("path", serde_json::Value::Null);
+                match edit {
+                    Edit::Set(value) => {
+                        if !dry_run {
+                            context.config_overrides.replace_scoped(
+                                key,
+                                value.clone(),
+                                scope.clone(),
+                            );
+                        }
+                        row.insert("changed", true);
+                        rows.push(row.build());
+                        continue;
+                    }
+                    Edit::Unset if dry_run => {
+                        session_scoped_value(context.config_overrides, key, scope)
+                    }
+                    Edit::Unset => context.config_overrides.remove_scoped(key, scope),
+                }
+            }
+            ConfigStore::Config => {
+                let target_path = paths
+                    .as_ref()
+                    .and_then(|paths| paths.config_file.as_deref())
+                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
+                tracing::trace!(
+                    key = %key, scope = %format_scope(scope), store = "config",
+                    path = %target_path.display(), dry_run,
+                    "persisting config {}", edit.name()
+                );
+                let options = store_edit_options(store, dry_run);
+                let result = match edit {
+                    Edit::Set(value) => {
+                        set_scoped_value_in_toml(target_path, key, value, scope, options)
+                    }
+                    Edit::Unset => unset_scoped_value_in_toml(target_path, key, scope, options),
+                }
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "failed to persist config {} for key `{key}` at {}",
+                        edit.name(),
+                        target_path.display()
+                    )
+                })?;
+                row.insert("path", target_path.display().to_string());
+                result.previous
+            }
+            ConfigStore::Secrets => {
+                let paths = paths
+                    .as_ref()
+                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
+                let secret_store = selected_secret_store(context.config, paths)
+                    .into_diagnostic()
+                    .wrap_err("failed to select secrets backend")?;
+                let options = store_edit_options(store, dry_run);
+                let result = match edit {
+                    Edit::Set(value) => secret_store.set_scoped(key, value, scope, options),
+                    Edit::Unset => secret_store.unset_scoped(key, scope, options),
+                }
+                .into_diagnostic()
+                .wrap_err_with(|| match edit {
+                    Edit::Set(_) => format!("failed to persist secret `{key}`"),
+                    Edit::Unset => format!("failed to remove secret `{key}`"),
+                })?;
+                row.insert("path", result.location);
+                row.insert("backend", result.backend.as_str());
+                // Compare unwrapped values before marking previous secret data for redaction.
+                row.insert("changed", edit.changed(result.previous.as_ref()));
+                row.insert(
+                    "previous",
+                    result
+                        .previous
+                        .map(|previous| config_value_to_json_for_key(key, &previous.into_secret()))
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                rows.push(row.build());
+                continue;
+            }
+        };
+        row.insert("changed", edit.changed(previous.as_ref()));
+        row.insert(
+            "previous",
+            previous
+                .as_ref()
+                .map(|previous| config_value_to_json_for_key(key, previous))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        rows.push(row.build());
+    }
+    Ok(rows)
 }
 
 fn session_scoped_value(
