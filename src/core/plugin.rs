@@ -399,6 +399,7 @@ pub struct ResponseV1 {
     #[serde(default)]
     pub messages: Vec<ResponseMessageV1>,
     /// Rendering and presentation metadata for the payload.
+    #[serde(default)]
     pub meta: ResponseMetaV1,
     /// Optional values the host should remember in its current session,
     /// keyed by subject kind (for example `host` or `user`).
