@@ -228,6 +228,7 @@ impl DiagnosticSink {
             DiagnosticEvent::RequestIds { .. } => "response.request_ids",
             DiagnosticEvent::Recovery { .. } => "session.recovery",
         };
+        let mut insert = |level, text| lines.push((level, text));
         match event {
             DiagnosticEvent::Context {
                 service,
@@ -243,7 +244,7 @@ impl DiagnosticSink {
                 let account = identity
                     .map(|name| format!(" as {}", safe_text(&name)))
                     .unwrap_or_default();
-                lines.push((
+                insert(
                     MessageLevel::Info,
                     format!(
                         "info: {service} at {}{account} (profile {}, {}).\n",
@@ -251,7 +252,7 @@ impl DiagnosticSink {
                         safe_text(&profile),
                         credential.label()
                     ),
-                ));
+                );
             }
             DiagnosticEvent::Exchange {
                 method,
@@ -278,13 +279,13 @@ impl DiagnosticSink {
                     (_, Some(TransportFailure::Tls)) => "TLS verification failed.".into(),
                     _ => format!("Transport failure in {elapsed_ms} ms."),
                 };
-                lines.push((
+                insert(
                     MessageLevel::Trace,
                     format!(
                         "request: {method} {}\nresponse: {response}\n",
                         safe_url(&url)
                     ),
-                ));
+                );
                 if let Some(failure) = failure {
                     let failure = match failure {
                         TransportFailure::ConnectionRefused => "connection-refused",
@@ -292,22 +293,22 @@ impl DiagnosticSink {
                         TransportFailure::Tls => "tls-verification",
                         TransportFailure::Other => "transport",
                     };
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: failure={failure}; elapsed={elapsed_ms} ms.\n"),
-                    ));
+                    );
                 }
                 if let Some(content_type) = content_type {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: content-type={content_type}.\n"),
-                    ));
+                    );
                 }
                 if let Some(bytes) = bytes {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: response-bytes={bytes}.\n"),
-                    ));
+                    );
                 }
             }
             DiagnosticEvent::DirectorySearch {
@@ -327,17 +328,17 @@ impl DiagnosticSink {
                     }
                     DirectoryOutcome::ConnectionFailed => "Connection failed before search.".into(),
                 };
-                lines.push((
+                insert(
                     MessageLevel::Trace,
                     format!(
                         "request: LDAP search {}\nresponse: {response}\n",
                         safe_text(&base)
                     ),
-                ));
-                lines.push((
+                );
+                insert(
                     MessageLevel::Evidence,
                     format!("evidence: projection-attributes={attributes}.\n"),
-                ));
+                );
             }
             DiagnosticEvent::PluginOutcome {
                 plugin,
@@ -349,37 +350,37 @@ impl DiagnosticSink {
                 bytes,
             } => {
                 if let Some(backend) = backend {
-                    lines.push((
+                    insert(
                         MessageLevel::Info,
                         format!("detail: backend={}\n", safe_text(&backend)),
-                    ));
+                    );
                 }
                 if let Some(attempt) = attempt {
-                    lines.push((MessageLevel::Info, format!("detail: attempt={attempt}\n")));
+                    insert(MessageLevel::Info, format!("detail: attempt={attempt}\n"));
                 }
                 let outcome = if let Some(code) = error_code {
-                    lines.push((
+                    insert(
                         MessageLevel::Info,
                         format!("detail: code={}\n", safe_text(&code)),
-                    ));
+                    );
                     format!("returned {}", safe_text(&code))
                 } else if exit_code != 0 {
                     format!("exited with status {exit_code}")
                 } else {
                     "completed".into()
                 };
-                lines.push((
+                insert(
                     MessageLevel::Trace,
                     format!(
                         "response: Plugin {} {outcome} in {elapsed_ms} ms.\n",
                         safe_text(&plugin)
                     ),
-                ));
+                );
                 if let Some(bytes) = bytes {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: Plugin stdout contains {bytes} bytes.\n"),
-                    ));
+                    );
                 }
             }
             DiagnosticEvent::RequestFacts {
@@ -388,37 +389,37 @@ impl DiagnosticSink {
                 cursor_page,
             } => {
                 if cursor_page {
-                    lines.push((MessageLevel::Trace, "request: Page continuation.\n".into()));
+                    insert(MessageLevel::Trace, "request: Page continuation.\n".into());
                 }
                 if let Some(seconds) = deadline_seconds {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: deadline={seconds}s.\n"),
-                    ));
+                    );
                 }
                 if let Some(projection) = projection {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: query.view={projection}.\n"),
-                    ));
+                    );
                 }
             }
-            DiagnosticEvent::RequestIds { header, body } => lines.push((
+            DiagnosticEvent::RequestIds { header, body } => insert(
                 MessageLevel::Evidence,
                 format!(
                     "evidence: Header request-id={}; body request-id={}.\n",
                     safe_text(&header),
                     safe_text(&body)
                 ),
-            )),
+            ),
             DiagnosticEvent::Recovery { retry_available } => {
                 if retry_available {
-                    lines.push((
+                    insert(
                         MessageLevel::Trace,
                         "request: Retrying after session renewal.\n".into(),
-                    ));
+                    );
                 }
-                lines.push((
+                insert(
                     MessageLevel::Evidence,
                     format!(
                         "evidence: Rejected session invalidated; replacement credential {}.\n",
@@ -428,7 +429,7 @@ impl DiagnosticSink {
                             "unavailable"
                         }
                     ),
-                ));
+                );
             }
             DiagnosticEvent::Cache {
                 name,
@@ -436,7 +437,7 @@ impl DiagnosticSink {
                 age_seconds,
                 ttl_seconds,
             } => {
-                lines.push((
+                insert(
                     MessageLevel::Trace,
                     format!(
                         "cache: {name} {}.\n",
@@ -453,7 +454,7 @@ impl DiagnosticSink {
                             "miss"
                         }
                     ),
-                ));
+                );
                 let mut facts = Vec::new();
                 if let Some(age) = age_seconds {
                     facts.push(format!("age={age}s"));
@@ -462,10 +463,10 @@ impl DiagnosticSink {
                     facts.push(format!("TTL={ttl}s"));
                 }
                 if !facts.is_empty() {
-                    lines.push((
+                    insert(
                         MessageLevel::Evidence,
                         format!("evidence: {name} {}.\n", facts.join("; ")),
-                    ));
+                    );
                 }
             }
         }
