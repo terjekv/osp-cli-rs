@@ -25,7 +25,7 @@
 //!   leaking host-internal runtime state
 //! - downstream product crates typically build a registry once and pass it
 //!   into [`crate::App::with_native_commands`] or
-//!   [`crate::AppBuilder::with_native_commands`] as part of their own wrapper
+//!   [`crate::App::with_native_commands`] as part of their own wrapper
 //!   or builder layer
 
 use std::collections::BTreeMap;

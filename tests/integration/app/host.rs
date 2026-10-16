@@ -66,9 +66,8 @@ impl NativeCommand for GroupShapedServiceCommand {
 
 #[test]
 fn service_group_field_names_are_not_interpreted_as_dsl_groups() {
-    let app = App::builder()
-        .with_native_commands(NativeCommandRegistry::new().with_command(GroupShapedServiceCommand))
-        .build();
+    let app = App::new()
+        .with_native_commands(NativeCommandRegistry::new().with_command(GroupShapedServiceCommand));
     let mut sink = BufferedUiSink::default();
     assert_eq!(
         app.run_with_sink(
@@ -203,9 +202,7 @@ fn native_command_sets_session_context_with_source_and_time() {
     let command = NativeSubjectCommand {
         observed: observed.clone(),
     };
-    let app = App::builder()
-        .with_native_commands(NativeCommandRegistry::new().with_command(command))
-        .build();
+    let app = App::new().with_native_commands(NativeCommandRegistry::new().with_command(command));
     let mut sink = BufferedUiSink::default();
     assert_eq!(
         app.run_with_sink(
@@ -420,9 +417,7 @@ impl UiSink for TerminalCapture {
 
 #[test]
 fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
-    let app = App::builder()
-        .with_native_commands(curated_orch_rows_registry())
-        .build();
+    let app = App::new().with_native_commands(curated_orch_rows_registry());
 
     if std::env::var_os("OSP_LIVE_OUTPUT_CONTRACT_CHILD").is_some() {
         if !StdIoUiSink.stderr_is_terminal() {
@@ -816,9 +811,7 @@ JSON
 
 #[test]
 fn app_host_surfaces_native_commands_in_help_and_dispatch() {
-    let app = App::builder()
-        .with_native_commands(native_probe_registry())
-        .build();
+    let app = App::new().with_native_commands(native_probe_registry());
     let help_args = ["osp", "--defaults-only", "--help"];
 
     let mut help_sink = BufferedUiSink::default();
@@ -912,9 +905,7 @@ theme.name = "nord"
 theme.name = "dracula"
 "#,
         || {
-            let app = App::builder()
-                .with_native_commands(native_probe_registry())
-                .build();
+            let app = App::new().with_native_commands(native_probe_registry());
 
             let default_args = ["osp", "--no-env", "--json", "native-probe"];
             let mut default_sink = BufferedUiSink::default();
@@ -982,9 +973,7 @@ theme.name = "dracula"
 
 #[test]
 fn app_host_projects_native_commands_into_repl_completion_surface() {
-    let app = App::builder()
-        .with_native_commands(native_probe_registry())
-        .build();
+    let app = App::new().with_native_commands(native_probe_registry());
 
     let args = [
         "osp",
@@ -1028,7 +1017,7 @@ theme.name = "dracula"
             let dir = make_temp_dir("osp-cli-app-host-route-plugin");
             write_route_probe_plugin(dir.path(), "route-probe", "route-probe");
             let plugin_dir = dir.to_str().expect("plugin dir should be utf-8");
-            let app = App::builder().build();
+            let app = App::new();
 
             let explicit_args = [
                 "osp",
@@ -1109,7 +1098,7 @@ theme.name = "dracula"
             let dir = make_temp_dir("osp-cli-app-host-unknown-profile-token");
             write_route_probe_plugin(dir.path(), "prod", "prod");
             let plugin_dir = dir.to_str().expect("plugin dir should be utf-8");
-            let app = App::builder().build();
+            let app = App::new();
 
             let mut sink = BufferedUiSink::default();
             let args = [

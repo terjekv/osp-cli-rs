@@ -60,7 +60,7 @@
 //! - keep site-specific auth, policy, and domain integrations in the wrapper
 //!   crate
 //! - extend the command surface with [`App::with_native_commands`] or
-//!   [`AppBuilder::with_native_commands`]
+//!   [`App::with_native_commands`]
 //! - keep runtime config bootstrap aligned with
 //!   [`config::RuntimeDefaults`], [`config::RuntimeConfigPaths`], and
 //!   [`config::build_runtime_pipeline`]
@@ -77,7 +77,7 @@
 //! use osp_cli::app::BufferedUiSink;
 //! use osp_cli::config::ConfigLayer;
 //! use osp_cli::{
-//!     App, AppBuilder, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+//!     App, NativeCommand, NativeCommandContext, NativeCommandOutcome,
 //!     NativeCommandRegistry,
 //! };
 //!
@@ -113,15 +113,15 @@
 //! }
 //!
 //! impl SiteApp {
-//!     fn builder() -> AppBuilder {
-//!         App::builder()
+//!     fn builder() -> App {
+//!         App::new()
 //!             .with_native_commands(site_registry())
 //!             .with_product_defaults(site_defaults())
 //!     }
 //!
 //!     fn new() -> Self {
 //!         Self {
-//!             inner: Self::builder().build(),
+//!             inner: Self::builder(),
 //!         }
 //!     }
 //!
@@ -147,7 +147,7 @@
 //!
 //! - wrapper crate / downstream product →
 //!   [embedding guide](https://github.com/unioslo/osp-cli-rs/blob/main/docs/EMBEDDING.md)
-//!   and [`App::builder`]
+//!   and [`App::new`]
 //! - full in-process host → [`app`]
 //! - rendering / formatting only → [`ui`]
 //!
@@ -199,7 +199,7 @@
 //!
 //! - semantic payload modules such as [`core::document`] and most of [`completion`]
 //!   stay intentionally cheap to compose and inspect
-//! - host machinery such as [`app::App`], [`app::AppBuilder`], and runtime
+//! - host machinery such as [`app::App`] and runtime
 //!   state is guided through constructors/builders/accessors rather than
 //!   compatibility shims or open-ended assembly
 //! - each public concept should have one canonical home; duplicate aliases and
@@ -224,10 +224,10 @@
 //! actually have:
 //!
 //! - "I want a full `osp`-style binary or custom `main`" →
-//!   [`app::App::builder`], [`app::AppBuilder::build`], or
+//!   [`app::App::new`] or
 //!   [`app::App::run_from`]
 //! - "I want to capture rendered stdout/stderr in tests or another host" →
-//!   [`app::App::with_sink`] or [`app::AppBuilder::build_with_sink`]
+//!   [`app::App::run_with_sink`] or [`app::App::run_process_with_sink`]
 //! - "I already have rows and only want pipeline transforms" →
 //!   [`dsl::apply_pipeline`] or [`dsl::apply_output_pipeline`]
 //! - "I need plugin discovery and catalog/policy integration" →
@@ -264,7 +264,7 @@ mod startup_trace;
 /// Rendering, theming, and structured output helpers.
 pub mod ui;
 
-pub use crate::app::{App, AppBuilder, AppRunner, run_from, run_process};
+pub use crate::app::{App, run_from, run_process};
 pub use crate::core::command_policy;
 pub use crate::native::{
     InvocationElevation, NativeCommand, NativeCommandContext, NativeCommandOutcome,

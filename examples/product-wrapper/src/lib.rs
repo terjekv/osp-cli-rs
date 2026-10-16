@@ -7,7 +7,7 @@ use osp_cli::config::{
     RuntimeLoadOptions, build_runtime_pipeline,
 };
 use osp_cli::{
-    App, AppBuilder, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+    App, NativeCommand, NativeCommandContext, NativeCommandOutcome,
     NativeCommandRegistry,
 };
 
@@ -67,15 +67,15 @@ pub struct SiteApp {
 }
 
 impl SiteApp {
-    pub fn builder() -> AppBuilder {
-        App::builder()
+    pub fn builder() -> App {
+        App::new()
             .with_native_commands(site_native_registry())
             .with_product_defaults(site_defaults())
     }
 
     pub fn new() -> Self {
         Self {
-            inner: Self::builder().build(),
+            inner: Self::builder(),
         }
     }
 

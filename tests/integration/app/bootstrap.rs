@@ -32,13 +32,12 @@ fn native_configuration_is_available_to_help_and_execution() {
     }
     let mut defaults = ConfigLayer::default();
     defaults.set("extensions.site.label", "configured-site");
-    let app = App::builder()
+    let app = App::new()
         .with_product_defaults(defaults)
         .with_native_commands(
             NativeCommandRegistry::new()
                 .with_command(ConfiguredCommand(Arc::new(Mutex::new(String::new())))),
-        )
-        .build();
+        );
     let mut sink = BufferedUiSink::default();
     assert_eq!(
         app.run_process_with_sink(["osp", "--defaults-only", "--help"], &mut sink),

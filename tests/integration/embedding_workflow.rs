@@ -267,11 +267,9 @@ impl UiSink for TerminalCapture {
 #[test]
 fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
     let approved = Arc::new(AtomicBool::new(false));
-    let app = App::builder()
-        .with_native_commands(
-            NativeCommandRegistry::new().with_command(ApprovalWorkflow(Arc::clone(&approved))),
-        )
-        .build();
+    let app = App::new().with_native_commands(
+        NativeCommandRegistry::new().with_command(ApprovalWorkflow(Arc::clone(&approved))),
+    );
     let mut terminal = TerminalCapture::default();
     assert_eq!(
         app.run_with_sink(
@@ -356,14 +354,13 @@ fn embedded_product_bootstrap_options_feed_config_and_remain_visible_in_help() {
         "extensions.site.name",
         wrapper.get_one::<String>("site").unwrap().clone(),
     );
-    let app = App::builder()
+    let app = App::new()
         .with_product_defaults(defaults)
         .with_product_help_option("--site <NAME>", "Select the product site")
         .with_native_commands(
             NativeCommandRegistry::new()
                 .with_command(ApprovalWorkflow(Arc::new(AtomicBool::new(true)))),
-        )
-        .build();
+        );
 
     let mut help = BufferedUiSink::default();
     assert_eq!(

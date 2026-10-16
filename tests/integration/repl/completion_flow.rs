@@ -4,7 +4,7 @@ use osp_cli::app::BufferedUiSink;
 use crate::app::support::parse_json_output;
 
 fn debug_complete_payload(line: &str, steps: &[&str]) -> serde_json::Value {
-    let app = App::builder().build();
+    let app = App::new();
     let mut sink = BufferedUiSink::default();
     let mut args = vec![
         "osp".to_string(),

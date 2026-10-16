@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Configure hosts directly with `App` setters. Replace `AppBuilder`
+  and sink-bound `AppRunner` calls with `App::new()` and explicit sink arguments.
+
 - Rebuild native completion at safe prompt boundaries after background refresh
   and cold discovery, including subsequent execution or rendering failures.
 

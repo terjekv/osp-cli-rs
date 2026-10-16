@@ -29,7 +29,7 @@ If you want the shortest successful wrapper:
 2. Rename `site_*` and `SiteApp` to your product name.
 3. Move defaults under `extensions.<product>.*`.
 4. Replace `SiteStatusCommand` with one real native command.
-5. Keep `main.rs` thin and let `SiteApp::builder()` own host wiring.
+5. Keep `main.rs` thin and let `SiteApp::new()` own host wiring.
 
 You can ignore for now:
 
@@ -93,7 +93,7 @@ To build a wrapper:
 3. Build a `NativeCommandRegistry` for your site-specific commands.
 4. Build one `ConfigLayer` containing your product-owned defaults under
    `extensions.<site>.*`.
-5. Inject both through `App::builder()`.
+5. Inject both through `App::new()`.
 6. Expose a small product API such as `run_process`, `builder`, or
    `assembly`.
 
@@ -115,15 +115,15 @@ pub struct SiteApp {
 }
 
 impl SiteApp {
-    pub fn builder() -> osp_cli::AppBuilder {
-        osp_cli::App::builder()
+    pub fn builder() -> osp_cli::App {
+        osp_cli::App::new()
             .with_native_commands(site_native_registry())
             .with_product_defaults(site_defaults())
     }
 
     pub fn new() -> Self {
         Self {
-            inner: Self::builder().build(),
+            inner: Self::builder(),
         }
     }
 
@@ -186,7 +186,7 @@ use osp_cli::config::{
     RuntimeDefaults, RuntimeLoadOptions, build_runtime_pipeline,
 };
 use osp_cli::{
-    App, AppBuilder, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+    App, NativeCommand, NativeCommandContext, NativeCommandOutcome,
     NativeCommandRegistry,
 };
 
@@ -245,15 +245,15 @@ pub struct SiteApp {
 }
 
 impl SiteApp {
-    pub fn builder() -> AppBuilder {
-        App::builder()
+    pub fn builder() -> App {
+        App::new()
             .with_native_commands(site_native_registry())
             .with_product_defaults(site_defaults())
     }
 
     pub fn new() -> Self {
         Self {
-            inner: Self::builder().build(),
+            inner: Self::builder(),
         }
     }
 
@@ -285,7 +285,7 @@ Notes:
 - `site_runtime_config_for(terminal)` is optional and meant for product-owned
   tests, validation, and adjacent tooling that need the same merged defaults
   outside the host
-- `SiteApp::builder()` gives callers one place to construct the configured host
+- `SiteApp::new()` gives callers one place to construct the configured host
 - if the product does not need its own preflight config step, keep the wrapper
   thinner and only inject the native registry and product defaults
 

@@ -2,7 +2,7 @@
 
 The host. It loads config, builds the command catalog from builtins, native
 commands and plugins, decides who handles a command, runs it, applies the
-pipeline and renders the result. `App` and `App::builder` are the public
+pipeline and renders the result. `App` is the public
 entry points; a product crate builds an `App` with its own defaults and native
 commands.
 
@@ -14,7 +14,7 @@ modules should not import `app`; the one current exception is
 
 | File | Owns |
 |---|---|
-| `mod.rs`, `host.rs` | `App`, `AppBuilder`, the top-level run path, builtin `CMD_…` names |
+| `mod.rs`, `host.rs` | `App`, the top-level run path, builtin `CMD_…` names |
 | `bootstrap.rs`, `assembly.rs` | Startup: config, logging, catalog assembly |
 | `runtime.rs`, `session.rs` | State that lives for the process vs for one logical run |
 | `rebuild.rs`, `repl_lifecycle.rs` | Rebuilding state after config or auth changes |

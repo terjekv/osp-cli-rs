@@ -128,7 +128,7 @@ impl crate::app::AccessPolicy for StartupResolutionProbe {
 #[test]
 fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
     with_test_xdg_env(|| {
-        let app = crate::app::App::builder().build();
+        let app = crate::app::App::new();
         let mut help_sink = BufferedUiSink::default();
 
         assert_eq!(
@@ -151,10 +151,10 @@ fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
         assert!(sink.stderr.is_empty());
 
         let mut runner_sink = BufferedUiSink::default();
-        let mut runner = crate::app::App::builder().build_with_sink(&mut runner_sink);
+        let runner = crate::app::App::new();
         assert_eq!(
             runner
-                .run_from(["osp", "--defaults-only", "--help"])
+                .run_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink)
                 .expect("runner help should render"),
             0
         );
@@ -163,9 +163,9 @@ fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_public_entrypoints_cover_owned_runner_and_free_process_wrappers_unit() {
+fn app_public_entrypoints_cover_repeated_sink_and_free_process_wrappers_unit() {
     with_test_xdg_env(|| {
-        let app = crate::app::App::builder().build();
+        let app = crate::app::App::new();
         assert_eq!(
             app.run_from(["osp", "--defaults-only", "--help"])
                 .expect("app run_from help should render"),
@@ -174,9 +174,11 @@ fn app_public_entrypoints_cover_owned_runner_and_free_process_wrappers_unit() {
         assert_eq!(app.run_process(["osp", "--defaults-only", "--help"]), 0);
 
         let mut runner_sink = BufferedUiSink::default();
-        let mut runner = crate::app::App::builder().build_with_sink(&mut runner_sink);
-        assert_eq!(runner.run_process(["osp", "--defaults-only", "--help"]), 0);
-        drop(runner);
+        let runner = crate::app::App::new();
+        assert_eq!(
+            runner.run_process_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink),
+            0
+        );
         assert!(!runner_sink.stdout.is_empty());
         assert!(runner_sink.stderr.is_empty());
 
@@ -211,10 +213,9 @@ fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
         let probe = StartupResolutionProbe::default();
         let run = |args: &[&str]| {
             let mut sink = BufferedUiSink::default();
-            let exit = crate::app::App::builder()
+            let exit = crate::app::App::new()
                 .with_product_defaults(product_defaults.clone())
                 .with_access_policy(probe.clone())
-                .build()
                 .run_with_sink(args, &mut sink)
                 .expect("prepared command should run");
             assert_eq!(exit, 0, "startup probe command should succeed");
@@ -265,9 +266,8 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
 
         let subject = Arc::new(Mutex::new(None));
         let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
+        let exit = crate::app::App::new()
             .with_access_policy(SubjectHook(subject.clone()))
-            .build()
             .run_with_sink(["osp", "config", "get", "profile.active"], &mut sink)
             .expect("startup subject command should run");
 
@@ -284,24 +284,26 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_builder_product_defaults_flow_through_public_builder_surface_unit() {
+fn app_product_defaults_flow_through_public_setup_surface_unit() {
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("extensions.site.enabled", true);
         product_defaults.set("theme.path", Vec::<String>::new());
 
         let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
+        let exit = crate::app::App::new()
             .with_product_defaults(product_defaults)
-            .build_with_sink(&mut sink)
-            .run_process([
-                "osp",
-                "--defaults-only",
-                "--json",
-                "config",
-                "get",
-                "extensions.site.enabled",
-            ]);
+            .run_process_with_sink(
+                [
+                    "osp",
+                    "--defaults-only",
+                    "--json",
+                    "config",
+                    "get",
+                    "extensions.site.enabled",
+                ],
+                &mut sink,
+            );
 
         assert_eq!(exit, 0);
         let payload: serde_json::Value =

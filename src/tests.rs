@@ -57,15 +57,15 @@ pub(crate) fn make_temp_dir(prefix: &str) -> TestTempDir {
 #[test]
 fn stable_top_level_surface_exposes_primary_entrypoints_and_types_unit() {
     let mut sink = crate::app::BufferedUiSink::default();
-    let app = crate::App::builder().build();
+    let app = crate::App::new();
     assert_eq!(app.run_process_with_sink(["osp", "--help"], &mut sink), 0);
     assert!(sink.stdout.contains("Usage"));
     assert!(sink.stderr.is_empty());
     sink.stdout.clear();
-    let mut runner = crate::App::builder().build_with_sink(&mut sink);
+    let runner = crate::App::new();
     assert_eq!(
         runner
-            .run_from(["osp", "--version"])
+            .run_with_sink(["osp", "--version"], &mut sink)
             .expect("version should run"),
         0
     );
