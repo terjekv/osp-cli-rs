@@ -4,17 +4,14 @@ use serde_json::json;
 #[test]
 fn presentation_recommendations_do_not_change_pipeline_semantics() {
     use osp_cli::core::output::OutputFormat;
-    use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind, RenderRecommendation};
+    use osp_cli::core::output_model::{OutputDocument, RenderRecommendation};
 
     let rows = vec![osp_cli::row! {
         "members" => json!([{"role": "primary"}, {"role": "secondary"}])
     }];
     for document in [
         None,
-        Some(OutputDocument::new(
-            OutputDocumentKind::Json,
-            Value::Object(rows[0].clone()),
-        )),
+        Some(OutputDocument::Json(Value::Object(rows[0].clone()))),
     ] {
         let mut output = OutputResult::from_rows(rows.clone());
         output.document = document;

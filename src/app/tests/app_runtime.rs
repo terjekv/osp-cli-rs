@@ -911,7 +911,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             .output
             .document
             .as_ref()
-            .map(|document| document.value.clone()),
+            .map(|document| document.json_value()),
         None
     );
     assert_eq!(

@@ -163,7 +163,7 @@ fn parsed_and_authored_guides_merge_round_trip_and_render_through_semantic_outpu
     parsed.blocks.extend(authored.blocks);
     let output = parsed.to_output_result();
     let restored: Document =
-        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
+        serde_json::from_value(output.document.as_ref().unwrap().json_value()).unwrap();
     assert_eq!(restored, parsed);
     let titles = restored
         .blocks
@@ -276,7 +276,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     assert!(markdown.contains("| uid"));
 
     let restored: Document =
-        serde_json::from_value(output.document.as_ref().unwrap().value.clone()).unwrap();
+        serde_json::from_value(output.document.as_ref().unwrap().json_value()).unwrap();
     assert_eq!(restored, guide);
     let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
     json_settings.format_explicit = true;

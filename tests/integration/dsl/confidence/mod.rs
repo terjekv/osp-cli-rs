@@ -56,12 +56,8 @@ fn help_like_record() -> Value {
 // guide fixtures above use the declared guide-content boundary.
 fn run_document_pipeline(view: Value, pipeline: &str) -> OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
-    let output = OutputResult::from_rows(Vec::new()).with_document(
-        osp_cli::core::output_model::OutputDocument::new(
-            osp_cli::core::output_model::OutputDocumentKind::Json,
-            view,
-        ),
-    );
+    let output = OutputResult::from_rows(Vec::new())
+        .with_document(osp_cli::core::output_model::OutputDocument::Json(view));
     apply_output_pipeline(output, &parsed.stages).expect("pipeline should succeed")
 }
 

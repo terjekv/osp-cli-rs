@@ -1,8 +1,7 @@
 use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta,
-    OutputResult,
+    ColumnAlignment, Group, OutputDocument, OutputItems, OutputMeta, OutputResult,
 };
 
 use crate::row;
@@ -541,9 +540,9 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
 #[test]
 fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]).with_document(
-        OutputDocument::new(
-            OutputDocumentKind::Document,
-            json!({"blocks": [{"text": "osp history"}]}),
+        OutputDocument::Semantic(
+            serde_json::from_value(json!({"blocks": [{"text": "osp history"}]}))
+                .expect("semantic document"),
         ),
     );
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
@@ -571,7 +570,7 @@ fn ui2_json_block_preserves_an_explicit_json_document_unit() {
         "mreg" => json!({"name": "db01.uio.no"}),
         "ldap" => json!({"host": "db01.uio.no"}),
     }])
-    .with_document(OutputDocument::new(OutputDocumentKind::Json, value.clone()));
+    .with_document(OutputDocument::Json(value.clone()));
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
 

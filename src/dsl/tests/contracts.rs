@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::{
     core::{
-        output_model::{Group, OutputDocument, OutputDocumentKind, OutputItems, OutputResult},
+        output_model::{Group, OutputDocument, OutputItems, OutputResult},
         row::Row,
     },
     dsl::{apply_output_pipeline, apply_pipeline},
@@ -177,10 +177,8 @@ fn nested_array_filter_preserves_every_matching_semantic_branch() {
     // the complete row; nested matching leaves do not become a new document.
     let mut filtered_outputs = Vec::new();
     for selector in ["clusters[].nodes[].disks[].ssd", "clusters.nodes.disks.ssd"] {
-        let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-            OutputDocumentKind::Json,
-            document.clone(),
-        ));
+        let output = OutputResult::from_rows(Vec::new())
+            .with_document(OutputDocument::Json(document.clone()));
         let filtered = apply_output_pipeline(output, &[format!("F {selector}=true")])
             .expect("nested semantic filter should work");
         filtered_outputs.push(filtered);
@@ -222,8 +220,7 @@ fn semantic_value_selection_flattens_leaves_into_value_rows() {
         },
         "counts": {"current": 2}
     });
-    let output = OutputResult::from_rows(Vec::new())
-        .with_document(OutputDocument::new(OutputDocumentKind::Json, document));
+    let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(document));
 
     let extracted = apply_output_pipeline(output, &["VALUE siteadmins.current.name".to_string()])
         .expect("semantic value selection should work");
@@ -253,8 +250,7 @@ fn addressed_filter_keeps_complete_rows_and_sibling_branches() {
         "netgroup": "uio-drift",
         "counts": {"current": 2, "pending": 1}
     });
-    let output = OutputResult::from_rows(Vec::new())
-        .with_document(OutputDocument::new(OutputDocumentKind::Json, document));
+    let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(document));
 
     let filtered = apply_output_pipeline(output, &["F siteadmins.current[].hosts>10".to_string()])
         .expect("addressed semantic filter should work");

@@ -63,7 +63,7 @@ fn apply_guide_stage(
     )?;
     Ok(output
         .document
-        .map(|document| document.value)
+        .map(|document| document.json_value())
         .unwrap_or_else(|| crate::core::output_model::output_items_to_value(&output.items)))
 }
 

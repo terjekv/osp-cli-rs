@@ -1,7 +1,6 @@
 use crate::core::document::Document;
 use crate::core::output_model::{
-    OutputDocument, OutputDocumentKind, OutputItems, OutputResult, RenderRecommendation,
-    output_items_to_value,
+    OutputDocument, OutputItems, OutputResult, RenderRecommendation, output_items_to_value,
 };
 use serde_json::json;
 
@@ -168,10 +167,7 @@ fn output_pipeline_filters_nested_single_record_documents_unit() {
         .expect("object"),
     ]);
     let mut output = output;
-    output.document = Some(OutputDocument::new(
-        OutputDocumentKind::Json,
-        output_items_to_value(&output.items),
-    ));
+    output.document = Some(OutputDocument::Json(output_items_to_value(&output.items)));
     output.meta.render_recommendation = Some(RenderRecommendation::Format(
         crate::core::output::OutputFormat::Mreg,
     ));
@@ -452,7 +448,7 @@ fn semantic_document_rebuilds_from_document_source_unit() {
 
     let rebuilt = apply_output_pipeline(output, &[]).expect("pipeline should succeed");
     let document: Document =
-        serde_json::from_value(rebuilt.document.as_ref().unwrap().value.clone()).unwrap();
+        serde_json::from_value(rebuilt.document.as_ref().unwrap().json_value()).unwrap();
     assert_eq!(document.rows()[0]["name"], "list");
     assert!(rebuilt.document.is_some());
 }

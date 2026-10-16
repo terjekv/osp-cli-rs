@@ -197,9 +197,8 @@ pub(crate) fn render_structured_output_with_document_options(
     let carried = output
         .document
         .as_ref()
-        .filter(|document| document.kind == crate::core::output_model::OutputDocumentKind::Document)
-        .and_then(|document| serde_json::from_value::<Document>(document.value.clone()).ok());
-    let Some(document) = options.source_document.or(carried.as_ref()) else {
+        .and_then(crate::core::output_model::OutputDocument::semantic);
+    let Some(document) = options.source_document.or(carried) else {
         return render_output(&output, settings);
     };
     let mut document = document.clone();

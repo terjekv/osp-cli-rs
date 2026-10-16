@@ -1,7 +1,7 @@
 use osp_cli::core::document::{DocBlock, Document, DocumentEntry};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::core::output_model::{
-    OutputDocument, OutputDocumentKind, OutputMeta, OutputResult, output_items_from_value,
+    OutputDocument, OutputMeta, OutputResult, output_items_from_value,
 };
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
 use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render_output};
@@ -49,10 +49,8 @@ fn service_record_exports_preserve_nested_typed_data() {
         },
         "labels": [["primary", "prod"], ["backup", "stage"]]
     });
-    let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-        OutputDocumentKind::Json,
-        record.clone(),
-    ));
+    let output =
+        OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(record.clone()));
 
     let json_export = render_output(&output, &export_settings(OutputFormat::Json));
     assert_eq!(serde_json::from_str::<Value>(&json_export).unwrap(), record);
@@ -116,7 +114,7 @@ fn service_record_exports_preserve_nested_typed_data() {
             "missing {expected:?} in Markdown export:\n{markdown}"
         );
     }
-    assert_eq!(output.document.unwrap().value, record);
+    assert_eq!(output.document.unwrap().json_value(), record);
 }
 
 #[test]
@@ -402,8 +400,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
         );
     }
     assert_eq!(
-        serde_json::from_value::<Document>(output.document.as_ref().unwrap().value.clone())
-            .unwrap(),
+        serde_json::from_value::<Document>(output.document.as_ref().unwrap().json_value()).unwrap(),
         guide
     );
 }

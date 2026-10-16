@@ -1,4 +1,4 @@
-use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind, OutputItems, OutputResult};
+use osp_cli::core::output_model::{OutputDocument, OutputItems, OutputResult};
 use osp_cli::dsl::apply_output_pipeline;
 use osp_cli::row;
 use serde_json::json;
@@ -26,8 +26,7 @@ fn collection_operations_preserve_unrelated_nulls_and_empty_containers() {
         vec!["A count()"],
     ] {
         let output = pipeline(
-            OutputResult::from_rows(vec![])
-                .with_document(OutputDocument::new(OutputDocumentKind::Json, input.clone())),
+            OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(input.clone())),
             &stages,
         );
         assert!(output.document.is_none());
@@ -52,10 +51,8 @@ fn collection_operations_preserve_unrelated_nulls_and_empty_containers() {
 fn group_shaped_service_records_do_not_lose_extra_fields() {
     let record =
         json!({"groups": {}, "aggregates": {}, "rows": [], "name": "host-a", "note": null});
-    let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::new(
-        OutputDocumentKind::Json,
-        json!([record.clone()]),
-    ));
+    let input = OutputResult::from_rows(vec![])
+        .with_document(OutputDocument::Json(json!([record.clone()])));
     let output = pipeline(input, &["S name"]);
     assert_eq!(
         serde_json::to_value(output.as_rows().unwrap()).unwrap(),
@@ -71,10 +68,8 @@ fn only_explicit_grouping_creates_groups_and_continuations_keep_them() {
     );
     assert!(!pipeline(grouped, &["Z"]).meta.grouped);
     let record = json!({"groups": {}, "aggregates": {}, "rows": []});
-    let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::new(
-        OutputDocumentKind::Json,
-        json!([record.clone()]),
-    ));
+    let input = OutputResult::from_rows(vec![])
+        .with_document(OutputDocument::Json(json!([record.clone()])));
     let sorted = pipeline(input.clone(), &["S groups"]);
     assert!(matches!(sorted.items, OutputItems::Rows(_)));
     assert_eq!(
@@ -93,8 +88,7 @@ fn only_explicit_grouping_creates_groups_and_continuations_keep_them() {
         } else {
             rows
         };
-        let input = OutputResult::from_rows(vec![])
-            .with_document(OutputDocument::new(OutputDocumentKind::Json, value));
+        let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(value));
         let input = if nested {
             pipeline(input, &["P hosts[]"])
         } else {
@@ -210,10 +204,8 @@ fn mixed_sort_is_consistent_and_missing_stays_last_in_both_directions() {
 
 #[test]
 fn scalar_document_sort_uses_the_requested_direction_and_cast() {
-    let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::new(
-        OutputDocumentKind::Json,
-        json!(["2", "10", "1"]),
-    ));
+    let input = OutputResult::from_rows(vec![])
+        .with_document(OutputDocument::Json(json!(["2", "10", "1"])));
     assert_eq!(
         serde_json::to_value(pipeline(input, &["S !value AS num"]).as_rows().unwrap()).unwrap(),
         json!([{"value":"10"},{"value":"2"},{"value":"1"}])
@@ -223,10 +215,7 @@ fn scalar_document_sort_uses_the_requested_direction_and_cast() {
 #[test]
 fn values_have_the_same_selector_order_for_rows_and_documents() {
     let rows = vec![row! {"a" => 1, "b" => 2}, row! {"a" => 3, "b" => 4}];
-    for document in [
-        None,
-        Some(OutputDocument::new(OutputDocumentKind::Json, json!(rows))),
-    ] {
+    for document in [None, Some(OutputDocument::Json(json!(rows)))] {
         let mut input = OutputResult::from_rows(rows.clone());
         input.document = document;
         let output = pipeline(input, &["VALUE a b"]);
@@ -240,10 +229,8 @@ fn values_have_the_same_selector_order_for_rows_and_documents() {
             ]
         );
     }
-    let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::new(
-        OutputDocumentKind::Json,
-        json!({"a":1,"b":2}),
-    ));
+    let input =
+        OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(json!({"a":1,"b":2})));
     assert_eq!(
         pipeline(input, &["VALUE"]).as_rows().unwrap(),
         &[row! {"value" => 1}, row! {"value" => 2}]
@@ -269,10 +256,8 @@ fn jq_evaluates_empty_input_instead_of_skipping_the_expression() {
 fn scoped_quick_search_keeps_complete_matching_document_members() {
     let document = json!({"commands":[{"name":"doctor", "about":"diagnostics"}, {"name":"config", "about":"settings"}]});
     for stage in ["doctor", "V doctor"] {
-        let input = OutputResult::from_rows(vec![]).with_document(OutputDocument::new(
-            OutputDocumentKind::Json,
-            document.clone(),
-        ));
+        let input =
+            OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(document.clone()));
         let output = pipeline(input, &[stage]);
         assert_eq!(
             serde_json::to_value(output.as_rows().unwrap()).unwrap(),

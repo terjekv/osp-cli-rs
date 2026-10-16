@@ -27,7 +27,7 @@ use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocumentKind, OutputItems, OutputResult, group_rows,
+    ColumnAlignment, Group, OutputDocument, OutputItems, OutputResult, group_rows,
     output_items_to_rows,
 };
 use crate::core::row::Row;
@@ -69,14 +69,8 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     if output.meta.document_rows
         && matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown)
     {
-        let mut doc = match output
-            .document
-            .as_ref()
-            .filter(|doc| doc.kind == OutputDocumentKind::Document)
-        {
-            Some(document) => serde_json::from_value::<Document>(document.value.clone())
-                .map(|document| lower_document(&document, plan.format))
-                .unwrap_or_default(),
+        let mut doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
+            Some(document) => lower_document(document, plan.format),
             None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
         };
         sanitize_doc(&mut doc);
@@ -775,13 +769,8 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
-    if let Some(document) = output.document.as_ref().filter(|document| {
-        matches!(
-            document.kind,
-            OutputDocumentKind::Json | OutputDocumentKind::Document
-        )
-    }) {
-        return document.value.clone();
+    if let Some(document) = &output.document {
+        return document.json_value();
     }
     match &output.items {
         OutputItems::Rows(rows) => {

@@ -16,6 +16,7 @@
 //! - semantic sidecar documents should stay canonical here instead of leaking
 //!   format-specific assumptions into the DSL or UI
 
+use crate::core::document::Document;
 use crate::core::output::OutputFormat;
 use crate::core::row::Row;
 use serde_json::Value;
@@ -129,40 +130,30 @@ pub enum RenderRecommendation {
     Document,
 }
 
-/// Stable identity for a semantic payload carried through the output pipeline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputDocumentKind {
-    /// Ordered semantic blocks for help, intro, and command reference.
-    Document,
-    /// Canonical JSON document supplied by a command implementation.
-    Json,
-}
-
-/// Optional semantic document attached to rendered output.
+/// Unstaged semantic content or an original service JSON envelope.
 #[derive(Clone, Debug, PartialEq)]
-pub struct OutputDocument {
-    /// Semantic payload identity.
-    pub kind: OutputDocumentKind,
-    /// Canonical JSON substrate for the payload.
-    pub value: Value,
+pub enum OutputDocument {
+    /// Ordered semantic blocks for direct human rendering.
+    Semantic(Document),
+    /// Canonical JSON supplied by a command, before row projection.
+    Json(Value),
 }
 
 impl OutputDocument {
-    /// Builds a semantic payload from its identity and canonical JSON value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind};
-    /// use serde_json::json;
-    ///
-    /// let document = OutputDocument::new(OutputDocumentKind::Document, json!({"blocks": [{"text": "Help"}]}));
-    ///
-    /// assert_eq!(document.kind, OutputDocumentKind::Document);
-    /// assert_eq!(document.value["blocks"][0]["text"], "Help");
-    /// ```
-    pub fn new(kind: OutputDocumentKind, value: Value) -> Self {
-        Self { kind, value }
+    /// Returns the semantic document when this payload contains one.
+    pub fn semantic(&self) -> Option<&Document> {
+        match self {
+            Self::Semantic(document) => Some(document),
+            Self::Json(_) => None,
+        }
+    }
+
+    /// Serializes semantic content only at the JSON output boundary.
+    pub fn json_value(&self) -> Value {
+        match self {
+            Self::Semantic(document) => serde_json::json!(document),
+            Self::Json(value) => value.clone(),
+        }
     }
 }
 
@@ -180,7 +171,10 @@ pub enum OutputItems {
 pub struct OutputResult {
     /// Primary payload to render or further transform.
     pub items: OutputItems,
-    /// Optional semantic sidecar document.
+    /// Unstaged semantic view or original service JSON envelope. Pipeline stages
+    /// discard it before transforming `items`. Semantic views serialize as
+    /// documents only when `meta.document_rows` marks their row projection;
+    /// presentation annotations keep canonical row JSON instead.
     pub document: Option<OutputDocument>,
     /// Rendering metadata derived during result construction.
     pub meta: OutputMeta,
@@ -219,36 +213,17 @@ impl OutputResult {
     /// Replaces existing payload rows with rows derived from the document and
     /// rebuilds the key index. This is a payload replacement, not an annotation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind, OutputResult};
-    /// use serde_json::json;
-    ///
-    /// let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-    ///     OutputDocumentKind::Document,
-    ///     json!({"blocks": [{"text": "Help"}]}),
-    /// ));
-    ///
-    /// assert!(output.document.is_some());
-    /// ```
     #[must_use]
     pub fn with_document(mut self, document: OutputDocument) -> Self {
-        let semantic = (document.kind == OutputDocumentKind::Document)
-            .then(|| {
-                serde_json::from_value::<crate::core::document::Document>(document.value.clone())
-                    .ok()
-            })
-            .flatten();
-        self.meta.document_rows = semantic.is_some();
+        self.meta.document_rows = matches!(document, OutputDocument::Semantic(_));
         if self.meta.document_rows {
             self.meta.render_recommendation = Some(RenderRecommendation::Document);
         } else if self.meta.render_recommendation == Some(RenderRecommendation::Document) {
             self.meta.render_recommendation = None;
         }
-        self.items = OutputItems::Rows(match semantic {
-            Some(document) => document.rows(),
-            None => rows_from_value(document.value.clone()),
+        self.items = OutputItems::Rows(match &document {
+            OutputDocument::Semantic(document) => document.rows(),
+            OutputDocument::Json(value) => rows_from_value(value.clone()),
         });
         self.meta.key_index = compute_key_index(self.as_rows().unwrap_or_default());
         self.document = Some(document);
@@ -490,8 +465,8 @@ fn group_from_value(value: &Value) -> Option<Group> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta, OutputResult,
-        output_items_from_value, output_items_to_rows, output_items_to_value,
+        Group, OutputDocument, OutputItems, OutputMeta, OutputResult, output_items_from_value,
+        output_items_to_rows, output_items_to_value,
     };
     use serde_json::Value;
     use serde_json::json;
@@ -536,17 +511,16 @@ mod tests {
         assert_eq!(grouped_output.into_rows(), None);
 
         let document_output =
-            OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-                OutputDocumentKind::Document,
-                json!({"blocks": [{"section": "Usage", "blocks": [{"text": "osp"}]}]}),
+            OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Semantic(
+                serde_json::from_value(
+                    json!({"blocks": [{"section": "Usage", "blocks": [{"text": "osp"}]}]}),
+                )
+                .expect("semantic document"),
             ));
 
         assert!(matches!(
             document_output.document,
-            Some(OutputDocument {
-                kind: OutputDocumentKind::Document,
-                value: Value::Object(_),
-            })
+            Some(OutputDocument::Semantic(_))
         ));
     }
 

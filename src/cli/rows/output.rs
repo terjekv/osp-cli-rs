@@ -5,8 +5,8 @@
 //! metadata" conversions.
 
 use crate::core::output_model::{
-    ColumnAlignment, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta, OutputResult,
-    compute_key_index, rows_from_value,
+    ColumnAlignment, OutputDocument, OutputItems, OutputMeta, OutputResult, compute_key_index,
+    rows_from_value,
 };
 use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
 use crate::core::row::Row;
@@ -21,7 +21,7 @@ pub(crate) fn plugin_data_to_output_result(
 ) -> OutputResult {
     let document = meta
         .is_some_and(|meta| meta.preserve_json_document || meta.row_path.is_some())
-        .then(|| OutputDocument::new(OutputDocumentKind::Json, data.clone()));
+        .then(|| OutputDocument::Json(data.clone()));
     let row_data = meta
         .and_then(|meta| meta.row_path.as_deref())
         .and_then(|row_path| data.get(row_path))
@@ -221,8 +221,11 @@ mod tests {
         );
 
         assert_eq!(
-            output.document.as_ref().map(|document| &document.value),
-            Some(&data)
+            output
+                .document
+                .as_ref()
+                .map(|document| document.json_value()),
+            Some(data.clone())
         );
     }
 
@@ -345,8 +348,11 @@ mod tests {
             vec![data.as_object().unwrap().clone()]
         );
         assert_eq!(
-            output.document.as_ref().map(|document| &document.value),
-            Some(&data)
+            output
+                .document
+                .as_ref()
+                .map(|document| document.json_value()),
+            Some(data.clone())
         );
         let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Mreg));
         assert!(rendered.contains("Task:"));
@@ -382,7 +388,7 @@ mod tests {
             projected
                 .document
                 .as_ref()
-                .map(|document| document.value.clone()),
+                .map(|document| document.json_value()),
             None
         );
     }

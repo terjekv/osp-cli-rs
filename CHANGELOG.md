@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Carry typed `OutputDocument::{Semantic, Json}` payloads instead
+  of a kind and an internal JSON encoding of semantic documents.
+
 - CLI help and REPL completion now share the same short descriptions.
 
 - **Breaking:** Remove `CommandDef`, `ArgDef`, `FlagDef`, `ValueKind`,

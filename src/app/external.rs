@@ -1448,7 +1448,7 @@ JSON
                         result.output,
                         Some(ReplCommandOutput::Output(guide))
                             if guide
-                                .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::Usage: osp ldap")
+                                .output.document.as_ref().expect("expected document").json_value().to_string().contains("HELP::Usage: osp ldap")
                     ));
                 }
                 NativeOutcomeKind::Exit => {
@@ -1553,7 +1553,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::")
+                    .output.document.as_ref().expect("expected document").json_value().to_string().contains("HELP::")
         ));
     }
 
@@ -1581,7 +1581,7 @@ JSON
             result.output,
             Some(ReplCommandOutput::Output(guide))
                 if guide
-                    .output.document.as_ref().expect("expected document").value.clone().to_string().contains("HELP::Usage: osp ldap")
+                    .output.document.as_ref().expect("expected document").json_value().to_string().contains("HELP::Usage: osp ldap")
         ));
     }
 

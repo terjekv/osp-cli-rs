@@ -105,14 +105,9 @@ impl Document {
 
     /// Keeps the unstaged document alongside its canonical row projection.
     pub fn to_output_result(&self) -> crate::core::output_model::OutputResult {
-        use crate::core::output_model::{
-            OutputDocument, OutputDocumentKind, OutputResult, RenderRecommendation,
-        };
+        use crate::core::output_model::{OutputDocument, OutputResult, RenderRecommendation};
         let mut output = OutputResult::from_rows(self.rows());
-        output.document = Some(OutputDocument::new(
-            OutputDocumentKind::Document,
-            serde_json::to_value(self).unwrap_or(Value::Null),
-        ));
+        output.document = Some(OutputDocument::Semantic(self.clone()));
         output.meta.document_rows = true;
         output.meta.render_recommendation = Some(RenderRecommendation::Document);
         output
