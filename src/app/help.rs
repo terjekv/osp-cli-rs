@@ -1,4 +1,4 @@
-//! Help-specific render bootstrap and verbosity policy.
+//! Help render bootstrap, visible command rows and verbosity policy.
 //!
 //! Help output has to work before the full host/runtime is fully running. This
 //! module owns the small amount of config/bootstrap logic needed to derive
@@ -19,6 +19,43 @@ use super::{
     RuntimeConfigRequest, RuntimeContext, TerminalKind, assembly, normalize_profile_override,
     resolve_runtime_config,
 };
+
+pub(crate) fn help_all_output(state: &crate::app::AppState) -> crate::app::CommandOutput {
+    let catalog = crate::app::authorized_command_catalog_for(
+        &state.runtime.auth,
+        &state.clients,
+        state.clients.native_commands().completion_catalog(),
+    );
+    let surface = crate::repl::surface::build_repl_surface(
+        crate::repl::ReplViewContext::from_parts(&state.runtime, &state.session),
+        &catalog,
+    );
+    let mut rows = Vec::new();
+    for spec in &surface.specs {
+        collect_help_paths(spec, "", &mut rows);
+    }
+    crate::app::CommandOutput::output(
+        crate::core::output_model::OutputResult::from_rows(rows),
+        None,
+    )
+}
+
+fn collect_help_paths(
+    spec: &crate::completion::CompletionNode,
+    prefix: &str,
+    rows: &mut Vec<crate::core::row::Row>,
+) {
+    if spec.value_key || spec.value_leaf {
+        return;
+    }
+    let path = format!("{prefix}{}", spec.name);
+    rows.push(
+        crate::row! { "command" => path.clone(), "description" => spec.tooltip.as_deref().unwrap_or("") },
+    );
+    for child in spec.children.values() {
+        collect_help_paths(child, &format!("{path} "), rows);
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HelpRenderOverrides {

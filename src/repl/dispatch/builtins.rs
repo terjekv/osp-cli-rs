@@ -54,19 +54,7 @@ pub(super) fn execute_repl_builtin(
                 &state.runtime.ui,
                 &scanned.invocation,
             );
-            let prepared = crate::repl::lifecycle::prepare_repl_surface_state(
-                &state.runtime,
-                &state.session,
-                &state.clients,
-            )?;
-            let mut rows = Vec::new();
-            for spec in &prepared.surface.specs {
-                collect_help_paths(spec, "", &mut rows);
-            }
-            let output = crate::app::CommandOutput::output(
-                crate::core::output_model::OutputResult::from_rows(rows),
-                None,
-            );
+            let output = crate::app::help::help_all_output(state);
             Ok(ReplResult::Print(
                 super::command::render_repl_command_output(
                     &state.runtime,
@@ -101,23 +89,6 @@ pub(super) fn execute_repl_builtin(
         ReplBuiltin::Bang(command) => {
             execute_bang_command(&mut state.session, history, raw, command)
         }
-    }
-}
-
-fn collect_help_paths(
-    spec: &crate::completion::CompletionNode,
-    prefix: &str,
-    rows: &mut Vec<crate::core::row::Row>,
-) {
-    if spec.value_key || spec.value_leaf {
-        return;
-    }
-    let path = format!("{prefix}{}", spec.name);
-    rows.push(
-        crate::row! { "command" => path.clone(), "description" => spec.tooltip.as_deref().unwrap_or("") },
-    );
-    for child in spec.children.values() {
-        collect_help_paths(child, &format!("{path} "), rows);
     }
 }
 

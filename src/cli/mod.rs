@@ -918,6 +918,11 @@ pub(crate) struct ReplHelpCommand {
     pub(crate) all: bool,
 }
 
+pub(crate) fn is_help_all(tokens: &[String]) -> bool {
+    tokens.first().is_some_and(|word| word == "help")
+        && ReplHelpCommand::try_parse_from(tokens).is_ok_and(|help| help.all)
+}
+
 pub(crate) fn repl_only_commands() -> [clap::Command; 6] {
     use clap::{Arg, ArgAction, Command, ValueHint};
     [

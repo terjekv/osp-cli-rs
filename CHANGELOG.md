@@ -10,6 +10,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Ignore retired config keys with one warning listing their names and removal
   guidance. This includes plugin provider/state/discovery keys, history profile
   scoping, and removed UI, auth visibility and cache knobs. Unknown keys still fail.
+- Support `help --all` and its output pipelines in one-shot commands using the
+  same visible command rows as the REPL.
 
 - Terminal confirmations remain available in one-shot commands. `may_prompt()`
   checks stdin/stderr terminals, JSON output and output pipelines; credential

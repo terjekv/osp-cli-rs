@@ -82,6 +82,18 @@ pub(super) fn run_external_command(
             &options,
         );
     }
+    if let (Ok((parsed, _)), Some(scanned)) = (&expanded, &scanned)
+        && crate::cli::is_help_all(&scanned.tokens)
+    {
+        let result = super::help::help_all_output(state);
+        let result = super::command_output::apply_stages_to_cli_result(result, &parsed.stages)?;
+        return super::run_cli_command(
+            state.runtime.config.resolved(),
+            &invocation.ui,
+            &result,
+            sink,
+        );
+    }
     let parsed = expanded
         .and_then(|(mut parsed, elevation)| {
             if let Some(scanned) = scanned {

@@ -309,6 +309,21 @@ pub(crate) fn run_scanned_with_sink_and_app(
             };
             command = command.arg(arg);
         }
+        // Let the shared help grammar recognize --all before clap's automatic
+        // help subcommand interprets it as a command path.
+        let help_all = command
+            .clone()
+            .disable_help_subcommand(true)
+            .try_get_matches_from(scanned.argv.iter().cloned())
+            .ok()
+            .and_then(|matches| Cli::from_arg_matches(&matches).ok())
+            .is_some_and(|cli| match cli.command {
+                Some(Commands::External(tokens)) => crate::cli::is_help_all(&tokens),
+                _ => false,
+            });
+        if help_all {
+            command = command.disable_help_subcommand(true);
+        }
         let parsed = command
             .try_get_matches_from_mut(scanned.argv.iter().cloned())
             .and_then(|matches| {

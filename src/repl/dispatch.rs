@@ -425,10 +425,7 @@ fn classify_repl_line(
     let parsed = parse_repl_dispatch_line(runtime, line)?;
 
     let scanned = scan_command_tokens(&parsed.dispatch_tokens)?;
-    use clap::Parser;
-    if scanned.tokens.first().is_some_and(|word| word == "help")
-        && crate::cli::ReplHelpCommand::try_parse_from(&scanned.tokens).is_ok_and(|help| help.all)
-    {
+    if crate::cli::is_help_all(&scanned.tokens) {
         return Ok(ReplLinePlan::Builtin {
             raw: line.to_string(),
             builtin: ReplBuiltin::HelpAll,
