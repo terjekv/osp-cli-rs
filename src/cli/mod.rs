@@ -310,8 +310,6 @@ pub enum ReplCommands {
 pub enum DebugMenuArg {
     /// Trace the normal completion popup.
     Completion,
-    /// Trace the history-search popup used by `Ctrl-R`.
-    History,
 }
 
 /// Arguments for REPL completion debugging.

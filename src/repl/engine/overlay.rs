@@ -1,7 +1,7 @@
 use super::super::menu::OspCompletionMenu;
 use super::adapter::{color_from_style_spec, style_with_fg_bg};
 use super::config::ReplAppearance;
-use super::{COMPLETION_MENU_NAME, HISTORY_MENU_NAME, SharedHistory};
+use super::{COMPLETION_MENU_NAME, SharedHistory};
 use anyhow::Result;
 use nu_ansi_term::Color;
 #[cfg(not(miri))]
@@ -268,14 +268,6 @@ pub(crate) fn build_completion_menu(appearance: &ReplAppearance) -> OspCompletio
         .with_max_rows(u16::MAX)
 }
 
-pub(crate) fn build_history_menu(appearance: &ReplAppearance) -> OspCompletionMenu {
-    build_candidate_menu(appearance, HISTORY_MENU_NAME)
-        .with_only_buffer_difference(false)
-        .with_quick_complete(false)
-        .with_columns(1)
-        .with_max_rows(appearance.history_menu_rows.max(1))
-}
-
 fn build_candidate_menu(appearance: &ReplAppearance, name: &str) -> OspCompletionMenu {
     let text_color = appearance
         .completion_text_style
@@ -335,10 +327,6 @@ mod tests {
         let completion_menu = build_completion_menu(&appearance);
         assert_eq!(completion_menu.name(), COMPLETION_MENU_NAME);
         assert!(!completion_menu.can_quick_complete());
-
-        let history_menu = build_history_menu(&appearance);
-        assert_eq!(history_menu.name(), HISTORY_MENU_NAME);
-        assert!(!history_menu.can_quick_complete());
 
         let options = build_history_picker_options(&appearance, "needle")
             .expect("history picker options should build");

@@ -136,7 +136,6 @@ pub use product::{ReplAction, ReplActionKey, ReplEvent, ReplFeedback, ReplStatus
 pub use engine::{
     CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,
     HighlightDebugSpan, debug_completion, debug_completion_steps, debug_highlight,
-    debug_history_menu, debug_history_menu_steps,
 };
 pub(crate) use engine::{
     CompletionTraceEvent, CompletionTraceMenuState, trace_completion, trace_completion_enabled,

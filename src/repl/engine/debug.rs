@@ -1,13 +1,13 @@
-//! REPL completion and history-menu debug surfaces.
+//! REPL completion debug surfaces.
 //!
 //! These helpers build deterministic snapshots of the editor/menu state so
 //! operators and tests can inspect completion behavior without relying on a
 //! live terminal session.
 
-use super::adapter::{ReplCompleter, ReplHistoryCompleter};
-use super::config::{DEFAULT_HISTORY_MENU_ROWS, ReplAppearance};
-use super::overlay::{build_completion_menu, build_history_menu};
-use super::{HISTORY_MENU_NAME, LineProjector, SharedHistory};
+use super::LineProjector;
+use super::adapter::ReplCompleter;
+use super::config::ReplAppearance;
+use super::overlay::build_completion_menu;
 use crate::completion::{CompletionEngine, CompletionTree};
 use crate::repl::menu::{MenuDebug, OspCompletionMenu, debug_snapshot, display_text};
 use reedline::{Completer, Editor, Menu, MenuEvent, UndoBehavior};
@@ -209,26 +209,6 @@ pub fn debug_completion(
     snapshot_completion_debug(tree, &mut menu, &editor, &options)
 }
 
-/// Builds a bounded history-menu diagnostic snapshot for `line` at `cursor`.
-///
-/// This exposes up to five distinct entries and does not model the live Ctrl-R
-/// skim picker, which searches the full history.
-pub fn debug_history_menu(
-    history: &SharedHistory,
-    line: &str,
-    cursor: usize,
-    options: CompletionDebugOptions<'_>,
-) -> CompletionDebug {
-    let (editor, mut completer, mut menu) =
-        build_debug_history_session(history, line, cursor, options.appearance);
-    let mut editor = editor;
-
-    menu.menu_event(MenuEvent::Activate(false));
-    menu.apply_event(&mut editor, completer.as_mut());
-
-    snapshot_history_debug(&mut menu, &editor, cursor, &options)
-}
-
 /// Replays a sequence of synthetic editor actions and captures each frame.
 pub fn debug_completion_steps(
     tree: &CompletionTree,
@@ -247,22 +227,6 @@ pub fn debug_completion_steps(
         ),
         steps,
         |menu, editor| snapshot_completion_debug(tree, menu, editor, &options),
-    )
-}
-
-/// Replays menu actions for the bounded history diagnostic and captures each
-/// frame. This does not model the live Ctrl-R skim picker.
-pub fn debug_history_menu_steps(
-    history: &SharedHistory,
-    line: &str,
-    cursor: usize,
-    options: CompletionDebugOptions<'_>,
-    steps: &[DebugStep],
-) -> Vec<CompletionDebugFrame> {
-    capture_debug_steps(
-        build_debug_history_session(history, line, cursor, options.appearance),
-        steps,
-        |menu, editor| snapshot_history_debug(menu, editor, cursor, &options),
     )
 }
 
@@ -304,35 +268,6 @@ fn build_debug_completion_session(
         build_completion_menu(appearance)
     } else {
         OspCompletionMenu::default()
-    };
-
-    (editor, completer, menu)
-}
-
-fn build_debug_history_session(
-    history: &SharedHistory,
-    line: &str,
-    cursor: usize,
-    appearance: Option<&ReplAppearance>,
-) -> (Editor, Box<dyn Completer>, OspCompletionMenu) {
-    let mut editor = Editor::default();
-    editor.edit_buffer(
-        |buf| {
-            buf.set_buffer(line.to_string());
-            buf.set_insertion_point(cursor.min(buf.get_buffer().len()));
-        },
-        UndoBehavior::CreateUndoPoint,
-    );
-
-    let completer = Box::new(ReplHistoryCompleter::new(history.clone()));
-    let menu = if let Some(appearance) = appearance {
-        build_history_menu(appearance)
-    } else {
-        OspCompletionMenu::default()
-            .with_name(HISTORY_MENU_NAME)
-            .with_quick_complete(false)
-            .with_columns(1)
-            .with_max_rows(DEFAULT_HISTORY_MENU_ROWS)
     };
 
     (editor, completer, menu)
@@ -419,29 +354,6 @@ fn snapshot_completion_debug(
             ],
         ),
         |value| engine.classify_match(&analysis, value).as_str().to_string(),
-    )
-}
-
-fn snapshot_history_debug(
-    menu: &mut OspCompletionMenu,
-    editor: &Editor,
-    cursor: usize,
-    options: &CompletionDebugOptions<'_>,
-) -> CompletionDebug {
-    let line = editor.get_buffer();
-    let cursor = cursor
-        .min(editor.line_buffer().insertion_point())
-        .min(line.len());
-    snapshot_menu_debug(
-        menu,
-        editor,
-        cursor,
-        options,
-        (
-            line.get(..cursor).unwrap_or(line).trim().to_string(),
-            [0, line.len()],
-        ),
-        |_| "history".to_string(),
     )
 }
 

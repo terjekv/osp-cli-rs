@@ -1,9 +1,7 @@
 use crate::completion::{CompletionNode, CompletionTree, FlagNode};
 use nu_ansi_term::Color;
-use reedline::Span;
 use reedline::{
-    Completer, EditCommand, Menu, Prompt, PromptEditMode, PromptHistorySearch,
-    PromptHistorySearchStatus,
+    Completer, EditCommand, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
 };
 use std::collections::BTreeSet;
 use std::io;
@@ -12,15 +10,14 @@ use std::sync::{Arc, Mutex};
 
 use super::editor::PaintedLine;
 use super::{
-    AutoCompleteEmacs, BasicInputReason, CompletionDebugOptions, DebugStep, HISTORY_MENU_NAME,
-    HistoryConfig, HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance,
-    ReplCompleter, ReplHistoryCompleter, ReplInputMode, ReplReloadKind, ReplResult, SharedHistory,
-    SubmissionContext, basic_input_reason, build_history_menu, build_history_picker_options,
-    build_repl_highlighter, color_from_style_spec, contains_cursor_position_report,
-    debug_completion, debug_completion_steps, debug_history_menu, debug_history_menu_steps,
-    default_pipe_verbs, evaluate_repl_submission, history_picker_items, is_cursor_position_error,
-    parse_cursor_position_report, path_suggestions, split_path_stub, trace_completion,
-    trace_completion_enabled,
+    AutoCompleteEmacs, BasicInputReason, CompletionDebugOptions, DebugStep, HistoryConfig,
+    HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance, ReplCompleter,
+    ReplInputMode, ReplReloadKind, ReplResult, SharedHistory, SubmissionContext,
+    basic_input_reason, build_history_picker_options, build_repl_highlighter,
+    color_from_style_spec, contains_cursor_position_report, debug_completion,
+    debug_completion_steps, default_pipe_verbs, evaluate_repl_submission, history_picker_items,
+    is_cursor_position_error, parse_cursor_position_report, path_suggestions, split_path_stub,
+    trace_completion, trace_completion_enabled,
 };
 use crate::core::shell_words::QuoteStyle;
 use crate::repl::LineProjection;
@@ -866,125 +863,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     assert!(err.to_string().contains("boom"));
 }
 
-// History menu and history-debug contracts.
-
-#[test]
-fn history_completer_returns_latest_unique_entries_for_empty_query_unit() {
-    let history = test_history(&[
-        "ldap user alice",
-        "mreg host foo",
-        "ldap user alice",
-        "config get theme",
-        "help ldap",
-        "doctor",
-    ]);
-    let mut completer = ReplHistoryCompleter::new(history);
-
-    let suggestions = completer.complete("", 0);
-    let values = suggestions
-        .iter()
-        .map(|suggestion| suggestion.value.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        values,
-        vec![
-            "doctor",
-            "help ldap",
-            "config get theme",
-            "ldap user alice",
-            "mreg host foo",
-        ]
-    );
-    assert!(
-        suggestions
-            .iter()
-            .all(|suggestion| suggestion.span == (Span { start: 0, end: 0 }))
-    );
-    assert_eq!(
-        suggestions[0]
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.first())
-            .cloned(),
-        Some("6  doctor".to_string())
-    );
-}
-
-#[test]
-fn history_completer_ranks_exact_prefix_then_substring_unit() {
-    let history = test_history(&[
-        "config list",
-        "ldap config",
-        "config get theme",
-        "show config",
-        "CONFIG",
-        "config",
-    ]);
-    let mut completer = ReplHistoryCompleter::new(history);
-
-    let suggestions = completer.complete("config", "config".len());
-    let values = suggestions
-        .iter()
-        .map(|suggestion| suggestion.value.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        values,
-        vec![
-            "config",
-            "CONFIG",
-            "config get theme",
-            "config list",
-            "show config",
-        ]
-    );
-    assert!(suggestions.iter().all(|suggestion| {
-        suggestion.span
-            == (Span {
-                start: 0,
-                end: "config".len(),
-            })
-    }));
-    assert_eq!(
-        suggestions[0]
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.first())
-            .cloned(),
-        Some("6  config".to_string())
-    );
-}
-
-#[test]
-fn debug_history_menu_surfaces_numbered_labels_and_steps_unit() {
-    let history = test_history(&["ldap user alice", "config get theme", "config"]);
-    let menu = build_history_menu(&ReplAppearance::default());
-    assert_eq!(menu.name(), HISTORY_MENU_NAME);
-    assert!(!menu.can_quick_complete());
-
-    let debug = debug_history_menu(
-        &history,
-        "config",
-        "config".len(),
-        CompletionDebugOptions::new(80, 6),
-    );
-    assert_eq!(debug.stub, "config");
-    assert_eq!(debug.matches[0].label, "3  config");
-    assert_eq!(debug.matches[0].id, "config");
-    assert!(debug.matches.iter().all(|item| item.kind == "history"));
-
-    let frames = debug_history_menu_steps(
-        &history,
-        "config",
-        "config".len(),
-        CompletionDebugOptions::new(80, 6),
-        &[DebugStep::Tab, DebugStep::Accept],
-    );
-    assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0].state.matches[0].label, "3  config");
-    assert_eq!(frames[1].state.line, "config");
-}
+// History picker contracts.
 
 #[test]
 fn history_picker_items_keep_latest_unique_commands_and_flatten_multiline_unit() {

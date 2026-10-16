@@ -49,7 +49,7 @@ pub(crate) use adapter::{
 };
 #[cfg(test)]
 pub(crate) use adapter::{
-    ReplCompleter, ReplHistoryCompleter, build_repl_highlighter, path_suggestions, split_path_stub,
+    ReplCompleter, build_repl_highlighter, path_suggestions, split_path_stub,
 };
 pub use adapter::{color_from_style_spec, default_pipe_verbs};
 pub use config::{
@@ -59,7 +59,7 @@ pub use config::{
 };
 pub use debug::{
     CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,
-    debug_completion, debug_completion_steps, debug_history_menu, debug_history_menu_steps,
+    debug_completion, debug_completion_steps,
 };
 #[cfg(test)]
 use editor::{
@@ -68,13 +68,12 @@ use editor::{
 };
 pub(crate) use editor::{BasicInputReason, OspPrompt, basic_input_reason};
 #[cfg(test)]
-use overlay::{build_history_menu, build_history_picker_options, history_picker_items};
+use overlay::{build_history_picker_options, history_picker_items};
 #[cfg(test)]
 use session::evaluate_repl_submission;
 use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";
-const HISTORY_MENU_NAME: &str = "history_menu";
 const HOST_COMMAND_HISTORY_PICKER: &str = "\u{0}osp-repl-history-picker";
 /// Page keys leave reedline through private host commands so they can step
 /// paginated results with an empty line and edit normally otherwise.

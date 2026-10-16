@@ -16,7 +16,6 @@ use crate::app::{AuthState, ReplScopeStack, RuntimeContext, UiState};
 use crate::native::NativeSessionContext;
 use crate::ui::theme_catalog::ThemeCatalog;
 
-use super::history;
 use super::presentation::{ReplIntroStyle, intro_style, intro_style_with_verbosity};
 use crate::app::CommandOutput;
 use crate::cli::{DebugCompleteArgs, DebugHighlightArgs, DebugMenuArg, ReplArgs, ReplCommands};
@@ -191,14 +190,6 @@ fn run_repl_debug_complete(
                 cursor,
                 options,
             ),
-            DebugMenuArg::History => {
-                let projected_line =
-                    input::project_repl_ui_line(&args.line, runtime.config.resolved())?;
-                let history = crate::repl::SharedHistory::new(history::build_history_config(
-                    runtime, session,
-                ));
-                crate::repl::debug_history_menu(&history, &projected_line.line, cursor, options)
-            }
         };
         serde_json::to_string_pretty(&debug)
             .into_diagnostic()
@@ -218,20 +209,6 @@ fn run_repl_debug_complete(
                 options,
                 &steps,
             ),
-            DebugMenuArg::History => {
-                let projected_line =
-                    input::project_repl_ui_line(&args.line, runtime.config.resolved())?;
-                let history = crate::repl::SharedHistory::new(history::build_history_config(
-                    runtime, session,
-                ));
-                crate::repl::debug_history_menu_steps(
-                    &history,
-                    &projected_line.line,
-                    cursor,
-                    options,
-                    &steps,
-                )
-            }
         };
         serde_json::to_string_pretty(&frames)
             .into_diagnostic()
@@ -453,29 +430,6 @@ mod tests {
         )
         .expect("debug complete should succeed");
         assert!(matches!(complete.body, crate::app::CommandBody::Json(_)));
-
-        let history_complete = run_repl_debug_command_for(
-            &runtime,
-            &session,
-            &clients,
-            ReplArgs {
-                command: ReplCommands::DebugComplete(DebugCompleteArgs {
-                    line: "co".to_string(),
-                    menu: DebugMenuArg::History,
-                    cursor: None,
-                    width: 80,
-                    height: 8,
-                    menu_ansi: false,
-                    menu_unicode: false,
-                    steps: vec!["tab".to_string()],
-                }),
-            },
-        )
-        .expect("history debug complete should succeed");
-        assert!(matches!(
-            history_complete.body,
-            crate::app::CommandBody::Json(_)
-        ));
 
         let highlight = run_repl_debug_command_for(
             &runtime,

@@ -5,12 +5,11 @@
 //! editor-facing mechanics such as reedline suggestions, path enumeration,
 //! menu styling, and trace payloads.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::completion::{CompletionAnalysis, CompletionEngine, CompletionTree, SuggestionOutput};
-use crate::core::fuzzy::fold_case;
 use crate::core::shell_words::{QuoteStyle, escape_for_shell, quote_for_shell};
 use crate::dsl::registered_verbs;
 use crate::repl::highlight::ReplHighlighter;
@@ -18,8 +17,7 @@ use nu_ansi_term::{Color, Style};
 use reedline::{Completer, Span, Suggestion};
 use serde::Serialize;
 
-use super::config::DEFAULT_HISTORY_MENU_ROWS;
-use super::{HistoryEntry, LineProjection, LineProjector, ReplAppearance, SharedHistory};
+use super::{LineProjection, LineProjector, ReplAppearance, SharedHistory};
 
 pub(crate) struct ReplCompleter {
     engine: CompletionEngine,
@@ -160,88 +158,6 @@ impl Completer for ReplCompleter {
         }
 
         suggestions
-    }
-}
-
-pub(crate) struct ReplHistoryCompleter {
-    history: SharedHistory,
-}
-
-impl ReplHistoryCompleter {
-    pub(crate) fn new(history: SharedHistory) -> Self {
-        Self { history }
-    }
-}
-
-impl Completer for ReplHistoryCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        let query = line
-            .get(..pos.min(line.len()))
-            .unwrap_or(line)
-            .trim()
-            .to_string();
-        let query_folded = fold_case(&query);
-        let replace_span = Span {
-            start: 0,
-            end: line.len(),
-        };
-
-        let mut seen = BTreeSet::new();
-        let mut exact = Vec::new();
-        let mut prefix = Vec::new();
-        let mut substring = Vec::new();
-        let mut recent = Vec::new();
-
-        for entry in self
-            .history
-            .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
-            .unwrap_or_default()
-            .into_iter()
-            .rev()
-        {
-            if !seen.insert(entry.command.clone()) {
-                continue;
-            }
-
-            if query_folded.is_empty() {
-                recent.push(history_suggestion(entry, replace_span));
-                if recent.len() >= DEFAULT_HISTORY_MENU_ROWS as usize {
-                    break;
-                }
-                continue;
-            }
-
-            let command_folded = fold_case(&entry.command);
-            let suggestion = history_suggestion(entry.clone(), replace_span);
-            if command_folded == query_folded {
-                exact.push(suggestion);
-            } else if command_folded.starts_with(&query_folded) {
-                prefix.push(suggestion);
-            } else if command_folded.contains(&query_folded) {
-                substring.push(suggestion);
-            }
-        }
-
-        if query_folded.is_empty() {
-            return recent;
-        }
-
-        exact
-            .into_iter()
-            .chain(prefix)
-            .chain(substring)
-            .take(DEFAULT_HISTORY_MENU_ROWS as usize)
-            .collect()
-    }
-}
-
-fn history_suggestion(entry: HistoryEntry, span: Span) -> Suggestion {
-    Suggestion {
-        value: entry.command.clone(),
-        extra: Some(vec![format!("{}  {}", entry.id, entry.command)]),
-        span,
-        append_whitespace: false,
-        ..Suggestion::default()
     }
 }
 
