@@ -5,7 +5,6 @@
 //! external command surface. It sits after top-level host setup but before the
 //! final native/plugin execution paths.
 
-use crate::repl::ReplViewContext;
 use std::cell::RefCell;
 
 use miette::{Result, WrapErr, miette};
@@ -769,7 +768,7 @@ fn parse_external_invocation(
 
 fn plan_external_invocation(
     runtime: &AppRuntime,
-    session: &AppSession,
+    _session: &AppSession,
     parsed: ParsedCommandLine,
     elevation: InvocationElevation,
     invocation: &ResolvedInvocation,
@@ -778,12 +777,12 @@ fn plan_external_invocation(
     if parsed.tokens.is_empty() {
         return Err(miette!("missing external command"));
     }
-    if let Some(help) = completion::maybe_render_dsl_help(
-        ReplViewContext::from_parts(runtime, session),
-        &parsed.stages,
-    ) {
+    if let Some(spec) = parsed.stages.iter().find_map(|raw| {
+        let parsed = crate::dsl::parse::pipeline::parse_stage(raw).ok()?;
+        crate::cli::is_cli_help_stage(&parsed).then_some(parsed.spec)
+    }) {
         return Ok(ExternalParse::Handled(Box::new(
-            CliCommandResult::document(Document::from_help_text(&help)),
+            CliCommandResult::document(crate::dsl::verb_info::help_document(&spec)?),
         )));
     }
 

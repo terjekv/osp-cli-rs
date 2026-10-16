@@ -415,31 +415,7 @@ fn handle_clap_parse_error(
                 crate::cli::is_cli_help_stage(&parsed).then_some(parsed.spec)
             });
             if let Some(spec) = &dsl_help {
-                let target = spec.split_whitespace().next().unwrap_or("");
-                let verbs = if target.is_empty() {
-                    crate::dsl::verb_info::registered_verbs()
-                        .iter()
-                        .collect::<Vec<_>>()
-                } else {
-                    vec![
-                        crate::dsl::verb_info::verb_info(target)
-                            .ok_or_else(|| miette!("Unknown DSL verb: {target}"))?,
-                    ]
-                };
-                filtered = Document {
-                    blocks: vec![DocBlock::section(
-                        "Commands",
-                        vec![DocBlock::Entries {
-                            entries: verbs
-                                .into_iter()
-                                .map(|info| DocumentEntry {
-                                    name: info.verb.to_string(),
-                                    description: info.help.to_string(),
-                                })
-                                .collect(),
-                        }],
-                    )],
-                };
+                filtered = crate::dsl::verb_info::help_document(spec)?;
             }
             let stages = if dsl_help.is_some() { &[][..] } else { stages };
             let mut output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)

@@ -119,6 +119,30 @@ pub fn verb_info(verb: &str) -> Option<&'static VerbInfo> {
         .find(|info| info.verb.eq_ignore_ascii_case(verb))
 }
 
+pub(crate) fn help_document(spec: &str) -> miette::Result<crate::core::document::Document> {
+    use crate::core::document::{DocBlock, Document, DocumentEntry};
+    let target = spec.split_whitespace().next().unwrap_or("");
+    let verbs = if target.is_empty() {
+        registered_verbs().iter().collect::<Vec<_>>()
+    } else {
+        vec![verb_info(target).ok_or_else(|| miette::miette!("Unknown DSL verb: {target}"))?]
+    };
+    Ok(Document {
+        blocks: vec![DocBlock::section(
+            "Commands",
+            vec![DocBlock::Entries {
+                entries: verbs
+                    .into_iter()
+                    .map(|info| DocumentEntry {
+                        name: info.verb.to_string(),
+                        description: info.help.to_string(),
+                    })
+                    .collect(),
+            }],
+        )],
+    })
+}
+
 /// Returns whether `verb` is a registered non-meta verb.
 pub fn is_registered_explicit_verb(verb: &str) -> bool {
     VERBS

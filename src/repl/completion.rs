@@ -14,7 +14,7 @@ use crate::completion::{
     FlagNode, SuggestionEntry,
 };
 use crate::dsl::parse::pipeline::parse_stage;
-use crate::dsl::{registered_verbs, verb_info};
+use crate::dsl::verb_info;
 use crate::repl::default_pipe_verbs;
 use crate::ui::section_chrome::{
     SectionRenderContext, SectionStyleTokens, render_section_block_with_overrides,
@@ -421,18 +421,27 @@ fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
     let mut lines = Vec::new();
 
     let target = spec.split_whitespace().next().unwrap_or("").trim();
-    if target.is_empty() {
-        for info in registered_verbs() {
-            lines.push(format!("  {:<5} {}", info.verb, info.summary));
+    match crate::dsl::verb_info::help_document(spec) {
+        Ok(document) => {
+            for row in document.rows() {
+                let name = row["name"].as_str().unwrap_or_default();
+                let info = verb_info(name).expect("DSL document contains registered verbs");
+                if target.is_empty() {
+                    lines.push(format!("  {:<5} {}", name, info.summary));
+                } else {
+                    lines.push(format!("  {}  {}", name, info.summary));
+                    lines.push(format!(
+                        "  {}",
+                        row["description"].as_str().unwrap_or_default()
+                    ));
+                }
+            }
+            if target.is_empty() {
+                lines.push(String::new());
+                lines.push("  Use | H <verb> for details.".to_string());
+            }
         }
-        lines.push(String::new());
-        lines.push("  Use | H <verb> for details.".to_string());
-    } else {
-        let lookup = target.to_ascii_uppercase();
-        if let Some(info) = verb_info(&lookup) {
-            lines.push(format!("  {}  {}", info.verb, info.summary));
-            lines.push(format!("  {}", info.help));
-        } else {
+        Err(_) => {
             lines.push(format!("  Unknown DSL verb: {target}"));
             lines.push("  Use | H to list available verbs.".to_string());
         }
