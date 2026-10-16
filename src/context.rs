@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Shared vocabulary for selections across native commands and plugins.
-pub const KINDS: &[&str] = &[
+pub(crate) const KINDS: &[&str] = &[
     "account", "group", "person", "host", "netgroup", "contact", "task", "provider", "vm",
 ];
 pub(crate) fn shared(kind: &str) -> bool {

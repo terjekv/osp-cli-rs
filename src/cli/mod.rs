@@ -32,8 +32,8 @@
 //! Most callers only need a few entry points:
 //!
 //! - [`crate::cli::Cli`] for the binary-facing grammar
-//! - [`crate::cli::InlineCommandCli`] for command text that omits the binary name
-//! - [`crate::cli::parse_command_text_with_aliases`] when you need alias-aware command plus
+//! - `InlineCommandCli` for command text that omits the binary name
+//! - `parse_command_text_with_aliases` when you need alias-aware command plus
 //!   DSL parsing
 //!
 //! The split here is deliberate. One-shot flags that affect rendering or
@@ -58,10 +58,9 @@ use std::path::PathBuf;
 
 use crate::ui::UiPresentation;
 
-pub use pipeline::{
-    ParsedCommandLine, is_cli_help_stage, parse_command_text_with_aliases,
-    parse_command_tokens_with_aliases, validate_cli_dsl_stages,
-};
+pub(crate) use pipeline::{ParsedCommandLine, is_cli_help_stage, validate_cli_dsl_stages};
+#[cfg(test)]
+pub(crate) use pipeline::{parse_command_text_with_aliases, parse_command_tokens_with_aliases};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum PresentationArg {
@@ -89,6 +88,7 @@ impl From<PresentationArg> for UiPresentation {
     about = "OSP CLI",
     after_help = "Run `osp COMMAND --help` for a command family, or `osp` alone for the interactive shell. Pipe output through the OSP DSL with `|`; use `| H` for in-band DSL help."
 )]
+#[non_exhaustive]
 pub struct Cli {
     #[arg(skip)]
     pub(crate) product_overrides: ConfigLayer,
@@ -143,10 +143,15 @@ pub struct Cli {
 
     /// Top-level built-in or plugin command selection.
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub(crate) command: Option<Commands>,
 }
 
 impl Cli {
+    /// Reports whether a built-in or external command was selected.
+    pub fn has_command(&self) -> bool {
+        self.command.is_some()
+    }
+
     /// Returns the runtime source-loading options implied by global CLI flags.
     pub fn runtime_load_options(&self) -> RuntimeLoadOptions {
         runtime_load_options_from_flags(self.no_env, self.no_config_file, self.defaults_only)
@@ -155,7 +160,7 @@ impl Cli {
 
 /// Top-level commands accepted by `osp`.
 #[derive(Subcommand)]
-pub enum Commands {
+pub(crate) enum Commands {
     #[command(hide = true)]
     /// Inspect, set or clear entities remembered in this REPL session.
     Context(ContextArgs),
@@ -188,7 +193,7 @@ pub enum Commands {
 
 /// Local terminal notification controls.
 #[derive(Debug, Clone, Args)]
-pub struct NotificationsArgs {
+pub(crate) struct NotificationsArgs {
     /// The local feedback operation.
     #[command(subcommand)]
     pub command: NotificationsCommands,
@@ -196,7 +201,7 @@ pub struct NotificationsArgs {
 
 /// Explicit local notification operations.
 #[derive(Debug, Clone, Subcommand)]
-pub enum NotificationsCommands {
+pub(crate) enum NotificationsCommands {
     /// Request the same terminal bell as enabled event feedback.
     Preview,
 }
@@ -218,7 +223,7 @@ impl Commands {
 
 /// Inspect, set or clear entities remembered in the current REPL session.
 #[derive(Debug, Args)]
-pub struct ContextArgs {
+pub(crate) struct ContextArgs {
     /// Context operation to run.
     #[command(subcommand)]
     pub command: Option<ContextCommands>,
@@ -226,7 +231,7 @@ pub struct ContextArgs {
 
 /// Operations for REPL session context.
 #[derive(Debug, Subcommand)]
-pub enum ContextCommands {
+pub(crate) enum ContextCommands {
     /// Remove all remembered values, or only the given kind.
     #[command(display_order = 10)]
     Clear(ContextClearArgs),
@@ -236,14 +241,14 @@ pub enum ContextCommands {
 
 /// Selects context values to clear.
 #[derive(Debug, Args)]
-pub struct ContextClearArgs {
+pub(crate) struct ContextClearArgs {
     /// Entity kind to remove, such as `account` or `host`.
     pub kind: Option<String>,
 }
 
 /// A named entity to remember.
 #[derive(Debug, Args)]
-pub struct ContextSetArgs {
+pub(crate) struct ContextSetArgs {
     /// Shared entity kind.
     pub kind: String,
     /// Entity name or identifier.
@@ -255,7 +260,7 @@ pub struct ContextSetArgs {
 #[command(
     after_help = "Static scripts cover built-in commands and flags. Commands loaded dynamically from native integrations or plugins remain available through the interactive REPL completion engine."
 )]
-pub struct CompletionsArgs {
+pub(crate) struct CompletionsArgs {
     /// Shell whose completion script should be generated.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
@@ -280,15 +285,15 @@ pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
 /// Parser used for inline command execution without the binary name prefix.
 #[derive(Parser)]
 #[command(name = "osp", about = "OSP CLI", no_binary_name = true)]
-pub struct InlineCommandCli {
+pub(crate) struct InlineCommandCli {
     /// Parsed command payload, if any.
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub(crate) command: Option<Commands>,
 }
 
 /// Hidden REPL-only command namespace.
 #[derive(Debug, Args)]
-pub struct ReplArgs {
+pub(crate) struct ReplArgs {
     /// Hidden REPL subcommand to run.
     #[command(subcommand)]
     pub command: ReplCommands,
@@ -296,7 +301,7 @@ pub struct ReplArgs {
 
 /// Hidden REPL debugging commands.
 #[derive(Debug, Subcommand)]
-pub enum ReplCommands {
+pub(crate) enum ReplCommands {
     #[command(name = "debug-complete", hide = true)]
     /// Trace completion candidates for a partially typed line.
     DebugComplete(DebugCompleteArgs),
@@ -307,14 +312,14 @@ pub enum ReplCommands {
 
 /// Popup menu target to inspect through the hidden REPL debug surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum DebugMenuArg {
+pub(crate) enum DebugMenuArg {
     /// Trace the normal completion popup.
     Completion,
 }
 
 /// Arguments for REPL completion debugging.
 #[derive(Debug, Args)]
-pub struct DebugCompleteArgs {
+pub(crate) struct DebugCompleteArgs {
     /// Input line to complete.
     #[arg(long)]
     pub line: String,
@@ -350,7 +355,7 @@ pub struct DebugCompleteArgs {
 
 /// Arguments for REPL highlighting debugging.
 #[derive(Debug, Args)]
-pub struct DebugHighlightArgs {
+pub(crate) struct DebugHighlightArgs {
     /// Input line to highlight.
     #[arg(long)]
     pub line: String,
@@ -358,7 +363,7 @@ pub struct DebugHighlightArgs {
 
 /// Top-level plugin command arguments.
 #[derive(Debug, Args)]
-pub struct PluginsArgs {
+pub(crate) struct PluginsArgs {
     /// Plugin management action to perform.
     #[command(subcommand)]
     pub command: PluginsCommands,
@@ -366,7 +371,7 @@ pub struct PluginsArgs {
 
 /// Top-level doctor command arguments.
 #[derive(Debug, Args)]
-pub struct DoctorArgs {
+pub(crate) struct DoctorArgs {
     /// Optional narrowed diagnostic target.
     #[command(subcommand)]
     pub command: Option<DoctorCommands>,
@@ -374,7 +379,7 @@ pub struct DoctorArgs {
 
 /// Built-in diagnostic groups exposed through `osp doctor`.
 #[derive(Debug, Subcommand)]
-pub enum DoctorCommands {
+pub(crate) enum DoctorCommands {
     /// Run all visible diagnostics.
     #[command(display_order = 10)]
     All,
@@ -394,7 +399,7 @@ pub enum DoctorCommands {
 
 /// Built-in plugin management subcommands.
 #[derive(Debug, Subcommand)]
-pub enum PluginsCommands {
+pub(crate) enum PluginsCommands {
     /// List plugins.
     List,
     /// Drop cached describe metadata.
@@ -413,7 +418,7 @@ pub enum PluginsCommands {
 
 /// Top-level theme command arguments.
 #[derive(Debug, Args)]
-pub struct ThemeArgs {
+pub(crate) struct ThemeArgs {
     /// Theme action to perform.
     #[command(subcommand)]
     pub command: ThemeCommands,
@@ -421,7 +426,7 @@ pub struct ThemeArgs {
 
 /// Theme inspection and selection commands.
 #[derive(Debug, Subcommand)]
-pub enum ThemeCommands {
+pub(crate) enum ThemeCommands {
     /// List available themes.
     #[command(display_order = 10)]
     List,
@@ -435,21 +440,21 @@ pub enum ThemeCommands {
 
 /// Arguments for `theme show`.
 #[derive(Debug, Args)]
-pub struct ThemeShowArgs {
+pub(crate) struct ThemeShowArgs {
     /// Theme name to inspect; defaults to the active theme.
     pub name: Option<String>,
 }
 
 /// Arguments for `theme use`.
 #[derive(Debug, Args)]
-pub struct ThemeUseArgs {
+pub(crate) struct ThemeUseArgs {
     /// Theme name to activate.
     pub name: String,
 }
 
 /// Shared config write scope arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigScopeArgs {
+pub(crate) struct ConfigScopeArgs {
     /// Write to the global store instead of a profile-scoped store.
     #[arg(long = "global", conflicts_with_all = ["profile", "profile_all"])]
     pub global: bool,
@@ -473,7 +478,7 @@ pub struct ConfigScopeArgs {
 
 /// Shared config store-selection arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigStoreArgs {
+pub(crate) struct ConfigStoreArgs {
     /// Apply the change only to the current in-memory session.
     #[arg(long = "session", conflicts_with_all = ["config_store", "secrets", "save"])]
     pub session: bool,
@@ -493,7 +498,7 @@ pub struct ConfigStoreArgs {
 
 /// Shared config read-output arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigReadOutputArgs {
+pub(crate) struct ConfigReadOutputArgs {
     /// Include source provenance for returned keys.
     #[arg(long = "sources")]
     pub sources: bool,
@@ -505,7 +510,7 @@ pub struct ConfigReadOutputArgs {
 
 /// Top-level config command arguments.
 #[derive(Args)]
-pub struct ConfigArgs {
+pub(crate) struct ConfigArgs {
     /// Config action to perform.
     #[command(subcommand)]
     pub command: ConfigCommands,
@@ -516,7 +521,7 @@ pub struct ConfigArgs {
 #[command(
     after_help = "Examples:\n  osp alias add lsng 'ldap netgroup ${1} --value | P members'\n  osp alias list\n  osp alias remove lsng --save"
 )]
-pub struct AliasArgs {
+pub(crate) struct AliasArgs {
     /// Alias action to perform.
     #[command(subcommand)]
     pub command: AliasCommands,
@@ -524,7 +529,7 @@ pub struct AliasArgs {
 
 /// Commands for the friendly `alias.*` config wrapper.
 #[derive(Debug, Subcommand)]
-pub enum AliasCommands {
+pub(crate) enum AliasCommands {
     /// List aliases available in the active profile and terminal.
     #[command(display_order = 10)]
     List(AliasListArgs),
@@ -538,7 +543,7 @@ pub enum AliasCommands {
 
 /// Arguments for `alias list`.
 #[derive(Debug, Args, Clone, Default)]
-pub struct AliasListArgs {
+pub(crate) struct AliasListArgs {
     /// Include the winning config source and scope for each alias.
     #[arg(long)]
     pub sources: bool,
@@ -546,7 +551,7 @@ pub struct AliasListArgs {
 
 /// Arguments for `alias add`.
 #[derive(Debug, Args)]
-pub struct AliasAddArgs {
+pub(crate) struct AliasAddArgs {
     /// Short command name, for example `lsng`.
     pub name: String,
 
@@ -568,7 +573,7 @@ pub struct AliasAddArgs {
 
 /// Arguments for `alias remove`.
 #[derive(Debug, Args)]
-pub struct AliasRemoveArgs {
+pub(crate) struct AliasRemoveArgs {
     /// Short command name to remove.
     pub name: String,
 
@@ -587,7 +592,7 @@ pub struct AliasRemoveArgs {
 
 /// Top-level history command arguments.
 #[derive(Debug, Args)]
-pub struct HistoryArgs {
+pub(crate) struct HistoryArgs {
     /// History action to perform.
     #[command(subcommand)]
     pub command: HistoryCommands,
@@ -595,11 +600,11 @@ pub struct HistoryArgs {
 
 /// Hidden intro command arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct IntroArgs {}
+pub(crate) struct IntroArgs {}
 
 /// History management commands.
 #[derive(Debug, Subcommand)]
-pub enum HistoryCommands {
+pub(crate) enum HistoryCommands {
     /// List recent history.
     #[command(display_order = 10)]
     List(HistoryListArgs),
@@ -613,7 +618,7 @@ pub enum HistoryCommands {
 
 /// Arguments for `history list`.
 #[derive(Debug, Args, Clone, Default)]
-pub struct HistoryListArgs {
+pub(crate) struct HistoryListArgs {
     /// Maximum number of recent matching entries to show.
     #[arg(long, value_name = "COUNT", default_value = "20")]
     pub limit: Option<std::num::NonZeroUsize>,
@@ -637,14 +642,14 @@ pub struct HistoryListArgs {
 
 /// Arguments for `history prune`.
 #[derive(Debug, Args)]
-pub struct HistoryPruneArgs {
+pub(crate) struct HistoryPruneArgs {
     /// Number of recent entries to keep.
     pub keep: usize,
 }
 
 /// Configuration inspection and mutation commands.
 #[derive(Subcommand)]
-pub enum ConfigCommands {
+pub(crate) enum ConfigCommands {
     /// Show the resolved configuration view.
     #[command(display_order = 10)]
     Show(ConfigShowArgs),
@@ -668,7 +673,7 @@ pub enum ConfigCommands {
 
 /// Arguments for `config show`.
 #[derive(Debug, Args)]
-pub struct ConfigShowArgs {
+pub(crate) struct ConfigShowArgs {
     /// Shared source/raw output flags for config reads.
     #[command(flatten)]
     pub output: ConfigReadOutputArgs,
@@ -676,7 +681,7 @@ pub struct ConfigShowArgs {
 
 /// Arguments for `config get`.
 #[derive(Debug, Args)]
-pub struct ConfigGetArgs {
+pub(crate) struct ConfigGetArgs {
     /// Config key to read.
     pub key: String,
 
@@ -687,7 +692,7 @@ pub struct ConfigGetArgs {
 
 /// Arguments for `config explain`.
 #[derive(Debug, Args)]
-pub struct ConfigExplainArgs {
+pub(crate) struct ConfigExplainArgs {
     /// Config key to explain.
     pub key: String,
 
@@ -698,7 +703,7 @@ pub struct ConfigExplainArgs {
 
 /// Arguments for `config set`.
 #[derive(Args)]
-pub struct ConfigSetArgs {
+pub(crate) struct ConfigSetArgs {
     /// Config key to write.
     pub key: String,
     /// Config value to write. Multiple words are joined with spaces.
@@ -736,7 +741,7 @@ pub struct ConfigSetArgs {
 
 /// Arguments for `config unset`.
 #[derive(Debug, Args)]
-pub struct ConfigUnsetArgs {
+pub(crate) struct ConfigUnsetArgs {
     /// Config key to remove.
     pub key: String,
 
@@ -814,7 +819,7 @@ pub(crate) fn runtime_load_options_from_flags(
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::cli::{Commands, ThemeCommands, parse_inline_command_tokens};
 ///
 /// let tokens = vec![
@@ -834,7 +839,9 @@ pub(crate) fn runtime_load_options_from_flags(
 ///     _ => panic!("unexpected command"),
 /// }
 /// ```
-pub fn parse_inline_command_tokens(tokens: &[String]) -> Result<Option<Commands>, clap::Error> {
+pub(crate) fn parse_inline_command_tokens(
+    tokens: &[String],
+) -> Result<Option<Commands>, clap::Error> {
     InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str)).map(|parsed| parsed.command)
 }
 
@@ -981,6 +988,32 @@ pub(crate) fn inline_help_document(
 
 #[cfg(test)]
 mod tests {
+    mod pipeline_parse;
+
+    mod aliases;
+
+    #[test]
+    fn internal_example_1() {
+        use crate::cli::{Commands, ThemeCommands, parse_inline_command_tokens};
+
+        let tokens = vec![
+            "theme".to_string(),
+            "show".to_string(),
+            "dracula".to_string(),
+        ];
+
+        let command = parse_inline_command_tokens(&tokens).unwrap().unwrap();
+        match command {
+            Commands::Theme(args) => match args.command {
+                ThemeCommands::Show(show) => {
+                    assert_eq!(show.name.as_deref(), Some("dracula"));
+                }
+                _ => panic!("unexpected theme command"),
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
     use super::{
         AliasCommands, Cli, Commands, ConfigCommands, InlineCommandCli, RuntimeLoadOptions,
         append_appearance_overrides, parse_inline_command_tokens,

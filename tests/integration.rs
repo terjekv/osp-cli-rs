@@ -4,9 +4,6 @@
 #[path = "support/temp.rs"]
 mod temp_support;
 
-#[path = "integration/aliases.rs"]
-mod aliases;
-
 #[path = "integration/app/mod.rs"]
 mod app;
 

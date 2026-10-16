@@ -1,11 +1,11 @@
-use osp_cli::cli::parse_command_text_with_aliases;
-use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
-use osp_cli::core::OutputFormat;
-use osp_cli::dsl::apply_pipeline;
-use osp_cli::ui::{RenderSettings, render};
+use crate::cli::parse_command_text_with_aliases;
+use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+use crate::core::OutputFormat;
+use crate::dsl::apply_pipeline;
+use crate::ui::{RenderSettings, render};
 use serde_json::json;
 
-fn make_config(entries: &[(&str, &str)]) -> osp_cli::config::ResolvedConfig {
+fn make_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "default");
     for (key, value) in entries {
@@ -39,7 +39,7 @@ fn alias_expands_internal_and_user_pipes() {
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Value);
-    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
+    let output = render(&transformed, &crate::ui::RenderRequest::new(&settings));
     assert!(output.contains("oistes"));
 }
 

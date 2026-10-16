@@ -35,7 +35,7 @@ pub(crate) fn truncate_display(s: &str, max_len: usize) -> String {
 
 /// Parsed command tokens plus trailing DSL stages.
 #[derive(Clone, PartialEq, Eq)]
-pub struct ParsedCommandLine {
+pub(crate) struct ParsedCommandLine {
     /// Final command tokens after alias expansion and command normalization.
     pub tokens: Vec<String>,
     /// Raw trailing DSL stage strings in execution order.
@@ -49,7 +49,7 @@ pub struct ParsedCommandLine {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::cli::parse_command_text_with_aliases;
 /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 ///
@@ -64,7 +64,7 @@ pub struct ParsedCommandLine {
 /// assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
 /// assert_eq!(parsed.stages, vec!["H P"]);
 /// ```
-pub fn parse_command_text_with_aliases(
+pub(crate) fn parse_command_text_with_aliases(
     text: &str,
     config: &ResolvedConfig,
 ) -> Result<ParsedCommandLine> {
@@ -89,7 +89,7 @@ pub fn parse_command_text_with_aliases(
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::cli::parse_command_tokens_with_aliases;
 /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 ///
@@ -112,7 +112,7 @@ pub fn parse_command_text_with_aliases(
 /// assert_eq!(parsed.tokens, vec!["config", "show"]);
 /// assert_eq!(parsed.stages, vec!["P ui.format"]);
 /// ```
-pub fn parse_command_tokens_with_aliases(
+pub(crate) fn parse_command_tokens_with_aliases(
     tokens: &[String],
     config: &ResolvedConfig,
 ) -> Result<ParsedCommandLine> {
@@ -209,13 +209,13 @@ fn finalize_parsed_command(tokens: Vec<String>, stages: Vec<String>) -> Result<P
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::cli::validate_cli_dsl_stages;
 ///
 /// validate_cli_dsl_stages(&["P uid".to_string(), "H P".to_string()]).unwrap();
 /// assert!(validate_cli_dsl_stages(&["R nope".to_string()]).is_err());
 /// ```
-pub fn validate_cli_dsl_stages(stages: &[String]) -> Result<()> {
+pub(crate) fn validate_cli_dsl_stages(stages: &[String]) -> Result<()> {
     for raw in stages {
         let parsed = parse_stage(raw).into_diagnostic().wrap_err_with(|| {
             format!("failed to parse DSL stage: {}", truncate_display(raw, 80))
@@ -242,7 +242,7 @@ pub fn validate_cli_dsl_stages(stages: &[String]) -> Result<()> {
 }
 
 /// Reports whether a parsed stage is the special CLI help form `| H <verb>`.
-pub fn is_cli_help_stage(parsed: &ParsedStage) -> bool {
+pub(crate) fn is_cli_help_stage(parsed: &ParsedStage) -> bool {
     matches!(parsed.kind, ParsedStageKind::UnknownExplicit) && parsed.verb.eq_ignore_ascii_case("H")
 }
 
@@ -459,6 +459,57 @@ fn resolve_alias_placeholder(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::cli::parse_command_text_with_aliases;
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver.resolve(ResolveOptions::default()).unwrap();
+
+        let parsed = parse_command_text_with_aliases("theme show dracula | H P", &config).unwrap();
+        assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
+        assert_eq!(parsed.stages, vec!["H P"]);
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::cli::parse_command_tokens_with_aliases;
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver.resolve(ResolveOptions::default()).unwrap();
+
+        let tokens = vec![
+            "config".to_string(),
+            "show".to_string(),
+            "|".to_string(),
+            "P".to_string(),
+            "ui.format".to_string(),
+        ];
+
+        let parsed = parse_command_tokens_with_aliases(&tokens, &config).unwrap();
+        assert_eq!(parsed.tokens, vec!["config", "show"]);
+        assert_eq!(parsed.stages, vec!["P ui.format"]);
+    }
+
+    #[test]
+    fn internal_example_3() {
+        use crate::cli::validate_cli_dsl_stages;
+
+        validate_cli_dsl_stages(&["P uid".to_string(), "H P".to_string()]).unwrap();
+        assert!(validate_cli_dsl_stages(&["R nope".to_string()]).is_err());
+    }
+
     use super::{
         expand_alias_template, parse_command_text_with_aliases, parse_command_tokens_with_aliases,
         truncate_display, validate_cli_dsl_stages,

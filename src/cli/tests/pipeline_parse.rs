@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
-use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, ResolvedConfig};
-use osp_cli::{
+use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, ResolvedConfig};
+use crate::{
     cli::{parse_command_text_with_aliases, parse_command_tokens_with_aliases},
     dsl::apply_pipeline,
     row,
