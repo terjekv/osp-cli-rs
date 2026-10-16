@@ -63,7 +63,7 @@ pub(crate) fn run_intro_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+    use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::native::NativeCommandRegistry;
@@ -101,20 +101,26 @@ mod tests {
     }
 
     fn intro_state() -> AppState {
-        AppState::new(AppStateInit {
+        crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config: resolved_repl_config(),
-            render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            verbosity: MessageLevel::Success,
-
-            debug_level: 0,
-            plugins: PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands: NativeCommandRegistry::default(),
-            themes: ThemeCatalog::default(),
             launch: LaunchContext::default(),
-        })
+            native_commands: NativeCommandRegistry::default(),
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Json),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build()
     }
 
     #[test]

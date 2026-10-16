@@ -444,17 +444,6 @@ impl AppSession {
         self.sync_history_shell_context();
     }
 
-    /// Captures the session-scoped state that must survive a runtime rebuild.
-    pub(crate) fn capture_rebuild_state(&self) -> Self {
-        self.clone()
-    }
-
-    /// Restores session-scoped state after a runtime rebuild.
-    pub(crate) fn restore_rebuild_state(&mut self, state: Self) {
-        *self = state;
-        self.sync_history_shell_context();
-    }
-
     /// Stores the last successful output so the REPL can replay it later.
     pub(crate) fn record_success_output(
         &mut self,
@@ -576,50 +565,6 @@ impl Default for AppSession {
     }
 }
 
-pub(crate) struct AppStateInit {
-    pub context: RuntimeContext,
-    pub config: crate::config::ResolvedConfig,
-    pub render_settings: crate::ui::RenderSettings,
-    pub verbosity: crate::ui::messages::MessageLevel,
-    pub debug_level: u8,
-    pub plugins: crate::plugin::PluginManager,
-    pub native_commands: NativeCommandRegistry,
-    pub themes: crate::ui::theme_catalog::ThemeCatalog,
-    pub launch: LaunchContext,
-}
-
-pub(crate) struct AppStateParts {
-    pub runtime: AppRuntime,
-    pub session: AppSession,
-    pub clients: AppClients,
-}
-
-impl AppStateParts {
-    fn from_init(init: AppStateInit, session_override: Option<AppSession>) -> Self {
-        {
-            let _phase =
-                tracing::info_span!(target: "osp_startup", "native command configure").entered();
-            init.native_commands.configure(&init.config);
-        }
-        let clients = AppClients::new(init.plugins, init.native_commands);
-        let config = crate::app::ConfigState::new(init.config);
-        let ui = crate::app::UiState::new(init.render_settings, init.verbosity, init.debug_level);
-        let auth = {
-            let _phase =
-                tracing::info_span!(target: "osp_startup", "auth policy catalog setup").entered();
-            crate::app::AuthState::from_commands(clients.plugins(), clients.native_commands())
-        };
-        let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);
-        let session = session_override.unwrap_or_default();
-
-        Self {
-            runtime,
-            session,
-            clients,
-        }
-    }
-}
-
 /// Aggregate application state shared between runtime and session logic.
 #[non_exhaustive]
 #[must_use]
@@ -667,25 +612,6 @@ impl AppState {
         config: crate::config::ResolvedConfig,
     ) -> miette::Result<Self> {
         AppStateBuilder::from_resolved_config(context, config).map(AppStateBuilder::build)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new(init: AppStateInit) -> Self {
-        Self::from_parts(AppStateParts::from_init(init, None))
-    }
-
-    pub(crate) fn from_parts(parts: AppStateParts) -> Self {
-        Self {
-            runtime: parts.runtime,
-            session: parts.session,
-            clients: parts.clients,
-        }
-    }
-
-    pub(crate) fn replace_parts(&mut self, parts: AppStateParts) {
-        self.runtime = parts.runtime;
-        self.session = parts.session;
-        self.clients = parts.clients;
     }
 
     /// Returns the prompt prefix configured for the current session.
@@ -750,14 +676,15 @@ impl AppState {
 /// ```
 #[must_use]
 pub struct AppStateBuilder {
-    context: RuntimeContext,
-    config: crate::config::ResolvedConfig,
-    ui: UiState,
-    launch: LaunchContext,
-    plugins: Option<PluginManager>,
-    native_commands: NativeCommandRegistry,
-    session: Option<AppSession>,
-    themes: Option<crate::ui::theme_catalog::ThemeCatalog>,
+    pub(crate) context: RuntimeContext,
+    pub(crate) config: crate::config::ResolvedConfig,
+    pub(crate) ui: UiState,
+    pub(crate) launch: LaunchContext,
+    pub(crate) plugins: Option<PluginManager>,
+    pub(crate) native_commands: NativeCommandRegistry,
+    pub(crate) session: Option<AppSession>,
+    pub(crate) themes: Option<crate::ui::theme_catalog::ThemeCatalog>,
+    pub(crate) definition: std::sync::Arc<super::AppDefinition>,
 }
 
 impl AppStateBuilder {
@@ -782,23 +709,7 @@ impl AppStateBuilder {
             native_commands: NativeCommandRegistry::default(),
             session: None,
             themes: None,
-        }
-    }
-
-    pub(crate) fn from_host_inputs(
-        context: RuntimeContext,
-        config: crate::config::ResolvedConfig,
-        host_inputs: crate::app::assembly::ResolvedHostInputs,
-    ) -> Self {
-        Self {
-            context,
-            config,
-            ui: host_inputs.ui,
-            launch: LaunchContext::default(),
-            plugins: Some(host_inputs.plugins),
-            native_commands: NativeCommandRegistry::default(),
-            session: Some(host_inputs.default_session),
-            themes: Some(host_inputs.themes),
+            definition: Default::default(),
         }
     }
 
@@ -811,14 +722,15 @@ impl AppStateBuilder {
         context: RuntimeContext,
         config: crate::config::ResolvedConfig,
     ) -> miette::Result<Self> {
-        let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-        let ui = crate::app::assembly::derive_ui_state(
-            &context,
-            &config,
-            &themes,
-            crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-            None,
-        )?;
+        let (ui, themes) =
+            super::assembly::build_host(super::assembly::HostBuildRequest::Presentation {
+                context: &context,
+                config: Some(&config),
+                seed: super::assembly::RenderSettingsSeed::DefaultAuto,
+                theme: None,
+                tolerant: false,
+            })?
+            .presentation();
         let session = AppSession::default();
         crate::ui::theme_catalog::log_theme_issues(&themes.issues);
         Ok(Self {
@@ -830,6 +742,7 @@ impl AppStateBuilder {
             native_commands: NativeCommandRegistry::default(),
             session: Some(session),
             themes: Some(themes),
+            definition: Default::default(),
         })
     }
 
@@ -874,46 +787,9 @@ impl AppStateBuilder {
     /// omitted pieces such as themes, plugin manager, and default session before
     /// returning the final value.
     pub fn build(self) -> AppState {
-        let Self {
-            context,
-            config,
-            ui,
-            launch,
-            plugins,
-            native_commands,
-            session,
-            themes,
-        } = self;
-        let should_log_theme_issues = themes.is_none();
-        let themes =
-            themes.unwrap_or_else(|| crate::ui::theme_catalog::load_theme_catalog(&config));
-        let plugins = plugins
-            .unwrap_or_else(|| crate::app::assembly::build_plugin_manager(&config, &launch, None));
-        if should_log_theme_issues {
-            crate::ui::theme_catalog::log_theme_issues(&themes.issues);
-        }
-
-        let crate::app::UiState {
-            render_settings,
-            verbosity,
-            debug_level,
-            ..
-        } = ui;
-
-        AppState::from_parts(AppStateParts::from_init(
-            AppStateInit {
-                context,
-                config,
-                render_settings,
-                verbosity,
-                debug_level,
-                plugins,
-                native_commands,
-                themes,
-                launch,
-            },
-            session,
-        ))
+        super::assembly::build_host(super::assembly::HostBuildRequest::State(Box::new(self)))
+            .unwrap_or_else(|_| unreachable!("resolved state builder inputs are infallible"))
+            .state()
     }
 }
 
@@ -962,9 +838,8 @@ mod tests {
             &["P name".to_string()],
         );
         session.record_failure("list users", "Command failed", "detail");
-        let snapshot = session.capture_rebuild_state();
-        let mut restored = AppSession::default();
-        restored.restore_rebuild_state(snapshot);
+        let restored = session.clone();
+        restored.sync_history_shell_context();
 
         assert_eq!(restored.prompt_prefix, "osp-dev");
         assert!(!restored.history_enabled);

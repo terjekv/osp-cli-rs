@@ -13,7 +13,7 @@ use super::{
     resolve_runtime_config, run_from, run_from_with_sink,
 };
 use crate::app::sink::BufferedUiSink;
-use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
 use crate::cli::commands::doctor as doctor_cmd;
 use crate::cli::invocation::{InvocationOptions, scan_cli_argv};
 use crate::cli::{Cli, Commands, ConfigCommands, PluginsCommands, ThemeCommands};
@@ -103,20 +103,22 @@ fn make_completion_state_with_entries_and_native(
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 
-    let mut state = AppState::new(AppStateInit {
+    let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config,
-        render_settings: settings,
-        verbosity: MessageLevel::Success,
-
-        debug_level: 0,
-        plugins: PluginManager::new(Vec::new())
-            .with_bundled_roots(false)
-            .with_default_roots(false),
-        native_commands,
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+        config: config,
         launch: LaunchContext::default(),
-    });
+        native_commands: native_commands,
+        ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+        plugins: Some(
+            PluginManager::new(Vec::new())
+                .with_bundled_roots(false)
+                .with_default_roots(false),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build();
     state
         .session
         .config_overrides
@@ -428,21 +430,23 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
             RuntimeLoadOptions::default()
         });
 
-    let mut state = AppState::new(AppStateInit {
+    let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config,
-        render_settings: settings,
-        verbosity: MessageLevel::Success,
-
-        debug_level: 0,
-        plugins: PluginManager::new(plugin_dirs)
-            .with_roots(config_root, cache_root)
-            .with_bundled_roots(!cfg!(miri))
-            .with_default_roots(!cfg!(miri)),
+        config: config,
+        launch: launch,
         native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
-        launch,
-    });
+        ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+        plugins: Some(
+            PluginManager::new(plugin_dirs)
+                .with_roots(config_root, cache_root)
+                .with_bundled_roots(!cfg!(miri))
+                .with_default_roots(!cfg!(miri)),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build();
     state
         .session
         .config_overrides

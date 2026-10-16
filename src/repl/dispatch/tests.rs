@@ -10,7 +10,7 @@ use super::{
     run_repl_command,
 };
 use crate::app::CommandOutput;
-use crate::app::{AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+use crate::app::{AppSession, AppState, LaunchContext, RuntimeContext, TerminalKind};
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::{
     Commands, ConfigArgs, ConfigCommands, ConfigSetArgs, ConfigUnsetArgs, DebugCompleteArgs,
@@ -508,18 +508,18 @@ fn make_state_with_plugins(plugins: crate::plugin::PluginManager) -> AppState {
         .expect("test config should resolve");
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
-    AppState::new(AppStateInit {
+    crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config,
-        render_settings: settings,
-        verbosity: MessageLevel::Success,
-
-        debug_level: 0,
-        plugins,
-        native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+        config: config,
         launch: LaunchContext::default(),
-    })
+        native_commands: crate::native::NativeCommandRegistry::default(),
+        ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+        plugins: Some(plugins),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build()
 }
 
 fn empty_plugins() -> crate::plugin::PluginManager {

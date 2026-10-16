@@ -779,7 +779,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit() {
+fn state_builder_preserves_derived_plugin_and_theme_state_unit() {
     let config = test_config(&[
         ("ui.verbosity", "trace"),
         ("debug.level", "2"),
@@ -791,18 +791,8 @@ fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit(
         Some("xterm-256color".to_string()),
     );
     let launch = crate::app::LaunchContext::default().with_plugin_dir("/tmp/osp-plugin-a");
-    let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
-        &context,
-        &config,
-        &launch,
-        crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-        None,
-        None,
-        None,
-    )
-    .expect("host inputs should derive");
-
-    let state = crate::app::AppStateBuilder::from_host_inputs(context, config, host_inputs)
+    let state = crate::app::AppStateBuilder::from_resolved_config(context, config)
+        .expect("host inputs should derive")
         .with_launch(launch)
         .build();
 

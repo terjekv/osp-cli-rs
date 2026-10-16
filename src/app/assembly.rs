@@ -1,14 +1,8 @@
-//! Internal assembly of host-derived runtime inputs.
+//! Host construction for executable state and config-derived presentation.
 //!
-//! This module exists to keep config-derived host assembly on one path instead
-//! of re-deriving the same UI/theme/plugin/session decisions in startup,
-//! rebuild, and builder code.
-//!
-//! The important distinction is:
-//!
-//! - assembly here is pure derivation from resolved config plus launch/runtime
-//!   context
-//! - side effects such as logging initialization happen outside this module
+//! Tolerant help requests do not create sessions or discover plugins. Full
+//! requests share assembly while retaining startup and reload failure policies.
+//! Startup hooks remain owned by the host; reload logging follows assembly.
 
 use miette::Result;
 
@@ -57,39 +51,252 @@ impl RenderSettingsSeed {
     }
 }
 
-/// Pure config-derived host state shared by startup, rebuild, and builders.
-pub(crate) struct ResolvedHostInputs {
-    pub(crate) themes: ThemeCatalog,
-    pub(crate) ui: UiState,
-    pub(crate) plugins: PluginManager,
-    pub(crate) default_session: AppSession,
+/// Host construction requests keep tolerant help separate from executable state.
+pub(crate) enum HostBuildRequest<'a> {
+    Startup {
+        cli: &'a crate::cli::Cli,
+        action: &'a super::RunAction,
+        profile_override: Option<String>,
+        terminal_kind: super::TerminalKind,
+        started: std::time::Instant,
+        definition: std::sync::Arc<super::AppDefinition>,
+    },
+    Rebuild(&'a super::AppState),
+    State(Box<super::AppStateBuilder>),
+    Presentation {
+        context: &'a RuntimeContext,
+        config: Option<&'a ResolvedConfig>,
+        seed: RenderSettingsSeed,
+        theme: Option<&'a str>,
+        tolerant: bool,
+    },
 }
 
-impl ResolvedHostInputs {
-    /// Derives the host-facing UI/theme/plugin/session inputs from one
-    /// authoritative config snapshot.
-    pub(crate) fn derive(
-        context: &RuntimeContext,
-        config: &ResolvedConfig,
-        launch: &LaunchContext,
-        render_seed: RenderSettingsSeed,
-        theme_name_override: Option<&str>,
-        plugin_preferences_override: Option<PluginCommandPreferences>,
-        session_overrides: Option<crate::config::ConfigLayer>,
-    ) -> Result<Self> {
-        let themes = crate::ui::theme_catalog::load_theme_catalog(config);
-        let plugins = build_plugin_manager(config, launch, plugin_preferences_override.as_ref());
-        let default_session =
-            AppSession::default().with_config_overrides(session_overrides.unwrap_or_default());
-        let ui = derive_ui_state(context, config, &themes, render_seed, theme_name_override)?;
+pub(crate) enum HostBuild {
+    State(Box<super::AppState>),
+    Presentation(Box<(UiState, ThemeCatalog)>),
+}
 
-        Ok(Self {
-            themes,
-            ui,
-            plugins,
-            default_session,
-        })
+impl HostBuild {
+    pub(crate) fn state(self) -> super::AppState {
+        match self {
+            Self::State(state) => *state,
+            Self::Presentation(..) => unreachable!("state request returns state"),
+        }
     }
+
+    pub(crate) fn presentation(self) -> (UiState, ThemeCatalog) {
+        match self {
+            Self::Presentation(parts) => *parts,
+            Self::State(_) => unreachable!("presentation request returns presentation"),
+        }
+    }
+}
+
+/// Constructs host snapshots while leaving startup hooks to the caller.
+pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
+    use super::{AppStateBuilder, RuntimeConfigRequest, resolve_runtime_config};
+    use miette::WrapErr;
+    let startup = matches!(&request, HostBuildRequest::Startup { .. });
+    let builder = match request {
+        HostBuildRequest::Presentation {
+            context,
+            config,
+            seed,
+            theme,
+            tolerant,
+        } => {
+            let Some(config) = config else {
+                let settings = RenderSettings {
+                    runtime: build_render_runtime(context.terminal_env()),
+                    ..RenderSettings::default()
+                };
+                return Ok(HostBuild::Presentation(Box::new((
+                    UiState::new(settings, Default::default(), 0),
+                    ThemeCatalog::default(),
+                ))));
+            };
+            let themes = crate::ui::theme_catalog::load_theme_catalog(config);
+            let settings = render_settings(context, config, &themes, seed, theme, tolerant)?;
+            return Ok(HostBuild::Presentation(Box::new((
+                UiState::new(
+                    settings,
+                    verbosity_from_config(config),
+                    debug_level_from_config(config),
+                ),
+                themes,
+            ))));
+        }
+        HostBuildRequest::State(builder) => *builder,
+        HostBuildRequest::Startup {
+            cli,
+            action,
+            profile_override,
+            terminal_kind,
+            started,
+            definition,
+        } => {
+            let _inputs =
+                tracing::info_span!(target: "osp_startup", "runtime config and host inputs")
+                    .entered();
+            let mut context = super::build_runtime_context(profile_override, terminal_kind);
+            context.repl_start = matches!(action, super::RunAction::Repl);
+            let session_layer = super::build_cli_session_layer(cli);
+            let launch = LaunchContext::default()
+                .with_plugin_dirs(cli.plugin_dirs.clone())
+                .with_runtime_load(cli.runtime_load_options())
+                .with_startup_started_at(started);
+            let request = RuntimeConfigRequest::new(
+                context.profile_override().map(ToOwned::to_owned),
+                Some(context.terminal_kind().as_config_terminal()),
+            )
+            .with_runtime_load(launch.runtime_load)
+            .with_product_defaults(definition.product_defaults.clone())
+            .with_session_layer(session_layer.clone());
+            let config = if action.uses_raw_config() {
+                super::bootstrap::resolve_raw_runtime_config(request)
+            } else {
+                resolve_runtime_config(request)
+            }
+            .map_err(|err| {
+                super::host::report_report_with_context(
+                    err,
+                    super::host::ErrorContext::Operation(
+                        "failed to resolve config with session layer",
+                    ),
+                )
+            })?;
+            let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
+            let plugins = build_plugin_manager(&config, &launch, None);
+            let ui = derive_ui_state(
+                &context,
+                &config,
+                &themes,
+                RenderSettingsSeed::DefaultAuto,
+                None,
+            )
+            .map_err(|err| {
+                super::host::report_report_with_context(
+                    err,
+                    super::host::ErrorContext::Operation(
+                        "failed to derive host runtime inputs for startup",
+                    ),
+                )
+            })?;
+            AppStateBuilder {
+                context,
+                config,
+                ui,
+                launch,
+                plugins: Some(plugins),
+                native_commands: definition.native_commands.clone(),
+                session: Some(
+                    AppSession::default().with_config_overrides(session_layer.unwrap_or_default()),
+                ),
+                themes: Some(themes),
+                definition,
+            }
+        }
+        HostBuildRequest::Rebuild(current) => {
+            let runtime = &current.runtime;
+            tracing::debug!(profile_override = ?runtime.context.profile_override(), scoped = !current.session.scope.is_root(), "rebuilding REPL state after config/theme change");
+            let session_layer = (!current.session.config_overrides.entries().is_empty())
+                .then(|| current.session.config_overrides.clone());
+            let config = resolve_runtime_config(
+                RuntimeConfigRequest::new(
+                    runtime.context.profile_override().map(ToOwned::to_owned),
+                    Some(runtime.context.terminal_kind().as_config_terminal()),
+                )
+                .with_runtime_load(runtime.launch.runtime_load)
+                .with_product_defaults(runtime.product_defaults().clone())
+                .with_session_layer(session_layer),
+            )
+            .wrap_err("failed to resolve config for REPL rebuild")?;
+            let mut settings = runtime.ui.render_settings.clone();
+            if !settings.format_explicit && config.get_string("ui.format").is_none() {
+                settings.format = crate::core::output::OutputFormat::Auto;
+            }
+            let preferences = current
+                .clients
+                .plugins()
+                .command_preferences_snapshot()
+                .rebased(
+                    &PluginCommandPreferences::from_resolved(runtime.config.resolved()),
+                    PluginCommandPreferences::from_resolved(&config),
+                );
+            let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
+            let plugins = build_plugin_manager(&config, &runtime.launch, Some(&preferences));
+            let ui = derive_ui_state(
+                &runtime.context,
+                &config,
+                &themes,
+                RenderSettingsSeed::Existing(Box::new(settings)),
+                None,
+            )
+            .wrap_err("failed to derive host runtime inputs for REPL rebuild")?;
+            AppStateBuilder {
+                context: runtime.context.clone(),
+                config,
+                ui,
+                launch: runtime.launch.clone(),
+                plugins: Some(plugins),
+                native_commands: current.clients.native_commands().clone(),
+                session: Some(current.session.clone()),
+                themes: Some(themes),
+                definition: runtime.definition.clone(),
+            }
+        }
+    };
+    let super::AppStateBuilder {
+        context,
+        config,
+        ui,
+        launch,
+        plugins,
+        native_commands,
+        session,
+        themes,
+        definition,
+    } = builder;
+    let assembly_span = startup
+        .then(|| tracing::info_span!(target: "osp_startup", "host state assembly").entered());
+    let should_log_theme_issues = themes.is_none();
+    let themes = themes.unwrap_or_else(|| crate::ui::theme_catalog::load_theme_catalog(&config));
+    let plugins = plugins.unwrap_or_else(|| build_plugin_manager(&config, &launch, None));
+    if should_log_theme_issues {
+        crate::ui::theme_catalog::log_theme_issues(&themes.issues);
+    }
+    {
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "native command configure").entered();
+        native_commands.configure(&config);
+    }
+    let clients = super::AppClients::new(plugins, native_commands);
+    let auth = {
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "auth policy catalog setup").entered();
+        super::AuthState::from_commands(clients.plugins(), clients.native_commands())
+    };
+    let mut runtime = super::AppRuntime::new(
+        context,
+        super::ConfigState::new(config),
+        ui,
+        auth,
+        themes,
+        launch,
+    );
+    runtime.definition = definition;
+    drop(assembly_span);
+    {
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "auth policy context setup").entered();
+        runtime.set_access_policy(runtime.definition.access_policy.clone());
+    }
+    Ok(HostBuild::State(Box::new(super::AppState {
+        runtime,
+        session: session.unwrap_or_default(),
+        clients,
+    })))
 }
 
 /// Derives UI state from resolved config and a settings baseline.
@@ -100,15 +307,17 @@ pub(crate) fn derive_render_settings(
     render_seed: RenderSettingsSeed,
     theme_name_override: Option<&str>,
 ) -> Result<RenderSettings> {
-    let mut render_settings = derive_base_render_settings(context, config, render_seed);
-    let selected_theme = selected_theme_name(config, theme_name_override);
-    render_settings.theme_name = resolve_known_theme_name(selected_theme, themes)?;
-    render_settings.theme = themes
-        .resolve(&render_settings.theme_name)
-        .map(|entry| entry.theme.clone());
-    Ok(render_settings)
+    render_settings(
+        context,
+        config,
+        themes,
+        render_seed,
+        theme_name_override,
+        false,
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn derive_render_settings_or_fallback(
     context: &RuntimeContext,
     config: &ResolvedConfig,
@@ -116,14 +325,36 @@ pub(crate) fn derive_render_settings_or_fallback(
     render_seed: RenderSettingsSeed,
     theme_name_override: Option<&str>,
 ) -> RenderSettings {
-    let mut render_settings = derive_base_render_settings(context, config, render_seed);
-    let selected_theme = selected_theme_name(config, theme_name_override);
-    render_settings.theme_name = resolve_known_theme_name(selected_theme, themes)
-        .unwrap_or_else(|_| DEFAULT_THEME_NAME.to_string());
-    render_settings.theme = themes
-        .resolve(&render_settings.theme_name)
+    render_settings(
+        context,
+        config,
+        themes,
+        render_seed,
+        theme_name_override,
+        true,
+    )
+    .expect("fallback theme is available")
+}
+
+fn render_settings(
+    context: &RuntimeContext,
+    config: &ResolvedConfig,
+    themes: &ThemeCatalog,
+    seed: RenderSettingsSeed,
+    theme: Option<&str>,
+    tolerant: bool,
+) -> Result<RenderSettings> {
+    let mut settings = derive_base_render_settings(context, config, seed);
+    let selected = resolve_known_theme_name(selected_theme_name(config, theme), themes);
+    settings.theme_name = if tolerant {
+        selected.unwrap_or_else(|_| DEFAULT_THEME_NAME.to_string())
+    } else {
+        selected?
+    };
+    settings.theme = themes
+        .resolve(&settings.theme_name)
         .map(|entry| entry.theme.clone());
-    render_settings
+    Ok(settings)
 }
 
 fn derive_base_render_settings(
@@ -194,11 +425,27 @@ pub(crate) fn apply_runtime_side_effects(
     crate::ui::theme_catalog::log_theme_issues(&themes.issues);
 }
 
+pub(crate) fn rebuild_repl_in_place(state: &mut super::AppState) -> Result<()> {
+    *state = rebuild_repl_state(state)?;
+    Ok(())
+}
+
+pub(crate) fn rebuild_repl_state(current: &super::AppState) -> Result<super::AppState> {
+    let next = build_host(HostBuildRequest::Rebuild(current))?.state();
+    next.session.sync_history_shell_context();
+    apply_runtime_side_effects(
+        next.runtime.config.resolved(),
+        next.runtime.ui.debug_level,
+        &next.runtime.themes,
+    );
+    Ok(next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        RenderSettingsSeed, ResolvedHostInputs, build_plugin_manager,
-        derive_render_settings_or_fallback, derive_ui_state,
+        RenderSettingsSeed, build_plugin_manager, derive_render_settings_or_fallback,
+        derive_ui_state,
     };
     use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
@@ -273,20 +520,13 @@ mod tests {
         let context = RuntimeContext::new(None, TerminalKind::Cli, None);
         let launch = LaunchContext::default();
 
-        let derived = ResolvedHostInputs::derive(
-            &context,
-            &config,
-            &launch,
-            RenderSettingsSeed::DefaultAuto,
-            None,
-            None,
-            None,
-        )
-        .expect("host inputs should derive");
-
-        assert_eq!(derived.ui.debug_level, 0);
-        assert_eq!(derived.plugins.process_timeout().as_millis(), 42,);
-        assert!(derived.default_session.history_enabled);
+        let state = crate::app::AppStateBuilder::from_resolved_config(context, config)
+            .expect("host inputs should derive")
+            .with_launch(launch)
+            .build();
+        assert_eq!(state.runtime.ui.debug_level, 0);
+        assert_eq!(state.clients.plugins().process_timeout().as_millis(), 42);
+        assert!(state.session.history_enabled);
     }
 
     #[test]

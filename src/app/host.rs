@@ -32,14 +32,13 @@ use crate::cli::invocation::{
 use crate::cli::{Cli, Commands};
 use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
 
-pub(crate) use super::bootstrap::prepare_startup_host;
+#[cfg(test)]
+pub(crate) use super::assembly::rebuild_repl_state;
 pub(crate) use super::dispatch::{
     DispatchPlan, RunAction, build_dispatch_plan, normalize_profile_override,
 };
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
-#[cfg(test)]
-pub(crate) use super::repl_lifecycle::rebuild_repl_state;
 pub(crate) use super::timing::{TimingSummary, format_timing_badge};
 pub(crate) use crate::plugin::config::{
     PluginConfigEntry, PluginConfigScope, plugin_config_entries,
@@ -237,13 +236,13 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    run_from_with_sink_and_app(args, sink, &super::AppDefinition::default())
+    run_from_with_sink_and_app(args, sink, &std::sync::Arc::default())
 }
 
 pub(crate) fn run_from_with_sink_and_app<I, T>(
     args: I,
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
 ) -> Result<i32>
 where
     I: IntoIterator<Item = T>,
@@ -269,7 +268,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
     suffix: &[OsString],
     scanned: &mut ScannedCliArgs,
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
     timing: &mut TimingSummary,
 ) -> Result<i32> {
     {
@@ -365,7 +364,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
 }
 
 fn product_config_overrides(
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
     matches: &clap::ArgMatches,
 ) -> crate::config::ConfigLayer {
     let mut overrides = crate::config::ConfigLayer::default();
@@ -392,7 +391,7 @@ fn handle_clap_parse_error(
     err: clap::Error,
     stages: &[String],
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
 ) -> Result<i32> {
     match err.kind() {
         clap::error::ErrorKind::DisplayHelp
@@ -475,7 +474,7 @@ fn run(
     invocation: InvocationOptions,
     stages: &[String],
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
     timing: &mut TimingSummary,
 ) -> Result<i32> {
     let run_started = Instant::now();
@@ -570,7 +569,7 @@ fn run(
 fn prepare_host_run(
     cli: &mut Cli,
     invocation: &InvocationOptions,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
     run_started: Instant,
 ) -> Result<PreparedHostRun> {
     let dispatch = {
@@ -584,37 +583,17 @@ fn prepare_host_run(
     );
 
     let terminal_kind = dispatch.action.terminal_kind();
-    let prepared = {
-        let _phase =
-            tracing::info_span!(target: "osp_startup", "runtime config and host inputs").entered();
-        prepare_startup_host(
-            cli,
-            &dispatch.action,
-            dispatch.profile_override.clone(),
-            terminal_kind,
-            run_started,
-            &app.product_defaults,
-        )?
-    };
     let mut state = {
-        let _phase = tracing::info_span!(target: "osp_startup", "host state assembly").entered();
-        crate::app::AppStateBuilder::from_host_inputs(
-            prepared.runtime_context,
-            prepared.config,
-            prepared.host_inputs,
-        )
-        .with_launch(prepared.launch_context)
-        .with_native_commands(app.native_commands.clone())
-        .build()
+        super::assembly::build_host(super::assembly::HostBuildRequest::Startup {
+            cli,
+            action: &dispatch.action,
+            profile_override: dispatch.profile_override.clone(),
+            terminal_kind,
+            started: run_started,
+            definition: app.clone(),
+        })?
+        .state()
     };
-    state
-        .runtime
-        .set_product_defaults(app.product_defaults.clone());
-    {
-        let _phase =
-            tracing::info_span!(target: "osp_startup", "auth policy context setup").entered();
-        state.runtime.set_access_policy(app.access_policy.clone());
-    }
     {
         let _phase = tracing::info_span!(target: "osp_startup", "startup hook").entered();
         if let Some(policy) = &app.access_policy {

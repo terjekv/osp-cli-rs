@@ -275,9 +275,7 @@ mod tests {
         HistoryScopeView, build_history_config, history_command, repl_history_enabled,
         repl_history_exclude_patterns, run_history_repl_command,
     };
-    use crate::app::{
-        AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind,
-    };
+    use crate::app::{AppSession, AppState, LaunchContext, RuntimeContext, TerminalKind};
     use crate::cli::{HistoryArgs, HistoryCommands, HistoryListArgs, HistoryPruneArgs};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
@@ -710,20 +708,26 @@ mod tests {
     }
 
     fn app_state(config: crate::config::ResolvedConfig) -> AppState {
-        AppState::new(AppStateInit {
+        crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config,
-            render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            verbosity: MessageLevel::Success,
-
-            debug_level: 0,
-            plugins: crate::plugin::PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands: crate::native::NativeCommandRegistry::default(),
-            themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+            config: config,
             launch: LaunchContext::default(),
-        })
+            native_commands: crate::native::NativeCommandRegistry::default(),
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Json),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                crate::plugin::PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build()
     }
 
     fn shared_history(enabled: bool) -> SharedHistory {

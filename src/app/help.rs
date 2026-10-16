@@ -14,11 +14,10 @@ use crate::ui::RenderSettings;
 use crate::ui::{HelpLayout, help_layout_from_config};
 
 use crate::ui::UiPresentation;
-use crate::ui::theme_loader;
 
 use super::{
-    RuntimeConfigRequest, RuntimeContext, TerminalKind, assembly, build_render_runtime,
-    normalize_profile_override, resolve_runtime_config,
+    RuntimeConfigRequest, RuntimeContext, TerminalKind, assembly, normalize_profile_override,
+    resolve_runtime_config,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -107,19 +106,19 @@ pub(crate) fn render_settings_for_help_with_scan(
     .ok();
     let terminal_env = std::env::var("TERM").ok();
     let runtime_context = RuntimeContext::new(None, TerminalKind::Cli, terminal_env.clone());
-    let mut settings = RenderSettings::default();
+    let (ui, _) = assembly::build_host(assembly::HostBuildRequest::Presentation {
+        context: &runtime_context,
+        config: config.as_ref(),
+        seed: assembly::RenderSettingsSeed::DefaultAuto,
+        theme: None,
+        tolerant: true,
+    })
+    .unwrap_or_else(|_| unreachable!("tolerant presentation cannot fail"))
+    .presentation();
+    let mut settings = ui.render_settings;
     let mut layout = HelpLayout::Full;
     let effective_help_level;
-    settings.runtime = build_render_runtime(terminal_env.as_deref());
     if let Some(config) = config.as_ref() {
-        let loaded = theme_loader::load_theme_catalog(config);
-        settings = assembly::derive_render_settings_or_fallback(
-            &runtime_context,
-            config,
-            &loaded,
-            assembly::RenderSettingsSeed::DefaultAuto,
-            None,
-        );
         layout = help_layout_from_config(config);
         effective_help_level = help_level(
             config,

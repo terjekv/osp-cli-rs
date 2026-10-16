@@ -17,7 +17,7 @@ modules should not import `app`; the one current exception is
 | `mod.rs`, `host.rs` | `App`, the top-level run path, builtin `CMD_…` names |
 | `bootstrap.rs`, `assembly.rs` | Startup: config, logging, catalog assembly |
 | `runtime.rs`, `session.rs` | State that lives for the process vs for one logical run |
-| `rebuild.rs`, `repl_lifecycle.rs` | Rebuilding state after config or auth changes |
+| `assembly.rs` | Full state, presentation bootstrap and REPL rebuilds |
 | `dispatch.rs` | Choosing builtin, native or plugin for a command line |
 | `command_plan.rs` | Shared inline parse/help classification and command pipeline policy |
 | `builtin.rs` | Running public builtin commands |

@@ -16,8 +16,6 @@
 //! - steady-state command execution belongs in `app::dispatch` and `repl`
 //! - config precedence still belongs to `crate::config`, not to this module
 
-use std::time::Instant;
-
 use crate::config::{
     ConfigError, ConfigExplain, ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions,
     ResolvedConfig, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
@@ -27,7 +25,7 @@ use crate::ui::messages::MessageLevel;
 use miette::Result;
 
 use crate::app::logging::{DeveloperLoggingConfig, FileLoggingConfig, parse_level_filter};
-use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
+use crate::app::{RuntimeContext, TerminalKind};
 use crate::cli::Cli;
 use crate::ui::build_presentation_defaults_layer;
 
@@ -73,13 +71,6 @@ impl RuntimeConfigRequest {
 pub(crate) struct PreparedRuntimeConfig {
     resolver: ConfigResolver,
     options: ResolveOptions,
-}
-
-pub(crate) struct PreparedStartupHost {
-    pub(crate) runtime_context: RuntimeContext,
-    pub(crate) launch_context: LaunchContext,
-    pub(crate) config: ResolvedConfig,
-    pub(crate) host_inputs: crate::app::assembly::ResolvedHostInputs,
 }
 
 impl PreparedRuntimeConfig {
@@ -171,68 +162,10 @@ pub(crate) fn build_runtime_context(
     RuntimeContext::new(profile_override, terminal_kind, std::env::var("TERM").ok())
 }
 
-pub(crate) fn prepare_startup_host(
-    cli: &Cli,
-    action: &crate::app::RunAction,
-    profile_override: Option<String>,
-    terminal_kind: TerminalKind,
-    run_started: Instant,
-    product_defaults: &ConfigLayer,
-) -> Result<PreparedStartupHost> {
-    let runtime_load = cli.runtime_load_options();
-    let mut runtime_context = build_runtime_context(profile_override, terminal_kind);
-    runtime_context.repl_start = matches!(action, crate::app::RunAction::Repl);
-    let session_layer = build_cli_session_layer(cli);
-    let launch_context = LaunchContext::default()
-        .with_plugin_dirs(cli.plugin_dirs.clone())
-        .with_runtime_load(runtime_load)
-        .with_startup_started_at(run_started);
-    let request = RuntimeConfigRequest::new(
-        runtime_context.profile_override().map(ToOwned::to_owned),
-        Some(runtime_context.terminal_kind().as_config_terminal()),
-    )
-    .with_runtime_load(launch_context.runtime_load)
-    .with_product_defaults(product_defaults.clone())
-    .with_session_layer(session_layer.clone());
-    let config = if action.uses_raw_config() {
-        prepare_runtime_config(request, true)
-            .and_then(|prepared| prepared.resolver.resolve_raw(prepared.options))
-            .map_err(|err| {
-                report_std_error_with_context(err, crate::app::host::ErrorContext::Config)
-            })
-    } else {
-        resolve_runtime_config(request)
-    }
-    .map_err(|err| {
-        super::host::report_report_with_context(
-            err,
-            super::host::ErrorContext::Operation("failed to resolve config with session layer"),
-        )
-    })?;
-    let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
-        &runtime_context,
-        &config,
-        &launch_context,
-        crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-        None,
-        None,
-        session_layer,
-    )
-    .map_err(|err| {
-        super::host::report_report_with_context(
-            err,
-            super::host::ErrorContext::Operation(
-                "failed to derive host runtime inputs for startup",
-            ),
-        )
-    })?;
-
-    Ok(PreparedStartupHost {
-        runtime_context,
-        launch_context,
-        config,
-        host_inputs,
-    })
+pub(crate) fn resolve_raw_runtime_config(request: RuntimeConfigRequest) -> Result<ResolvedConfig> {
+    prepare_runtime_config(request, true)
+        .and_then(|prepared| prepared.resolver.resolve_raw(prepared.options))
+        .map_err(|err| report_std_error_with_context(err, super::host::ErrorContext::Config))
 }
 
 pub(crate) fn build_logging_config(

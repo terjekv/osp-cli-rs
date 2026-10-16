@@ -12,8 +12,7 @@ mod output_support {
 }
 use crate::app::TimingSummary;
 use crate::app::{
-    AppState, AppStateInit, DebugTimingBadge, DebugTimingState, LaunchContext, RuntimeContext,
-    TerminalKind,
+    AppState, DebugTimingBadge, DebugTimingState, LaunchContext, RuntimeContext, TerminalKind,
 };
 use crate::app::{CMD_CONFIG, CMD_HELP, CMD_PLUGINS, CMD_THEME};
 use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
@@ -65,20 +64,26 @@ fn make_state(entries: &[(&str, &str)]) -> AppState {
     .resolve(options)
     .expect("test config should resolve");
 
-    AppState::new(AppStateInit {
+    crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config,
-        render_settings: RenderSettings::test_plain(OutputFormat::Json),
-        verbosity: MessageLevel::Success,
-
-        debug_level: 0,
-        plugins: PluginManager::new(Vec::new())
-            .with_bundled_roots(false)
-            .with_default_roots(false),
-        native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+        config: config,
         launch: LaunchContext::default(),
-    })
+        native_commands: crate::native::NativeCommandRegistry::default(),
+        ui: crate::app::UiState::new(
+            RenderSettings::test_plain(OutputFormat::Json),
+            MessageLevel::Success,
+            0,
+        ),
+        plugins: Some(
+            PluginManager::new(Vec::new())
+                .with_bundled_roots(false)
+                .with_default_roots(false),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build()
 }
 
 fn repl_view<'a>(state: &'a AppState) -> ReplViewContext<'a> {
@@ -850,20 +855,26 @@ fn intro_template_expansion_handles_scalars_sensitive_keys_and_malformed_placeho
     )
     .resolve(ResolveOptions::default().with_terminal("repl"))
     .expect("list-aware config should resolve");
-    let state = AppState::new(AppStateInit {
+    let state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
-        config,
-        render_settings: RenderSettings::test_plain(OutputFormat::Json),
-        verbosity: MessageLevel::Success,
-
-        debug_level: 0,
-        plugins: PluginManager::new(Vec::new())
-            .with_bundled_roots(false)
-            .with_default_roots(false),
-        native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+        config: config,
         launch: LaunchContext::default(),
-    });
+        native_commands: crate::native::NativeCommandRegistry::default(),
+        ui: crate::app::UiState::new(
+            RenderSettings::test_plain(OutputFormat::Json),
+            MessageLevel::Success,
+            0,
+        ),
+        plugins: Some(
+            PluginManager::new(Vec::new())
+                .with_bundled_roots(false)
+                .with_default_roots(false),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build();
     let expanded = super::expand_intro_template(
         repl_view(&state),
         &intro_commands(&["help", "config"]),

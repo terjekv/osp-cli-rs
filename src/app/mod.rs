@@ -84,8 +84,6 @@ pub(crate) mod facts;
 pub(crate) mod help;
 pub(crate) mod host;
 pub(crate) mod logging;
-pub(crate) mod rebuild;
-pub(crate) mod repl_lifecycle;
 pub(crate) mod runtime;
 pub(crate) mod session;
 /// UI sink abstractions used by the host entrypoints.
@@ -95,6 +93,7 @@ mod tests;
 pub(crate) mod timing;
 
 pub use access::{AccessPolicy, Visibility};
+pub(crate) use assembly::rebuild_repl_in_place;
 pub(crate) use bootstrap::*;
 pub(crate) use builtin::*;
 pub(crate) use command_output::*;
@@ -106,13 +105,10 @@ pub(crate) use config_explain::{
 pub(crate) use facts::*;
 pub use host::run_from;
 pub(crate) use host::*;
-pub(crate) use repl_lifecycle::rebuild_repl_in_place;
 pub use runtime::{
     AppClients, AppRuntime, AuthState, ConfigState, LaunchContext, RuntimeContext, TerminalKind,
     UiState,
 };
-#[cfg(test)]
-pub(crate) use session::AppStateInit;
 pub use session::{
     AppSession, AppState, AppStateBuilder, DebugTimingBadge, DebugTimingState, LastFailure,
     ReplScopeFrame, ReplScopeStack,

@@ -285,7 +285,7 @@ pub(crate) fn build_cycle_chrome_output(
 mod tests {
     use super::{ReplLoopState, build_cycle_chrome_output};
     use crate::app::sink::BufferedUiSink;
-    use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+    use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::repl::{ReplReloadKind, ReplResult};
@@ -381,20 +381,26 @@ mod tests {
             .resolve(ResolveOptions::default().with_terminal("repl"))
             .expect("config should resolve");
 
-        let mut state = AppState::new(AppStateInit {
+        let mut state = crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config,
-            render_settings: RenderSettings::test_plain(OutputFormat::Table),
-            verbosity: MessageLevel::Success,
-
-            debug_level: 0,
-            plugins: crate::plugin::PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands: crate::native::NativeCommandRegistry::default(),
-            themes: ThemeCatalog::default(),
+            config: config,
             launch: LaunchContext::default(),
-        });
+            native_commands: crate::native::NativeCommandRegistry::default(),
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                crate::plugin::PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build();
 
         let mut loop_state = ReplLoopState::new(true);
         let first = loop_state

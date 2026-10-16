@@ -265,14 +265,14 @@ impl UiState {
         context: &RuntimeContext,
         config: &ResolvedConfig,
     ) -> miette::Result<Self> {
-        let themes = crate::ui::theme_catalog::load_theme_catalog(config);
-        crate::app::assembly::derive_ui_state(
+        super::assembly::build_host(super::assembly::HostBuildRequest::Presentation {
             context,
-            config,
-            &themes,
-            crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-            None,
-        )
+            config: Some(config),
+            seed: super::assembly::RenderSettingsSeed::DefaultAuto,
+            theme: None,
+            tolerant: false,
+        })
+        .map(|built| built.presentation().0)
     }
 
     /// Creates the UI state snapshot used for one resolved config revision.
@@ -458,7 +458,7 @@ pub struct AppRuntime {
     pub(crate) themes: ThemeCatalog,
     /// Launch-time inputs used to assemble caches and external services.
     pub(crate) launch: LaunchContext,
-    product_defaults: ConfigLayer,
+    pub(crate) definition: Arc<super::AppDefinition>,
 }
 
 impl AppRuntime {
@@ -478,7 +478,7 @@ impl AppRuntime {
             auth,
             themes,
             launch,
-            product_defaults: ConfigLayer::default(),
+            definition: Arc::default(),
         }
     }
 
@@ -517,11 +517,7 @@ impl AppRuntime {
     }
 
     pub(crate) fn product_defaults(&self) -> &ConfigLayer {
-        &self.product_defaults
-    }
-
-    pub(crate) fn set_product_defaults(&mut self, product_defaults: ConfigLayer) {
-        self.product_defaults = product_defaults;
+        &self.definition.product_defaults
     }
 
     pub(crate) fn access_policy(&self) -> Option<Arc<dyn AccessPolicy>> {
@@ -529,6 +525,7 @@ impl AppRuntime {
     }
 
     pub(crate) fn set_access_policy(&mut self, policy: Option<Arc<dyn AccessPolicy>>) {
+        Arc::make_mut(&mut self.definition).access_policy = policy.clone();
         self.auth
             .set_access_policy(policy, Some(self.config.resolved()));
         if self.auth.access_policy.is_some() && !self.auth.session_facts().authenticated {

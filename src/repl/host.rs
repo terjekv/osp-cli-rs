@@ -275,8 +275,7 @@ mod tests {
         run_repl_debug_command_for, should_show_repl_intro, start_native_completion_refreshes,
     };
     use crate::app::{
-        AppClients, AppRuntime, AppSession, AppState, AppStateInit, LaunchContext, RuntimeContext,
-        TerminalKind,
+        AppClients, AppRuntime, AppSession, LaunchContext, RuntimeContext, TerminalKind,
     };
     use crate::cli::{DebugCompleteArgs, DebugHighlightArgs, DebugMenuArg, ReplArgs, ReplCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
@@ -311,20 +310,22 @@ mod tests {
 
         let settings = RenderSettings::test_plain(OutputFormat::Json);
 
-        let state = AppState::new(AppStateInit {
+        let state = crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config,
-            render_settings: settings,
-            verbosity: MessageLevel::Success,
-
-            debug_level: 0,
-            plugins: crate::plugin::PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands,
-            themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+            config: config,
             launch: LaunchContext::default(),
-        });
+            native_commands: native_commands,
+            ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+            plugins: Some(
+                crate::plugin::PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build();
         (state.runtime, state.session, state.clients)
     }
 

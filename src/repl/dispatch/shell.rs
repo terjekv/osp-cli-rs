@@ -361,7 +361,7 @@ mod tests {
         execute_repl_shortcut, handle_repl_exit_request, repl_help_for_scope,
     };
     use crate::app::sink::BufferedUiSink;
-    use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+    use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::core::plugin::{DescribeCommandAuthV1, DescribeVisibilityModeV1};
@@ -453,18 +453,22 @@ mod tests {
             .resolve(ResolveOptions::default().with_terminal("repl"))
             .expect("test config should resolve");
 
-        AppState::new(AppStateInit {
+        crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
-            config,
-            render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            verbosity: MessageLevel::Success,
-
-            debug_level: 0,
-            plugins,
-            native_commands,
-            themes: crate::ui::theme_catalog::ThemeCatalog::default(),
+            config: config,
             launch: LaunchContext::default(),
-        })
+            native_commands: native_commands,
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Json),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(plugins),
+            themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build()
     }
 
     #[cfg(unix)]
