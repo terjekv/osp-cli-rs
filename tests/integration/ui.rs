@@ -4,7 +4,7 @@ use osp_cli::core::output_model::{
     OutputDocument, OutputMeta, OutputResult, output_items_from_value,
 };
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render_output};
+use osp_cli::ui::{RenderRuntime, RenderSettings, TableBorderStyle, TableOverflow, render};
 use serde_json::{Value, json};
 
 fn export_settings(format: OutputFormat) -> RenderSettings {
@@ -52,10 +52,16 @@ fn service_record_exports_preserve_nested_typed_data() {
     let output =
         OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(record.clone()));
 
-    let json_export = render_output(&output, &export_settings(OutputFormat::Json));
+    let json_export = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+    );
     assert_eq!(serde_json::from_str::<Value>(&json_export).unwrap(), record);
 
-    let mreg = render_output(&output, &export_settings(OutputFormat::Mreg));
+    let mreg = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+    );
     for expected in [
         "uid:",
         "alice",
@@ -89,7 +95,10 @@ fn service_record_exports_preserve_nested_typed_data() {
         );
     }
 
-    let markdown = render_output(&output, &export_settings(OutputFormat::Markdown));
+    let markdown = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+    );
     for expected in [
         "- uid: alice",
         "- enabled: true",
@@ -144,7 +153,10 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
             "rows": [members[2]]
         }
     ]);
-    let exported = render_output(&grouped, &export_settings(OutputFormat::Json));
+    let exported = render(
+        &grouped,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+    );
     let restored_value: Value = serde_json::from_str(&exported).unwrap();
     assert_eq!(restored_value, canonical);
 
@@ -158,15 +170,18 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
     };
     assert_eq!(restored.items, grouped.items);
     assert_eq!(
-        serde_json::from_str::<Value>(&render_output(
+        serde_json::from_str::<Value>(&render(
             &restored,
-            &export_settings(OutputFormat::Json)
+            &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json))
         ),)
         .unwrap(),
         canonical
     );
 
-    let markdown = render_output(&restored, &export_settings(OutputFormat::Markdown));
+    let markdown = render(
+        &restored,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+    );
     for expected in [
         "- region: eu|west",
         "- total: 3.5",
@@ -185,7 +200,10 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
             "missing {expected:?} in grouped Markdown:\n{markdown}"
         );
     }
-    let mreg = render_output(&restored, &export_settings(OutputFormat::Mreg));
+    let mreg = render(
+        &restored,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+    );
     for expected in [
         "region:",
         "eu|west",
@@ -302,7 +320,10 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
         ],
     };
     let output = guide.to_output_result();
-    let exported = render_output(&output, &export_settings(OutputFormat::Json));
+    let exported = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Json)),
+    );
     assert_eq!(
         serde_json::from_str::<Value>(&exported).unwrap(),
         serde_json::to_value(&guide).unwrap()
@@ -328,12 +349,18 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
             .collect::<Vec<_>>(),
         ["--dry-run", "--profile", "--json"]
     );
-    let flag_markdown = render_output(&flags, &export_settings(OutputFormat::Markdown));
+    let flag_markdown = render(
+        &flags,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+    );
     for flag in ["--dry-run", "--profile", "--json"] {
         assert!(flag_markdown.contains(flag), "{flag_markdown}");
     }
 
-    let terminal = render_output(&output, &export_settings(OutputFormat::Auto));
+    let terminal = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Auto)),
+    );
     let visible_words = terminal.split_whitespace().collect::<Vec<_>>().join(" ");
     for expected in [
         "Operations",
@@ -357,7 +384,10 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
             "missing {expected:?} in terminal guide:\n{terminal}"
         );
     }
-    let markdown = render_output(&output, &export_settings(OutputFormat::Markdown));
+    let markdown = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Markdown)),
+    );
     for expected in [
         "Operations",
         "Use `site host show` after **approval**.",
@@ -380,7 +410,10 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
             "missing {expected:?} in guide Markdown:\n{markdown}"
         );
     }
-    let mreg = render_output(&output, &export_settings(OutputFormat::Mreg));
+    let mreg = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
+    );
     for expected in [
         "Operations",
         "site host show",

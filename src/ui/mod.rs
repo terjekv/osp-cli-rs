@@ -20,23 +20,9 @@
 //!        ▼ [ emit ]   render terminal/markdown/json text
 //! ```
 //!
-//! Public surface:
-//!
-//! - [`crate::ui::render_output`] renders one structured payload through the
-//!   normal
-//!   UI
-//!   path
-//! - [`crate::ui::render_rows`] is the lightweight "I already have rows"
-//!   helper
-//! - [`crate::ui::RenderSettings`] and
-//!   [`crate::ui::ResolvedRenderSettings`] define the stable caller-facing
-//!   render knobs
-//! - [`crate::ui::format_local_timestamp`],
-//!   [`crate::ui::format_relative_timestamp`], and
-//!   [`crate::ui::format_binary_bytes`] keep product-authored human details
-//!   consistent with structured output
-//! - [`crate::ui::theme`], [`crate::ui::style`], and [`crate::ui::messages`]
-//!   provide the other operator-facing presentation surfaces
+//! [`crate::ui::render`] takes canonical output and a
+//! [`crate::ui::RenderRequest`]. The layout IR
+//! remains private to this module; semantic content stays in `core`.
 //!
 //! Internal ownership stays intentionally boring:
 //!
@@ -59,16 +45,15 @@ mod chrome;
 mod doc;
 mod emit;
 mod lower;
-pub(crate) use lower::json_value;
 mod plan;
 pub(crate) mod settings;
 mod text;
 
-use crate::config::ResolvedConfig;
-use crate::core::document::{DocBlock, Document};
+use crate::core::document::DocBlock;
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
 
+pub(crate) use lower::json_value;
 pub(crate) use messages::{
     render_messages_from_settings as render_messages, render_messages_without_config,
 };
@@ -155,90 +140,87 @@ pub(crate) fn format_relative_unix_timestamp(seconds: i64) -> String {
     }
 }
 
+/// Settings and human presentation for one render operation.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct StructuredDocumentRenderOptions<'a> {
-    pub(crate) source_document: Option<&'a Document>,
-    pub(crate) layout: HelpLayout,
-    pub(crate) title_prefix: Option<&'a str>,
-    pub(crate) show_footer_rule: Option<bool>,
+pub struct RenderRequest<'a> {
+    /// Effective output and terminal settings.
+    pub settings: &'a RenderSettings,
+    /// Normal output or a copy-safe sink.
+    pub profile: RenderProfile,
+    /// Optional help layout for an unstaged semantic document.
+    pub layout: Option<HelpLayout>,
+    /// Prefix for the first semantic section title.
+    pub title_prefix: Option<&'a str>,
+    /// Override the layout's default closing rule.
+    pub show_footer_rule: Option<bool>,
+    /// Human-only complete lines, supplied by the command or progress sink.
+    pub presentation_lines: &'a [String],
 }
 
-pub(crate) fn render_structured_output_with_source_document(
-    output: &OutputResult,
-    source_document: Option<&Document>,
-    settings: &RenderSettings,
-    layout: HelpLayout,
-) -> String {
-    render_structured_output_with_document_options(
-        output,
-        settings,
-        StructuredDocumentRenderOptions {
-            source_document,
-            layout,
+impl<'a> RenderRequest<'a> {
+    /// Uses ordinary output rendering without additional help chrome.
+    pub fn new(settings: &'a RenderSettings) -> Self {
+        Self {
+            settings,
+            profile: RenderProfile::Normal,
+            layout: None,
             title_prefix: None,
             show_footer_rule: None,
-        },
-    )
+            presentation_lines: &[],
+        }
+    }
 }
 
-pub(crate) fn render_structured_output_with_document_options(
-    output: &OutputResult,
-    settings: &RenderSettings,
-    options: StructuredDocumentRenderOptions<'_>,
-) -> String {
-    let output = prepare_output_for_sink(output, settings, RenderProfile::Normal);
-    let plan = plan_output(&output, settings, RenderProfile::Normal);
-    if !matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown) {
-        return emit::emit_doc(
-            &lower::lower_output(&output, &plan),
-            plan.format,
-            &plan.settings,
-        );
-    }
-    let carried = output
-        .document
-        .as_ref()
-        .and_then(crate::core::output_model::OutputDocument::semantic);
-    let Some(document) = options.source_document.or(carried) else {
-        return render_output(&output, settings);
-    };
-    let mut document = document.clone();
-    if let Some(prefix) = options.title_prefix
-        && let Some(DocBlock::Section { title, .. }) = document
-            .blocks
-            .iter_mut()
-            .find(|block| matches!(block, DocBlock::Section { .. }))
+/// Renders canonical data, optionally using its unstaged semantic document.
+///
+/// ```
+/// use osp_cli::{row, core::output_model::OutputResult};
+/// use osp_cli::core::output::OutputFormat;
+/// use osp_cli::ui::{render, RenderRequest, RenderSettings};
+///
+/// let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]);
+/// let settings = RenderSettings::test_plain(OutputFormat::Markdown);
+/// let rendered = render(&output, &RenderRequest::new(&settings));
+/// assert!(rendered.contains("alice"));
+/// ```
+pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
+    let output = prepare_output_for_sink(output, request.settings, request.profile);
+    let plan = plan_output(&output, request.settings, request.profile);
+    let mut doc = if plan.format != OutputFormat::Json && !request.presentation_lines.is_empty() {
+        lower::lower_presentation_lines(request.presentation_lines, plan.settings.width)
+    } else if matches!(plan.format, OutputFormat::Auto | OutputFormat::Markdown)
+        && let Some(layout) = request.layout
+        && let Some(document) = output
+            .document
+            .as_ref()
+            .and_then(crate::core::output_model::OutputDocument::semantic)
     {
-        *title = format!("{prefix} · {title}");
-    }
-    let mut doc = if plan.format == OutputFormat::Markdown {
-        lower::lower_document(&document, plan.format)
+        let mut document = document.clone();
+        if let Some(prefix) = request.title_prefix
+            && let Some(DocBlock::Section { title, .. }) = document
+                .blocks
+                .iter_mut()
+                .find(|block| matches!(block, DocBlock::Section { .. }))
+        {
+            *title = format!("{prefix} · {title}");
+        }
+        if plan.format == OutputFormat::Markdown {
+            lower::lower_document(&document, plan.format)
+        } else {
+            lower::lower_document_help_layout(
+                &document,
+                &plan,
+                layout,
+                request
+                    .show_footer_rule
+                    .unwrap_or_else(|| default_show_footer_rule(layout)),
+            )
+        }
     } else {
-        lower::lower_document_help_layout(
-            &document,
-            &plan,
-            options.layout,
-            options
-                .show_footer_rule
-                .unwrap_or_else(|| default_show_footer_rule(options.layout)),
-        )
+        lower::lower_output(&output, &plan)
     };
     lower::sanitize_doc(&mut doc);
     emit::emit_doc(&doc, plan.format, &plan.settings)
-}
-
-fn render_output_with_profile(
-    output: &OutputResult,
-    settings: &RenderSettings,
-    profile: RenderProfile,
-) -> String {
-    let output = prepare_output_for_sink(output, settings, profile);
-    let plan = plan_output(&output, settings, profile);
-    emit::emit_doc(
-        &lower::lower_output(&output, &plan),
-        plan.format,
-        &plan.settings,
-    )
 }
 
 fn prepare_output_for_sink<'a>(
@@ -257,169 +239,18 @@ fn prepare_output_for_sink<'a>(
     }
 }
 
-/// Renders an already-materialized row slice through the canonical UI
-/// pipeline.
-///
-/// Use this when the caller already has rows and does not need the richer
-/// document/meta surface of [`OutputResult`].
-pub fn render_rows(rows: &[crate::core::row::Row], settings: &RenderSettings) -> String {
-    render_output(
-        &OutputResult {
-            items: crate::core::output_model::OutputItems::Rows(rows.to_vec()),
-            document: None,
-            meta: Default::default(),
-        },
-        settings,
-    )
-}
-
-/// Renders structured output using the canonical UI pipeline.
-///
-/// # Examples
-///
-/// ```
-/// use osp_cli::core::output::OutputFormat;
-/// use osp_cli::core::output_model::OutputResult;
-/// use osp_cli::row;
-/// use osp_cli::ui::{RenderSettings, render_output};
-///
-/// let output = OutputResult::from_rows(vec![row! {
-///     "uid" => "alice",
-///     "mail" => "a@example.com",
-/// }]);
-/// let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Markdown));
-///
-/// assert!(rendered.contains("| uid"));
-/// assert!(rendered.contains("alice"));
-/// ```
-pub fn render_output(output: &OutputResult, settings: &RenderSettings) -> String {
-    render_output_with_profile(output, settings, RenderProfile::Normal)
-}
-
-/// Renders a semantic document through the shared UI lowering and emitters.
-pub fn render_document(document: &Document, settings: &RenderSettings) -> String {
-    let format = settings.format;
-    if matches!(format, OutputFormat::Json) {
-        let value = serde_json::to_value(document).unwrap_or(serde_json::Value::Null);
-        return render_json_value(&value, settings);
-    }
-
-    let resolved = resolve_settings(settings, RenderProfile::Normal);
-    let mut doc = lower::lower_document(document, format);
-    lower::sanitize_doc(&mut doc);
-    emit::emit_doc(&doc, format, &resolved)
-}
-
-pub(crate) fn render_presentation_lines(lines: &[String], settings: &RenderSettings) -> String {
-    let plan = plan_output(
-        &OutputResult::from_rows(Vec::new()),
-        settings,
-        RenderProfile::Normal,
-    );
-    emit::emit_doc(
-        &lower::lower_presentation_lines(lines, plan.settings.width),
-        plan.format,
-        &plan.settings,
-    )
-}
-
-/// Renders output using the copy-safe profile.
-///
-/// This keeps the same structured payload but resolves settings as if the
-/// result is headed for clipboard, logs, or another plain-text sink.
-pub fn render_output_for_copy(output: &OutputResult, settings: &RenderSettings) -> String {
-    render_output_with_profile(output, settings, RenderProfile::CopySafe)
-}
-
-pub(crate) fn render_json_value(value: &serde_json::Value, settings: &RenderSettings) -> String {
-    let resolved = resolve_settings(settings, RenderProfile::CopySafe);
-    emit::emit_doc(
-        &doc::Doc {
-            blocks: vec![doc::Block::Json(doc::JsonBlock {
-                text: serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".to_string()),
-            })],
-        },
-        OutputFormat::Json,
-        &resolved,
-    )
-}
-
-pub(crate) fn render_structured_output(
-    config: &ResolvedConfig,
-    settings: &RenderSettings,
-    output: &OutputResult,
-) -> String {
-    render_structured_output_with_config(output, None, settings, config)
-}
-
 pub(crate) fn copy_output_to_clipboard(
     output: &OutputResult,
     settings: &RenderSettings,
     clipboard: &clipboard::ClipboardService,
 ) -> Result<(), clipboard::ClipboardError> {
-    clipboard.copy_text(&render_output_for_copy(output, settings))
-}
-
-#[cfg(test)]
-pub(crate) fn render_structured_output_with_layout(
-    output: &OutputResult,
-    settings: &RenderSettings,
-    layout: HelpLayout,
-) -> String {
-    render_structured_output_with_source_document(output, None, settings, layout)
-}
-
-pub(crate) fn render_structured_output_with_config(
-    output: &OutputResult,
-    source_document: Option<&Document>,
-    settings: &RenderSettings,
-    config: &ResolvedConfig,
-) -> String {
-    render_structured_output_with_document_options(
+    clipboard.copy_text(&render(
         output,
-        settings,
-        StructuredDocumentRenderOptions {
-            source_document,
-            layout: help_layout_from_config(config),
-            title_prefix: None,
-            show_footer_rule: None,
+        &RenderRequest {
+            profile: RenderProfile::CopySafe,
+            ..RenderRequest::new(settings)
         },
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn render_document_with_layout(
-    document: &Document,
-    settings: &RenderSettings,
-    layout: HelpLayout,
-) -> String {
-    render_document_with_layout_with_chrome(
-        document,
-        settings,
-        layout,
-        default_show_footer_rule(layout),
-        None,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn render_document_with_layout_with_chrome(
-    document: &Document,
-    settings: &RenderSettings,
-    layout: HelpLayout,
-    footer: bool,
-    title_prefix: Option<&str>,
-) -> String {
-    render_structured_output_with_document_options(
-        &document.to_output_result(),
-        settings,
-        StructuredDocumentRenderOptions {
-            source_document: Some(document),
-            layout,
-            title_prefix,
-            show_footer_rule: Some(footer),
-        },
-    )
+    ))
 }
 
 fn default_show_footer_rule(layout: HelpLayout) -> bool {

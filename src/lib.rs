@@ -43,12 +43,13 @@
 //! ```
 //! use osp_cli::core::output::OutputFormat;
 //! use osp_cli::row;
-//! use osp_cli::ui::{RenderSettings, render_rows};
+//! use osp_cli::ui::{RenderSettings, render};
 //!
-//! let rendered = render_rows(
-//!     &[row! { "uid" => "alice", "mail" => "alice@example.com" }],
-//!     &RenderSettings::test_plain(OutputFormat::Json),
-//! );
+//! let output = osp_cli::core::output_model::OutputResult::from_rows(vec![
+//!     row! { "uid" => "alice", "mail" => "alice@example.com" },
+//! ]);
+//! let settings = RenderSettings::test_plain(OutputFormat::Json);
+//! let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 //!
 //! assert!(rendered.contains("\"uid\": \"alice\""));
 //! assert!(rendered.contains("\"mail\": \"alice@example.com\""));

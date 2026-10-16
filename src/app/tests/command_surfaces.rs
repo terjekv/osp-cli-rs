@@ -34,7 +34,10 @@ fn staged_semantic_quick_search_preserves_guide_shape_by_default_unit() {
             .all(|row| row["section"] == "Commands")
     );
 
-    let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Auto));
+    let rendered = render(
+        &output,
+        &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Auto)),
+    );
     assert!(rendered.contains("Commands"));
     assert!(!rendered.contains("Usage"));
     assert!(!rendered.contains("Sections"));

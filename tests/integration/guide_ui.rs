@@ -1,7 +1,7 @@
 use osp_cli::core::document::{DocBlock, Document};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::ui::{RenderSettings, render_output};
+use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
 fn run_guide_pipeline(view: Document, pipeline: &str) -> osp_cli::core::output_model::OutputResult {
@@ -26,7 +26,7 @@ fn guide_payload_narrowing_restores_and_renders_as_markdown_guide() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.width = Some(80);
     settings.format_explicit = true;
-    let markdown = render_output(&output, &settings);
+    let markdown = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(markdown.contains("list"));
     assert!(markdown.contains("List history entries"));
@@ -58,7 +58,10 @@ fn guide_payload_value_extraction_degrades_and_renders_as_plain_values() {
     let output = run_guide_pipeline(sample_guide(), "P name | VALUE name | S value | L 2");
     assert!(!output.meta.document_rows);
 
-    let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Value));
+    let rendered = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Value)),
+    );
     assert!(rendered.contains("clear"));
     assert!(rendered.contains("list"));
     assert!(!rendered.contains("Usage"));
@@ -128,8 +131,14 @@ fn clap_command_metadata_projects_into_guides() {
             .is_some_and(|value| { value.as_str().is_some_and(|name| name.contains("--format")) }))
     );
 
-    let markdown =
-        osp_cli::ui::render_document(&guide, &RenderSettings::test_plain(OutputFormat::Markdown));
+    let markdown = osp_cli::ui::render(
+        &guide.to_output_result(),
+        &osp_cli::ui::RenderRequest::new(&{
+            let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
+            settings.format_explicit = true;
+            settings
+        }),
+    );
     assert!(markdown.contains("List plugins"));
     assert!(markdown.contains("Plugin epilogue"));
 }
@@ -181,11 +190,11 @@ fn parsed_and_authored_guides_merge_round_trip_and_render_through_semantic_outpu
     );
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
-    let markdown = render_output(&output, &settings);
+    let markdown = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
     assert!(markdown.contains("## Usage") && markdown.contains("## Session"));
     assert!(markdown.contains("current profile: prod"));
     settings.format = OutputFormat::Value;
-    let values = render_output(&output, &settings);
+    let values = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
     for value in [
         "Show deployment status",
         "Run doctor before deploy",
@@ -260,7 +269,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut guide_settings = RenderSettings::test_plain(OutputFormat::Auto);
     guide_settings.width = Some(40);
-    let rendered = render_output(&output, &guide_settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&guide_settings));
     assert!(rendered.contains("Session"));
     assert!(rendered.contains("profile"));
     assert!(rendered.contains("osp history list"));
@@ -268,7 +277,10 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
-    let markdown = render_output(&output, &markdown_settings);
+    let markdown = render(
+        &output,
+        &osp_cli::ui::RenderRequest::new(&markdown_settings),
+    );
     assert!(markdown.contains("## Session"));
     assert!(markdown.contains("- profile: prod"));
     assert!(markdown.contains("| name"));
@@ -280,14 +292,14 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     assert_eq!(restored, guide);
     let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
     json_settings.format_explicit = true;
-    let json_output = render_output(&output, &json_settings);
+    let json_output = render(&output, &osp_cli::ui::RenderRequest::new(&json_settings));
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&json_output).unwrap(),
         serde_json::to_value(&guide).unwrap(),
     );
     let mut value_settings = RenderSettings::test_plain(OutputFormat::Value);
     value_settings.format_explicit = true;
-    let values = render_output(&output, &value_settings);
+    let values = render(&output, &osp_cli::ui::RenderRequest::new(&value_settings));
     for expected in [
         "prod",
         "rose-pine-moon",
@@ -308,12 +320,18 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     styled.color = osp_cli::core::output::ColorMode::Always;
     styled.unicode = osp_cli::core::output::UnicodeMode::Always;
     styled.width = Some(60);
-    let rich = render_output(&output, &styled);
+    let rich = render(&output, &osp_cli::ui::RenderRequest::new(&styled));
     assert!(
         rich.contains('\x1b'),
         "explicit color should style the guide: {rich}"
     );
-    let copied = osp_cli::ui::render_output_for_copy(&output, &styled);
+    let copied = osp_cli::ui::render(
+        &output,
+        &osp_cli::ui::RenderRequest {
+            profile: osp_cli::ui::RenderProfile::CopySafe,
+            ..osp_cli::ui::RenderRequest::new(&styled)
+        },
+    );
     assert!(
         !copied.contains('\x1b'),
         "copied output must remain plain: {copied}"
@@ -335,7 +353,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut mreg_settings = RenderSettings::test_plain(OutputFormat::Mreg);
     mreg_settings.format_explicit = true;
-    let mreg = render_output(&output, &mreg_settings);
+    let mreg = render(&output, &osp_cli::ui::RenderRequest::new(&mreg_settings));
     for entry in [
         "Session",
         "profile",

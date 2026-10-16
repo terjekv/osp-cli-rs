@@ -84,7 +84,7 @@ mod tests {
     };
     use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
     use crate::dsl::apply_output_pipeline;
-    use crate::ui::{RenderSettings, render_output};
+    use crate::ui::{RenderSettings, render};
     use serde_json::Value;
     use serde_json::json;
 
@@ -174,9 +174,9 @@ mod tests {
             vec![crate::row! { "uid" => "alice", "count" => 2 }]
         );
         assert_eq!(
-            render_output(
+            render(
                 &empty_object,
-                &RenderSettings::test_plain(OutputFormat::Mreg)
+                &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Mreg))
             ),
             "No results.\n"
         );
@@ -189,9 +189,9 @@ mod tests {
         );
         assert!(empty_array_rows.is_empty());
         assert_eq!(
-            render_output(
+            render(
                 &empty_array,
-                &RenderSettings::test_plain(OutputFormat::Table)
+                &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table))
             ),
             "No results.\n"
         );
@@ -241,7 +241,10 @@ mod tests {
             }),
         );
 
-        let table = render_output(&output, &RenderSettings::test_plain(OutputFormat::Table));
+        let table = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table)),
+        );
         assert!(table.contains("db01.uio.no"));
         assert!(table.contains("api01.uio.no"));
         assert!(!table.contains("next_cursor"));
@@ -249,7 +252,7 @@ mod tests {
 
         let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
         json_settings.format_explicit = true;
-        let rendered_json = render_output(&output, &json_settings);
+        let rendered_json = render(&output, &crate::ui::RenderRequest::new(&json_settings));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&rendered_json)
                 .expect("rendered output should be JSON"),
@@ -295,7 +298,10 @@ mod tests {
                 "error_code" => Value::Null
             }]
         );
-        let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Table));
+        let rendered = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table)),
+        );
         assert!(rendered.contains("NAME"));
         assert!(rendered.contains("PROVIDER"));
         assert!(rendered.contains("COMPUTE"));
@@ -347,7 +353,10 @@ mod tests {
                 .map(|document| document.json_value()),
             Some(data.clone())
         );
-        let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Mreg));
+        let rendered = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Mreg)),
+        );
         assert!(rendered.contains("Task:"));
         assert!(rendered.contains("1855"));
         assert!(rendered.contains("Target:"));

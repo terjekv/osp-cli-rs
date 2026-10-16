@@ -1,6 +1,6 @@
 //! Public document contracts migrated from the removed guide model.
 
-use super::{RenderSettings, render_output};
+use super::{RenderSettings, render};
 use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::OutputResult;
@@ -51,7 +51,10 @@ fn document_serialization_preserves_parsed_and_authored_order_unit() {
         Document::from_markdown_template("## OSP\nWelcome\n\n{{ help }}\n\n## Tail\nDone", &help),
     ] {
         let output = document.to_output_result();
-        let json = render_output(&output, &settings(OutputFormat::Json));
+        let json = render(
+            &output,
+            &crate::ui::RenderRequest::new(&settings(OutputFormat::Json)),
+        );
         assert_eq!(serde_json::from_str::<Document>(&json).unwrap(), document);
         assert!(output.meta.document_rows);
         assert_eq!(output.as_rows().unwrap(), document.rows());
@@ -70,7 +73,7 @@ fn document_intent_is_explicit_and_ordinary_records_remain_data_unit() {
         OutputFormat::Markdown,
         OutputFormat::Mreg,
     ] {
-        let rendered = render_output(&output, &settings(format));
+        let rendered = render(&output, &crate::ui::RenderRequest::new(&settings(format)));
         assert!(
             rendered.contains("42")
                 && rendered.contains("failed")
@@ -87,7 +90,10 @@ fn document_markdown_surfaces_sections_and_keeps_entry_rows_unit() {
     let mut settings = settings(OutputFormat::Markdown);
     for width in [None, Some(90)] {
         settings.width = width;
-        let markdown = render_output(&document.to_output_result(), &settings);
+        let markdown = render(
+            &document.to_output_result(),
+            &crate::ui::RenderRequest::new(&settings),
+        );
         for text in [
             "## Usage",
             "history <COMMAND>",
@@ -136,7 +142,10 @@ fn document_values_use_content_and_preserve_object_value_order_unit() {
     ];
     for (document, expected) in cases {
         assert_eq!(
-            render_output(&document.to_output_result(), &settings(OutputFormat::Value)),
+            render(
+                &document.to_output_result(),
+                &crate::ui::RenderRequest::new(&settings(OutputFormat::Value))
+            ),
             expected
         );
     }

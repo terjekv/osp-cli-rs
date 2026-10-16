@@ -2,7 +2,7 @@ use crate::assert_snapshot_text;
 use osp_cli::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use osp_cli::core::output_model::OutputResult;
 use osp_cli::dsl::apply_pipeline;
-use osp_cli::ui::{RenderSettings, render_output};
+use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
 #[test]
@@ -90,12 +90,12 @@ fn address_colors_follow_theme_overrides_only_in_colored_output() {
     settings.mode = RenderMode::Rich;
     settings.style_overrides.ipv4 = Some("red".into());
     settings.style_overrides.ipv6 = Some("green".into());
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
     assert!(rendered.contains("\x1b[31m192.0.2.1\x1b[0m"));
     assert!(rendered.contains("\x1b[32m2001:db8::1\x1b[0m"));
     assert!(!rendered.contains("\x1b[31m999.0.0.1"));
     settings.color = ColorMode::Never;
-    let plain = render_output(&output, &settings);
+    let plain = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
     assert!(plain.contains("192.0.2.1") && plain.contains("2001:db8::1"));
     assert!(!plain.contains('\x1b'));
 }
@@ -268,7 +268,7 @@ fn single_row_key_value_block_plain_snapshot_contract() {
     settings.format_explicit = true;
     settings.width = Some(120);
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert_snapshot_text!("single_row_key_value_block_plain", rendered);
 }
@@ -285,7 +285,7 @@ fn single_row_key_value_block_rich_snapshot_contract() {
     settings.runtime.stdout_is_tty = true;
     settings.theme_name = "dracula".to_string();
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert_snapshot_text!("single_row_key_value_block_rich", rendered);
 }
@@ -297,7 +297,7 @@ fn quick_filtered_single_row_key_value_block_plain_snapshot_contract() {
     settings.format_explicit = true;
     settings.width = Some(60);
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert_snapshot_text!("quick_filtered_single_row_key_value_block_plain", rendered);
 }
@@ -314,7 +314,7 @@ fn quick_filtered_single_row_key_value_block_rich_snapshot_contract() {
     settings.runtime.stdout_is_tty = true;
     settings.theme_name = "dracula".to_string();
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert_snapshot_text!("quick_filtered_single_row_key_value_block_rich", rendered);
 }

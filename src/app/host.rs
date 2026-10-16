@@ -452,11 +452,12 @@ fn handle_clap_parse_error(
             let mut output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
                 .map_err(|error| miette!("failed to transform help output: {error}"))?;
             output.meta.document_long_help = long_help;
-            let rendered = crate::ui::render_structured_output_with_source_document(
+            let rendered = crate::ui::render(
                 &output,
-                stages.is_empty().then_some(&filtered),
-                &help_context.settings,
-                help_context.layout,
+                &crate::ui::RenderRequest {
+                    layout: Some(help_context.layout),
+                    ..crate::ui::RenderRequest::new(&help_context.settings)
+                },
             );
             sink.write_stdout(&rendered);
             Ok(0)

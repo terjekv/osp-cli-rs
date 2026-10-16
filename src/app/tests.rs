@@ -33,7 +33,7 @@ use crate::repl::{HistoryConfig, HistoryShellContext, SharedHistory};
 use crate::repl::{completion, dispatch as repl_dispatch, help as repl_help, surface};
 use crate::ui::build_presentation_defaults_layer;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
-use crate::ui::{RenderSettings, render_output};
+use crate::ui::{RenderSettings, render};
 use crate::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry};
 use clap::Command;
 use clap::Parser;

@@ -8,7 +8,7 @@ use super::ReplViewContext;
 #[cfg(test)]
 use crate::ui::HelpLayout;
 #[cfg(test)]
-use crate::ui::{StructuredDocumentRenderOptions, help_layout_from_config};
+use crate::ui::help_layout_from_config;
 
 #[cfg(test)]
 pub(crate) fn render_repl_help_with_chrome(view: ReplViewContext<'_>, help_text: &str) -> String {
@@ -35,14 +35,13 @@ pub(crate) fn render_help_with_chrome(
     let parsed = escape_inline_markup(parsed);
     let mut output = parsed.to_output_result();
     output.meta.document_long_help = help_text.lines().any(|line| line.starts_with("          "));
-    let mut rendered = crate::ui::render_structured_output_with_document_options(
+    let mut rendered = crate::ui::render(
         &output,
-        &settings,
-        StructuredDocumentRenderOptions {
-            source_document: Some(&parsed),
-            layout,
+        &crate::ui::RenderRequest {
+            layout: Some(layout),
             title_prefix: None,
             show_footer_rule: Some(matches!(layout, HelpLayout::Full)),
+            ..crate::ui::RenderRequest::new(&settings)
         },
     );
     rendered = rendered.replace("\\`", "`").replace("\\*", "*");
@@ -293,11 +292,12 @@ mod tests {
         let guide = Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n");
 
         let configured = RenderSettings::test_plain(OutputFormat::Json);
-        let rendered = crate::ui::render_structured_output_with_source_document(
+        let rendered = crate::ui::render(
             &guide.to_output_result(),
-            Some(&guide),
-            &configured,
-            guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
+                ..crate::ui::RenderRequest::new(&configured)
+            },
         );
         assert!(rendered.contains("Usage:"));
         assert!(rendered.contains("list"));
@@ -305,11 +305,12 @@ mod tests {
 
         let mut explicit = RenderSettings::test_plain(OutputFormat::Json);
         explicit.format_explicit = true;
-        let rendered = crate::ui::render_structured_output_with_source_document(
+        let rendered = crate::ui::render(
             &guide.to_output_result(),
-            Some(&guide),
-            &explicit,
-            guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
+                ..crate::ui::RenderRequest::new(&explicit)
+            },
         );
         assert!(rendered.trim_start().starts_with('{'));
     }
@@ -321,14 +322,13 @@ mod tests {
             Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list\n")
                 .to_output_result();
         let rehydrated = RenderSettings::test_plain(OutputFormat::Json);
-        let rendered = crate::ui::render_structured_output_with_document_options(
+        let rendered = crate::ui::render(
             &from_text,
-            &rehydrated,
-            StructuredDocumentRenderOptions {
-                source_document: None,
-                layout: guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
                 title_prefix: None,
                 show_footer_rule: None,
+                ..crate::ui::RenderRequest::new(&rehydrated)
             },
         );
         assert!(rendered.contains("Usage:"));
@@ -336,14 +336,13 @@ mod tests {
 
         let filtered = filtered_guide_output();
         let semantic = RenderSettings::test_plain(OutputFormat::Auto);
-        let rendered = crate::ui::render_structured_output_with_document_options(
+        let rendered = crate::ui::render(
             &filtered,
-            &semantic,
-            StructuredDocumentRenderOptions {
-                source_document: None,
-                layout: guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
                 title_prefix: None,
                 show_footer_rule: None,
+                ..crate::ui::RenderRequest::new(&semantic)
             },
         );
         assert!(rendered.contains("Commands:"));
@@ -352,14 +351,13 @@ mod tests {
 
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
         explicit_json.format_explicit = true;
-        let rendered = crate::ui::render_structured_output_with_document_options(
+        let rendered = crate::ui::render(
             &filtered,
-            &explicit_json,
-            StructuredDocumentRenderOptions {
-                source_document: None,
-                layout: guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
                 title_prefix: None,
                 show_footer_rule: None,
+                ..crate::ui::RenderRequest::new(&explicit_json)
             },
         );
         assert!(rendered.trim_start().starts_with('['));
@@ -368,14 +366,13 @@ mod tests {
 
         let mut markdown = RenderSettings::test_plain(OutputFormat::Markdown);
         markdown.format_explicit = true;
-        let rendered = crate::ui::render_structured_output_with_document_options(
+        let rendered = crate::ui::render(
             &filtered,
-            &markdown,
-            StructuredDocumentRenderOptions {
-                source_document: None,
-                layout: guide_render_layout(),
+            &crate::ui::RenderRequest {
+                layout: Some(guide_render_layout()),
                 title_prefix: None,
                 show_footer_rule: None,
+                ..crate::ui::RenderRequest::new(&markdown)
             },
         );
         assert!(rendered.contains("## Commands"));

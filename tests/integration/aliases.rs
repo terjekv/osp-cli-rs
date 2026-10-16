@@ -2,7 +2,7 @@ use osp_cli::cli::parse_command_text_with_aliases;
 use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::apply_pipeline;
-use osp_cli::ui::{RenderSettings, render_output};
+use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
 fn make_config(entries: &[(&str, &str)]) -> osp_cli::config::ResolvedConfig {
@@ -39,7 +39,7 @@ fn alias_expands_internal_and_user_pipes() {
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Value);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
     assert!(output.contains("oistes"));
 }
 

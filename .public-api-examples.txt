@@ -10,5 +10,5 @@ src/native.rs execute
 src/plugin/manager.rs select_provider
 src/plugin/manager.rs clear_provider_selection
 src/dsl/engine.rs apply_output_pipeline
-src/ui/mod.rs render_output
+src/ui/mod.rs render
 src/app/session.rs AppState::from_resolved_config

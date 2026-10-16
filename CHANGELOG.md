@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** Render output through `ui::render` and `RenderRequest` instead
+  of separate row, document, copy, and configured output render functions.
+
 - Use one command output value with an exclusive structured, text, JSON, or
   empty body across CLI, REPL, progress, and replay.
 

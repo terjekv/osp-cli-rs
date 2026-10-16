@@ -4,7 +4,7 @@ use osp_cli::core::fuzzy::{completion_fuzzy_matcher, search_fuzzy_matcher};
 use osp_cli::core::output::OutputFormat;
 use osp_cli::core::output_model::OutputResult;
 use osp_cli::row;
-use osp_cli::ui::{RenderSettings, render_output};
+use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
 #[test]
@@ -39,7 +39,7 @@ fn miri_nested_key_value_rendering_stays_structured() {
 
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.format_explicit = true;
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("uid:"));
     assert!(rendered.contains("netgroups (2):"));

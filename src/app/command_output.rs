@@ -8,7 +8,7 @@ use crate::core::plugin::{ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, Re
 use crate::dsl::apply_output_pipeline;
 use crate::ui::clipboard::ClipboardService;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
-use crate::ui::{RenderSettings, copy_output_to_clipboard};
+use crate::ui::{RenderRequest, RenderSettings, copy_output_to_clipboard};
 use miette::{Result, WrapErr, miette};
 use serde_json::Value;
 use terminal_size::{Height, terminal_size};
@@ -189,22 +189,14 @@ impl CommandOutput {
                 )
             }
         };
-        {
-            if !self.presentation.lines.is_empty()
-                && crate::ui::plan_output(&output, &effective, crate::ui::RenderProfile::Normal)
-                    .format
-                    != OutputFormat::Json
-            {
-                crate::ui::render_presentation_lines(&self.presentation.lines, &effective)
-            } else {
-                crate::ui::render_structured_output_with_source_document(
-                    &output,
-                    None,
-                    &effective,
-                    crate::ui::help_layout_from_config(config),
-                )
-            }
-        }
+        crate::ui::render(
+            &output,
+            &RenderRequest {
+                layout: Some(crate::ui::help_layout_from_config(config)),
+                presentation_lines: &self.presentation.lines,
+                ..RenderRequest::new(&effective)
+            },
+        )
     }
 }
 
@@ -374,40 +366,25 @@ pub(crate) fn run_progress_command_with_ui(
     }
     let mut rendered = if append_lines && !result.presentation.progress_append.is_empty() {
         plain_progress_settings(&mut settings);
-        {
-            if !result.presentation.progress_append.is_empty()
-                && crate::ui::plan_output(output, &settings, crate::ui::RenderProfile::Normal)
-                    .format
-                    != OutputFormat::Json
-            {
-                crate::ui::render_presentation_lines(
-                    &result.presentation.progress_append,
-                    &settings,
-                )
-            } else {
-                crate::ui::render_output(output, &settings)
-            }
-        }
+        crate::ui::render(
+            output,
+            &RenderRequest {
+                presentation_lines: &result.presentation.progress_append,
+                ..RenderRequest::new(&settings)
+            },
+        )
     } else if !json_output && sink.stderr_is_terminal() {
         result.render(config, &settings)
     } else {
         plain_progress_settings(&mut settings);
-        {
-            if !result.presentation.lines.is_empty()
-                && crate::ui::plan_output(output, &settings, crate::ui::RenderProfile::Normal)
-                    .format
-                    != OutputFormat::Json
-            {
-                crate::ui::render_presentation_lines(&result.presentation.lines, &settings)
-            } else {
-                crate::ui::render_structured_output_with_source_document(
-                    output,
-                    None,
-                    &settings,
-                    crate::ui::help_layout_from_config(config),
-                )
-            }
-        }
+        crate::ui::render(
+            output,
+            &RenderRequest {
+                layout: Some(crate::ui::help_layout_from_config(config)),
+                presentation_lines: &result.presentation.lines,
+                ..RenderRequest::new(&settings)
+            },
+        )
     };
     if framed && !result.messages.is_empty() {
         rendered.insert_str(

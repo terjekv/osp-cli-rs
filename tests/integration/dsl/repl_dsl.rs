@@ -1,6 +1,6 @@
 use osp_cli::core::output::OutputFormat;
 use osp_cli::dsl::{apply_pipeline, parse_pipeline};
-use osp_cli::ui::{RenderSettings, render_output};
+use osp_cli::ui::{RenderSettings, render};
 use serde_json::json;
 
 fn user_rows() -> Vec<osp_cli::core::row::Row> {
@@ -37,7 +37,7 @@ fn dsl_pipeline_project_works_on_ldap_user_data() {
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Table);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(output.contains("uid"));
     assert!(output.contains("cn"));
@@ -53,7 +53,7 @@ fn dsl_pipeline_values_works_on_netgroup_members() {
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Value);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(output.contains("oistes"));
     assert!(!output.contains("description"));
@@ -67,7 +67,7 @@ fn dsl_pipeline_filter_works() {
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Mreg);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(output.contains("ucore"));
 }
@@ -81,7 +81,7 @@ fn dsl_pipeline_markdown_table_format_works() {
 
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.width = Some(200);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     let mut lines = output.lines();
     let header = lines.next().unwrap_or_default();
@@ -112,7 +112,7 @@ fn dsl_pipeline_grouped_output_renders_without_flattening() {
         apply_pipeline(rows, &["G dept".to_string()]).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Table);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(output.contains("dept"));
     assert!(output.contains("sales"));
@@ -138,7 +138,7 @@ fn dsl_pipeline_quick_uses_visible_dotted_row_values_when_no_structural_match_ex
     let transformed = apply_pipeline(rows, &parsed.stages).expect("pipeline should succeed");
 
     let settings = RenderSettings::test_plain(OutputFormat::Table);
-    let output = render_output(&transformed, &settings);
+    let output = render(&transformed, &osp_cli::ui::RenderRequest::new(&settings));
 
     assert!(output.contains("theme.name"));
     assert!(output.contains("dracula"));
