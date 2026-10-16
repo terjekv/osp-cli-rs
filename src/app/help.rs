@@ -131,6 +131,16 @@ pub(crate) fn render_settings_for_help_with_scan(
         settings.format_explicit = true;
     }
 
+    if let Some(mode) = overrides.invocation.mode {
+        settings.mode = mode;
+    }
+    if let Some(color) = overrides.invocation.color {
+        settings.color = color;
+    }
+    if let Some(unicode) = overrides.invocation.unicode {
+        settings.unicode = unicode;
+    }
+
     HelpRenderContext {
         config,
         settings,

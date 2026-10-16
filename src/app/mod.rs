@@ -506,19 +506,32 @@ impl App {
                         )
                     } else {
                         let (verbose, quiet) = (scan.invocation.verbose, scan.invocation.quiet);
-                        let message_verbosity =
-                            adjust_verbosity(MessageLevel::Success, verbose, quiet);
-                        let error_render_settings = help::render_settings_for_help_with_scan(
+                        let context = help::render_settings_for_help_with_scan(
                             &scan,
                             &self.definition.product_defaults,
                             &crate::config::ConfigLayer::default(),
-                        )
-                        .settings;
-                        (
-                            message_verbosity,
-                            scan.invocation.debug.min(3),
-                            error_render_settings,
-                        )
+                        );
+                        let verbosity = adjust_verbosity(
+                            context
+                                .config
+                                .as_ref()
+                                .map_or(MessageLevel::Success, bootstrap::message_verbosity_from_config),
+                            verbose,
+                            quiet,
+                        );
+                        let debug_level = context
+                            .config
+                            .as_ref()
+                            .map_or(0, bootstrap::debug_verbosity_from_config)
+                            .saturating_add(scan.invocation.debug)
+                            .min(3);
+                        if let Some(config) = &context.config {
+                            logging::init_developer_logging(bootstrap::build_logging_config(
+                                config,
+                                debug_level,
+                            ));
+                        }
+                        (verbosity, debug_level, context.settings)
                     }
                 };
                 let err = host::report_with_invocation(

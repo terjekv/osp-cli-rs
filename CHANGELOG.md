@@ -37,6 +37,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Add `core::CommandScope` for command suggestions written for the current prompt.
 
+- Startup failures now honor explicit mode, color and Unicode render flags
+  even when configuration cannot load. Configured verbosity and debug bases
+  also apply to startup diagnostics whenever configuration resolves.
+
 - REPL failures retain plugin messages and use the one-shot failure renderer
   and usage-error titles. Show one detail hint only below detailed verbosity.
 
