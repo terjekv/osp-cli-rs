@@ -1,10 +1,13 @@
-use crate::temp_support::make_temp_dir;
-use osp_cli::app::{AppSession, AppStateBuilder, LaunchContext, RuntimeContext, TerminalKind};
-use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+use crate::app::{AppSession, AppStateBuilder, LaunchContext, RuntimeContext, TerminalKind};
+use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+use crate::tests::make_temp_dir;
 
-use super::support::{with_path_prefix, write_executable_script};
+#[cfg(unix)]
+use std::path::Path;
 
-fn resolved_config(entries: &[(&str, &str)]) -> osp_cli::config::ResolvedConfig {
+use super::plugin_support::write_executable_script;
+
+fn resolved_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "default");
     for (key, value) in entries {
@@ -43,7 +46,7 @@ JSON
 #[cfg(unix)]
 #[test]
 fn app_state_builder_uses_launch_context_for_plugin_roots_and_path_discovery() {
-    if crate::isolation::isolated_test() {
+    if crate::tests::isolated_test() {
         return;
     }
     let explicit_dir = make_temp_dir("osp-cli-launch-explicit");
@@ -125,4 +128,26 @@ fn app_state_builder_surfaces_invalid_theme_selection_errors() {
     let text = err.to_string();
     assert!(text.contains("definitely-not-a-theme"));
     assert!(text.contains("theme"));
+}
+
+#[cfg(unix)]
+fn with_path_prefix<T>(prefix: &Path, callback: impl FnOnce() -> T) -> T {
+    let previous = std::env::var_os("PATH");
+    let joined = std::env::join_paths(
+        std::iter::once(prefix.to_path_buf())
+            .chain(previous.iter().flat_map(std::env::split_paths)),
+    )
+    .expect("PATH should join");
+    unsafe {
+        std::env::set_var("PATH", joined);
+    }
+
+    let result = callback();
+
+    match previous {
+        Some(value) => unsafe { std::env::set_var("PATH", value) },
+        None => unsafe { std::env::remove_var("PATH") },
+    }
+
+    result
 }

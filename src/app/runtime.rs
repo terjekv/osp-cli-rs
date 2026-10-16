@@ -433,7 +433,7 @@ pub struct AppClients {
 
 impl AppClients {
     /// Creates the shared client registry used by the application.
-    pub fn new(plugins: PluginManager, native_commands: NativeCommandRegistry) -> Self {
+    pub(crate) fn new(plugins: PluginManager, native_commands: NativeCommandRegistry) -> Self {
         Self {
             plugins,
             native_commands,
@@ -441,7 +441,7 @@ impl AppClients {
     }
 
     /// Returns the shared plugin manager.
-    pub fn plugins(&self) -> &PluginManager {
+    pub(crate) fn plugins(&self) -> &PluginManager {
         &self.plugins
     }
 

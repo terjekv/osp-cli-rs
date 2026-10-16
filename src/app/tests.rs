@@ -487,3 +487,9 @@ JSON
 fn make_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
     crate::tests::make_temp_dir(prefix)
 }
+
+mod launch;
+
+#[cfg(unix)]
+#[path = "../../tests/support/plugin.rs"]
+mod plugin_support;

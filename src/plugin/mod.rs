@@ -9,9 +9,13 @@ pub(crate) mod env;
 mod manager;
 pub(crate) mod run;
 
-pub use manager::{
+pub(crate) use manager::{
     CommandCatalogEntry, CommandSource, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, Plugin, PluginManager,
     PluginSource,
 };
 
 pub(crate) use manager::PluginDispatchContext;
+
+#[cfg(test)]
+#[path = "tests/integration.rs"]
+mod integration_tests;

@@ -403,3 +403,34 @@ fn registry_collects_nested_auth_policies_when_describe_is_overridden_unit() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn internal_example_1() {
+    use crate::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry};
+    use anyhow::Result;
+    use clap::Command;
+
+    struct VersionCommand;
+
+    impl NativeCommand for VersionCommand {
+        fn command(&self) -> Command {
+            Command::new("version").about("Show version")
+        }
+
+        fn execute(
+            &self,
+            _args: &[String],
+            _context: &NativeCommandContext<'_>,
+        ) -> Result<NativeCommandOutcome> {
+            Ok(NativeCommandOutcome::Exit(0))
+        }
+    }
+
+    let registry = NativeCommandRegistry::new().with_command(VersionCommand);
+    let catalog = registry.catalog();
+
+    assert!(registry.command(" VERSION ").is_some());
+    assert_eq!(catalog[0].name, "version");
+    assert_eq!(catalog[0].about, "Show version");
+    assert!(catalog[0].auth.is_none());
+}

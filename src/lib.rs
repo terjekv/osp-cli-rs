@@ -163,7 +163,7 @@
 //! - [`repl`] exists to own the interactive shell boundary.
 //! - [`dsl`] exists to transform canonical rows and explicit group metadata.
 //! - [`ui`] exists to lower structured output into terminal-facing text.
-//! - [`plugin`] exists to treat external command providers as part of the same
+//! - `plugin` exists to treat external command providers as part of the same
 //!   command surface.
 //!
 //! At runtime, data flows roughly like this:
@@ -231,7 +231,7 @@
 //! - "I already have rows and only want pipeline transforms" →
 //!   [`dsl::apply_pipeline`] or [`dsl::apply_output_pipeline`]
 //! - "I need plugin discovery and catalog/policy integration" →
-//!   [`plugin::PluginManager`] on the host side, or [`core::plugin`] when
+//!   `plugin::PluginManager` on the host side, or [`core::plugin`] when
 //!   implementing the wire protocol itself
 //! - "I need runtime/session state" → [`app::AppStateBuilder::from_resolved_config`]
 //!   with [`app::LaunchContext`] and session overrides
@@ -259,7 +259,7 @@ pub mod diagnostics;
 /// Canonical pipeline parsing and execution.
 pub mod dsl;
 /// External plugin discovery, protocol, and dispatch support.
-pub mod plugin;
+pub(crate) mod plugin;
 /// Interactive REPL editor, prompt, history, and completion surface.
 pub mod repl;
 mod startup_trace;

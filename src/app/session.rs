@@ -609,7 +609,7 @@ impl AppState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{AppState, RuntimeContext, TerminalKind};
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
@@ -784,7 +784,8 @@ impl AppStateBuilder {
     ///
     /// If omitted, the builder derives the plugin manager from the resolved
     /// config plus the current launch context during [`AppStateBuilder::build`].
-    pub fn with_plugins(mut self, plugins: PluginManager) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_plugins(mut self, plugins: PluginManager) -> Self {
         self.plugins = Some(plugins);
         self
     }
@@ -821,6 +822,38 @@ impl AppStateBuilder {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::app::{AppState, RuntimeContext, TerminalKind};
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
+        defaults.set("theme.path", Vec::<String>::new());
+        defaults.set("ui.verbosity", "warning");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(ResolveOptions::new().with_terminal("repl"))
+            .unwrap();
+
+        let state = AppState::from_resolved_config(
+            RuntimeContext::new(None, TerminalKind::Repl, None),
+            config,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.runtime.config_state().resolved().active_profile(),
+            "default"
+        );
+        assert_eq!(state.runtime.ui().verbosity.as_str(), "warning");
+        assert!(state.clients.plugins().explicit_dirs().is_empty());
+    }
+
     use std::time::Duration;
 
     use super::{AppSession, ReplExitTransition};

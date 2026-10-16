@@ -1,7 +1,7 @@
 #[cfg(unix)]
-use crate::temp_support::make_temp_dir;
+use crate::plugin::PluginManager;
 #[cfg(unix)]
-use osp_cli::plugin::PluginManager;
+use crate::tests::make_temp_dir;
 
 #[cfg(unix)]
 fn write_executable_script(path: &std::path::Path, script: &str) {

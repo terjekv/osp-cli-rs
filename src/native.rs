@@ -957,7 +957,7 @@ impl NativeCommandRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use anyhow::Result;
     /// use clap::Command;
     /// use osp_cli::{
@@ -1016,12 +1016,12 @@ impl NativeCommandRegistry {
     }
 
     /// Returns catalog metadata for all registered native commands.
-    pub fn catalog(&self) -> Vec<CommandCatalogEntry> {
+    pub(crate) fn catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(false)
     }
 
     /// Returns catalog metadata with native runtime completion additions.
-    pub fn completion_catalog(&self) -> Vec<CommandCatalogEntry> {
+    pub(crate) fn completion_catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(true)
     }
 

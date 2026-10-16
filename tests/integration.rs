@@ -22,9 +22,6 @@ mod embedding_workflow;
 #[path = "integration/guide_ui.rs"]
 mod guide_ui;
 
-#[path = "integration/plugin_manager.rs"]
-mod plugin_manager;
-
 #[path = "integration/repl/mod.rs"]
 mod repl;
 

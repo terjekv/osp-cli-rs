@@ -5,16 +5,18 @@ use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, PluginDescribe};
 use crate::core::runtime::RuntimeHints;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
 /// Default limit for optional describe subprocesses, in milliseconds.
-pub const DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS: usize = 10_000;
+pub(crate) const DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS: usize = 10_000;
 
 /// Search root from which an executable was discovered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginSource {
+pub(crate) enum PluginSource {
     /// A directory supplied through `--plugin-dir`.
     Explicit,
     /// A directory supplied through `OSP_PLUGIN_PATH`.
@@ -40,7 +42,7 @@ impl std::fmt::Display for PluginSource {
 
 /// One executable and its optional metadata. Describe failures do not prevent runs.
 #[derive(Debug, Clone)]
-pub struct Plugin {
+pub(crate) struct Plugin {
     /// Command name from the executable's `osp-` suffix.
     pub name: String,
     /// Executable path.
@@ -68,7 +70,7 @@ impl Plugin {
 
 /// Execution origin of a command catalog entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandSource {
+pub(crate) enum CommandSource {
     /// In-process command.
     Native,
     /// External executable, with its discovery root.
@@ -77,7 +79,7 @@ pub enum CommandSource {
 
 /// Shared command metadata used by native and executable commands.
 #[derive(Debug, Clone)]
-pub struct CommandCatalogEntry {
+pub(crate) struct CommandCatalogEntry {
     /// Top-level command name.
     pub name: String,
     /// Short help text.
@@ -115,7 +117,7 @@ pub(crate) struct PluginDispatchContext {
 
 /// Discovers executable commands and caches optional metadata.
 #[derive(Debug)]
-pub struct PluginManager {
+pub(crate) struct PluginManager {
     pub(super) explicit_dirs: Vec<PathBuf>,
     pub(super) config_root: Option<PathBuf>,
     pub(super) cache_root: Option<PathBuf>,
@@ -168,18 +170,22 @@ impl PluginManager {
         self
     }
     /// Returns the describe time limit.
+    #[cfg(test)]
     pub fn process_timeout(&self) -> Duration {
         self.process_timeout
     }
     /// Returns explicit launch roots.
+    #[cfg(test)]
     pub fn explicit_dirs(&self) -> &[PathBuf] {
         &self.explicit_dirs
     }
     /// Returns the configured user root override.
+    #[cfg(test)]
     pub fn config_root(&self) -> Option<&Path> {
         self.config_root.as_deref()
     }
     /// Returns the configured cache root override.
+    #[cfg(test)]
     pub fn cache_root(&self) -> Option<&Path> {
         self.cache_root.as_deref()
     }
@@ -196,7 +202,7 @@ impl PluginManager {
     }
     /// Finds the first enabled executable for a command.
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::plugin::PluginManager;
     /// let manager = PluginManager::new(Vec::new())
     ///     .with_default_roots(false).with_bundled_roots(false)
@@ -210,7 +216,7 @@ impl PluginManager {
     }
     /// Drops both the in-memory inventory and the persisted describe cache.
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::plugin::PluginManager;
     /// let manager = PluginManager::new(Vec::new())
     ///     .with_default_roots(false).with_bundled_roots(false)
@@ -249,5 +255,30 @@ impl PluginManager {
             super::catalog::collect_command_auth(&mut auth, &plugin.command(), &[]);
         }
         auth
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::plugin::PluginManager;
+        let manager = PluginManager::new(Vec::new())
+            .with_default_roots(false)
+            .with_bundled_roots(false)
+            .with_path_discovery(false);
+        assert!(manager.find("hello").is_none());
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::plugin::PluginManager;
+        let manager = PluginManager::new(Vec::new())
+            .with_default_roots(false)
+            .with_bundled_roots(false)
+            .with_path_discovery(false);
+        manager.refresh();
+        assert!(manager.list().is_empty());
     }
 }
