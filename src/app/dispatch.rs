@@ -196,6 +196,7 @@ pub(crate) fn resolve_external_command_source(
     clients: &AppClients,
     command: &str,
     provider_override: Option<&str>,
+    scope: &crate::core::CommandScope,
 ) -> Result<ExternalCommandSource> {
     if provider_override.is_some() {
         return Ok(ExternalCommandSource::Plugin);
@@ -215,9 +216,15 @@ pub(crate) fn resolve_external_command_source(
     if matching.is_empty() {
         return Err(match closest_external_command(&catalog, command) {
             Some(suggestion) => {
-                miette!("unknown command `{command}`\nTry: use command `{suggestion}`")
+                miette!(
+                    "unknown command `{command}`\nTry: use command `{}`",
+                    scope.command(&suggestion)
+                )
             }
-            None => miette!("unknown command `{command}`\nTry: run `help` to list commands"),
+            None => miette!(
+                "unknown command `{command}`\nTry: run `{}` to list commands",
+                scope.command("help")
+            ),
         });
     }
 
@@ -239,7 +246,8 @@ pub(crate) fn resolve_external_command_source(
             .map(|entry| entry.providers.join(", "))
             .unwrap_or_default();
         return Err(miette!(
-            "command `{command}` requires provider selection; available: {providers}; use --plugin-provider <plugin-id> or `plugins select-provider {command} <plugin-id>`"
+            "command `{command}` requires provider selection; available: {providers}; use --plugin-provider <plugin-id> or `{}`",
+            scope.command(&format!("plugins select-provider {command} <plugin-id>"))
         ));
     }
 

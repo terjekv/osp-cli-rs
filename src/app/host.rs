@@ -431,8 +431,11 @@ fn handle_clap_parse_error(
                     .entered();
                 app.native_commands.configure(config);
             }
-            let (mut body, root_help, long_help) =
-                crate::cli::command_help_document(command.clone(), &tokens, &crate::core::CommandScope::OneShot);
+            let (mut body, root_help, long_help) = crate::cli::command_help_document(
+                command.clone(),
+                &tokens,
+                &crate::core::CommandScope::OneShot,
+            );
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);
@@ -815,7 +818,7 @@ pub fn render_report_message(
     }
 
     if detail == ErrorDetail::Terse {
-        match known_error_hint(&known) {
+        match known_error_hint(&known, &settings.runtime.command_scope) {
             Some(hint) if !message.contains(&hint) => {
                 message.push_str("\nTry: ");
                 message.push_str(&hint);
@@ -949,64 +952,69 @@ pub(crate) fn adjust_error_detail(base: ErrorDetail, verbose: u8, quiet: u8) -> 
     ErrorDetail::from_rank(rank + verbose as i8 - quiet as i8)
 }
 
-fn known_error_hint(known: &KnownErrorChain<'_>) -> Option<String> {
+fn known_error_hint(
+    known: &KnownErrorChain<'_>,
+    scope: &crate::core::CommandScope,
+) -> Option<String> {
     if let Some(plugin_err) = known.plugin {
         return Some(match plugin_err {
             PluginDispatchError::CommandNotFound { .. } => {
-                "run `osp plugins list` and set --plugin-dir or OSP_PLUGIN_PATH"
+                format!("run `{}` and set --plugin-dir or OSP_PLUGIN_PATH", scope.command("plugins list"))
             }
             PluginDispatchError::CommandAmbiguous { .. } => {
-                "rerun with --plugin-provider <plugin-id> or persist a default with `osp plugins select-provider <command> <plugin-id>`"
+                format!("rerun with --plugin-provider <plugin-id> or persist a default with `{}`", scope.command("plugins select-provider <command> <plugin-id>"))
             }
             PluginDispatchError::ProviderNotFound { .. } => {
-                "pick one of the available providers from `osp plugins commands` or `osp plugins doctor`"
+                format!("pick one of the available providers from `{}` or `{}`", scope.command("plugins commands"), scope.command("plugins doctor"))
             }
             PluginDispatchError::ProviderUnhealthy { .. } => {
-                "inspect the provider issue with `osp plugins doctor`"
+                format!("inspect the provider issue with `{}`", scope.command("plugins doctor"))
             }
             PluginDispatchError::InvalidEnvironment { .. } => {
-                "inspect the colliding extensions.plugins.*.env keys and remove the normalization conflict"
+                "inspect the colliding extensions.plugins.*.env keys and remove the normalization conflict".to_string()
             }
             PluginDispatchError::ExecuteFailed { .. } => {
-                "verify the plugin executable exists and is executable"
+                "verify the plugin executable exists and is executable".to_string()
             }
             PluginDispatchError::TimedOut { .. } => {
-                "increase extensions.plugins.timeout_ms or inspect the plugin executable"
+                "increase extensions.plugins.timeout_ms or inspect the plugin executable".to_string()
             }
             PluginDispatchError::OutputTooLarge { .. } => {
-                "reduce the plugin response size or return a narrower result"
+                "reduce the plugin response size or return a narrower result".to_string()
             }
             PluginDispatchError::NonZeroExit { .. } => {
-                "inspect the plugin stderr output or rerun with -v/-vv for more context"
+                "inspect the plugin stderr output or rerun with -v/-vv for more context".to_string()
             }
             PluginDispatchError::InvalidJsonResponse { .. }
             | PluginDispatchError::InvalidResponsePayload { .. } => {
-                "inspect the plugin response contract and stderr output"
+                "inspect the plugin response contract and stderr output".to_string()
             }
-        }
-        .to_string());
+        });
     }
 
     if let Some(config_err) = known.config {
-        return Some(
-            match config_err {
-                crate::config::ConfigError::UnknownProfile { .. } => {
-                    "run `osp config explain profile.default` or choose a known profile"
-                }
-                crate::config::ConfigError::InsecureSecretsPermissions { .. } => {
-                    "restrict the secrets file permissions to 0600"
-                }
-                _ => "run `osp config explain <key>` to inspect config provenance",
+        return Some(match config_err {
+            crate::config::ConfigError::UnknownProfile { .. } => {
+                format!(
+                    "run `{}` or choose a known profile",
+                    scope.command("config explain profile.default")
+                )
             }
-            .to_string(),
-        );
+            crate::config::ConfigError::InsecureSecretsPermissions { .. } => {
+                "restrict the secrets file permissions to 0600".to_string()
+            }
+            _ => format!(
+                "run `{}` to inspect config provenance",
+                scope.command("config explain <key>")
+            ),
+        });
     }
 
     if let Some(clap) = known.clap {
         let path = known
             .boxed_context
             .and_then(|context| context.command_path.as_deref());
-        return Some(clap_error_action(clap, path));
+        return Some(clap_error_action(clap, path, scope));
     }
 
     None
@@ -1044,7 +1052,11 @@ fn terse_clap_error(error: &clap::Error) -> String {
     terse
 }
 
-fn clap_error_action(error: &clap::Error, command_path: Option<&str>) -> String {
+fn clap_error_action(
+    error: &clap::Error,
+    command_path: Option<&str>,
+    scope: &crate::core::CommandScope,
+) -> String {
     let rendered = error.to_string();
     let suggestions = rendered
         .lines()
@@ -1060,17 +1072,20 @@ fn clap_error_action(error: &clap::Error, command_path: Option<&str>) -> String 
         .collect::<Vec<_>>();
     let prefix = command_path.filter(|path| !path.is_empty());
     match (prefix, suggestions.as_slice()) {
-        (Some(prefix), [suggestion]) => format!("use `{prefix} {suggestion}`"),
+        (Some(prefix), [suggestion]) => {
+            format!("use `{}`", scope.command(&format!("{prefix} {suggestion}")))
+        }
         (Some(prefix), suggestions) if !suggestions.is_empty() => format!(
-            "use one of {}; run `{prefix} --help` to see every subcommand",
+            "use one of {}; run `{}` to see every subcommand",
             suggestions
                 .iter()
-                .map(|suggestion| format!("`{prefix} {suggestion}`"))
+                .map(|suggestion| format!("`{}`", scope.command(&format!("{prefix} {suggestion}"))))
                 .collect::<Vec<_>>()
-                .join(" or ")
+                .join(" or "),
+            scope.command(&format!("{prefix} --help"))
         ),
         (None, [suggestion]) => format!("use subcommand `{suggestion}`"),
-        (Some(prefix), _) => format!("use `{prefix} --help`"),
+        (Some(prefix), _) => format!("use `{}`", scope.command(&format!("{prefix} --help"))),
         _ => "rerun this command with `--help` to inspect accepted values and options".to_string(),
     }
 }

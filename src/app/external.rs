@@ -235,6 +235,7 @@ fn dispatch_external_invocation(
         clients,
         &command,
         invocation.plugin_provider.as_deref(),
+        &invocation.ui.render_settings.runtime.command_scope,
     )? {
         ExternalCommandSource::Native => {
             let native_command = clients
@@ -1617,7 +1618,7 @@ JSON
         .expect_err("misspelled command should fail with a suggestion");
 
         assert!(err.to_string().contains("unknown command `lpad`"));
-        assert!(err.to_string().contains("Try: use command `ldap`"));
+        assert!(err.to_string().contains("Try: use command `osp ldap`"));
     }
 
     #[test]

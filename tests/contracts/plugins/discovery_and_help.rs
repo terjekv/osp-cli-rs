@@ -13,7 +13,7 @@ fn unknown_domain_command_shows_command_hint_contract() {
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("unknown command ldap"))
-        .stderr(predicate::str::contains("Try: run help to list commands"));
+        .stderr(predicate::str::contains("Try: run osp help to list commands"));
 }
 
 #[test]

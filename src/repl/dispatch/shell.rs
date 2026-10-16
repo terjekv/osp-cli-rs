@@ -247,8 +247,13 @@ pub(super) fn enter_repl_shell(
         clients,
         command,
         invocation.plugin_provider.as_deref(),
+        &invocation.ui.render_settings.runtime.command_scope,
     )?;
-    ensure_shell_entry_dispatchable(&catalog, command)?;
+    ensure_shell_entry_dispatchable(
+        &catalog,
+        command,
+        &invocation.ui.render_settings.runtime.command_scope,
+    )?;
 
     // Shells are root commands: entering one switches from the current shell.
     let mut out = session
@@ -272,6 +277,7 @@ pub(super) fn enter_repl_shell(
 fn ensure_shell_entry_dispatchable(
     catalog: &[crate::plugin::CommandCatalogEntry],
     command: &str,
+    scope: &crate::core::CommandScope,
 ) -> Result<()> {
     let matching = catalog
         .iter()
@@ -283,8 +289,9 @@ fn ensure_shell_entry_dispatchable(
 
     if entry.requires_selection {
         return Err(miette!(
-            "command `{command}` requires provider selection; available: {}; use --plugin-provider <plugin-id> or `plugins select-provider {command} <plugin-id>`",
-            entry.providers.join(", ")
+            "command `{command}` requires provider selection; available: {}; use --plugin-provider <plugin-id> or `{}`",
+            entry.providers.join(", "),
+            scope.command(&format!("plugins select-provider {command} <plugin-id>"))
         ));
     }
 
@@ -525,6 +532,34 @@ JSON
             ReplResult::Print(text) => text,
             other => panic!("unexpected repl result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn command_scope_reaches_repl_hint_rendering() {
+        let mut registry = NativeCommandRegistry::default();
+        registry.register(NativeLdapHelpCommand);
+        let mut state = app_state_with_native(registry);
+        let history = crate::repl::SharedHistory::new(crate::repl::HistoryConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        let hint = |state: &mut AppState, line: &str| {
+            let mut sink = BufferedUiSink::default();
+            crate::repl::dispatch::execute_repl_plugin_line(
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
+                &history,
+                line,
+                Some(&mut sink),
+            )
+            .expect("dispatch should render the usage error");
+            let output: serde_json::Value = serde_json::from_str(&sink.stdout).unwrap();
+            output["error"]["message"].as_str().unwrap().to_string()
+        };
+        assert!(hint(&mut state, "ldap usr").contains("Try: use `ldap user`"));
+        state.session.scope.enter("ldap");
+        assert!(hint(&mut state, "usr").contains("Try: use `user`"));
     }
 
     #[test]

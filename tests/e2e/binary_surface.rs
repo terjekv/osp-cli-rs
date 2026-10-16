@@ -67,7 +67,7 @@ fn binary_invalid_subcommand_exits_nonzero_and_writes_usage_to_stderr() {
     );
     let stderr = stderr_utf8(output.stderr);
     assert!(stderr.contains("unrecognized subcommand 'nope'"));
-    assert!(stderr.contains("Try: use config --help"));
+    assert!(stderr.contains("Try: use osp config --help"));
     assert!(!stderr.contains("Usage:"));
 }
 
