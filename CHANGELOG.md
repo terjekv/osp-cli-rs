@@ -7,6 +7,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Ignore retired config keys with one warning listing their names and removal
+  guidance. This includes plugin provider/state/discovery keys, history profile
+  scoping, and removed UI, auth visibility and cache knobs. Unknown keys still fail.
+
 - Terminal confirmations remain available in one-shot commands. `may_prompt()`
   checks stdin/stderr terminals, JSON output and output pipelines; credential
   acquisition retains its own command-scope restrictions.
@@ -225,7 +229,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   subcommands and theme completion words.
 
 - **Breaking:** Rename `ui.message.verbosity` to `ui.verbosity` (environment:
-  `OSP__UI__VERBOSITY`); old configs fail as unknown keys. Rename public
+  `OSP__UI__VERBOSITY`); old keys are ignored with a warning. Rename public
   `UiState::{message_verbosity, debug_verbosity}` to `{verbosity, debug_level}`
   and `DeveloperLoggingConfig::debug_count` to `debug_level`.
 
@@ -345,12 +349,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   mutation methods. Resolve prepared `LoadedLayers` with an explicit schema.
 
 - **Breaking:** Remove the unused config keys `session.cache.max_results`,
-  `ui.prompt`, `ui.prompt.secrets`, and `base.dir`. Configurations containing
-  these keys now fail as unknown keys.
+  `ui.prompt`, `ui.prompt.secrets`, and `base.dir`. These keys are now ignored
+  with a warning.
 - **Breaking:** Remove `ui.help.table_chrome`, `ui.help.entry_indent`,
   `ui.help.entry_gap`, `ui.help.section_spacing`, `ui.medium_list_max`,
   `ui.indent`, and `repl.prompt_right`. Their former default behavior is fixed;
-  configurations containing these keys now fail as unknown keys.
+  these keys are now ignored with a warning.
 
 - Declare builtin config schema, defaults, documentation, and bootstrap rules
   together.
@@ -375,7 +379,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   overrides and the mirrored command-policy DSL. `CommandAccess` is `Runnable`, `Denied(reason)` or `Hidden(reason)`.
   Remove the unused `CredentialState::present()` constructor.
 - **Breaking:** Remove config keys `auth.visible.builtins` and
-  `auth.visible.plugins`; configs that set them now fail as unknown keys.
+  `auth.visible.plugins`; these keys are now ignored with a warning.
 - **Breaking:** Remove capability, profile, product-availability, feature,
   visible-session, auth-strength and credential-freshness gates. Protocol-v1
   DTOs still parse the legacy fields and ignore them; `capability_gated` is

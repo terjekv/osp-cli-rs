@@ -50,3 +50,7 @@ osp config explain repl.tab_mode
 osp config show --sources
 OSP__REPL__TAB_MODE=always osp      # one-off env override
 ```
+
+Retired config keys are ignored before interpolation and validation. The host
+prints one warning naming them and `osp config unset KEY` guidance. Truly unknown
+keys still fail validation. The retired-key list belongs to the config schema.

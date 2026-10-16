@@ -527,6 +527,28 @@ impl SchemaEntry {
     }
 }
 
+// Retired keys stay recognizable only so existing files remain loadable.
+const REMOVED_KEYS: &[&str] = &[
+    "plugins.*.provider",
+    "plugins.*.state",
+    "extensions.plugins.discovery.path",
+    "repl.history.profile_scoped",
+    "session.cache.max_results",
+    "ui.prompt",
+    "ui.prompt.secrets",
+    "base.dir",
+    "ui.help.table_chrome",
+    "ui.help.entry_indent",
+    "ui.help.entry_gap",
+    "ui.help.section_spacing",
+    "ui.medium_list_max",
+    "ui.indent",
+    "repl.prompt_right",
+    "auth.visible.builtins",
+    "auth.visible.plugins",
+    "ui.message.verbosity",
+];
+
 /// Config schema used for validation, parsing, and runtime filtering.
 #[derive(Debug, Clone)]
 pub struct ConfigSchema {
@@ -563,6 +585,19 @@ impl ConfigSchema {
     pub fn insert(&mut self, key: &'static str, entry: SchemaEntry) {
         self.entries
             .insert(key.to_string(), entry.with_canonical_key(key));
+    }
+
+    pub(crate) fn is_removed_key(&self, key: &str) -> bool {
+        !self.entries.contains_key(key)
+            && REMOVED_KEYS.iter().any(|pattern| {
+                if let Some((prefix, suffix)) = pattern.split_once('*') {
+                    key.strip_prefix(prefix)
+                        .and_then(|rest| rest.strip_suffix(suffix))
+                        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+                } else {
+                    key == *pattern
+                }
+            })
     }
 
     /// Returns whether the key is recognized by the schema.
@@ -1416,9 +1451,20 @@ pub struct ResolvedConfig {
     pub(crate) known_profiles: BTreeSet<String>,
     pub(crate) values: BTreeMap<String, ResolvedValue>,
     pub(crate) aliases: BTreeMap<String, ResolvedValue>,
+    pub(crate) ignored_keys: Vec<String>,
 }
 
 impl ResolvedConfig {
+    pub(crate) fn ignored_keys_warning(&self) -> String {
+        if self.ignored_keys.is_empty() {
+            return String::new();
+        }
+        format!(
+            "warning: Ignoring config keys no longer used: {}.\nhint: Remove them with osp config unset KEY.\n",
+            self.ignored_keys.join(", ")
+        )
+    }
+
     /// Returns the profile selected for resolution.
     pub fn active_profile(&self) -> &str {
         &self.active_profile

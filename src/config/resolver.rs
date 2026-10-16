@@ -128,6 +128,11 @@ impl ConfigResolver {
             known_profiles: frame.known_profiles,
             values: resolved.final_values,
             aliases: resolved.alias_values,
+            ignored_keys: self
+                .collect_keys()
+                .into_iter()
+                .filter(|key| self.schema.is_removed_key(key))
+                .collect(),
         };
         tracing::debug!(
             active_profile = %config.active_profile(),
@@ -259,7 +264,7 @@ impl ConfigResolver {
 
         let mut values = BTreeMap::new();
         for key in keys {
-            if is_bootstrap_only_key(&key) {
+            if is_bootstrap_only_key(&key) || self.schema.is_removed_key(&key) {
                 continue;
             }
             if let Some(selected) = self.select_across_layers(&key, selector) {

@@ -402,6 +402,7 @@ fn handle_clap_parse_error(
                 &product_overrides,
             );
             if let Some(config) = &help_context.config {
+                sink.write_stderr(&config.ignored_keys_warning());
                 let _phase = tracing::info_span!(target: "osp_startup", "native command configure")
                     .entered();
                 app.native_commands.configure(config);
@@ -532,6 +533,8 @@ fn run(
         let _phase = tracing::info_span!(target: "osp_startup", "host startup").entered();
         prepare_host_run(&mut cli, &invocation, app, run_started)?
     };
+
+    sink.write_stderr(&state.runtime.config.resolved().ignored_keys_warning());
 
     if let Some(help) = crate::repl::completion::maybe_render_dsl_help(
         crate::repl::ReplViewContext::from_parts(&state.runtime, &state.session),
