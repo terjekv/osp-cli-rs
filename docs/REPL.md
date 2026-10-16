@@ -123,6 +123,13 @@ REPL rebuilds for the life of that session.
 
 ## Shell Scope
 
+Suggested commands match the current prompt. Inside `orch`, both `task …` and
+`orch task …` work unless a host command or alias shadows the relative first
+word: use `orch context …` to distinguish it from the host's `context` command.
+Suggestions for another root keep their root form; leave the current shell
+before running them. JSON follow-ups in the REPL use the same form, while
+one-shot output uses `osp …`.
+
 `repl.shellable_commands` selects eligible
 top-level roots; its defaults are `nh`, `mreg`, `ldap`, `vm`, and `orch`.
 Built-in namespaces such as `plugins`, `config`, `theme`, and `help` do not

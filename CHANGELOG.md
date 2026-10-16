@@ -7,6 +7,15 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Write follow-up commands and error hints for the current prompt: terminal
+  suggestions include `osp`, REPL suggestions omit it, and integration shells
+  use relative commands unless a host command or alias would shadow them.
+  REPL JSON follows the same scope; one-shot JSON keeps its command spelling.
+- Preserve command colour in relative REPL tables using the `command` field.
+- Provider conflicts in the catalog state only that selection is required;
+  invocation errors retain the selection command.
+
+
 - Write help usage lines for the current terminal or REPL shell, including the
   `osp` executable in one-shot native help.
 
