@@ -1095,7 +1095,27 @@ fn run_external_plugin_command(
                     }
                     error.details = details.into();
                 }
-                cli_result_from_plugin_response(response, &[])?
+                for text in response
+                    .meta
+                    .presentation_lines
+                    .iter_mut()
+                    .chain(&mut response.meta.progress_append)
+                    .chain(&mut response.meta.column_labels)
+                    .chain(response.meta.partial_rows.iter_mut())
+                {
+                    *text = plugin_text(text);
+                }
+                for rule in &mut response.meta.display_rules {
+                    if let crate::core::output_model::DisplayRule::SuffixWhenTrue {
+                        suffix, ..
+                    } = rule
+                    {
+                        *suffix = plugin_text(suffix);
+                    }
+                }
+                let mut result = cli_result_from_plugin_response(response, &[])?;
+                result.stderr_text = plugin_text(&result.stderr_text);
+                result
             }
             Ok(value) => CommandOutput::output(
                 crate::core::output_model::OutputResult::from_rows(
