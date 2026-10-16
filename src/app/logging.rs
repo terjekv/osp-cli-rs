@@ -18,7 +18,9 @@
 
 #[cfg(test)]
 use std::ffi::OsString;
+use std::cell::Cell;
 use std::fs::OpenOptions;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -30,6 +32,23 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry;
 use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
+
+thread_local! {
+    // A command override must not alter unrelated in-process hosts or tests.
+    static STDERR_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
+}
+
+pub(crate) struct StderrLevelGuard(Option<u8>);
+
+impl Drop for StderrLevelGuard {
+    fn drop(&mut self) {
+        STDERR_OVERRIDE.set(self.0);
+    }
+}
+
+pub(crate) fn override_stderr_level(level: u8) -> StderrLevelGuard {
+    StderrLevelGuard(STDERR_OVERRIDE.replace(Some(level)))
+}
 
 static LOGGING_STATE: OnceLock<Option<LoggingState>> = OnceLock::new();
 
@@ -108,7 +127,7 @@ pub fn parse_level_filter(value: &str) -> Option<LevelFilter> {
 }
 
 struct LoggingState {
-    stderr_handle: Box<dyn ReloadFilterHandle>,
+    stderr_level: Arc<AtomicU8>,
     file_handle: Box<dyn ReloadFilterHandle>,
     file_writer: DynamicFileWriter,
 }
@@ -138,8 +157,12 @@ impl LoggingState {
         };
 
         let use_ansi = std::io::stderr().is_terminal();
-        let (stderr_filter, stderr_handle) =
-            reload::Layer::new(map_debug_count(config.debug_count));
+        let stderr_level = Arc::new(AtomicU8::new(config.debug_count));
+        let level = stderr_level.clone();
+        let stderr_filter = tracing_subscriber::filter::filter_fn(move |metadata| {
+            let current = STDERR_OVERRIDE.get().unwrap_or_else(|| level.load(Ordering::Relaxed));
+            metadata.level() <= &map_debug_count(current)
+        }).with_max_level_hint(tracing::Level::TRACE);
         let stderr_layer = fmt::layer()
             .with_writer(std::io::stderr)
             .with_target(true)
@@ -168,20 +191,14 @@ impl LoggingState {
         }
 
         Some(Self {
-            stderr_handle: Box::new(stderr_handle),
+            stderr_level,
             file_handle: Box::new(file_handle),
             file_writer,
         })
     }
 
     fn apply(&self, config: &DeveloperLoggingConfig) {
-        if let Err(err) = self
-            .stderr_handle
-            .reload(map_debug_count(config.debug_count))
-            && config.debug_count >= 2
-        {
-            eprintln!("failed to reload stderr logging: {err}");
-        }
+        self.stderr_level.store(config.debug_count, Ordering::Relaxed);
 
         let file_level = match self.file_writer.configure(config.file.as_ref()) {
             Ok(level) => level,

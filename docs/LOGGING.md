@@ -87,7 +87,9 @@ subprocesses, or work that runs before the command is known.
 ## REPL Behavior
 
 In the REPL, `-v/-q/-d` are command-local. They do not permanently change the
-shell’s behavior unless you change config defaults.
+shell’s behavior unless you change config defaults. Launch flags set the
+session baseline; per-line flags add to that baseline for one command. The
+stderr override leaves file logging unchanged.
 
 ```text
 plugins commands -v

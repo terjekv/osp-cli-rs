@@ -411,9 +411,23 @@ fn execute_repl_line_plan(
     match plan {
         ReplLinePlan::Builtin { raw, builtin } => {
             *accepted = true;
+            let debug_level = input::ReplParsedLine::parse(&raw, runtime.config.resolved())
+                .ok()
+                .and_then(|parsed| scan_command_tokens(&parsed.dispatch_tokens).ok())
+                .map(|scanned| {
+                    resolve_invocation_ui(
+                        runtime.config.resolved(),
+                        &runtime.ui,
+                        &scanned.invocation,
+                    )
+                    .ui
+                    .debug_verbosity
+                })
+                .unwrap_or(runtime.ui.debug_verbosity);
+            let _logging = crate::app::logging::override_stderr_level(debug_level);
             let result =
                 execute_repl_builtin(runtime, session, clients, history, &raw, builtin, sink)?;
-            Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity))
+            Ok(ExecutedReplLine::flat(result, debug_level))
         }
         ReplLinePlan::Blank => Ok(ExecutedReplLine::flat(
             ReplResult::Continue,
@@ -428,15 +442,25 @@ fn execute_repl_line_plan(
         }
         ReplLinePlan::Shortcut { parsed, shortcut } => {
             *accepted = true;
+            let invocation = match shortcut.as_ref() {
+                ReplShortcutPlan::Help { invocation }
+                | ReplShortcutPlan::CurrentShellHelp { invocation, .. }
+                | ReplShortcutPlan::ShellEntry { invocation, .. } => invocation,
+            };
+            let debug_level = invocation.ui.debug_verbosity;
+            let error_display = crate::app::host::ErrorDisplaySettings::from(&invocation.ui);
+            let _logging = crate::app::logging::override_stderr_level(debug_level);
             let result =
-                execute_repl_shortcut(runtime, session, clients, &parsed, *shortcut, line, sink)?;
-            Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity))
+                execute_repl_shortcut(runtime, session, clients, &parsed, *shortcut, line, sink)
+                    .map_err(|err| crate::app::host::report_with_invocation(err, error_display))?;
+            Ok(ExecutedReplLine::flat(result, debug_level))
         }
         ReplLinePlan::Command(dispatch) => {
             let ui = match dispatch.as_ref() {
                 ParsedReplDispatch::Help { effective, .. } => &effective.ui,
                 ParsedReplDispatch::Invocation(invocation) => &invocation.effective.ui,
             };
+            let _logging = crate::app::logging::override_stderr_level(ui.debug_verbosity);
             let error_display = crate::app::host::ErrorDisplaySettings::from(ui);
             execute_repl_command_dispatch(
                 ReplExecutionContext {
