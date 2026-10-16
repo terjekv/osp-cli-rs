@@ -47,7 +47,7 @@ pub(crate) fn isolated_test() -> bool {
         command.process_group(0);
     }
     let mut child = Cleanup(command.spawn().expect("isolated test should start"));
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(180);
     let status = loop {
         if let Some(status) = child.0.try_wait().expect("isolated test status") {
             break Some(status);

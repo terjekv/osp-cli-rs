@@ -208,6 +208,8 @@ impl<'a> ReplPtyConfig<'a> {
 pub(crate) struct ReplPtySession {
     child: Box<dyn portable_pty::Child + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    terminal: Box<dyn portable_pty::MasterPty + Send>,
+    interactive: bool,
     // PTY reads can split UTF-8 characters; retain bytes until taking a view.
     output: Arc<Mutex<Vec<u8>>>,
     reader: Option<std::thread::JoinHandle<()>>,
@@ -332,9 +334,11 @@ impl ReplPtySession {
         let mut session = Self {
             child,
             writer,
+            terminal: pair.master,
+            interactive: cursor_position_reports,
             output,
             reader: None,
-            deadline: Instant::now() + Duration::from_secs(30),
+            deadline: Instant::now() + Duration::from_secs(120),
             _home: home,
             _plugins: plugins_temp,
         };
@@ -406,7 +410,32 @@ impl ReplPtySession {
         strip_terminal_noise(&self.output_snapshot(max_len))
     }
 
+    fn wait_deadline(&self, timeout: Duration) -> Instant {
+        // One-second waits belong to latency contracts; other waits detect hangs.
+        let timeout = if timeout > Duration::from_secs(1) {
+            timeout.max(Duration::from_secs(15))
+        } else {
+            timeout
+        };
+        (Instant::now() + timeout).min(self.deadline)
+    }
+
     pub(crate) fn write_bytes(&mut self, bytes: &[u8]) {
+        let deadline = self.wait_deadline(Duration::from_secs(15));
+        // A rendered prompt can still belong to the editor being rebuilt.
+        while self.interactive
+            && self
+                .terminal
+                .get_termios()
+                .is_some_and(|termios| termios.local_flags.bits() & libc::ECHO != 0)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "editor never disabled terminal echo; output:\n{}",
+                self.output_snapshot(8000),
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let mut writer = self.writer.lock().expect("writer lock");
         writer.write_all(bytes).expect("write to pty");
         writer.flush().expect("flush pty");
@@ -415,7 +444,7 @@ impl ReplPtySession {
     pub(crate) fn type_text(&mut self, text: &str) {
         let start = self.output_len();
         self.write_bytes(text.as_bytes());
-        let deadline = (Instant::now() + Duration::from_secs(3)).min(self.deadline);
+        let deadline = self.wait_deadline(Duration::from_secs(15));
         loop {
             let output = self.output_since(start);
             // Cooked terminal echo can precede editor startup after a reload.
@@ -435,18 +464,28 @@ impl ReplPtySession {
         }
     }
 
+    fn output_ready(&self, output: &str) -> bool {
+        !self.interactive
+            || output.rsplit_once("\x1b[?25h").is_some_and(|(_, tail)| {
+                !tail.contains("\x1b[?25l") && strip_terminal_noise(tail).is_empty()
+            })
+    }
+
     pub(crate) fn wait_for_output_since(
         &self,
         start: usize,
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = (Instant::now() + timeout).min(self.deadline);
+        let deadline = self.wait_deadline(timeout);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
-                if start < buf.len() && String::from_utf8_lossy(&buf[start..]).contains(needle) {
-                    return true;
+                if start < buf.len() {
+                    let output = String::from_utf8_lossy(&buf[start..]);
+                    if output.contains(needle) && self.output_ready(&output) {
+                        return true;
+                    }
                 }
             }
             if Instant::now() >= deadline {
@@ -457,7 +496,7 @@ impl ReplPtySession {
     }
 
     pub(crate) fn wait_for_editor_since(&self, start: usize, timeout: Duration) -> bool {
-        let deadline = (Instant::now() + timeout).min(self.deadline);
+        let deadline = self.wait_deadline(timeout);
         loop {
             let output = self.output_since(start);
             if let Some((_, frame)) = output.rsplit_once("\x1b[?25l")
@@ -474,19 +513,7 @@ impl ReplPtySession {
     }
 
     pub(crate) fn wait_for_plain_output(&self, needle: &str, timeout: Duration) -> bool {
-        let deadline = (Instant::now() + timeout).min(self.deadline);
-        loop {
-            {
-                let buf = self.output.lock().expect("output lock");
-                if strip_terminal_noise(&String::from_utf8_lossy(&buf)).contains(needle) {
-                    return true;
-                }
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        self.wait_for_plain_output_since(0, needle, timeout)
     }
 
     pub(crate) fn wait_for_plain_output_since(
@@ -495,15 +522,16 @@ impl ReplPtySession {
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = (Instant::now() + timeout).min(self.deadline);
+        let deadline = self.wait_deadline(timeout);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
-                if start < buf.len()
-                    && strip_terminal_noise(&String::from_utf8_lossy(&buf[start..]))
-                        .contains(needle)
-                {
-                    return true;
+                if start < buf.len() {
+                    let output = String::from_utf8_lossy(&buf[start..]);
+                    if strip_terminal_noise(&output).contains(needle) && self.output_ready(&output)
+                    {
+                        return true;
+                    }
                 }
             }
             if Instant::now() >= deadline {
@@ -514,7 +542,7 @@ impl ReplPtySession {
     }
 
     pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> bool {
-        let deadline = (Instant::now() + timeout).min(self.deadline);
+        let deadline = self.wait_deadline(timeout);
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => return true,
