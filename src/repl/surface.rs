@@ -12,8 +12,8 @@ use std::collections::BTreeSet;
 
 use crate::app::help::help_level;
 use crate::app::{
-    CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY, CMD_LIST, CMD_PLUGINS, CMD_SHOW, CMD_THEME,
-    CMD_USE, CURRENT_TERMINAL_SENTINEL,
+    CMD_CONFIG, CMD_CONTEXT, CMD_DOCTOR, CMD_HISTORY, CMD_PLUGINS, CMD_THEME,
+    CURRENT_TERMINAL_SENTINEL,
 };
 use crate::plugin::CommandCatalogEntry;
 use crate::ui::{HelpLayout, help_layout_from_config};
@@ -53,117 +53,107 @@ pub(crate) fn build_repl_surface(
     let help_layout = help_layout_from_config(view.config);
     let help_level = help_level(view.config, 0, 0);
 
-    let mut root_words = catalog_completion_words(catalog);
-    root_words.push("source".to_string());
     let mut specs = crate::cli::repl_only_commands()
         .iter()
         .map(|command| clap_command_spec(command, help_layout))
         .collect::<Vec<_>>();
-    let mut overview_entries = vec![
-        ReplOverviewEntry {
-            name: "exit".to_string(),
-            summary: "Exit application.".to_string(),
-        },
-        ReplOverviewEntry {
-            name: "help".to_string(),
-            summary: "Show this command overview.".to_string(),
-        },
-        ReplOverviewEntry {
-            name: "last".to_string(),
-            summary: "Replay the last result (--raw before pipes).".to_string(),
-        },
-        ReplOverviewEntry {
-            name: "source".to_string(),
-            summary: "Run commands from files.".to_string(),
-        },
-    ];
-    if shows_invocation_options_overview(help_level) {
-        overview_entries.push(ReplOverviewEntry {
-            name: "options".to_string(),
-            summary: crate::cli::invocation::invocation_overview_summary(),
-        });
-    }
-
-    specs.extend(
-        catalog
-            .iter()
-            .filter_map(command_spec_from_catalog)
-            .collect::<Vec<_>>(),
-    );
-
-    root_words.extend([CMD_PLUGINS.to_string(), CMD_LIST.to_string()]);
     specs.push(plugins_command_spec(catalog, help_layout));
-    overview_entries.push(ReplOverviewEntry {
-        name: CMD_PLUGINS.to_string(),
-        summary: "Inspect and manage plugin providers".to_string(),
-    });
 
-    let def = doctor_cmd::doctor_command();
-    root_words.push(CMD_DOCTOR.to_string());
-    specs.push(clap_command_spec(&def, help_layout));
-    overview_entries.push(overview_entry_from_clap(&def));
-    root_words.extend([
-        CMD_THEME.to_string(),
-        CMD_LIST.to_string(),
-        CMD_SHOW.to_string(),
-        CMD_USE.to_string(),
-    ]);
+    specs.push(clap_command_spec(
+        &doctor_cmd::doctor_command(),
+        help_layout,
+    ));
     let def = theme_cmd::theme_command();
     let mut spec = clap_command_spec(&def, help_layout);
     theme_cmd::augment_theme_completion(&mut spec, view.themes);
     specs.push(spec);
-    overview_entries.push(overview_entry_from_clap(&def));
 
-    root_words.extend([
-        CMD_CONFIG.to_string(),
-        "alias".to_string(),
-        "add".to_string(),
-        "get".to_string(),
-        "show".to_string(),
-        "explain".to_string(),
-        "set".to_string(),
-        "remove".to_string(),
-        "doctor".to_string(),
-    ]);
     specs.push(config_command_spec(view));
     specs.push(alias_command_spec(view, &aliases));
-    overview_entries.push(ReplOverviewEntry {
-        name: CMD_CONFIG.to_string(),
-        summary: "Inspect and edit runtime config".to_string(),
-    });
-    overview_entries.push(ReplOverviewEntry {
-        name: "alias".to_string(),
-        summary: "Create and manage command aliases".to_string(),
-    });
-
     if history_enabled {
-        root_words.extend([
-            CMD_HISTORY.to_string(),
-            CMD_LIST.to_string(),
-            "prune".to_string(),
-            "clear".to_string(),
-        ]);
         let def = history::history_command();
         let mut spec = clap_command_spec(&def, help_layout);
         history::augment_history_completion(&mut spec);
         specs.push(spec);
-        overview_entries.push(overview_entry_from_clap(&def));
     }
-    root_words.push(CMD_CONTEXT.to_string());
     specs.push(context_command_spec(help_layout));
-    overview_entries.push(ReplOverviewEntry {
-        name: CMD_CONTEXT.to_string(),
-        summary: "Inspect or clear remembered session values".to_string(),
+    specs.extend(catalog.iter().filter_map(command_spec_from_catalog));
+
+    let mut overview_entries = specs
+        .iter()
+        .filter_map(|spec| {
+            let summary = match spec.name.as_str() {
+                "quit" => return None,
+                "exit" => "Exit application.".to_string(),
+                "help" => "Show this command overview.".to_string(),
+                "last" => "Replay the last result (--raw before pipes).".to_string(),
+                "source" => "Run commands from files.".to_string(),
+                CMD_CONTEXT => "Inspect or clear remembered session values".to_string(),
+                _ => {
+                    if let Some(entry) = catalog.iter().find(|entry| entry.name == spec.name) {
+                        let mut overview = plugin_overview_entry(entry);
+                        if !view.auth.external_command_access(&entry.name).is_runnable() {
+                            overview.summary.push_str(" (restricted)");
+                        }
+                        return Some(overview);
+                    }
+                    spec.tooltip
+                        .clone()
+                        .unwrap_or_else(|| "Command".to_string())
+                }
+            };
+            Some(ReplOverviewEntry {
+                name: spec.name.clone(),
+                summary,
+            })
+        })
+        .collect::<Vec<_>>();
+    // The overview has a historical presentation order independent of the menu.
+    overview_entries.sort_by_key(|entry| match entry.name.as_str() {
+        "exit" => 0,
+        "help" => 1,
+        "last" => 2,
+        "source" => 3,
+        CMD_PLUGINS => 4,
+        CMD_DOCTOR => 5,
+        CMD_THEME => 6,
+        CMD_CONFIG => 7,
+        "alias" => 8,
+        CMD_HISTORY => 9,
+        CMD_CONTEXT => 10,
+        _ => 11,
     });
+    if shows_invocation_options_overview(help_level) {
+        overview_entries.insert(
+            4,
+            ReplOverviewEntry {
+                name: "options".to_string(),
+                summary: crate::cli::invocation::invocation_overview_summary(),
+            },
+        );
+    }
 
-    overview_entries.extend(catalog.iter().map(|entry| {
-        let mut overview = plugin_overview_entry(entry);
-        if !view.auth.external_command_access(&entry.name).is_runnable() {
-            overview.summary.push_str(" (restricted)");
-        }
-        overview
-    }));
-
+    let mut root_words = specs
+        .iter()
+        .flat_map(|spec| {
+            if catalog.iter().any(|entry| entry.name == spec.name) {
+                spec_completion_words(spec)
+            } else {
+                vec![spec.name.clone()]
+            }
+        })
+        .collect::<Vec<_>>();
+    // Shorthand and builtin child words historically offered at the root.
+    root_words.extend(
+        [
+            "P", "F", "V", "|", "list", "show", "use", "add", "get", "explain", "set", "remove",
+            "doctor",
+        ]
+        .map(str::to_string),
+    );
+    if history_enabled {
+        root_words.extend(["prune", "clear"].map(str::to_string));
+    }
     root_words.extend(view.themes.ids());
     root_words.extend(aliases.iter().map(|entry| entry.name.clone()));
     normalize_root_words(&mut root_words);
@@ -273,25 +263,6 @@ fn context_command_spec(help_layout: HelpLayout) -> CompletionNode {
     builtin_command_spec(crate::cli::builtin_command(CMD_CONTEXT), help_layout)
 }
 
-pub(crate) fn catalog_completion_words(catalog: &[CommandCatalogEntry]) -> Vec<String> {
-    let mut words = vec![
-        "help".to_string(),
-        "last".to_string(),
-        "exit".to_string(),
-        "quit".to_string(),
-        "P".to_string(),
-        "F".to_string(),
-        "V".to_string(),
-        "|".to_string(),
-    ];
-    for entry in catalog {
-        words.extend(spec_completion_words(&entry.completion));
-    }
-    words.sort();
-    words.dedup();
-    words
-}
-
 pub(crate) fn collect_alias_entries(config: &crate::config::ResolvedConfig) -> Vec<ReplAliasEntry> {
     let mut out = Vec::new();
     for (key, entry) in config.aliases() {
@@ -382,20 +353,6 @@ fn provider_selection_summary(entry: &CommandCatalogEntry, base: Option<&str>) -
             "{base} (using {selected_label}; {selection_reason}; alternatives: {})",
             alternatives.join(", ")
         )
-    }
-}
-
-fn overview_entry_from_clap(command: &clap::Command) -> ReplOverviewEntry {
-    let about = command.get_about().map(ToString::to_string);
-    let summary = about
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Command")
-        .to_string();
-    ReplOverviewEntry {
-        name: command.get_name().to_string(),
-        summary,
     }
 }
 
