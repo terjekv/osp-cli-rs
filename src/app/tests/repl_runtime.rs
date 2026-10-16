@@ -61,7 +61,7 @@ fn repl_flag_prefixed_help_records_prompt_timing_badge_unit() {
     .expect("flag-prefixed help should render successfully");
 
     match rendered {
-        crate::repl::ReplLineResult::Continue(text) => {
+        crate::repl::ReplResult::Print(text) => {
             assert!(text.contains("config <COMMAND>"));
         }
         other => panic!("unexpected repl result: {other:?}"),

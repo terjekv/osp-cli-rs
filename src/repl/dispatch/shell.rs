@@ -1,4 +1,4 @@
-use crate::repl::{ReplLineResult, ReplReloadKind};
+use crate::repl::{ReplReloadKind, ReplResult};
 use miette::{Result, miette};
 
 use super::command::{
@@ -73,7 +73,7 @@ pub(super) fn execute_repl_shortcut(
     shortcut: ReplShortcutPlan,
     line: &str,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     match shortcut {
         ReplShortcutPlan::Help { invocation } => {
             repl_help_result(runtime, session, clients, parsed, &invocation, line, sink)
@@ -95,14 +95,14 @@ pub(super) fn execute_repl_shortcut(
             if warn_on_repeat {
                 rendered = format!("{}{}", repeated_shell_root_help_warning(&command), rendered);
             }
-            Ok(ReplLineResult::Continue(rendered))
+            Ok(ReplResult::Print(rendered))
         }
         ReplShortcutPlan::ShellEntry {
             command,
             invocation,
         } => {
             let entered = enter_repl_shell(runtime, session, clients, &command, &invocation, sink)?;
-            Ok(ReplLineResult::Restart {
+            Ok(ReplResult::Restart {
                 output: entered,
                 reload: ReplReloadKind::Default,
             })
@@ -174,8 +174,8 @@ fn repl_help_result(
     invocation: &ResolvedInvocation,
     line: &str,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
-    Ok(ReplLineResult::Continue(render_repl_help_for_scope(
+) -> Result<ReplResult> {
+    Ok(ReplResult::Print(render_repl_help_for_scope(
         runtime,
         session,
         clients,
@@ -186,10 +186,10 @@ fn repl_help_result(
     )?))
 }
 
-pub(super) fn handle_repl_exit_request(session: &mut AppSession) -> ReplLineResult {
+pub(super) fn handle_repl_exit_request(session: &mut AppSession) -> ReplResult {
     match session.request_repl_exit() {
-        crate::app::session::ReplExitTransition::ExitRoot => ReplLineResult::Exit(0),
-        crate::app::session::ReplExitTransition::LeftShell { frame } => ReplLineResult::Restart {
+        crate::app::session::ReplExitTransition::ExitRoot => ReplResult::Exit(0),
+        crate::app::session::ReplExitTransition::LeftShell { frame } => ReplResult::Restart {
             output: render_repl_shell_leave_message(&frame),
             reload: ReplReloadKind::Default,
         },
@@ -318,7 +318,7 @@ pub(super) fn render_repl_help_for_scope(
     )?
     .result
     {
-        ReplLineResult::Continue(rendered) => Ok(rendered),
+        ReplResult::Print(rendered) => Ok(rendered),
         other => Err(miette!("unexpected REPL help result: {other:?}")),
     }
 }
@@ -371,7 +371,7 @@ mod tests {
     };
     use crate::repl::dispatch::base_repl_invocation;
     use crate::repl::input::ReplParsedLine;
-    use crate::repl::{ReplLineResult, ReplReloadKind};
+    use crate::repl::{ReplReloadKind, ReplResult};
     use crate::ui::RenderSettings;
     use crate::ui::messages::MessageLevel;
     use clap::Command;
@@ -539,7 +539,7 @@ JSON
         .expect("help shortcut should succeed");
 
         match rendered {
-            ReplLineResult::Continue(text) => text,
+            ReplResult::Print(text) => text,
             other => panic!("unexpected repl result: {other:?}"),
         }
     }
@@ -563,7 +563,7 @@ JSON
         );
         assert!(matches!(
             handle_repl_exit_request(&mut state.session),
-            ReplLineResult::Exit(0)
+            ReplResult::Exit(0)
         ));
 
         state.session.scope.enter("ldap");
@@ -573,7 +573,7 @@ JSON
         );
         assert!(matches!(
             handle_repl_exit_request(&mut state.session),
-            ReplLineResult::Restart {
+            ReplResult::Restart {
                 output: text,
                 reload: ReplReloadKind::Default,
             } if text.contains("Leaving ldap shell")
@@ -604,7 +604,7 @@ JSON
                 &mut sink,
             )
             .expect("help shortcut should succeed"),
-            ReplLineResult::Continue(text) if text.contains("help") || text.contains("config")
+            ReplResult::Print(text) if text.contains("help") || text.contains("config")
         ));
 
         let ordinary = ReplParsedLine::parse("config show", state.runtime.config.resolved())
@@ -704,7 +704,7 @@ JSON
         .expect("bare shellable root should enter shell");
 
         match rendered {
-            ReplLineResult::Restart {
+            ReplResult::Restart {
                 output: text,
                 reload: ReplReloadKind::Default,
             } => assert!(text.contains("Entering ldap shell")),
@@ -737,7 +737,7 @@ JSON
         .expect("repeated shell root should render help");
 
         match rendered {
-            ReplLineResult::Continue(text) => {
+            ReplResult::Print(text) => {
                 assert!(text.contains("was interpreted as `ldap --help`"));
                 assert!(text.contains("Directory lookup"));
             }
@@ -770,7 +770,7 @@ JSON
         .expect("shell root should switch shells");
 
         match rendered {
-            ReplLineResult::Restart {
+            ReplResult::Restart {
                 output: text,
                 reload: ReplReloadKind::Default,
             } => assert!(text.contains("Entering ldap shell")),
@@ -860,7 +860,7 @@ JSON
 
         assert!(matches!(
             rendered,
-            ReplLineResult::Continue(text) if text.contains("help") || text.contains("Show this command overview")
+            ReplResult::Print(text) if text.contains("help") || text.contains("Show this command overview")
         ));
     }
 

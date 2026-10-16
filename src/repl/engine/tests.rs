@@ -14,12 +14,11 @@ use super::editor::PaintedLine;
 use super::{
     AutoCompleteEmacs, BasicInputReason, CompletionDebugOptions, DebugStep, HISTORY_MENU_NAME,
     HistoryConfig, HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance,
-    ReplCompleter, ReplHistoryCompleter, ReplInputMode, ReplLineResult, ReplReloadKind,
-    ReplRunResult, SharedHistory, SubmissionContext, SubmissionResult, basic_input_reason,
-    build_history_menu, build_history_picker_options, build_repl_highlighter,
-    color_from_style_spec, contains_cursor_position_report, debug_completion,
-    debug_completion_steps, debug_history_menu, debug_history_menu_steps, default_pipe_verbs,
-    evaluate_repl_submission, history_picker_items, is_cursor_position_error,
+    ReplCompleter, ReplHistoryCompleter, ReplInputMode, ReplReloadKind, ReplResult, SharedHistory,
+    SubmissionContext, basic_input_reason, build_history_menu, build_history_picker_options,
+    build_repl_highlighter, color_from_style_spec, contains_cursor_position_report,
+    debug_completion, debug_completion_steps, debug_history_menu, debug_history_menu_steps,
+    default_pipe_verbs, evaluate_repl_submission, history_picker_items, is_cursor_position_error,
     parse_cursor_position_report, path_suggestions, split_path_stub, trace_completion,
     trace_completion_enabled,
 };
@@ -130,10 +129,10 @@ fn submission_delegates_help_and_exit_to_host() {
     let mut execute = |line: &str, _: &SharedHistory| {
         seen.push(line.to_string());
         Ok(match line {
-            "help" => ReplLineResult::Continue("host help".to_string()),
-            "!!" => ReplLineResult::ReplaceInput("ldap user oistes".to_string()),
-            "exit" => ReplLineResult::Exit(7),
-            other => ReplLineResult::Continue(other.to_string()),
+            "help" => ReplResult::Print("host help".to_string()),
+            "!!" => ReplResult::ReplaceInput("ldap user oistes".to_string()),
+            "exit" => ReplResult::Exit(7),
+            other => ReplResult::Print(other.to_string()),
         })
     };
     let mut submission = SubmissionContext {
@@ -141,13 +140,13 @@ fn submission_delegates_help_and_exit_to_host() {
         execute: &mut execute,
     };
 
-    let help = evaluate_repl_submission("help", &mut submission).expect("help should succeed");
-    let bang = evaluate_repl_submission("!!", &mut submission).expect("bang should succeed");
-    let exit = evaluate_repl_submission("exit", &mut submission).expect("exit should succeed");
+    let help = evaluate_repl_submission("help", &mut submission);
+    let bang = evaluate_repl_submission("!!", &mut submission);
+    let exit = evaluate_repl_submission("exit", &mut submission);
 
-    assert!(matches!(help, SubmissionResult::Print(text) if text == "host help"));
-    assert!(matches!(bang, SubmissionResult::ReplaceInput(text) if text == "ldap user oistes"));
-    assert!(matches!(exit, SubmissionResult::Exit(7)));
+    assert!(matches!(help, ReplResult::Print(text) if text == "host help"));
+    assert!(matches!(bang, ReplResult::ReplaceInput(text) if text == "ldap user oistes"));
+    assert!(matches!(exit, ReplResult::Exit(7)));
     assert_eq!(
         seen,
         vec!["help".to_string(), "!!".to_string(), "exit".to_string()]
@@ -456,7 +455,7 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
     let history = disabled_history();
 
     let mut restart_execute = |_line: &str, _: &SharedHistory| {
-        Ok(ReplLineResult::Restart {
+        Ok(ReplResult::Restart {
             output: "restarting".to_string(),
             reload: ReplReloadKind::WithIntro,
         })
@@ -465,36 +464,33 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
         history_store: &history,
         execute: &mut restart_execute,
     };
-    let restart =
-        evaluate_repl_submission("config set", &mut submission).expect("restart should map");
+    let restart = evaluate_repl_submission("config set", &mut submission);
     assert!(matches!(
         restart,
-        SubmissionResult::Restart {
+        ReplResult::Restart {
             output,
             reload: ReplReloadKind::WithIntro
         } if output == "restarting"
     ));
 
-    let mut failing_execute = |_line: &str, _: &SharedHistory| -> anyhow::Result<ReplLineResult> {
+    let mut failing_execute = |_line: &str, _: &SharedHistory| -> anyhow::Result<ReplResult> {
         Err(anyhow::anyhow!("submit failed"))
     };
     let mut failing_submission = SubmissionContext {
         history_store: &history,
         execute: &mut failing_execute,
     };
-    let result = evaluate_repl_submission("broken", &mut failing_submission)
-        .expect("error should be absorbed");
-    assert!(matches!(result, SubmissionResult::Noop));
+    let result = evaluate_repl_submission("broken", &mut failing_submission);
+    assert!(matches!(result, ReplResult::Continue));
 
     let mut noop_execute =
-        |_line: &str, _: &SharedHistory| Ok(ReplLineResult::Continue("ignored".to_string()));
+        |_line: &str, _: &SharedHistory| Ok(ReplResult::Print("ignored".to_string()));
     let mut noop_submission = SubmissionContext {
         history_store: &history,
         execute: &mut noop_execute,
     };
-    let result =
-        evaluate_repl_submission("   ", &mut noop_submission).expect("blank lines should noop");
-    assert!(matches!(result, SubmissionResult::Noop));
+    let result = evaluate_repl_submission("   ", &mut noop_submission);
+    assert!(matches!(result, ReplResult::Continue));
 }
 
 #[test]
@@ -658,8 +654,7 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
     ] {
         let history = SharedHistory::new(history_config());
         let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
-        let mut execute =
-            |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
+        let mut execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
         let mut submission = SubmissionContext {
             history_store: &history,
             execute: &mut execute,
@@ -681,7 +676,7 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
             |basic_prompt, _submission| {
                 basic_calls += 1;
                 assert_eq!(basic_prompt.left(), "left");
-                Ok(ReplRunResult::Exit(7))
+                Ok(ReplResult::Exit(7))
             },
             |config, interactive_history, _submission| {
                 interactive_calls += 1;
@@ -704,19 +699,19 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
                         .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
                         .unwrap_or_default()
                 );
-                Ok(ReplRunResult::Exit(7))
+                Ok(ReplResult::Exit(7))
             },
         )
         .expect("routing path should succeed");
 
         match reason {
             Some(_) => {
-                assert_eq!(result, ReplRunResult::Exit(7));
+                assert_eq!(result, ReplResult::Exit(7));
                 assert_eq!(basic_calls, 1);
                 assert_eq!(interactive_calls, 0);
             }
             None => {
-                assert_eq!(result, ReplRunResult::Exit(7));
+                assert_eq!(result, ReplResult::Exit(7));
                 assert_eq!(basic_calls, 0);
                 assert_eq!(interactive_calls, 1);
             }
@@ -780,8 +775,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     );
     assert_eq!(built_editor.current_buffer_contents(), "");
 
-    let mut fallback_execute =
-        |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
+    let mut fallback_execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut fallback_submission = SubmissionContext {
         history_store: &history,
         execute: &mut fallback_execute,
@@ -793,10 +787,10 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         &mut fallback_submission,
         &mut built_editor,
         |_editor| Err(io::Error::from_raw_os_error(25)),
-        |_prompt, _submission| Ok(ReplRunResult::Exit(9)),
+        |_prompt, _submission| Ok(ReplResult::Exit(9)),
     )
     .expect("cursor probe errors should fall back to basic mode");
-    assert_eq!(fallback, ReplRunResult::Exit(9));
+    assert_eq!(fallback, ReplResult::Exit(9));
 
     let executed = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&executed);
@@ -804,7 +798,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         seen.lock()
             .expect("executed command log should not be poisoned")
             .push(line.to_string());
-        Ok(ReplLineResult::Continue(String::new()))
+        Ok(ReplResult::Continue)
     };
     let mut submission = SubmissionContext {
         history_store: &history,
@@ -826,10 +820,10 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
                 reedline::Signal::CtrlD
             })
         },
-        |_prompt, _submission| Ok(ReplRunResult::Exit(99)),
+        |_prompt, _submission| Ok(ReplResult::Exit(99)),
     )
     .expect("success and ctrl-d signals should succeed");
-    assert_eq!(exit, ReplRunResult::Exit(0));
+    assert_eq!(exit, ReplResult::Exit(0));
     assert_eq!(
         *executed
             .lock()
@@ -837,8 +831,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         vec!["help".to_string()]
     );
 
-    let mut error_execute =
-        |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
+    let mut error_execute = |_line: &str, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut error_submission = SubmissionContext {
         history_store: &history,
         execute: &mut error_execute,
@@ -850,7 +843,7 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         &mut error_submission,
         &mut reedline::Reedline::create(),
         |_editor| Err(io::Error::other("boom")),
-        |_prompt, _submission| Ok(ReplRunResult::Exit(1)),
+        |_prompt, _submission| Ok(ReplResult::Exit(1)),
     )
     .expect_err("non-cursor editor errors should bubble up");
     assert!(err.to_string().contains("boom"));

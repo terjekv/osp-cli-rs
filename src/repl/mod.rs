@@ -20,11 +20,12 @@
 //!       ▼ [ engine ]    reedline editor, prompt, completion/history menus
 //!       │ line accepted
 //!       ▼ [ dispatch ]  execute command, apply shell scope and aliases
-//!       │ ReplLineResult
-//!       ├── Continue     → render output, show next prompt
+//!       │ ReplResult
+//!       ├── Continue     → show next prompt
+//!       ├── Print        → render output, show next prompt
 //!       ├── ReplaceInput → update input buffer without printing
 //!       ├── Restart      → [ lifecycle ] rebuild REPL state, loop again
-//!       └── Exit         → return ReplRunResult to the caller
+//!       └── Exit         → return ReplResult to the caller
 //! ```
 //!
 //! Embedders drive the loop with [`crate::repl::run_repl`], configured through
@@ -37,7 +38,7 @@
 //! ```no_run
 //! use anyhow::Result;
 //! use osp_cli::repl::{
-//!     HistoryConfig, ReplLineResult, ReplPrompt, ReplRunConfig, run_repl,
+//!     HistoryConfig, ReplResult, ReplPrompt, ReplRunConfig, run_repl,
 //! };
 //!
 //! let config = ReplRunConfig::builder(
@@ -46,10 +47,10 @@
 //! )
 //! .build();
 //!
-//! let _result = run_repl(config, |line, _history| -> Result<ReplLineResult> {
+//! let _result = run_repl(config, |line, _history| -> Result<ReplResult> {
 //!     match line.trim() {
-//!         "exit" | "quit" => Ok(ReplLineResult::Exit(0)),
-//!         _ => Ok(ReplLineResult::Continue(String::new())),
+//!         "exit" | "quit" => Ok(ReplResult::Exit(0)),
+//!         _ => Ok(ReplResult::Continue),
 //!     }
 //! })?;
 //! # Ok::<(), anyhow::Error>(())
@@ -119,9 +120,9 @@ pub(crate) use engine::ReplCompleter;
 // Primary host-facing entry points.
 pub use engine::{
     HistoryConfig, HistoryEntry, HistoryShellContext, LineProjection, LineProjector,
-    PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder, ReplInputMode, ReplLineResult,
-    ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunConfigBuilder, ReplRunResult, ReplTabMode,
-    SharedHistory, color_from_style_spec, default_pipe_verbs, run_repl,
+    PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder, ReplInputMode, ReplPrompt,
+    ReplReloadKind, ReplResult, ReplRunConfig, ReplRunConfigBuilder, ReplTabMode, SharedHistory,
+    color_from_style_spec, default_pipe_verbs, run_repl,
 };
 pub use menu_core::MenuDebug;
 pub use notices::post_notice;

@@ -134,7 +134,7 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
         .expect("plugin enable should succeed");
         assert!(matches!(
             result,
-            crate::repl::ReplLineResult::Restart {
+            crate::repl::ReplResult::Restart {
                 reload: crate::repl::ReplReloadKind::Default,
                 ..
             }
@@ -166,7 +166,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     .expect("theme use should succeed");
     assert!(matches!(
         theme_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::WithIntro,
             ..
         }
@@ -182,7 +182,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     .expect("config set should succeed");
     assert!(matches!(
         format_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::Default,
             ..
         }
@@ -198,7 +198,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     .expect("config unset should succeed");
     assert!(matches!(
         unset_format_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::Default,
             ..
         }
@@ -214,7 +214,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
     .expect("dry-run config unset should succeed");
     assert!(matches!(
         dry_run_unset_result,
-        crate::repl::ReplLineResult::Continue(_)
+        crate::repl::ReplResult::Print(_)
     ));
 }
 
@@ -222,10 +222,11 @@ fn repl_reload_intent_matches_command_scope_unit() {
 fn repl_config_unset_rebuilds_runtime_state_unit() {
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
-        state
-            .session
-            .config_overrides
-            .insert("ui.format", "table", crate::config::Scope::profile("default"));
+        state.session.config_overrides.insert(
+            "ui.format",
+            "table",
+            crate::config::Scope::profile("default"),
+        );
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
@@ -240,7 +241,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
         .expect("config unset should succeed");
         assert!(matches!(
             result,
-            crate::repl::ReplLineResult::Restart {
+            crate::repl::ReplResult::Restart {
                 reload: crate::repl::ReplReloadKind::Default,
                 ..
             }
@@ -260,10 +261,11 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 fn repl_config_unset_dry_run_preserves_session_state_unit() {
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
-        state
-            .session
-            .config_overrides
-            .insert("ui.format", "table", crate::config::Scope::profile("default"));
+        state.session.config_overrides.insert(
+            "ui.format",
+            "table",
+            crate::config::Scope::profile("default"),
+        );
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
@@ -276,7 +278,7 @@ fn repl_config_unset_dry_run_preserves_session_state_unit() {
             "config unset ui.format --dry-run",
         )
         .expect("dry-run config unset should succeed");
-        assert!(matches!(result, crate::repl::ReplLineResult::Continue(_)));
+        assert!(matches!(result, crate::repl::ReplResult::Print(_)));
         assert_eq!(
             layer_value(&state.session.config_overrides, "ui.format"),
             Some(&ConfigValue::from("table"))

@@ -6,7 +6,7 @@
 //! the host loop stays readable.
 
 use crate::completion::CompletionTree;
-use crate::repl::{ReplAppearance, ReplReloadKind, ReplRunConfig, ReplRunResult};
+use crate::repl::{ReplAppearance, ReplReloadKind, ReplResult, ReplRunConfig};
 use miette::Result;
 
 use crate::app;
@@ -18,8 +18,8 @@ use super::completion;
 use super::history;
 use super::input;
 use super::presentation::{
-    ReplInputMode, build_repl_appearance, build_repl_prompt, build_repl_prompt_right_renderer,
-    render_repl_intro, repl_input_mode, repl_tab_mode,
+    build_repl_appearance, build_repl_prompt, build_repl_prompt_right_renderer, render_repl_intro,
+    repl_input_mode, repl_tab_mode,
 };
 use super::surface;
 
@@ -71,11 +71,14 @@ impl ReplLoopState {
     pub(super) fn apply_run_result(
         &mut self,
         sink: &mut dyn UiSink,
-        result: ReplRunResult,
+        result: ReplResult,
         exit_message: &str,
     ) -> Option<i32> {
         match result {
-            ReplRunResult::Exit(code) => {
+            ReplResult::Continue | ReplResult::Print(_) | ReplResult::ReplaceInput(_) => {
+                unreachable!("the editor consumes continuation actions")
+            }
+            ReplResult::Exit(code) => {
                 let message = exit_message.trim_end();
                 if !message.is_empty() {
                     sink.write_stdout(message);
@@ -83,7 +86,7 @@ impl ReplLoopState {
                 }
                 Some(code)
             }
-            ReplRunResult::Restart { output, reload } => {
+            ReplResult::Restart { output, reload } => {
                 self.pending_reload = true;
                 self.show_intro = matches!(reload, ReplReloadKind::WithIntro);
                 if self.show_intro {
@@ -149,9 +152,7 @@ fn build_repl_cycle_run_config(
     )
     .with_completion_tree(prepared.completion_tree)
     .with_appearance(prepared.appearance)
-    .with_input_mode(map_repl_input_mode(repl_input_mode(
-        runtime.config.resolved(),
-    )))
+    .with_input_mode(repl_input_mode(runtime.config.resolved()))
     .with_tab_mode(repl_tab_mode(runtime.config.resolved()))
     .with_prompt_right(Some(build_repl_prompt_right_renderer(
         view,
@@ -184,14 +185,6 @@ pub(super) fn prepare_repl_surface_state(
     })
 }
 
-fn map_repl_input_mode(mode: ReplInputMode) -> crate::repl::ReplInputMode {
-    match mode {
-        ReplInputMode::Auto => crate::repl::ReplInputMode::Auto,
-        ReplInputMode::Interactive => crate::repl::ReplInputMode::Interactive,
-        ReplInputMode::Basic => crate::repl::ReplInputMode::Basic,
-    }
-}
-
 pub(crate) fn build_cycle_chrome_output(
     help_text: &str,
     show_intro: bool,
@@ -216,7 +209,7 @@ mod tests {
     use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
-    use crate::repl::{ReplReloadKind, ReplRunResult};
+    use crate::repl::{ReplReloadKind, ReplResult};
     use crate::ui::RenderSettings;
     use crate::ui::messages::MessageLevel;
     use crate::ui::theme_catalog::ThemeCatalog;
@@ -226,7 +219,7 @@ mod tests {
         let mut loop_state = ReplLoopState::new(true);
         let mut sink = BufferedUiSink::default();
         assert_eq!(
-            loop_state.apply_run_result(&mut sink, ReplRunResult::Exit(7), "Goodbye.\n"),
+            loop_state.apply_run_result(&mut sink, ReplResult::Exit(7), "Goodbye.\n"),
             Some(7)
         );
         assert_eq!(sink.stdout, "Goodbye.\n");
@@ -234,7 +227,7 @@ mod tests {
         let mut silent = ReplLoopState::new(false);
         let mut silent_sink = BufferedUiSink::default();
         assert_eq!(
-            silent.apply_run_result(&mut silent_sink, ReplRunResult::Exit(0), ""),
+            silent.apply_run_result(&mut silent_sink, ReplResult::Exit(0), ""),
             Some(0)
         );
         assert!(silent_sink.stdout.is_empty());
@@ -244,7 +237,7 @@ mod tests {
         assert_eq!(
             loop_state.apply_run_result(
                 &mut sink,
-                ReplRunResult::Restart {
+                ReplResult::Restart {
                     output: "hello".to_string(),
                     reload: ReplReloadKind::WithIntro,
                 },
@@ -262,7 +255,7 @@ mod tests {
         assert_eq!(
             loop_state.apply_run_result(
                 &mut sink,
-                ReplRunResult::Restart {
+                ReplResult::Restart {
                     output: "ignored".to_string(),
                     reload: ReplReloadKind::Default,
                 },
@@ -333,7 +326,7 @@ mod tests {
 
         loop_state.apply_run_result(
             &mut BufferedUiSink::default(),
-            ReplRunResult::Restart {
+            ReplResult::Restart {
                 output: String::new(),
                 reload: ReplReloadKind::Default,
             },

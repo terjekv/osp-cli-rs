@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::repl::{ReplLineResult, ReplReloadKind, SharedHistory};
+use crate::repl::{ReplReloadKind, ReplResult, SharedHistory};
 use miette::{Result, miette};
 
 use crate::app;
@@ -30,14 +30,14 @@ pub(super) enum ParsedReplDispatch {
 }
 
 pub(super) struct ExecutedReplCommand {
-    pub(super) result: ReplLineResult,
+    pub(super) result: ReplResult,
     pub(super) exit_code: i32,
     pub(super) debug_verbosity: u8,
     pub(super) execute_finished: Option<Instant>,
 }
 
 impl ExecutedReplCommand {
-    fn parse_only(result: ReplLineResult, debug_verbosity: u8) -> Self {
+    fn parse_only(result: ReplResult, debug_verbosity: u8) -> Self {
         Self {
             result,
             exit_code: 0,
@@ -47,7 +47,7 @@ impl ExecutedReplCommand {
     }
 
     fn invocation(
-        result: ReplLineResult,
+        result: ReplResult,
         exit_code: i32,
         debug_verbosity: u8,
         execute_finished: Instant,
@@ -378,7 +378,7 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 runtime, session, line, &stages, *result, &effective, sink,
             )?;
             Ok(ExecutedReplCommand::parse_only(
-                ReplLineResult::Continue(rendered),
+                ReplResult::Print(rendered),
                 effective.ui.debug_verbosity,
             ))
         }
@@ -473,13 +473,13 @@ pub(super) fn finalize_repl_command(
     rendered: String,
     restart_repl: bool,
     show_intro_on_reload: bool,
-) -> ReplLineResult {
+) -> ReplResult {
     if restart_repl {
         tracing::debug!(
             show_intro = show_intro_on_reload,
             "REPL restart requested (config/theme change)"
         );
-        ReplLineResult::Restart {
+        ReplResult::Restart {
             output: rendered,
             reload: if show_intro_on_reload {
                 ReplReloadKind::WithIntro
@@ -488,7 +488,7 @@ pub(super) fn finalize_repl_command(
             },
         }
     } else {
-        ReplLineResult::Continue(rendered)
+        ReplResult::Print(rendered)
     }
 }
 

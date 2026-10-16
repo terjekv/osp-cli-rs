@@ -93,7 +93,7 @@ fn start_native_completion_refreshes(runtime: &AppRuntime, clients: &crate::app:
 fn run_repl_cycle(
     state: &mut AppState,
     cycle: lifecycle::ReplCycle,
-) -> Result<crate::repl::ReplRunResult> {
+) -> Result<crate::repl::ReplResult> {
     state.session.seed_startup_prompt_timing(
         state.runtime.ui.debug_verbosity,
         state.runtime.launch.startup_started_at.elapsed(),

@@ -371,7 +371,7 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
 
     assert!(matches!(
         result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             output,
             reload: crate::repl::ReplReloadKind::Default,
         } if output.contains("refreshed")
@@ -414,7 +414,7 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     )
     .expect("doctor last should render")
     {
-        crate::repl::ReplLineResult::Continue(output) => output,
+        crate::repl::ReplResult::Print(output) => output,
         other => panic!("unexpected doctor result: {other:?}"),
     };
 
@@ -476,7 +476,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     )
     .expect("doctor last should render")
     {
-        crate::repl::ReplLineResult::Continue(output) => output,
+        crate::repl::ReplResult::Print(output) => output,
         other => panic!("unexpected doctor result: {other:?}"),
     };
 

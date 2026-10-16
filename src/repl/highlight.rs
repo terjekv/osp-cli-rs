@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use crate::completion::{CommandLineParser, CompletionNode, CompletionTree, TokenSpan};
 use nu_ansi_term::Color;
 use reedline::{Highlighter, StyledText};
 use serde::Serialize;
 
-use crate::repl::LineProjection;
+use crate::repl::{LineProjection, LineProjector};
 
 /// Highlighting intentionally stays small and opinionated:
 /// - color only the visible command path the tree can resolve
@@ -59,8 +58,6 @@ pub struct HighlightDebugSpan {
     /// RGB color used for the span, when highlighting applied a literal color.
     pub rgb: Option<[u8; 3]>,
 }
-
-pub(crate) type LineProjector = Arc<dyn Fn(&str) -> LineProjection + Send + Sync>;
 
 pub(crate) struct ReplHighlighter {
     tree: CompletionTree,

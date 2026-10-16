@@ -40,7 +40,6 @@ JSON
     )
     .expect_err("response ok=false should become repl error");
     assert!(err.to_string().contains("MOCK_ERR: mock failure"));
-
 }
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
@@ -60,7 +59,9 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
         .dispatch("hello", &[], &dispatch_context)
         .expect("plugin dispatch should succeed");
     let result = super::super::cli_result_from_plugin_response(response, &stages)
-        .and_then(|result| super::super::command_output::apply_stages_to_cli_result(result, &stages))
+        .and_then(|result| {
+            super::super::command_output::apply_stages_to_cli_result(result, &stages)
+        })
         .expect("plugin response should prepare");
     assert_eq!(result.exit_code, 0);
     assert!(result.failure_report.is_none());
@@ -84,13 +85,12 @@ fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
     )
     .expect("repl command should succeed");
     match repl_rendered {
-        crate::repl::ReplLineResult::Continue(text) => {
+        crate::repl::ReplResult::Print(text) => {
             assert_eq!(text.trim(), cli_rendered.trim());
             assert!(text.contains("hello-from-plugin"));
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
-
 }
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
@@ -127,11 +127,10 @@ fn repl_plugin_provider_override_dispatches_selected_provider_unit() {
     )
     .expect("repl command should honor one-shot provider override");
     match repl_rendered {
-        crate::repl::ReplLineResult::Continue(text) => {
+        crate::repl::ReplResult::Print(text) => {
             assert!(text.contains("beta-from-plugin"));
             assert!(!text.contains("alpha-from-plugin"));
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
-
 }

@@ -21,7 +21,7 @@ mod builtins;
 mod command;
 mod shell;
 
-use crate::repl::{ReplLineResult, SharedHistory};
+use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, miette};
 use std::time::Instant;
 
@@ -89,15 +89,15 @@ enum ReplTimingPlan {
 }
 
 struct ExecutedReplLine {
-    result: ReplLineResult,
+    result: ReplResult,
     exit_code: i32,
     timing: ReplTimingPlan,
 }
 
 impl ExecutedReplLine {
-    fn flat(result: ReplLineResult, debug_verbosity: u8) -> Self {
+    fn flat(result: ReplResult, debug_verbosity: u8) -> Self {
         let exit_code = match result {
-            ReplLineResult::Exit(code) => code,
+            ReplResult::Exit(code) => code,
             _ => 0,
         };
         Self {
@@ -107,7 +107,7 @@ impl ExecutedReplLine {
         }
     }
 
-    fn parse_only(result: ReplLineResult, debug_verbosity: u8) -> Self {
+    fn parse_only(result: ReplResult, debug_verbosity: u8) -> Self {
         Self {
             result,
             exit_code: 0,
@@ -116,7 +116,7 @@ impl ExecutedReplLine {
     }
 
     fn invocation(
-        result: ReplLineResult,
+        result: ReplResult,
         exit_code: i32,
         debug_verbosity: u8,
         parse_finished: Instant,
@@ -189,7 +189,7 @@ pub(crate) fn execute_repl_plugin_line(
     clients: &AppClients,
     history: &SharedHistory,
     line: &str,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     let mut sink = StdIoUiSink;
     execute_repl_plugin_line_with_sink(runtime, session, clients, history, line, &mut sink)
         .map(|executed| executed.result)
@@ -230,7 +230,7 @@ fn execute_repl_plugin_line_with_acceptance(
     let execution = (|| {
         if let Some(command @ builtins::BangCommand::Last) = builtins::parse_bang_command(line)? {
             match builtins::execute_bang_command(session, history, line, command)? {
-                ReplLineResult::ReplaceInput(expanded) => {
+                ReplResult::ReplaceInput(expanded) => {
                     sink.write_stderr(&format!("{expanded}\n"));
                     resolved = expanded;
                 }
@@ -301,7 +301,7 @@ fn execute_repl_plugin_line_with_acceptance(
                     ui.message_verbosity,
                 ));
                 let mut executed = ExecutedReplLine::flat(
-                    ReplLineResult::Continue(String::new()),
+                    ReplResult::Print(String::new()),
                     runtime.ui.debug_verbosity,
                 );
                 executed.exit_code = crate::app::classify_exit_code(&err);
@@ -478,13 +478,13 @@ fn execute_repl_line_plan(
             Ok(ExecutedReplLine::flat(result, runtime.ui.debug_verbosity))
         }
         ReplLinePlan::Blank => Ok(ExecutedReplLine::flat(
-            ReplLineResult::Continue(String::new()),
+            ReplResult::Print(String::new()),
             runtime.ui.debug_verbosity,
         )),
         ReplLinePlan::DslHelp { help } => {
             *accepted = true;
             Ok(ExecutedReplLine::flat(
-                ReplLineResult::Continue(help),
+                ReplResult::Print(help),
                 runtime.ui.debug_verbosity,
             ))
         }

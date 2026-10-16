@@ -1,7 +1,5 @@
 use super::adapter::{ReplCompleter, build_repl_highlighter, color_from_style_spec};
-use super::config::{
-    LineProjector, ReplAppearance, ReplLineResult, ReplReloadKind, ReplRunResult, ReplTabMode,
-};
+use super::config::{LineProjector, ReplAppearance, ReplResult, ReplTabMode};
 use super::editor::{
     AutoCompleteEmacs, BasicInputReason, OspPrompt, PaintedLine, is_cursor_position_error,
     mark_cursor_position_unsupported,
@@ -31,17 +29,6 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) line_projector: Option<LineProjector>,
 }
 
-pub(crate) enum SubmissionResult {
-    Noop,
-    Print(String),
-    ReplaceInput(String),
-    Exit(i32),
-    Restart {
-        output: String,
-        reload: ReplReloadKind,
-    },
-}
-
 pub(crate) struct SubmissionContext<'a, F> {
     pub(crate) history_store: &'a SharedHistory,
     pub(crate) execute: &'a mut F,
@@ -50,36 +37,30 @@ pub(crate) struct SubmissionContext<'a, F> {
 pub(crate) fn evaluate_repl_submission<F>(
     raw: &str,
     ctx: &mut SubmissionContext<'_, F>,
-) -> Result<SubmissionResult>
+) -> ReplResult
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
 {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Ok(SubmissionResult::Noop);
+        return ReplResult::Continue;
     }
-    let result = match (ctx.execute)(raw, ctx.history_store) {
-        Ok(ReplLineResult::Continue(output)) => SubmissionResult::Print(output),
-        Ok(ReplLineResult::ReplaceInput(buffer)) => SubmissionResult::ReplaceInput(buffer),
-        Ok(ReplLineResult::Exit(code)) => SubmissionResult::Exit(code),
-        Ok(ReplLineResult::Restart { output, reload }) => {
-            SubmissionResult::Restart { output, reload }
-        }
+    match (ctx.execute)(raw, ctx.history_store) {
+        Ok(result) => result,
         Err(err) => {
             eprintln!("{err}");
-            SubmissionResult::Noop
+            ReplResult::Continue
         }
-    };
-    Ok(result)
+    }
 }
 
 pub(crate) fn run_repl_interactive<F>(
     config: InteractiveLoopConfig<'_>,
     history_store: SharedHistory,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
 {
     let InteractiveLoopConfig {
         prompt,
@@ -160,11 +141,11 @@ pub(super) fn drive_interactive_editor<F, R, B>(
     editor: &mut Reedline,
     mut read_signal: R,
     mut run_basic_fn: B,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
     R: FnMut(&mut Reedline) -> io::Result<Signal>,
-    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplRunResult>,
+    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
 {
     crate::startup_trace::begin_first_prompt();
     loop {
@@ -206,9 +187,9 @@ where
 pub(crate) fn run_repl_basic<F>(
     prompt: &OspPrompt,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
 {
     crate::repl::notices::attach_basic();
     crate::startup_trace::begin_first_prompt();
@@ -220,16 +201,15 @@ where
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;
         if read == 0 {
-            return Ok(ReplRunResult::Exit(0));
+            return Ok(ReplResult::Exit(0));
         }
 
         submission
             .history_store
             .with(|store| store.stage_command_line(&line))
             .map_err(anyhow::Error::msg)??;
-        match apply_basic_submission(evaluate_repl_submission(&line, submission)?) {
-            BasicSubmissionAction::Continue => continue,
-            BasicSubmissionAction::Return(result) => return Ok(result),
+        if let Some(result) = apply_submission(evaluate_repl_submission(&line, submission), None) {
+            return Ok(result);
         }
     }
 }
@@ -313,9 +293,9 @@ fn handle_interactive_signal<F>(
     history_store: &SharedHistory,
     appearance: &ReplAppearance,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<Option<ReplRunResult>>
+) -> Result<Option<ReplResult>>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
 {
     match signal {
         Signal::Success(line) if line == HOST_COMMAND_HISTORY_PICKER => {
@@ -349,36 +329,17 @@ where
                 return Ok(None);
             }
             let command = if previous { "prev" } else { "next" };
-            apply_interactive_submission(evaluate_repl_submission(command, submission)?, editor)
+            Ok(apply_submission(
+                evaluate_repl_submission(command, submission),
+                Some(editor),
+            ))
         }
-        Signal::Success(line) => {
-            apply_interactive_submission(evaluate_repl_submission(&line, submission)?, editor)
-        }
-        Signal::CtrlD => Ok(Some(ReplRunResult::Exit(0))),
+        Signal::Success(line) => Ok(apply_submission(
+            evaluate_repl_submission(&line, submission),
+            Some(editor),
+        )),
+        Signal::CtrlD => Ok(Some(ReplResult::Exit(0))),
         Signal::CtrlC => Ok(None),
-    }
-}
-
-enum BasicSubmissionAction {
-    Continue,
-    Return(ReplRunResult),
-}
-
-fn apply_basic_submission(result: SubmissionResult) -> BasicSubmissionAction {
-    match result {
-        SubmissionResult::Noop => BasicSubmissionAction::Continue,
-        SubmissionResult::Print(output) => {
-            print!("{output}");
-            BasicSubmissionAction::Continue
-        }
-        SubmissionResult::ReplaceInput(buffer) => {
-            println!("{buffer}");
-            BasicSubmissionAction::Continue
-        }
-        SubmissionResult::Exit(code) => BasicSubmissionAction::Return(ReplRunResult::Exit(code)),
-        SubmissionResult::Restart { output, reload } => {
-            BasicSubmissionAction::Return(ReplRunResult::Restart { output, reload })
-        }
     }
 }
 
@@ -389,31 +350,29 @@ fn render_history_picker_failure(err: &anyhow::Error) -> String {
     )
 }
 
-fn apply_interactive_submission(
-    result: SubmissionResult,
-    editor: &mut Reedline,
-) -> Result<Option<ReplRunResult>> {
+fn apply_submission(result: ReplResult, editor: Option<&mut Reedline>) -> Option<ReplResult> {
     match result {
-        SubmissionResult::Noop => Ok(None),
-        SubmissionResult::Print(output) => {
+        ReplResult::Continue => None,
+        ReplResult::Print(output) => {
             print!("{output}");
-            Ok(None)
+            None
         }
-        SubmissionResult::ReplaceInput(buffer) => {
-            editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(buffer)]);
-            Ok(None)
+        ReplResult::ReplaceInput(buffer) => {
+            if let Some(editor) = editor {
+                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(buffer)]);
+            } else {
+                println!("{buffer}");
+            }
+            None
         }
-        SubmissionResult::Exit(code) => Ok(Some(ReplRunResult::Exit(code))),
-        SubmissionResult::Restart { output, reload } => {
-            Ok(Some(ReplRunResult::Restart { output, reload }))
-        }
+        result @ (ReplResult::Exit(_) | ReplResult::Restart { .. }) => Some(result),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repl::engine::HistoryConfig;
+    use crate::repl::engine::{HistoryConfig, ReplReloadKind};
     use reedline::{KeyCode, KeyModifiers, ReedlineEvent};
     use std::sync::{Arc, Mutex};
 
@@ -461,48 +420,36 @@ mod tests {
     }
 
     #[test]
-    fn apply_interactive_submission_covers_editor_update_and_terminal_outcomes_unit() {
+    fn apply_submission_covers_editor_update_and_terminal_outcomes_unit() {
         let mut editor = Reedline::create();
 
+        assert!(apply_submission(ReplResult::Continue, Some(&mut editor)).is_none());
         assert!(
-            apply_interactive_submission(SubmissionResult::Noop, &mut editor)
-                .expect("noop should succeed")
-                .is_none()
-        );
-        assert!(
-            apply_interactive_submission(
-                SubmissionResult::Print("printed".to_string()),
-                &mut editor
-            )
-            .expect("print should succeed")
-            .is_none()
+            apply_submission(ReplResult::Print("printed".to_string()), Some(&mut editor)).is_none()
         );
 
         assert!(
-            apply_interactive_submission(
-                SubmissionResult::ReplaceInput("config show".to_string()),
-                &mut editor,
+            apply_submission(
+                ReplResult::ReplaceInput("config show".to_string()),
+                Some(&mut editor),
             )
-            .expect("replace should succeed")
             .is_none()
         );
         assert_eq!(editor.current_buffer_contents(), "config show");
 
         assert!(matches!(
-            apply_interactive_submission(SubmissionResult::Exit(7), &mut editor)
-                .expect("exit should succeed"),
-            Some(ReplRunResult::Exit(7))
+            apply_submission(ReplResult::Exit(7), Some(&mut editor)),
+            Some(ReplResult::Exit(7))
         ));
         assert!(matches!(
-            apply_interactive_submission(
-                SubmissionResult::Restart {
+            apply_submission(
+                ReplResult::Restart {
                     output: "reload".to_string(),
                     reload: ReplReloadKind::Default,
                 },
-                &mut editor,
-            )
-            .expect("restart should succeed"),
-            Some(ReplRunResult::Restart { output, reload: ReplReloadKind::Default })
+                Some(&mut editor),
+            ),
+            Some(ReplResult::Restart { output, reload: ReplReloadKind::Default })
                 if output == "reload"
         ));
     }
@@ -520,7 +467,7 @@ mod tests {
             seen.lock()
                 .expect("executed command log should not be poisoned")
                 .push(line.to_string());
-            Ok(ReplLineResult::Continue(String::new()))
+            Ok(ReplResult::Continue)
         };
         let mut submission = SubmissionContext {
             history_store: &history,
@@ -567,7 +514,7 @@ mod tests {
                 &mut submission,
             )
             .expect("ctrl-d should succeed"),
-            Some(ReplRunResult::Exit(0))
+            Some(ReplResult::Exit(0))
         ));
         assert!(
             handle_interactive_signal(

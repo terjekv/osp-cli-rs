@@ -267,7 +267,7 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 key: "repl.input_mode",
                 schema: SchemaEntry::string()
                     .with_allowed_values(
-                        crate::repl::presentation::ReplInputMode::ALL
+                        crate::repl::ReplInputMode::ALL
                             .iter()
                             .map(|value| value.as_str()),
                     )

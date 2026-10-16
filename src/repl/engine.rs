@@ -54,8 +54,8 @@ pub(crate) use adapter::{
 pub use adapter::{color_from_style_spec, default_pipe_verbs};
 pub use config::{
     LineProjection, LineProjector, PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder,
-    ReplInputMode, ReplLineResult, ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunConfigBuilder,
-    ReplRunResult, ReplTabMode,
+    ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig, ReplRunConfigBuilder,
+    ReplTabMode,
 };
 pub use debug::{
     CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,
@@ -69,9 +69,9 @@ use editor::{
 pub(crate) use editor::{BasicInputReason, OspPrompt, basic_input_reason};
 #[cfg(test)]
 use overlay::{build_history_menu, build_history_picker_options, history_picker_items};
-use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 #[cfg(test)]
-use session::{SubmissionResult, evaluate_repl_submission};
+use session::evaluate_repl_submission;
+use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";
 const HISTORY_MENU_NAME: &str = "history_menu";
@@ -104,11 +104,14 @@ struct ReplRunContext {
 ///
 /// # Errors
 ///
-/// Returns an error when the interactive editor layer fails or when the
-/// supplied `execute` callback returns an error for a submitted line.
-pub fn run_repl<F>(config: ReplRunConfig, mut execute: F) -> Result<ReplRunResult>
+/// Returns an error when the editor or history backend fails. Errors from
+/// `execute` are printed to stderr and the session continues.
+///
+/// Only [`ReplResult::Exit`] and [`ReplResult::Restart`] leave the editor loop;
+/// the editor applies the other actions before reading another line.
+pub fn run_repl<F>(config: ReplRunConfig, mut execute: F) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
 {
     crate::startup_trace::initialize();
     let ReplRunConfig {
@@ -155,15 +158,15 @@ fn run_repl_with_reason<F, B, I>(
     submission: &mut SubmissionContext<'_, F>,
     mut run_basic_fn: B,
     mut run_interactive_fn: I,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
-    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplRunResult>,
+    F: FnMut(&str, &SharedHistory) -> Result<ReplResult>,
+    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
     I: FnMut(
         InteractiveLoopConfig<'_>,
         SharedHistory,
         &mut SubmissionContext<'_, F>,
-    ) -> Result<ReplRunResult>,
+    ) -> Result<ReplResult>,
 {
     let ReplRunContext {
         prompt,

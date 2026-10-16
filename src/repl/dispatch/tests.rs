@@ -19,7 +19,7 @@ use crate::cli::{
 };
 use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 use crate::core::output::OutputFormat;
-use crate::repl::{HistoryConfig, ReplLineResult, ReplReloadKind, SharedHistory};
+use crate::repl::{HistoryConfig, ReplReloadKind, ReplResult, SharedHistory};
 use crate::ui::RenderSettings;
 use crate::ui::messages::MessageLevel;
 
@@ -46,26 +46,25 @@ fn observe_dispatch_kind(
         history,
         line,
     ) {
-        Ok(ReplLineResult::Exit(_)) => ObservedDispatchKind::Exit,
-        Ok(ReplLineResult::Continue(output)) if output.is_empty() => ObservedDispatchKind::Blank,
-        Ok(ReplLineResult::Continue(output)) if output.contains("DSL Help") => {
+        Ok(ReplResult::Continue) => ObservedDispatchKind::Blank,
+        Ok(ReplResult::Exit(_)) => ObservedDispatchKind::Exit,
+        Ok(ReplResult::Print(output)) if output.is_empty() => ObservedDispatchKind::Blank,
+        Ok(ReplResult::Print(output)) if output.contains("DSL Help") => {
             ObservedDispatchKind::DslHelp
         }
-        Ok(ReplLineResult::Continue(output))
-            if line.trim() == "help" && output.contains("Commands") =>
-        {
+        Ok(ReplResult::Print(output)) if line.trim() == "help" && output.contains("Commands") => {
             ObservedDispatchKind::ShortcutHelp
         }
-        Ok(ReplLineResult::Continue(output))
+        Ok(ReplResult::Print(output))
             if output.contains("unrecognized subcommand")
                 || output.contains("unknown argument") =>
         {
             ObservedDispatchKind::InlineHelp
         }
-        Ok(ReplLineResult::ReplaceInput(_)) | Ok(ReplLineResult::Restart { .. }) => {
+        Ok(ReplResult::ReplaceInput(_)) | Ok(ReplResult::Restart { .. }) => {
             ObservedDispatchKind::Command
         }
-        Ok(ReplLineResult::Continue(_)) => ObservedDispatchKind::Command,
+        Ok(ReplResult::Print(_)) => ObservedDispatchKind::Command,
         Err(_) => ObservedDispatchKind::Error,
     }
 }
@@ -119,14 +118,14 @@ fn repl_exit_behaves_differently_for_root_and_shells_unit() {
     let mut root = AppSession::default();
     assert!(matches!(
         handle_repl_exit_request(&mut root),
-        ReplLineResult::Exit(0)
+        ReplResult::Exit(0)
     ));
 
     let mut nested = AppSession::default();
     nested.scope.enter("ldap");
     assert!(matches!(
         handle_repl_exit_request(&mut nested),
-        ReplLineResult::Restart {
+        ReplResult::Restart {
             output: message,
             reload: ReplReloadKind::Default,
         } if message == "Leaving ldap shell. Back at root.\n"
@@ -201,7 +200,7 @@ fn leave_repl_shell_returns_none_at_root_unit() {
     assert!(leave_repl_shell(&mut session).is_none());
     assert!(matches!(
         finalize_repl_command(String::new(), true, false),
-        ReplLineResult::Restart {
+        ReplResult::Restart {
             output,
             reload: ReplReloadKind::Default
         } if output.is_empty()
@@ -212,7 +211,7 @@ fn leave_repl_shell_returns_none_at_root_unit() {
 fn finalize_repl_command_uses_intro_reload_when_requested_unit() {
     assert!(matches!(
         finalize_repl_command("saved\n".to_string(), true, true),
-        ReplLineResult::Restart {
+        ReplResult::Restart {
             output,
             reload: ReplReloadKind::WithIntro
         } if output == "saved\n"
@@ -307,7 +306,7 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
     .expect("last should replay");
     assert!(matches!(
         processed,
-        ReplLineResult::Continue(text) if text.contains("alice") && !text.contains("admin")
+        ReplResult::Print(text) if text.contains("alice") && !text.contains("admin")
     ));
 
     let raw = execute_repl_plugin_line(
@@ -320,7 +319,7 @@ fn repl_last_builtin_replays_processed_and_raw_results_unit() {
     .expect("last raw should replay");
     assert!(matches!(
         raw,
-        ReplLineResult::Continue(text) if text.contains("alice") && text.contains("admin")
+        ReplResult::Print(text) if text.contains("alice") && text.contains("admin")
     ));
 }
 
@@ -362,7 +361,7 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
     assert!(matches!(
         execute_bang_command(&mut session, &history, "!", BangCommand::Prefix(String::new()))
             .expect("empty prefix renders help"),
-        ReplLineResult::Continue(help) if help.contains("Bang history shortcuts")
+        ReplResult::Print(help) if help.contains("Bang history shortcuts")
     ));
     assert!(matches!(
         execute_bang_command(
@@ -372,7 +371,7 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
             BangCommand::Contains("ops".to_string())
         )
         .expect("contains search should expand"),
-        ReplLineResult::ReplaceInput(value) if value == "netgroup ops"
+        ReplResult::ReplaceInput(value) if value == "netgroup ops"
     ));
     assert!(matches!(
         execute_bang_command(
@@ -382,7 +381,7 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
             BangCommand::Prefix("user".to_string())
         )
         .expect("prefix search should expand"),
-        ReplLineResult::ReplaceInput(value) if value == "user alice"
+        ReplResult::ReplaceInput(value) if value == "user alice"
     ));
     assert!(matches!(
         execute_bang_command(
@@ -392,7 +391,7 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
             BangCommand::Prefix("missing".to_string())
         )
         .expect("missing bang match should still succeed"),
-        ReplLineResult::Continue(value) if value.contains("No history match")
+        ReplResult::Print(value) if value.contains("No history match")
     ));
     assert!(is_repl_bang_request(" !prefix"));
     assert!(!is_repl_bang_request("help"));
@@ -415,10 +414,7 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
         "!1",
     )
     .expect("bare absolute history recall should succeed");
-    assert_eq!(
-        bare,
-        ReplLineResult::ReplaceInput("config show".to_string())
-    );
+    assert_eq!(bare, ReplResult::ReplaceInput("config show".to_string()));
 
     let recalled = execute_repl_plugin_line(
         &mut state.runtime,
@@ -431,7 +427,7 @@ fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
 
     assert_eq!(
         recalled,
-        ReplLineResult::ReplaceInput("config show --label \"two words\"".to_string())
+        ReplResult::ReplaceInput("config show --label \"two words\"".to_string())
     );
 }
 
@@ -460,7 +456,7 @@ fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
 
     assert_eq!(
         recalled,
-        ReplLineResult::ReplaceInput("user alice --json".to_string())
+        ReplResult::ReplaceInput("user alice --json".to_string())
     );
 }
 
@@ -625,7 +621,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             "quit"
         )
         .expect("quit should exit from the REPL root"),
-        ReplLineResult::Exit(0)
+        ReplResult::Exit(0)
     ));
     assert!(state.session.prompt_timing.badge().is_some());
 
@@ -638,7 +634,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             "   "
         )
         .expect("blank lines should be ignored"),
-        ReplLineResult::Continue(output) if output.is_empty()
+        ReplResult::Print(output) if output.is_empty()
     ));
 
     assert!(matches!(
@@ -650,7 +646,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             "intro | H"
         )
         .expect("dsl help stage should short-circuit normal command execution"),
-        ReplLineResult::Continue(output)
+        ReplResult::Print(output)
             if output.contains("DSL Help")
                 && output.contains("Use | H <verb> for details.")
     ));
@@ -664,7 +660,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
             "help"
         )
         .expect("root help shortcut should render command help"),
-        ReplLineResult::Continue(output)
+        ReplResult::Print(output)
             if output.contains("Commands") && output.contains("config")
     ));
 

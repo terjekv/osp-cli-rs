@@ -15,6 +15,7 @@ use crate::config::DEFAULT_REPL_HISTORY_MENU_ROWS;
 use crate::config::ResolvedConfig;
 use crate::core::document::{DocBlock, Document, DocumentEntry};
 use crate::native::NativeSessionContext;
+use crate::repl::ReplInputMode;
 use crate::repl::{ReplAppearance, ReplPrompt};
 use crate::ui::messages::MessageLevel;
 use crate::ui::render_structured_output_with_source_document;
@@ -32,13 +33,6 @@ pub(crate) enum ReplIntroStyle {
     Minimal,
     Compact,
     Full,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReplInputMode {
-    Auto,
-    Interactive,
-    Basic,
 }
 
 impl ReplIntroStyle {
@@ -62,29 +56,6 @@ impl ReplIntroStyle {
             Self::Minimal => "minimal",
             Self::Compact => "compact",
             Self::Full => "full",
-        }
-    }
-}
-
-impl ReplInputMode {
-    /// All variants in canonical configuration order.
-    pub const ALL: [Self; 3] = [Self::Auto, Self::Interactive, Self::Basic];
-
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "interactive" | "full" => Some(Self::Interactive),
-            "basic" | "plain" => Some(Self::Basic),
-            _ => None,
-        }
-    }
-
-    /// Returns the canonical configuration spelling.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::Interactive => "interactive",
-            Self::Basic => "basic",
         }
     }
 }
@@ -304,10 +275,7 @@ fn resolve_intro_placeholder(
     match key {
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),
-        "user" => {
-            return effective_user(view).to_string();
-        }
-        "user.name" => {
+        "user" | "user.name" => {
             return effective_user(view).to_string();
         }
         "display_name" => {

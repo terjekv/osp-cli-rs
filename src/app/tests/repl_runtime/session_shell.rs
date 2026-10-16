@@ -44,7 +44,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
         "exit",
     )
     .expect("root exit should be handled by host dispatch");
-    assert_eq!(root_exit, crate::repl::ReplLineResult::Exit(0));
+    assert_eq!(root_exit, crate::repl::ReplResult::Exit(0));
 
     state.session.scope.enter("orch");
     let shell_exit = repl_dispatch::execute_repl_plugin_line(
@@ -56,7 +56,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
     )
     .expect("shell exit should leave the current shell");
     match shell_exit {
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             output: text,
             reload: crate::repl::ReplReloadKind::Default,
         } => {
@@ -204,7 +204,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     )
     .expect("bang expansion should succeed");
     match expanded {
-        crate::repl::ReplLineResult::Continue(text) => {
+        crate::repl::ReplResult::Print(text) => {
             assert!(text.contains("first"), "repeated command output: {text}");
         }
         other => panic!("unexpected repl result: {other:?}"),
@@ -274,7 +274,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     )
     .expect("contains bang expansion should succeed");
     match expanded {
-        crate::repl::ReplLineResult::ReplaceInput(text) => {
+        crate::repl::ReplResult::ReplaceInput(text) => {
             assert_eq!(text, "cache alpha");
         }
         other => panic!("unexpected repl result: {other:?}"),
@@ -307,7 +307,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
     )
     .expect("scoped bang search should succeed");
     match scoped_hit {
-        crate::repl::ReplLineResult::ReplaceInput(text) => assert_eq!(text, "status"),
+        crate::repl::ReplResult::ReplaceInput(text) => assert_eq!(text, "status"),
         other => panic!("unexpected repl result: {other:?}"),
     }
 
@@ -320,7 +320,7 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
     )
     .expect("cross-shell bang miss should render feedback");
     match scoped_miss {
-        crate::repl::ReplLineResult::Continue(text) => {
+        crate::repl::ReplResult::Print(text) => {
             assert_eq!(text, "No history match for: !?config\n");
         }
         other => panic!("unexpected repl result: {other:?}"),

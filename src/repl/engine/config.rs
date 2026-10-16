@@ -77,6 +77,30 @@ pub enum ReplInputMode {
     Basic,
 }
 
+impl ReplInputMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Interactive, Self::Basic];
+
+    /// Parses the input-mode setting, including `full` and `plain` aliases.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "interactive" | "full" => Some(Self::Interactive),
+            "basic" | "plain" => Some(Self::Basic),
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Interactive => "interactive",
+            Self::Basic => "basic",
+        }
+    }
+}
+
 /// Selects when typing, rather than Tab, opens the completion menu.
 ///
 /// Tab and a leading `-` open the menu in every mode.
@@ -129,30 +153,21 @@ pub enum ReplReloadKind {
     WithIntro,
 }
 
-/// Outcome of executing one submitted REPL line.
+/// Outcome of a REPL submission or editor run.
+///
+/// The editor consumes continuation actions and returns only [`Self::Exit`] or
+/// [`Self::Restart`] to the surrounding host.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplLineResult {
+pub enum ReplResult {
+    /// Continue without printing or changing the input buffer.
+    Continue,
     /// Print output and continue the current session.
-    Continue(String),
+    Print(String),
     /// Replace the current input buffer instead of printing output.
     ReplaceInput(String),
     /// Exit the REPL with the given process status.
     Exit(i32),
     /// Rebuild the REPL runtime, optionally showing intro chrome again.
-    Restart {
-        /// Output to print before restarting.
-        output: String,
-        /// Restart presentation mode to use.
-        reload: ReplReloadKind,
-    },
-}
-
-/// Outcome of one `run_repl` session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplRunResult {
-    /// Exit the editor loop and return a process status.
-    Exit(i32),
-    /// Restart the surrounding REPL host loop with refreshed state.
     Restart {
         /// Output to print before restarting.
         output: String,
@@ -472,7 +487,7 @@ impl ReplAppearanceBuilder {
 #[cfg(test)]
 mod tests {
     use super::{
-        ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunResult,
+        ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig,
     };
     use crate::repl::HistoryConfig;
 
@@ -502,13 +517,13 @@ mod tests {
         assert_eq!(prompt.left, "osp");
         assert!(prompt.indicator.is_empty());
 
-        let restart = ReplRunResult::Restart {
+        let restart = ReplResult::Restart {
             output: "reloading".to_string(),
             reload: ReplReloadKind::WithIntro,
         };
         assert!(matches!(
             restart,
-            ReplRunResult::Restart {
+            ReplResult::Restart {
                 output,
                 reload: ReplReloadKind::WithIntro
             } if output == "reloading"

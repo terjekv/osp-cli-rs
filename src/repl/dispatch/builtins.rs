@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 pub(super) use crate::repl::history_store::BangCommand;
 use crate::repl::history_store::split_bang_request;
-use crate::repl::{ReplLineResult, SharedHistory};
+use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, WrapErr, miette};
 
 use crate::app::sink::UiSink;
@@ -43,9 +43,9 @@ pub(super) fn execute_repl_builtin(
     raw: &str,
     builtin: ReplBuiltin,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     match builtin {
-        ReplBuiltin::Help => Ok(ReplLineResult::Continue(render_repl_help_for_scope(
+        ReplBuiltin::Help => Ok(ReplResult::Print(render_repl_help_for_scope(
             runtime,
             session,
             clients,
@@ -140,9 +140,9 @@ fn execute_source_command(
     history: &SharedHistory,
     command: SourceCommand,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     if command.help {
-        return Ok(ReplLineResult::Continue(source_help()));
+        return Ok(ReplResult::Print(source_help()));
     }
 
     for path in command.paths {
@@ -175,7 +175,7 @@ fn execute_source_command(
             }
         }
     }
-    Ok(ReplLineResult::Continue(String::new()))
+    Ok(ReplResult::Print(String::new()))
 }
 
 /// Runs one sourced line, returning the result that stops the batch, if any.
@@ -187,7 +187,7 @@ fn execute_source_line(
     line: &str,
     location: &str,
     sink: &mut dyn UiSink,
-) -> Result<Option<ReplLineResult>> {
+) -> Result<Option<ReplResult>> {
     if shell_words::split(line)
         .ok()
         .and_then(|words| words.into_iter().next())
@@ -199,19 +199,20 @@ fn execute_source_line(
     let executed =
         super::execute_repl_plugin_line_with_sink(runtime, session, clients, history, line, sink)?;
     match executed.result {
-        ReplLineResult::Continue(rendered) => sink.write_stdout(&rendered),
-        ReplLineResult::Restart { output, reload } => {
+        ReplResult::Continue => {}
+        ReplResult::Print(rendered) => sink.write_stdout(&rendered),
+        ReplResult::Restart { output, reload } => {
             sink.write_stdout(&output);
             sink.write_stderr(&format!(
                 "{location}: command requires a REPL restart; remaining source lines were not run\n"
             ));
-            return Ok(Some(ReplLineResult::Restart {
+            return Ok(Some(ReplResult::Restart {
                 output: String::new(),
                 reload,
             }));
         }
-        ReplLineResult::Exit(code) => return Ok(Some(ReplLineResult::Exit(code))),
-        ReplLineResult::ReplaceInput(_) => {
+        ReplResult::Exit(code) => return Ok(Some(ReplResult::Exit(code))),
+        ReplResult::ReplaceInput(_) => {
             return Err(miette!(
                 "history expansion is not supported in sourced files"
             ));
@@ -230,9 +231,9 @@ fn execute_pagination_builtin(
     history: &SharedHistory,
     direction: PaginationDirection,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     if session.native_context.pagination().is_none() {
-        return Ok(ReplLineResult::Continue(
+        return Ok(ReplResult::Print(
             "No paginated result to continue. Run a paginated list command first.\n".to_string(),
         ));
     }
@@ -243,7 +244,7 @@ fn execute_pagination_builtin(
         } else {
             "Already at the first page.\n"
         };
-        return Ok(ReplLineResult::Continue(message.to_string()));
+        return Ok(ReplResult::Print(message.to_string()));
     };
 
     // NativePagination stores tokenized argv. Re-encode it only at the REPL
@@ -324,11 +325,11 @@ pub(super) fn execute_bang_command(
     history: &SharedHistory,
     raw: &str,
     command: BangCommand,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     let elevated = split_bang_request(raw).is_some_and(|(elevated, _)| elevated);
     let scope = current_history_scope(session);
     if matches!(&command, BangCommand::Prefix(prefix) if prefix.is_empty()) {
-        return Ok(ReplLineResult::Continue(render_bang_help()));
+        return Ok(ReplResult::Print(render_bang_help()));
     }
     let expanded = history
         .with(|store| store.expand(&command, scope.as_deref(), elevated))
@@ -336,12 +337,10 @@ pub(super) fn execute_bang_command(
         .flatten();
 
     let Some(expanded) = expanded else {
-        return Ok(ReplLineResult::Continue(format!(
-            "No history match for: {raw}\n"
-        )));
+        return Ok(ReplResult::Print(format!("No history match for: {raw}\n")));
     };
 
-    Ok(ReplLineResult::ReplaceInput(expanded))
+    Ok(ReplResult::ReplaceInput(expanded))
 }
 
 pub(super) fn current_history_scope(session: &AppSession) -> Option<String> {
@@ -366,7 +365,7 @@ fn execute_last_result_builtin(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     line: &str,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     let parsed = crate::repl::input::ReplParsedLine::parse(line, runtime.config.resolved())?;
     let scanned = crate::cli::invocation::scan_command_tokens(&parsed.dispatch_tokens)?;
     let command = clap::Command::new("last")
@@ -381,12 +380,12 @@ fn execute_last_result_builtin(
     let matches = match command.try_get_matches_from(scanned.tokens) {
         Ok(matches) => matches,
         Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {
-            return Ok(ReplLineResult::Continue(error.to_string()));
+            return Ok(ReplResult::Print(error.to_string()));
         }
         Err(error) => return Err(miette!(error.to_string())),
     };
     let Some(last) = session.last_success() else {
-        return Ok(ReplLineResult::Continue(
+        return Ok(ReplResult::Print(
             "No recorded successful REPL result in this session.\n".to_string(),
         ));
     };
@@ -408,7 +407,7 @@ fn execute_last_result_builtin(
         &last.output,
         &stages,
     )?;
-    Ok(ReplLineResult::Continue(rendered))
+    Ok(ReplResult::Print(rendered))
 }
 
 pub(super) fn is_repl_bang_request(raw: &str) -> bool {
@@ -426,7 +425,7 @@ mod tests {
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::native::{NativeCommand, NativeCommandContext, NativeCommandOutcome};
-    use crate::repl::{HistoryConfig, ReplLineResult, SharedHistory};
+    use crate::repl::{HistoryConfig, ReplResult, SharedHistory};
     use crate::ui::RenderSettings;
     use crate::ui::messages::MessageLevel;
     use clap::Command;
@@ -551,7 +550,7 @@ mod tests {
                 &mut sink,
             )
             .expect("exit should succeed"),
-            ReplLineResult::Exit(0)
+            ReplResult::Exit(0)
         ));
 
         let mut state = app_state();
@@ -569,7 +568,7 @@ mod tests {
                 &mut sink,
             )
             .expect("help should succeed"),
-            ReplLineResult::Continue(text) if text.contains("help") || text.contains("config")
+            ReplResult::Print(text) if text.contains("help") || text.contains("config")
         ));
 
         state.session.record_success_output(
@@ -590,7 +589,7 @@ mod tests {
                 &mut sink,
             )
             .expect("last should succeed"),
-            ReplLineResult::Continue(text) if text == "visible\n"
+            ReplResult::Print(text) if text == "visible\n"
         ));
 
         state.session.record_success_output(
@@ -618,7 +617,7 @@ mod tests {
                 &mut sink,
             )
             .expect("last should succeed"),
-            ReplLineResult::Continue(text) if text.contains("alice") && !text.contains("admin")
+            ReplResult::Print(text) if text.contains("alice") && !text.contains("admin")
         ));
         assert!(matches!(
             execute_repl_builtin(
@@ -633,7 +632,7 @@ mod tests {
                 &mut sink,
             )
             .expect("last raw should succeed"),
-            ReplLineResult::Continue(text) if text.contains("alice") && text.contains("admin")
+            ReplResult::Print(text) if text.contains("alice") && text.contains("admin")
         ));
     }
 
@@ -657,7 +656,7 @@ mod tests {
         .expect("missing pagination should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Run a paginated list command first")
+            ReplResult::Print(text) if text.contains("Run a paginated list command first")
         ));
 
         state
@@ -681,7 +680,7 @@ mod tests {
         .expect("first-page boundary should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Already at the first page")
+            ReplResult::Print(text) if text.contains("Already at the first page")
         ));
 
         let result = execute_repl_builtin(
@@ -698,7 +697,7 @@ mod tests {
         .expect("last-page boundary should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Already at the last page")
+            ReplResult::Print(text) if text.contains("Already at the last page")
         ));
     }
 
@@ -731,7 +730,7 @@ mod tests {
         .expect("trusted continuation should dispatch");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("page command received: next page")
+            ReplResult::Print(text) if text.contains("page command received: next page")
         ));
         assert_eq!(state.session.native_context.pagination(), None);
     }
