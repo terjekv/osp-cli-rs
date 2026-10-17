@@ -380,7 +380,12 @@ fn fitted_table_widths(
     if matches!(overflow, TableOverflow::Ellipsis | TableOverflow::Wrap) {
         // Protect identifier cells and comma-separated identifier lists without
         // treating an isolated URL or long word inside prose as a column floor.
-        let token_width_limit = (available_width / 3).max(1);
+        let secondary_room = available_width
+            .saturating_sub(widths.len() * 3 + 1)
+            .saturating_sub(natural.first().copied().unwrap_or(0));
+        let token_width_limit = (available_width / 3)
+            .min(secondary_room / widths.len().saturating_sub(1).max(1))
+            .max(1);
         for (column, minimum_width) in minimum.iter_mut().enumerate() {
             for cell in rows.iter().filter_map(|row| row.get(column)) {
                 let tokens = cell.raw.split(", ").collect::<Vec<_>>();
@@ -490,7 +495,10 @@ fn table_cell_lines(raw: &str, width: usize, overflow: TableOverflow) -> Vec<Str
                 vec![format!("{}…", crop_display_width(&raw, width - 1))]
             }
         }
-        TableOverflow::Wrap => wrap_display_width(raw, width),
+        TableOverflow::Wrap => raw
+            .split('\n')
+            .flat_map(|line| wrap_display_width(line, width))
+            .collect(),
     }
 }
 

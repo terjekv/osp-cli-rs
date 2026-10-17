@@ -401,7 +401,8 @@ pub(crate) fn apply_render_config_overrides(
         settings.ruled_section_policy = parsed;
     }
 
-    if settings.width.is_none()
+    if settings.runtime.stdout_is_tty
+        && settings.width.is_none()
         && config
             .get_value_entry("ui.width")
             .is_some_and(|entry| entry.source != ConfigSource::BuiltinDefaults)
@@ -565,11 +566,11 @@ impl RenderSettings {
     }
 
     fn resolve_width(&self) -> Option<usize> {
-        if self.width_max == 0 {
-            return self.width.filter(|width| *width > 0);
-        }
         let configured = self.width.filter(|width| *width > 0);
-        let measured = self.runtime.width.filter(|width| *width > 0);
+        let measured = self
+            .runtime
+            .width
+            .filter(|width| self.runtime.stdout_is_tty && *width > 0);
         let width = match (configured, measured) {
             (Some(configured), Some(measured)) => configured.min(measured),
             (Some(configured), None) => configured,
@@ -579,7 +580,11 @@ impl RenderSettings {
             (None, None) => return None,
         };
 
-        Some(width.min(self.width_max))
+        Some(if self.width_max == 0 {
+            width
+        } else {
+            width.min(self.width_max)
+        })
     }
 
     pub(crate) fn resolve_render_settings(&self) -> ResolvedRenderSettings {
@@ -630,6 +635,10 @@ impl RenderSettings {
             unicode: UnicodeMode::Never,
             width: None,
             width_max: 0,
+            runtime: RenderRuntime {
+                width: None,
+                ..self.runtime.clone()
+            },
             ..self.clone()
         }
     }
@@ -834,6 +843,7 @@ mod tests {
             ],
         );
         let mut settings = RenderSettings::test_plain(OutputFormat::Table);
+        settings.runtime.stdout_is_tty = true;
 
         apply_render_config_overrides(&mut settings, &config);
 
@@ -901,7 +911,7 @@ mod tests {
         assert_eq!(rich.backend, RenderBackend::Rich);
         assert!(rich.color);
         assert!(rich.unicode);
-        assert_eq!(rich.width, None);
+        assert_eq!(rich.width, Some(88));
 
         let copy = rich_settings.plain_copy_settings();
         let resolved_copy = super::resolve_settings(&rich_settings, RenderProfile::CopySafe);

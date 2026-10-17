@@ -94,11 +94,11 @@ Useful persistent config keys:
 - `ui.width`
 - `ui.width-max`
 
-`ui.width-max` defaults to `-1`: output grows to its content, including tables
-wider than the physical terminal. Set a positive maximum to fit output to that
-limit or the narrower measured terminal. `0` also disables the maximum.
-An explicit `ui.width` remains an upper width preference. Piped output keeps
-natural width unless an explicit width was supplied.
+`ui.width-max` defaults to `-1`: no additional cap is imposed on the measured
+terminal width. Set a positive maximum to fit output to that limit or the
+narrower terminal. `0` also disables the additional cap. An explicit `ui.width`
+is an upper width preference for terminal output. Piped output keeps full values
+regardless of these terminal preferences.
 
 ## Tables and MREG Layout
 
@@ -112,9 +112,14 @@ Table-oriented tuning lives here:
     `addresses (2):`; `inherit` follows `ui.table.border`
 - `ui.table.overflow`
   - `clip | ellipsis | wrap | none`
-  - defaults to `ellipsis`, keeping list rows compact when a table is wider
-    than the configured or detected terminal width
-  - explicit `wrap` preserves complete values across as many lines as needed
+  - defaults to `ellipsis`: each cell stays on one line, with embedded newlines
+    shown as literal `\n` and long values ellipsized to the fitted column width
+  - explicit `wrap` preserves complete values and embedded line breaks across
+    as many lines as needed
+  - `none` explicitly permits tables wider than the terminal
+
+Table cells comma-join lists. Markdown keeps complete cell values and escapes
+embedded newlines as `<br>`; JSON preserves the original typed values.
 
 `table` is the dense grid view for many rows.
 
