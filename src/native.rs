@@ -888,9 +888,19 @@ pub trait NativeCommand: Send + Sync {
     /// Session-wide JSON never calls this hook. Stop rich work on cancellation.
     fn start_repl(&self, _config: &ResolvedConfig, _session: Option<crate::repl::ReplSession>) {}
 
+    /// Consumes a request to fetch completion data after configuration or execution.
+    ///
+    /// The REPL checks this between editor cycles, after configuration has been
+    /// applied. Keep it local and one-shot: publishing fetched data should only
+    /// request a tree rebuild, not another fetch.
+    fn take_completion_fetch_request(&self) -> bool {
+        false
+    }
+
     /// Refreshes runtime completion data on a host-owned background thread.
     ///
-    /// The host invokes this once when an authorized interactive REPL starts.
+    /// The host invokes this when an authorized interactive REPL starts, and
+    /// after [`Self::take_completion_fetch_request`] requests another fetch.
     /// Implementations may perform remote I/O here, then atomically replace
     /// the snapshot read by [`NativeCommand::augment_completion`].
     fn refresh_completion(&self) -> Result<()> {
@@ -1091,9 +1101,12 @@ impl NativeCommandRegistry {
             .swap(false, Ordering::AcqRel)
     }
 
-    pub(crate) fn refresh_completion_in_background(&self, should_refresh: impl Fn(&str) -> bool) {
+    pub(crate) fn refresh_completion_in_background(
+        &self,
+        should_refresh: impl Fn(&str, &dyn NativeCommand) -> bool,
+    ) {
         for (name, command) in self.commands.iter() {
-            if !should_refresh(name) {
+            if !should_refresh(name, command.as_ref()) {
                 continue;
             }
             let name = name.clone();

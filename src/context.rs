@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 /// Shared vocabulary for selections across native commands and plugins.
 pub(crate) const KINDS: &[&str] = &[
     "account", "group", "person", "host", "netgroup", "contact", "task", "provider", "vm",
+    "network", "zone",
 ];
 pub(crate) fn shared(kind: &str) -> bool {
     matches!(kind, "account" | "group" | "host")
