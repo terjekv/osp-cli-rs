@@ -957,22 +957,7 @@ fn apply_scoped_edit(
                 result.previous
             }
             ConfigStore::Secrets => {
-                let paths = paths
-                    .as_ref()
-                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
-                let secret_store = selected_secret_store(runtime.config.resolved(), paths)
-                    .into_diagnostic()
-                    .wrap_err("failed to select secrets backend")?;
-                let options = store_edit_options(store, dry_run);
-                let result = match edit {
-                    Edit::Set { value, .. } => secret_store.set_scoped(key, value, scope, options),
-                    Edit::Unset => secret_store.unset_scoped(key, scope, options),
-                }
-                .into_diagnostic()
-                .wrap_err_with(|| match edit {
-                    Edit::Set { .. } => format!("failed to persist secret `{key}`"),
-                    Edit::Unset => format!("failed to remove secret `{key}`"),
-                })?;
+                let result = edit_secret(runtime, scope, key, edit, dry_run)?;
                 row.insert("path", result.location);
                 row.insert("backend", result.backend.as_str());
                 // Compare unwrapped values before marking previous secret data for redaction.
@@ -1256,6 +1241,56 @@ fn validate_write_scopes(
         validate_key_scope(key, scope)?;
     }
 
+    Ok(())
+}
+
+fn edit_secret(
+    runtime: &AppRuntime,
+    scope: &Scope,
+    key: &str,
+    edit: Edit<'_>,
+    dry_run: bool,
+) -> Result<crate::config::SecretStoreEditResult> {
+    let paths = config_write_paths(runtime.launch.runtime_load, ConfigStore::Secrets)?
+        .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
+    let secret_store = selected_secret_store(runtime.config.resolved(), &paths)
+        .into_diagnostic()
+        .wrap_err("failed to select secrets backend")?;
+    let options = store_edit_options(ConfigStore::Secrets, dry_run);
+    match edit {
+        Edit::Set { value, .. } => secret_store.set_scoped(key, value, scope, options),
+        Edit::Unset => secret_store.unset_scoped(key, scope, options),
+    }
+    .into_diagnostic()
+    .wrap_err_with(|| match edit {
+        Edit::Set { .. } => format!("failed to persist secret `{key}`"),
+        Edit::Unset => format!("failed to remove secret `{key}`"),
+    })
+}
+
+pub(crate) fn store_secret(runtime: &AppRuntime, key: &str, value: &ConfigValue) -> Result<()> {
+    validate_store_key(ConfigStore::Secrets, key)?;
+    let target = ConfigWriteTarget::from_args(
+        &ConfigScopeArgs::default(),
+        &ConfigStoreArgs {
+            secrets: true,
+            ..Default::default()
+        },
+    );
+    let scopes = resolve_config_scopes(runtime, &target)?;
+    validate_write_scopes(key, &scopes).into_diagnostic()?;
+    for scope in scopes {
+        edit_secret(
+            runtime,
+            &scope,
+            key,
+            Edit::Set {
+                value,
+                current: None,
+            },
+            false,
+        )?;
+    }
     Ok(())
 }
 

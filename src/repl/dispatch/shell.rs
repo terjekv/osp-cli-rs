@@ -216,6 +216,7 @@ pub(super) fn enter_repl_shell(
         ExternalPathAccessRequirement::Runnable,
         "command",
     )?;
+    state.reload_config_after_access_hook()?;
     ensure_external_access(
         &state.runtime,
         &path,

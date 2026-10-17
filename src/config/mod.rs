@@ -121,7 +121,7 @@ pub use runtime::{
     build_runtime_pipeline, default_cache_root_dir, default_config_root_dir, default_home_dir,
     default_state_root_dir,
 };
-pub(crate) use secrets::{RuntimeSecretStore, SecretBackendKind};
+pub(crate) use secrets::{RuntimeSecretStore, SecretBackendKind, SecretStoreEditResult};
 pub(crate) use store::secret_file_mode;
 pub use store::{
     TomlSecretPermissions, TomlStoreEditMode, TomlStoreEditOptions, set_scoped_value_in_toml,

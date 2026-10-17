@@ -67,6 +67,7 @@ The unpublished UiO companion uses the sibling path dependency.
 Native command contexts retain `may_prompt()` and `can_present()`. Terminal
 confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.
 `AppRuntime::input_is_replay()` identifies sourced commands and redirected stdin; `NativeCommandContext::may_prompt()` rejects both.
+Access hooks can call `AppRuntime::store_secret(key, value)` to use `config set --secrets` storage and reload the host before the pending command runs.
 `core::CommandError` carries recovery advice, `ResponseV1::ok` constructs
 successful wire responses, and `config::is_sensitive_key` classifies secret
 names. Public context contracts and native REPL hooks remain available.

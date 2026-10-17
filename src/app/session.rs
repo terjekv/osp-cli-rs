@@ -613,6 +613,15 @@ pub(crate) struct AppState {
     pub clients: AppClients,
 }
 
+impl AppState {
+    pub(crate) fn reload_config_after_access_hook(&mut self) -> miette::Result<()> {
+        if self.runtime.config_reload_requested {
+            crate::app::assembly::rebuild_repl_in_place(self)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 impl AppState {
     /// Builds a full application-state snapshot by deriving UI state from the

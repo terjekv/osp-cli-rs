@@ -15,6 +15,7 @@
 //! The modules here are grouped by built-in command namespace, not by transport
 //! or rendering concerns.
 
+pub(crate) use config::store_secret;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod doctor;

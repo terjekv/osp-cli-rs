@@ -401,6 +401,7 @@ fn run_native_invocation(
             std::iter::once(name.to_string()).chain(args.iter().cloned()),
         );
         before_external_dispatch(&mut state.runtime, &input_path, "command")?;
+        state.reload_config_after_access_hook()?;
         let parsed = NativeParse::new(command, name, args)?;
         let intent = NativeIntent::from_parse(&parsed);
         before_external_execution(
@@ -409,6 +410,7 @@ fn run_native_invocation(
             intent.requirement,
             "command",
         )?;
+        state.reload_config_after_access_hook()?;
         let parsed = refresh_native_parse(
             command,
             &state.session.native_context,
@@ -1095,6 +1097,7 @@ fn run_external_plugin_command(
         ExternalPathAccessRequirement::Runnable
     };
     before_external_run(&mut state.runtime, &path, requirement, "plugin command")?;
+    state.reload_config_after_access_hook()?;
     ensure_external_access(&state.runtime, &path, requirement, "plugin command")?;
     mark_repl_command_accepted(accepted);
     let capture = !help

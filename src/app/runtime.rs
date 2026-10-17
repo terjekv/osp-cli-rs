@@ -483,12 +483,25 @@ pub struct AppRuntime {
     /// Launch-time inputs used to assemble caches and external services.
     pub(crate) launch: LaunchContext,
     pub(crate) definition: Arc<super::AppDefinition>,
+    pub(crate) config_reload_requested: bool,
 }
 
 impl AppRuntime {
     /// Returns the active resolved configuration.
     pub fn config(&self) -> &ResolvedConfig {
         self.config.resolved()
+    }
+
+    /// Persists a secret in the active profile through `config set --secrets`.
+    /// The host reloads configuration after the access hook, before dispatch.
+    pub fn store_secret(&mut self, key: &str, value: &str) -> miette::Result<()> {
+        crate::cli::commands::store_secret(
+            self,
+            key,
+            &crate::config::ConfigValue::String(value.into()),
+        )?;
+        self.config_reload_requested = true;
+        Ok(())
     }
 
     /// Returns whether this runtime hosts the interactive REPL.
@@ -524,6 +537,7 @@ impl AppRuntime {
             themes,
             launch,
             definition: Arc::default(),
+            config_reload_requested: false,
         }
     }
 
