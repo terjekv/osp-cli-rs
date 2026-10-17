@@ -141,6 +141,19 @@ impl ReplHinter {
             LineProblemKind::UnknownCommand { parent } if parent.is_empty() => {
                 format!("unknown command '{word}'")
             }
+            LineProblemKind::UnknownCommand { parent }
+                if self.completer.engine().node_at(parent).is_some_and(|node| {
+                    node.children
+                        .values()
+                        .any(|child| child.value_key || child.value_leaf)
+                }) =>
+            {
+                if parent.first().is_some_and(|command| command == "config") {
+                    format!("unknown config key '{word}'")
+                } else {
+                    format!("unknown value '{word}' for '{}'", parent.join(" "))
+                }
+            }
             LineProblemKind::UnknownCommand { parent } => {
                 format!("unknown command '{word}' for '{}'", parent.join(" "))
             }
