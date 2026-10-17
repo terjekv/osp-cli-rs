@@ -93,6 +93,7 @@ pub(crate) struct ContextBinding {
     pub(crate) owners: BTreeMap<String, String>,
     loaded: bool,
     saved: Vec<NativeSessionContextEntry>,
+    secrets: Vec<String>,
 }
 impl NativeSessionContext {
     pub(crate) fn activate(&self, runtime: &crate::app::AppRuntime) {
@@ -104,6 +105,26 @@ impl NativeSessionContext {
         let mut binding = self.binding.write().unwrap_or_else(|e| e.into_inner());
         binding.identity = identity;
         binding.profile = config.active_profile().to_owned();
+        binding.secrets = crate::plugin::env::config_env(config).secrets;
+        drop(binding);
+        self.protect_context();
+    }
+    fn protect_context(&self) {
+        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
+        let mut entries = self
+            .context_entries
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        entries.retain(|_, entry| {
+            !contains_secret(&entry.value, &binding.secrets)
+                && !contains_secret(&entry.origin, &binding.secrets)
+        });
+        for entry in entries.values_mut() {
+            for secret in &binding.secrets {
+                entry.command = entry.command.replace(secret, "[redacted]");
+                entry.used_by = entry.used_by.replace(secret, "[redacted]");
+            }
+        }
     }
     pub(crate) fn register_context(
         &self,
@@ -167,10 +188,13 @@ impl NativeSessionContext {
             }
         }
         binding.loaded = true;
+        drop(binding);
+        self.protect_context();
         Ok(())
     }
     /// Saves opt-in persisted kinds after a selection or migration.
     pub fn save_context(&self) -> Result<()> {
+        self.protect_context();
         let mut binding = self.binding.write().unwrap_or_else(|e| e.into_inner());
         if !binding.loaded {
             return Ok(());
@@ -217,6 +241,22 @@ impl NativeSessionContext {
         Ok(())
     }
 }
+pub(crate) fn protect_response_context(response: &mut ResponseV1, secrets: &[String]) {
+    if let Some(entries) = response.context.as_mut() {
+        entries.retain(|_, value| !contains_secret(value, secrets));
+    }
+    response
+        .meta
+        .context
+        .retain(|_, value| !contains_secret(value, secrets));
+}
+
+fn contains_secret(value: &str, secrets: &[String]) -> bool {
+    secrets
+        .iter()
+        .any(|secret| !secret.is_empty() && value.contains(secret))
+}
+
 fn context_path() -> Option<std::path::PathBuf> {
     crate::config::default_state_root_dir().map(|p| p.join("context.json"))
 }
@@ -387,10 +427,16 @@ impl Resolution {
             after: self.args.clone(),
         };
         session.set_value("context.executed", serde_json::to_string(&expansion)?);
+        let binding = session.binding.read().unwrap_or_else(|e| e.into_inner());
         Ok(self.expanded.then(|| {
             std::iter::once(service.to_owned())
                 .chain(self.args.iter().cloned())
-                .map(|t| crate::core::shell_words::escape_for_shell(&t))
+                .map(|mut token| {
+                    for secret in &binding.secrets {
+                        token = token.replace(secret, "[redacted]");
+                    }
+                    crate::core::shell_words::escape_for_shell(&token)
+                })
                 .collect::<Vec<_>>()
                 .join(" ")
         }))
@@ -398,13 +444,26 @@ impl Resolution {
 
     /// Publishes successful singleton results and records consumed context.
     pub fn finish(&self, response: &mut ResponseV1, session: &NativeSessionContext) {
-        for (kind, value) in &self.used {
+        let secrets = session
+            .binding
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .secrets
+            .clone();
+        let used: BTreeMap<_, _> = self
+            .used
+            .iter()
+            .filter(|(_, value)| !contains_secret(value, &secrets))
+            .map(|(kind, value)| (kind.clone(), value.clone()))
+            .collect();
+        protect_response_context(response, &secrets);
+        for (kind, value) in &used {
             response.messages.push(ResponseMessageV1 {
                 level: crate::core::MessageLevel::Info,
                 text: format!("{kind} {value} (from context)"),
             });
         }
-        response.meta.context = self.used.clone();
+        response.meta.context = used.clone();
         if let Some(entries) = &response.context {
             for (kind, value) in entries {
                 if self.contract.produces.contains_key(kind) {
@@ -441,7 +500,7 @@ impl Resolution {
                             }
                         }
                     })
-                    .filter(|v| !v.is_empty())
+                    .filter(|v| !v.is_empty() && !contains_secret(v, &secrets))
                     .collect::<std::collections::BTreeSet<_>>();
                 if values.len() == 1
                     && let Some(value) = values.pop_first()
@@ -451,7 +510,7 @@ impl Resolution {
             }
         }
         if response.meta.context_not_found {
-            for (kind, value) in &self.used {
+            for (kind, value) in &used {
                 if !self
                     .contract
                     .consumes
@@ -478,7 +537,7 @@ impl Resolution {
                 .contract
                 .consumes
                 .iter()
-                .filter(|c| c.fill == Fill::Narrow && self.used.contains_key(&c.kind))
+                .filter(|c| c.fill == Fill::Narrow && used.contains_key(&c.kind))
             {
                 response.messages.push(ResponseMessageV1 {
                     level: crate::core::MessageLevel::Info,
@@ -494,11 +553,12 @@ impl Resolution {
             for entry in entries.values_mut().filter(|e| {
                 visible.contains(e)
                     && (shared(&e.kind) || e.service == session.service)
-                    && self.used.contains_key(&e.kind)
+                    && used.contains_key(&e.kind)
             }) {
                 entry.used_by = session.command_path.as_deref().unwrap_or_default().into();
             }
         }
+        session.protect_context();
     }
 }
 

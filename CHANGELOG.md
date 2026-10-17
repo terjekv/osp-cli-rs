@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Reject known injected secrets in context selections and announcements; redact
+  them from context provenance while preserving canonical command result data.
+
 - Expand context `.` values in attached options and short option groups, and
   retain the expanded or filled invocation when producing context selections.
 

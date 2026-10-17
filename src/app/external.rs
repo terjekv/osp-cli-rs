@@ -1185,6 +1185,7 @@ fn run_external_plugin_command(
                         meta: Default::default(),
                     }
                 };
+                crate::context::protect_response_context(&mut response, &context.secrets);
                 if let Some(resolution) = &resolution {
                     resolution.finish(&mut response, &selected_context);
                     selected_context
