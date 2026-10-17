@@ -117,6 +117,8 @@ Read arguments declared by commands may be omitted; the host announces the
 remembered value and stores the expanded command in history. Writes require an
 explicit value or `.`; expansion is echoed before execution. Prompt tokens use
 `kind:value`, qualified by service only when kinds clash.
+For declared read subjects, an explicit argument wins over context, and context
+wins over the command's default value.
 
 Changing profile, effective identity or service endpoint hides foreign values;
 switching back restores them. Logout removes the service's values. Most kinds

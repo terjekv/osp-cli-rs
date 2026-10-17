@@ -450,7 +450,12 @@ fn run_native_invocation(
             };
             let resolved =
                 crate::context::resolve(command.command(), &parsed.args, &selected_context)
-                    .map_err(|e| miette!("{e:#}"))?;
+                    .map_err(|e| {
+                        super::host::report_anyhow_with_context(
+                            e,
+                            super::host::ErrorContext::NativeExecution,
+                        )
+                    })?;
             let resolves_missing = resolved.args != parsed.args;
             let mut selected = &parsed.grammar;
             for segment in parsed.path.as_slice().iter().skip(1) {
@@ -648,7 +653,12 @@ fn run_native_command(
                     &empty_context
                 },
             )
-            .map_err(|e| miette!("{e:#}"))?,
+            .map_err(|e| {
+                super::host::report_anyhow_with_context(
+                    e,
+                    super::host::ErrorContext::NativeExecution,
+                )
+            })?,
         )
     } else {
         None
@@ -1108,7 +1118,12 @@ fn run_external_plugin_command(
                 args,
                 &selected_context,
             )
-            .map_err(|e| miette!("{e:#}"))?,
+            .map_err(|e| {
+                super::host::report_anyhow_with_context(
+                    e,
+                    super::host::ErrorContext::Operation("failed to resolve plugin context"),
+                )
+            })?,
         )
     } else {
         None

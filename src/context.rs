@@ -296,7 +296,7 @@ fn parsed_leaf(command: &Command, args: &[String]) -> Result<clap::ArgMatches, c
 
 /// Resolves entity arguments from a command declaration in a REPL session.
 pub fn resolve(
-    command: Command,
+    mut command: Command,
     args: &[String],
     session: &NativeSessionContext,
 ) -> Result<Resolution> {
@@ -313,6 +313,7 @@ pub fn resolve(
     {
         return Ok(result);
     }
+    command.build();
     let Ok(matches) = relaxed(command.clone()).try_get_matches_from(
         std::iter::once(command.get_name().to_string()).chain(args.iter().cloned()),
     ) else {
@@ -320,6 +321,7 @@ pub fn resolve(
     };
     let mut leaf = &command;
     let mut selected = &matches;
+    let mut path = vec![command.get_name().to_owned()];
     loop {
         if let Some(contract) = leaf.get::<ContextContract>() {
             result.contract.consumes.extend(contract.consumes.clone());
@@ -333,6 +335,7 @@ pub fn resolve(
         };
         leaf = next;
         selected = child;
+        path.push(name.to_owned());
     }
     for consume in &result.contract.consumes {
         if !KINDS.contains(&consume.kind.as_str()) {
@@ -351,12 +354,19 @@ pub fn resolve(
         }) {
             continue;
         }
-        let explicit = selected
+        let values = selected
             .try_get_many::<String>(id)
             .ok()
             .flatten()
             .map(|v| v.cloned().collect::<Vec<_>>())
             .unwrap_or_default();
+        let explicit = if selected.try_contains_id(id).is_ok()
+            && selected.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
+        {
+            values.as_slice()
+        } else {
+            &[]
+        };
         let current = session.context_value(&consume.kind);
         if explicit.iter().any(|v| v == ".") {
             let value = current
@@ -395,16 +405,38 @@ pub fn resolve(
                 }
                 result.args.push(value.clone());
                 result.used.insert(consume.kind.clone(), value);
-            } else if consume.required
-                || leaf
-                    .get_arguments()
-                    .any(|a| a.get_id() == id && a.is_required_set())
+            } else if values.is_empty()
+                && (consume.required
+                    || leaf
+                        .get_arguments()
+                        .any(|a| a.get_id() == id && a.is_required_set()))
             {
-                bail!(
-                    "{} required (current: {}; use . for it)",
-                    id.to_uppercase(),
-                    current.as_deref().unwrap_or("none")
-                );
+                let label = leaf
+                    .get_arguments()
+                    .find(|arg| arg.get_id() == id)
+                    .and_then(|arg| arg.get_value_names())
+                    .and_then(|names| names.first())
+                    .map(|name| name.to_string())
+                    .filter(|name| {
+                        !name
+                            .to_ascii_lowercase()
+                            .strip_prefix("arg")
+                            .is_some_and(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
+                    })
+                    .unwrap_or_else(|| consume.kind.clone())
+                    .to_lowercase()
+                    .replace('_', " ");
+                let article = if label.starts_with(['a', 'e', 'i', 'o', 'u']) {
+                    "an"
+                } else {
+                    "a"
+                };
+                return Err(crate::core::CommandError::new(format!(
+                    "{} needs {article} {label}",
+                    path.join(" ")
+                ))
+                .with_action(leaf.clone().render_usage().to_string())
+                .into());
             }
         }
     }
