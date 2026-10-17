@@ -222,6 +222,16 @@ impl<'a> NativeCommandContext<'a> {
         }
     }
 
+    /// Reports a completed operation through the host before execution resumes.
+    /// Unlike preliminary progress, notices bypass result filters and also reach
+    /// nonterminal sinks. A reporting failure lets callers stop subsequent writes.
+    pub fn emit_notice(&self, document: NativeProgressEvent) -> Result<()> {
+        match self.progress {
+            Some(progress) => progress.present(document),
+            None => Ok(()),
+        }
+    }
+
     /// Draws a preliminary document and reports whether the host can replace it.
     /// Returns false without emitting when [`Self::can_present`] is false.
     pub fn emit_progress_measured(&self, event: NativeProgressEvent) -> Result<bool> {
