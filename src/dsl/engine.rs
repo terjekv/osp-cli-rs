@@ -286,8 +286,14 @@ pub(crate) fn run_compiled(
         // Once a real stage runs, only the transformed rows may be shown.
         output.meta.display_limit = None;
         output.meta.wants_copy |= matches!(stage, CompiledStage::Copy);
-        if !stage.behavior().preserves_render_recommendation {
-            // Shape changes derive columns from the result. Field-keyed
+        let narrows = stage.quick_plan().is_some_and(|plan| {
+            rows.partitions
+                .iter()
+                .any(|partition| plan.narrows(partition.rows.len()))
+        });
+        if narrows || !stage.behavior().preserves_render_recommendation {
+            // Shape changes, including quick narrowing a lone object, derive
+            // columns from the result. Field-keyed
             // formatting (relative times, timestamps) still applies to any
             // field that survives, so it stays.
             output.meta.render_recommendation = None;
@@ -295,10 +301,11 @@ pub(crate) fn run_compiled(
             output.meta.display_column_labels = None;
             output.meta.column_align.clear();
         }
-        output.meta.document_rows &= matches!(
-            stage.behavior().semantic_effect,
-            crate::dsl::compiled::SemanticEffect::Preserve
-        );
+        output.meta.document_rows &= !narrows
+            && matches!(
+                stage.behavior().semantic_effect,
+                crate::dsl::compiled::SemanticEffect::Preserve
+            );
         rows = apply_stage(rows, stage)?;
         match stage.synthesized_fields() {
             Some(created) => forget_formatting(&mut output.meta, &created),

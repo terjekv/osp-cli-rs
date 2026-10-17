@@ -73,6 +73,12 @@ impl CompiledQuickSpec {
 }
 
 impl QuickPlan {
+    /// Whether this stage narrows fields instead of filtering rows: quick
+    /// search reshapes a lone object, except for presence checks.
+    pub(crate) fn narrows(&self, row_count: usize) -> bool {
+        row_count == 1 && !self.spec.existence()
+    }
+
     pub(crate) fn matches_row_filter_mode(&self, row: &Row) -> bool {
         matches_row(row, &self.spec)
     }
@@ -128,7 +134,7 @@ fn decode_search_token(raw_token: &str) -> Result<String> {
 }
 
 pub(crate) fn apply_with_plan(mut rows: Vec<Row>, plan: &QuickPlan) -> Result<Vec<Row>> {
-    if rows.len() == 1 && !plan.spec.existence() {
+    if plan.narrows(rows.len()) {
         return Ok(narrow_row(rows.remove(0), &plan.spec));
     }
     Ok(rows
