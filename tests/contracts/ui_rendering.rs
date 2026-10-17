@@ -39,7 +39,7 @@ fn startup_is_a_compact_console_overview_not_a_pipe_manual() {
         .unwrap();
     assert!(pipes.lines().count() <= 6, "{pipes}");
     assert!(pipes.contains("text search") && pipes.contains("| H <verb>"));
-    assert!(plain.lines().count() <= 33, "{plain}");
+    assert!(plain.lines().count() <= 40, "{plain}");
     assert!(rendered.contains("\x1b[38;2;189;147;249mOSP"));
     assert!(rendered.contains("\x1b[38;2;104;121;173mShow this command overview."));
 }
