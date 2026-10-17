@@ -92,6 +92,7 @@ pub(crate) struct ContextBinding {
     persisted: BTreeMap<String, Vec<String>>,
     pub(crate) owners: BTreeMap<String, String>,
     loaded: bool,
+    saved: Vec<NativeSessionContextEntry>,
 }
 impl NativeSessionContext {
     pub(crate) fn activate(&self, runtime: &crate::app::AppRuntime) {
@@ -150,13 +151,18 @@ impl NativeSessionContext {
                 .context_entries
                 .write()
                 .unwrap_or_else(|e| e.into_inner());
-            for entry in stored.into_iter().filter(|e| {
-                binding
-                    .persisted
-                    .get(&e.service)
-                    .is_some_and(|k| k.contains(&e.kind))
-                    && valid_value(&e.value)
-            }) {
+            let stored: Vec<_> = stored
+                .into_iter()
+                .filter(|e| {
+                    binding
+                        .persisted
+                        .get(&e.service)
+                        .is_some_and(|k| k.contains(&e.kind))
+                        && valid_value(&e.value)
+                })
+                .collect();
+            binding.saved = stored.clone();
+            for entry in stored {
                 entries.insert(entry.key(), entry);
             }
         }
@@ -165,7 +171,7 @@ impl NativeSessionContext {
     }
     /// Saves opt-in persisted kinds after a selection or migration.
     pub fn save_context(&self) -> Result<()> {
-        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
+        let mut binding = self.binding.write().unwrap_or_else(|e| e.into_inner());
         if !binding.loaded {
             return Ok(());
         }
@@ -181,14 +187,32 @@ impl NativeSessionContext {
                     .get(&e.service)
                     .is_some_and(|k| k.contains(&e.kind))
             })
+            .cloned()
             .collect();
         if let Some(path) = context_path() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
+            let _transaction = crate::config::lock_file_transaction(&path)?;
+            let current: Vec<NativeSessionContextEntry> = match std::fs::read(&path) {
+                Ok(bytes) => serde_json::from_slice(&bytes)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => return Err(error.into()),
+            };
+            let mut merged: BTreeMap<_, _> = current.into_iter().map(|e| (e.key(), e)).collect();
+            for entry in &binding.saved {
+                if !stored.iter().any(|e| e.key() == entry.key()) {
+                    merged.remove(&entry.key());
+                }
             }
-            let temporary = path.with_extension("tmp");
-            std::fs::write(&temporary, serde_json::to_vec(&stored)?)?;
-            std::fs::rename(temporary, path)?;
+            for entry in &stored {
+                if !binding.saved.contains(entry) {
+                    merged.insert(entry.key(), entry.clone());
+                }
+            }
+            crate::config::write_text_atomic(
+                &path,
+                &serde_json::to_vec(&merged.into_values().collect::<Vec<_>>())?,
+                true,
+            )?;
+            binding.saved = stored;
         }
         Ok(())
     }

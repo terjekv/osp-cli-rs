@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Merge persisted context changes under a file transaction so concurrent REPLs
+  preserve other identities’ selections and use unique atomic writes.
+
 - Ignore retired config keys with one warning listing their names and removal
   guidance. This includes plugin provider/state/discovery keys, history profile
   scoping, and removed UI, auth visibility and cache knobs. Unknown keys still fail.
