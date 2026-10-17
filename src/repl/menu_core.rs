@@ -463,7 +463,7 @@ impl MenuCore {
         self.working_details.columns.max(1)
     }
 
-    fn reset_position(&mut self) {
+    pub(crate) fn reset_position(&mut self) {
         self.col_pos = 0;
         self.row_pos = 0;
     }

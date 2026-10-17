@@ -170,8 +170,9 @@ impl ReplHinter {
         if let Some(closest) = self
             .completer
             .complete(prefix, prefix.len())
-            .into_iter()
-            .map(|suggestion| suggestion.value)
+            .suggestions()
+            .iter()
+            .map(|suggestion| suggestion.value.clone())
             .find(|value| value != flag_name)
         {
             message.push_str(&format!("; did you mean '{closest}'?"));
@@ -193,7 +194,7 @@ impl Hinter for ReplHinter {
         let candidates = if line.trim().is_empty() {
             Vec::new()
         } else {
-            self.completer.complete(line, pos)
+            self.completer.complete(line, pos).suggestions().to_vec()
         };
         self.inline = if use_ansi_coloring
             && self.style.is_some()

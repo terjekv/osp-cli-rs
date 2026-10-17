@@ -232,7 +232,7 @@ where
             }
         };
 
-        if let Signal::Success(command) = &signal
+        if let Signal::HostCommand(command) = &signal
             && matches!(
                 command.as_str(),
                 HOST_COMMAND_LAST_ARGUMENT | HOST_COMMAND_PREVIOUS_ARGUMENT
@@ -306,6 +306,10 @@ fn build_repl_hinter(
 
 fn build_repl_keybindings() -> reedline::Keybindings {
     let mut keybindings = default_emacs_keybindings();
+    // Lines are single-line commands; Alt+Enter is free for a host action.
+    for modifiers in [KeyModifiers::ALT, KeyModifiers::SHIFT] {
+        keybindings.remove_binding(modifiers, KeyCode::Enter);
+    }
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Enter,
@@ -432,7 +436,7 @@ where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     match signal {
-        Signal::Success(line) if line.starts_with("\0osp-action:") => {
+        Signal::HostCommand(line) if line.starts_with("\0osp-action:") => {
             let draft = editor.current_buffer_contents().to_string();
             let cursor = editor.current_insertion_point();
             let id = line.trim_start_matches("\0osp-action:");
@@ -465,7 +469,7 @@ where
             }]);
             Ok(result)
         }
-        Signal::Success(line) if line == HOST_COMMAND_HISTORY_PICKER => {
+        Signal::HostCommand(line) if line == HOST_COMMAND_HISTORY_PICKER => {
             // `Ctrl-R` leaves reedline through a private host command so we
             // can temporarily hand terminal ownership to skim. Once skim
             // returns, submit the selected command or restore it for editing.
@@ -504,7 +508,7 @@ where
             }
             Ok(None)
         }
-        Signal::Success(line)
+        Signal::HostCommand(line)
             if line == HOST_COMMAND_PAGE_PREVIOUS || line == HOST_COMMAND_PAGE_NEXT =>
         {
             let previous = line == HOST_COMMAND_PAGE_PREVIOUS;
@@ -532,6 +536,8 @@ where
             submission.root_input = false;
             Ok(submission.exit_on_interrupt.then_some(ReplResult::Exit(0)))
         }
+        // No other host commands are bound and no external break is wired.
+        _ => Ok(None),
     }
 }
 
@@ -714,7 +720,7 @@ mod tests {
 
         assert!(
             handle_interactive_signal(
-                Signal::Success(HOST_COMMAND_HISTORY_PICKER.to_string()),
+                Signal::HostCommand(HOST_COMMAND_HISTORY_PICKER.to_string()),
                 &mut editor,
                 &history,
                 &appearance,

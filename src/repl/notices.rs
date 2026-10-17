@@ -3,6 +3,7 @@
 //! Workers own a session handle, never a terminal writer. Only the editor may
 //! deliver background lines; foreground commands retain them until input resumes.
 
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -10,7 +11,7 @@ use reedline::ExternalPrinter;
 
 #[derive(Default)]
 struct Notices {
-    printer: Option<ExternalPrinter<String>>,
+    printer: Option<SyncSender<String>>,
     pending: Vec<String>,
     basic: bool,
     foreground: bool,
@@ -27,7 +28,7 @@ impl Notices {
         } else if self.basic {
             eprintln!("\n{line}");
         } else if let Some(printer) = &self.printer {
-            let _ = printer.sender().try_send(line);
+            let _ = printer.try_send(line);
         } else if self.pending.len() < 8 {
             self.pending.push(line);
         }
@@ -36,14 +37,14 @@ impl Notices {
     fn flush(&mut self) {
         if let Some(printer) = &self.printer {
             for line in self.pending.drain(..) {
-                let _ = printer.sender().try_send(line);
+                let _ = printer.try_send(line);
             }
         }
     }
 
     fn attach(&mut self, printer: &ExternalPrinter<String>) {
         self.basic = false;
-        self.printer = Some(printer.clone());
+        self.printer = Some(printer.sender());
         self.flush();
     }
 }

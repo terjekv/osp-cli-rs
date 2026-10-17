@@ -44,7 +44,7 @@ libc = "0.2"
 miette = { version = "7.4", default-features = false, features = ["derive", "fancy"] }
 nu-ansi-term = "0.50"
 pulldown-cmark = "0.13"
-reedline = { version = "0.36", features = ["external_printer"] }
+reedline = { version = "0.52", features = ["external_printer"] }
 regex = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }

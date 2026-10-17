@@ -7,9 +7,8 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use reedline::{
-    Completer, EditCommand, Editor, Menu, MenuEvent, MenuTextStyle, Painter, Span, Suggestion,
-    UndoBehavior,
-    menu_functions::{can_partially_complete, replace_in_buffer},
+    Completer, EditCommand, Editor, Menu, MenuEvent, MenuSettings, MenuTextStyle, Painter, Span,
+    Suggestion, UndoBehavior, menu_functions::replace_in_buffer,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -25,7 +24,8 @@ pub(crate) use crate::repl::menu_core::{MenuDebug, display_text};
 /// - Uses display labels from `Suggestion.extra` when available.
 /// - Shows the selected item's description as a single meta line.
 pub struct OspCompletionMenu {
-    name: String,
+    // Carries the name reedline looks the menu up by.
+    settings: MenuSettings,
     marker: String,
     // When true, only pass the buffer prefix up to the cursor to the completer.
     only_buffer_difference: bool,
@@ -62,7 +62,7 @@ enum ApplyMode {
 impl Default for OspCompletionMenu {
     fn default() -> Self {
         Self {
-            name: "completion_menu".to_string(),
+            settings: MenuSettings::default().with_name("completion_menu"),
             marker: "| ".to_string(),
             only_buffer_difference: false,
             quick_complete: true,
@@ -84,7 +84,7 @@ impl Default for OspCompletionMenu {
 impl OspCompletionMenu {
     /// Sets the menu name used by `reedline`.
     pub fn with_name(mut self, name: &str) -> Self {
-        self.name = name.to_string();
+        self.settings = std::mem::take(&mut self.settings).with_name(name);
         self
     }
 
@@ -303,10 +303,19 @@ impl OspCompletionMenu {
                 self.apply_suggestion(editor, suggestion, ApplyMode::Accept);
                 true
             }
-            None if common_prefix(&pool).len() > stub.len() => {
-                can_partially_complete(&pool, editor)
+            None => {
+                let prefix = common_prefix(&pool);
+                let extends = prefix.len() > stub.len() && prefix.starts_with(stub);
+                if extends {
+                    let partial = Suggestion {
+                        value: prefix.to_string(),
+                        span: first.span,
+                        ..Suggestion::default()
+                    };
+                    replace_in_buffer(Some(partial), editor, None);
+                }
+                extends
             }
-            None => false,
         };
         if completed {
             self.close();
@@ -392,7 +401,7 @@ impl OspCompletionMenu {
         adjusted.span = Span { start, end };
         adjusted.append_whitespace = false;
 
-        replace_in_buffer(Some(adjusted), editor);
+        replace_in_buffer(Some(adjusted), editor, None);
 
         if crate::repl::trace_completion_enabled() {
             let line_after = editor.get_buffer().to_string();
@@ -438,8 +447,8 @@ impl OspCompletionMenu {
 }
 
 impl Menu for OspCompletionMenu {
-    fn name(&self) -> &str {
-        &self.name
+    fn settings(&self) -> &MenuSettings {
+        &self.settings
     }
 
     fn indicator(&self) -> &str {
@@ -452,6 +461,21 @@ impl Menu for OspCompletionMenu {
 
     fn is_active(&self) -> bool {
         self.core.is_active()
+    }
+
+    fn set_active(&mut self, active: bool) {
+        self.menu_event(if active {
+            MenuEvent::Activate(false)
+        } else {
+            MenuEvent::Deactivate
+        });
+    }
+
+    // Deactivation already drops the replace span and indent anchor.
+    fn clear_input(&mut self) {}
+
+    fn reset_position(&mut self) {
+        self.core.reset_position();
     }
 
     fn can_quick_complete(&self) -> bool {
@@ -494,7 +518,7 @@ impl Menu for OspCompletionMenu {
         } else {
             buffer
         };
-        let values = completer.complete(input, pos);
+        let values = completer.complete(input, pos).suggestions().to_vec();
         self.core.set_values(values);
         self.replace_span = self.core.values().first().map(|item| item.span);
         if self.core.values().is_empty() {
@@ -559,7 +583,7 @@ pub(crate) struct SharedCompletionMenu {
     menu: Arc<Mutex<OspCompletionMenu>>,
     // `Menu` hands out borrows, which cannot outlive a lock guard, so reedline
     // reads these copies; `sync` refreshes them after every mutation.
-    name: String,
+    settings: Arc<MenuSettings>,
     indicator: String,
     values: Vec<Suggestion>,
 }
@@ -567,7 +591,7 @@ pub(crate) struct SharedCompletionMenu {
 impl SharedCompletionMenu {
     pub(crate) fn new(menu: OspCompletionMenu) -> Self {
         let mut shared = Self {
-            name: menu.name.clone(),
+            settings: Arc::new(MenuSettings::default().with_name(menu.name())),
             menu: Arc::new(Mutex::new(menu)),
             indicator: String::new(),
             values: Vec::new(),
@@ -599,8 +623,8 @@ impl SharedCompletionMenu {
 }
 
 impl Menu for SharedCompletionMenu {
-    fn name(&self) -> &str {
-        &self.name
+    fn settings(&self) -> &MenuSettings {
+        &self.settings
     }
 
     fn indicator(&self) -> &str {
@@ -609,6 +633,19 @@ impl Menu for SharedCompletionMenu {
 
     fn is_active(&self) -> bool {
         self.lock().is_active()
+    }
+
+    fn set_active(&mut self, active: bool) {
+        self.lock().set_active(active);
+        self.sync();
+    }
+
+    fn clear_input(&mut self) {
+        self.lock().clear_input();
+    }
+
+    fn reset_position(&mut self) {
+        self.lock().reset_position();
     }
 
     fn can_quick_complete(&self) -> bool {

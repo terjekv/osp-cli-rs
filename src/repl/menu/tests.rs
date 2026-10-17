@@ -1,6 +1,8 @@
 use super::{OspCompletionMenu, needs_space_prefix};
 use nu_ansi_term::{Color, Style};
-use reedline::{Completer, Editor, Menu, MenuEvent, Span, Suggestion, UndoBehavior};
+use reedline::{
+    Completer, CompletionResult, Editor, Menu, MenuEvent, Span, Suggestion, UndoBehavior,
+};
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
@@ -10,8 +12,8 @@ struct FixedCompleter {
 }
 
 impl Completer for FixedCompleter {
-    fn complete(&mut self, _line: &str, _pos: usize) -> Vec<Suggestion> {
-        self.suggestions.clone()
+    fn complete(&mut self, _line: &str, _pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.suggestions.clone())
     }
 }
 
@@ -19,7 +21,7 @@ impl Completer for FixedCompleter {
 struct DynamicSpanCompleter;
 
 impl Completer for DynamicSpanCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         let start = line
             .get(..pos)
             .unwrap_or("")
@@ -27,7 +29,7 @@ impl Completer for DynamicSpanCompleter {
             .map(|idx| idx + 1)
             .unwrap_or(0);
         let span = Span { start, end: pos };
-        vec![suggestion("config", span), suggestion("doctor", span)]
+        CompletionResult::fresh(vec![suggestion("config", span), suggestion("doctor", span)])
     }
 }
 
@@ -35,39 +37,41 @@ impl Completer for DynamicSpanCompleter {
 struct ScopedConfigCompleter;
 
 impl Completer for ScopedConfigCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        let input = line.get(..pos).unwrap_or(line);
-        if let Some(rest) = input.strip_prefix("config ") {
-            if let Some(flag_stub) = rest.strip_prefix("show ") {
-                let span = Span {
-                    start: pos.saturating_sub(flag_stub.len()),
-                    end: pos,
-                };
-                let all_flags = ["--sources", "--raw"];
-                let exact_flag = all_flags.contains(&flag_stub);
-                return ["--sources", "--raw"]
-                    .into_iter()
-                    .filter(|flag| {
-                        flag_stub.is_empty() || exact_flag || flag.starts_with(flag_stub)
-                    })
-                    .map(|flag| suggestion(flag, span))
-                    .collect();
-            }
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(scoped_config_suggestions(line, pos))
+    }
+}
 
-            if !rest.contains(' ') {
-                let span = Span { start: 7, end: pos };
-                let all_commands = ["show", "get", "explain"];
-                let exact_command = all_commands.contains(&rest);
-                return ["show", "get", "explain"]
-                    .into_iter()
-                    .filter(|command| rest.is_empty() || exact_command || command.starts_with(rest))
-                    .map(|command| suggestion(command, span))
-                    .collect();
-            }
+fn scoped_config_suggestions(line: &str, pos: usize) -> Vec<Suggestion> {
+    let input = line.get(..pos).unwrap_or(line);
+    if let Some(rest) = input.strip_prefix("config ") {
+        if let Some(flag_stub) = rest.strip_prefix("show ") {
+            let span = Span {
+                start: pos.saturating_sub(flag_stub.len()),
+                end: pos,
+            };
+            let all_flags = ["--sources", "--raw"];
+            let exact_flag = all_flags.contains(&flag_stub);
+            return ["--sources", "--raw"]
+                .into_iter()
+                .filter(|flag| flag_stub.is_empty() || exact_flag || flag.starts_with(flag_stub))
+                .map(|flag| suggestion(flag, span))
+                .collect();
         }
 
-        Vec::new()
+        if !rest.contains(' ') {
+            let span = Span { start: 7, end: pos };
+            let all_commands = ["show", "get", "explain"];
+            let exact_command = all_commands.contains(&rest);
+            return ["show", "get", "explain"]
+                .into_iter()
+                .filter(|command| rest.is_empty() || exact_command || command.starts_with(rest))
+                .map(|command| suggestion(command, span))
+                .collect();
+        }
     }
+
+    Vec::new()
 }
 
 fn set_buffer(editor: &mut Editor, buffer: &str) {

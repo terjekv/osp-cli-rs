@@ -13,7 +13,7 @@ use crate::core::shell_words::{QuoteStyle, escape_for_shell, quote_for_shell};
 use crate::dsl::registered_verbs;
 use crate::repl::highlight::ReplHighlighter;
 use nu_ansi_term::{Color, Style};
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 use serde::Serialize;
 
 use super::{LineProjection, LineProjector, ReplAppearance, SharedHistory};
@@ -64,7 +64,7 @@ impl ReplCompleter {
 }
 
 impl Completer for ReplCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         debug_assert!(
             pos <= line.len(),
             "completer received pos {pos} beyond line length {}",
@@ -73,12 +73,12 @@ impl Completer for ReplCompleter {
         if pos == line.len()
             && let Some(expanded) = self.expand_bang_request(line)
         {
-            return vec![Suggestion {
+            return CompletionResult::fresh(vec![Suggestion {
                 value: expanded,
                 span: Span { start: 0, end: pos },
                 append_whitespace: false,
                 ..Suggestion::default()
-            }];
+            }]);
         }
         let projected = self
             .line_projector
@@ -159,7 +159,7 @@ impl Completer for ReplCompleter {
             ));
         }
 
-        suggestions
+        CompletionResult::fresh(suggestions)
     }
 }
 

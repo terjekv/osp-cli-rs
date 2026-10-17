@@ -167,6 +167,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
 
     let prefix_values = word_completer
         .complete("ld", 2)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -174,6 +176,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
 
     let fuzzy_values = word_completer
         .complete("lap", 3)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -182,6 +186,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
     let mut pipe_completer = ReplCompleter::new(tree, None);
     let pipe_values = pipe_completer
         .complete("ldap user | F", "ldap user | F".len())
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -209,6 +215,8 @@ fn completer_can_use_projected_line_for_host_flags_unit() {
 
     let completions = completer.complete("--json config sh", "--json config sh".len());
     let values = completions
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -239,6 +247,8 @@ fn completer_hides_suggestions_requested_by_projection_unit() {
 
     let values = completer
         .complete("-", 1)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -266,6 +276,8 @@ fn completer_uses_engine_metadata_for_subcommands() {
     let mut completer = ReplCompleter::new(tree, None);
     let completion = completer
         .complete("ld", 2)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .find(|item| item.value == "ldap")
         .expect("ldap completion should exist");

@@ -461,11 +461,11 @@ impl Prompt for OspPrompt {
         ))
     }
 
-    fn get_prompt_color(&self) -> reedline::Color {
-        reedline::Color::Reset
+    fn get_prompt_color(&self) -> nu_ansi_term::Color {
+        nu_ansi_term::Color::Default
     }
 
-    fn get_indicator_color(&self) -> reedline::Color {
-        reedline::Color::Reset
+    fn get_indicator_color(&self) -> nu_ansi_term::Color {
+        nu_ansi_term::Color::Default
     }
 }
