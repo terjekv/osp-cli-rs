@@ -49,9 +49,11 @@ pub(crate) fn run_theme_command(
                 .map(str::to_string)
                 .to_vec(),
             );
-            output.meta.render_recommendation = Some(RenderRecommendation::Format(
-                crate::core::output::OutputFormat::Table,
-            ));
+            if ui.render_settings.format == crate::core::output::OutputFormat::Auto {
+                output.meta.render_recommendation = Some(RenderRecommendation::Format(
+                    crate::core::output::OutputFormat::Table,
+                ));
+            }
             add_palette_styles(&mut output);
             let overridden = crate::core::style::ColorRole::ALL
                 .into_iter()
