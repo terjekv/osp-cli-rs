@@ -762,6 +762,7 @@ pub(crate) fn render_saved_repl_output(
     ui: &UiState,
     output: &CommandOutput,
     stages: &[String],
+    sink: Option<&mut dyn UiSink>,
 ) -> Result<String> {
     let mut staged = output.saved();
     let context = match &staged.body {
@@ -779,6 +780,9 @@ pub(crate) fn render_saved_repl_output(
         None => CommandBody::None,
     };
     staged.apply_stages(stages).wrap_err(context)?;
+    if let (Some(sink), CommandBody::Output(output)) = (sink, &staged.body) {
+        maybe_copy_output(config, ui, output, sink);
+    }
     Ok(staged.render(config, &ui.render_settings))
 }
 

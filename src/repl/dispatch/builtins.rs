@@ -78,7 +78,7 @@ pub(super) fn execute_repl_builtin(
         }
         ReplBuiltin::Exit => Ok(handle_repl_exit_request(&mut state.session)),
         ReplBuiltin::Last => {
-            execute_last_result_builtin(&mut state.runtime, &mut state.session, raw)
+            execute_last_result_builtin(&mut state.runtime, &mut state.session, raw, sink)
         }
         ReplBuiltin::Pagination(direction) => {
             execute_pagination_builtin(state, history, direction, sink)
@@ -188,6 +188,7 @@ fn execute_each_command(
         &ui,
         &last.output,
         &stages,
+        None,
     )?;
     let values: serde_json::Value =
         serde_json::from_str(&rendered).map_err(|err| miette!("each: {err}"))?;
@@ -438,6 +439,7 @@ fn execute_last_result_builtin(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     line: &str,
+    sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
     let parsed = crate::repl::input::ReplParsedLine::parse(line, runtime.config.resolved())?;
     let scanned = crate::cli::invocation::scan_command_tokens(&parsed.dispatch_tokens)?;
@@ -480,6 +482,7 @@ fn execute_last_result_builtin(
         &invocation.ui,
         &last.output,
         &stages,
+        Some(sink),
     )?;
     Ok(ReplResult::Print(rendered))
 }
