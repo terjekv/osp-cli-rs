@@ -144,6 +144,21 @@ fn run_repl_cycle(
                     .map_err(|err| anyhow::Error::from_boxed(err.into()));
             }
         };
+        if let Some(result) = state
+            .runtime
+            .definition
+            .repl_line_handler
+            .as_ref()
+            .and_then(|handler| handler(line))
+        {
+            history
+                .with(|store| store.finalize_execution(line, line, false))
+                .map_err(anyhow::Error::msg)??;
+            return Ok(match result {
+                std::ops::ControlFlow::Continue(text) => crate::repl::ReplResult::Print(text),
+                std::ops::ControlFlow::Break(code) => crate::repl::ReplResult::Exit(code),
+            });
+        }
         dispatch::execute_repl_plugin_line(state, history, line, None)
             .map(|executed| executed.result)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))

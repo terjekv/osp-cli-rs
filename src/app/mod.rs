@@ -117,6 +117,8 @@ pub(crate) use session::{
 };
 pub use sink::{BufferedUiSink, StdIoUiSink, StderrSpinner, UiSink};
 
+type ReplLineHandler = dyn Fn(&str) -> Option<std::ops::ControlFlow<i32, String>> + Send + Sync;
+
 type ProductAction = dyn Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync;
 
 /// Optional action-flag argument placed in the invocation configuration layer.
@@ -144,6 +146,7 @@ pub(crate) struct AppDefinition {
     action_flags: Vec<ProductActionFlag>,
     config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
     access_policy: Option<Arc<dyn AccessPolicy>>,
+    pub(crate) repl_line_handler: Option<Arc<ReplLineHandler>>,
 }
 
 #[derive(Clone, Default)]
@@ -231,6 +234,20 @@ impl App {
     /// ```
     pub fn with_native_commands(mut self, native_commands: NativeCommandRegistry) -> Self {
         Arc::make_mut(&mut self.definition).native_commands = native_commands;
+        self
+    }
+
+    /// Handles product-owned REPL input before ordinary command dispatch.
+    ///
+    /// Return `None` for normal dispatch, `ControlFlow::Continue(text)` to
+    /// print a message, or `ControlFlow::Break(code)` to leave the REPL.
+    /// Consumed lines do not enter history or replace the previous command
+    /// result. This also runs for basic terminal input.
+    pub fn with_repl_line_handler(
+        mut self,
+        handler: impl Fn(&str) -> Option<std::ops::ControlFlow<i32, String>> + Send + Sync + 'static,
+    ) -> Self {
+        Arc::make_mut(&mut self.definition).repl_line_handler = Some(Arc::new(handler));
         self
     }
 
