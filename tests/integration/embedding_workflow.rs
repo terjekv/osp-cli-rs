@@ -206,7 +206,12 @@ impl NativeCommand for ApprovalWorkflow {
         }))
         .with_meta(ResponseMetaV1 {
             context: Default::default(),
-            presentation_lines: vec!["Task assessed".into()],
+            format_hint: Some("mreg".into()),
+            progress_replace: true,
+            ..ResponseMetaV1::default()
+        })
+        .with_frame(json!({"task_id": "task-42", "state": "assessed", "stages": [{"name": "planning", "complete": true}]}), ResponseMetaV1 {
+            format_hint: Some("mreg".into()),
             progress_replace: true,
             ..ResponseMetaV1::default()
         })
@@ -214,9 +219,9 @@ impl NativeCommand for ApprovalWorkflow {
             level: MessageLevel::Success,
             text: "Plan validated for task-42".into(),
         }]);
-        // Historical progress may be coalesced until the operator interaction.
+        // Stream consumers retain historical events without terminal coalescing.
         progress.replay = true;
-        context.emit_progress(progress)?;
+        context.emit_stream(progress)?;
         context.present(
             NativeProgressEvent::new(json!({"notice": notice})).with_meta(ResponseMetaV1 {
                 context: Default::default(),
@@ -281,7 +286,8 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         .unwrap(),
         3
     );
-    let assessed = terminal.0.stderr.find("Task assessed").unwrap();
+    let assessed = terminal.0.stderr.find("assessed").unwrap();
+    assert!(terminal.0.stderr.contains("planning"));
     let notice = terminal.0.stderr.find("Approval required").unwrap();
     assert!(
         assessed < notice,
@@ -289,7 +295,11 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
     );
     assert!(terminal.0.stdout.contains("waiting_approval"));
 
-    for (is_approved, expected_status) in [(false, 3), (true, 0)] {
+    for (is_approved, expected_status, filter) in [
+        (false, 3, "task_id=task-42"),
+        (true, 0, "task_id=task-42"),
+        (true, 0, "state=completed"),
+    ] {
         approved.store(is_approved, Ordering::SeqCst);
         let mut sink = BufferedUiSink::default();
         assert_eq!(
@@ -301,7 +311,7 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
                     "provision",
                     "|",
                     "F",
-                    "task_id=task-42"
+                    filter
                 ],
                 &mut sink
             )
@@ -325,10 +335,19 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
                 "data": data,
             })
         };
-        assert_eq!(
-            serde_json::from_str::<Value>(&sink.stdout).unwrap(),
-            expected
-        );
+        let mut results = serde_json::Deserializer::from_str(&sink.stdout).into_iter::<Value>();
+        if filter == "task_id=task-42" {
+            assert_eq!(
+                results.next().unwrap().unwrap(),
+                json!({"task_id": "task-42", "state": "assessed"})
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(sink.stdout.lines().next().unwrap()).unwrap(),
+                json!({"task_id": "task-42", "state": "assessed"})
+            );
+        }
+        assert_eq!(results.next().unwrap().unwrap(), expected);
+        assert!(results.next().is_none());
         let mut messages = serde_json::Deserializer::from_str(&sink.stderr).into_iter::<Value>();
         assert_eq!(
             messages.next().unwrap().unwrap(),
@@ -338,7 +357,7 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         );
         assert_eq!(
             sink.stderr[messages.byte_offset()..].trim_start_matches('\n'),
-            "task-42\nassessed\n"
+            ""
         );
     }
 }
