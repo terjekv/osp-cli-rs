@@ -368,9 +368,9 @@ When implementing native commands:
 - `emit_progress` remains preliminary human progress on stderr, independent of
   the streaming endpoint contract. Return the final document through the normal
   `NativeCommandOutcome` path; stream metadata never replaces that document
-- use `presentation_lines` with `progress_replace: true` for transient status;
-  a single rendered line animates on interactive stderr and clears when the
-  command finishes or presents another document
+- use structured data and `progress_replace: true` for preliminary status;
+  interactive stderr clears it when the command finishes or presents another
+  document
 - call `context.flush_progress()` before blocking for input, and use
   `context.present(...)` for notices and confirmations that must remain visible
   outside result-stream DSL filters; contexts without a progress sink make

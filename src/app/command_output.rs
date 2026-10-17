@@ -20,14 +20,6 @@ use crate::app::sink::UiSink;
 use crate::app::{AppSession, UiState};
 use crate::cli::rows::output::{plugin_data_to_output_result, rows_to_output_result};
 
-/// Transient human presentation belongs to the invocation, not canonical data.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct CommandPresentation {
-    pub(crate) lines: Vec<String>,
-    pub(crate) progress_append: Vec<String>,
-    pub(crate) progress_replace: bool,
-}
-
 /// The mutually exclusive data returned by a command.
 #[derive(Debug, Clone)]
 pub(crate) enum CommandBody {
@@ -69,7 +61,7 @@ pub(crate) struct CommandOutput {
     pub(crate) messages: MessageBuffer,
     pub(crate) body: CommandBody,
     pub(crate) format_hint: Option<OutputFormat>,
-    pub(crate) presentation: CommandPresentation,
+    pub(crate) progress_replace: bool,
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
@@ -86,7 +78,7 @@ impl CommandOutput {
             messages: MessageBuffer::default(),
             body: CommandBody::None,
             format_hint: None,
-            presentation: CommandPresentation::default(),
+            progress_replace: false,
             stderr_text: String::new(),
             failure_report: None,
             hint_command: None,
@@ -166,11 +158,7 @@ impl CommandOutput {
                 }
             }
         }
-        result.presentation = CommandPresentation {
-            lines: meta.presentation_lines.clone(),
-            progress_append: meta.progress_append.clone(),
-            progress_replace: meta.progress_replace,
-        };
+        result.progress_replace = meta.progress_replace;
         result
     }
 
@@ -186,7 +174,7 @@ impl CommandOutput {
         Self {
             body,
             format_hint: self.format_hint,
-            presentation: self.presentation.clone(),
+            progress_replace: false,
             ..Self::exit(0)
         }
     }
@@ -202,7 +190,7 @@ impl CommandOutput {
         let (output, format_hint) = apply_output_stages(output, stages, self.format_hint)?;
         self.body = CommandBody::Output(Box::new(output));
         self.format_hint = format_hint;
-        self.presentation = CommandPresentation::default();
+        self.progress_replace = false;
         Ok(())
     }
 
@@ -225,7 +213,6 @@ impl CommandOutput {
             &output,
             &RenderRequest {
                 layout: Some(crate::ui::help_layout_from_config(config)),
-                presentation_lines: &self.presentation.lines,
                 ..RenderRequest::new(&effective)
             },
         )
@@ -480,9 +467,9 @@ pub(crate) fn run_progress_command_with_ui(
         }
         return Ok(());
     }
-    let show_body = !result.presentation.progress_replace || ui.verbosity >= MessageLevel::Success;
+    let show_body = !result.progress_replace || ui.verbosity >= MessageLevel::Success;
     let framed = show_body
-        && result.presentation.progress_replace
+        && result.progress_replace
         && !json_output
         && sink.stderr_is_terminal()
         && !progress_output_is_empty(output);
@@ -492,22 +479,12 @@ pub(crate) fn run_progress_command_with_ui(
     if !show_body || progress_output_is_empty(output) {
         return Ok(());
     }
-    let append_lines = !sink.stderr_is_terminal() || json_output;
     let mut settings = ui.render_settings.clone();
     if let Some(width) = sink.stderr_width() {
         settings.width = Some(width);
         settings.runtime.width = Some(width);
     }
-    let mut rendered = if append_lines && !result.presentation.progress_append.is_empty() {
-        plain_progress_settings(&mut settings);
-        crate::ui::render(
-            output,
-            &RenderRequest {
-                presentation_lines: &result.presentation.progress_append,
-                ..RenderRequest::new(&settings)
-            },
-        )
-    } else if !json_output && sink.stderr_is_terminal() {
+    let mut rendered = if !json_output && sink.stderr_is_terminal() {
         result.render(config, &settings)
     } else {
         plain_progress_settings(&mut settings);
@@ -515,7 +492,6 @@ pub(crate) fn run_progress_command_with_ui(
             output,
             &RenderRequest {
                 layout: Some(crate::ui::help_layout_from_config(config)),
-                presentation_lines: &result.presentation.lines,
                 ..RenderRequest::new(&settings)
             },
         )
@@ -531,10 +507,7 @@ pub(crate) fn run_progress_command_with_ui(
         );
     }
     if !rendered.is_empty() {
-        sink.write_progress(
-            &rendered,
-            result.presentation.progress_replace && !json_output,
-        );
+        sink.write_progress(&rendered, result.progress_replace && !json_output);
     }
     Ok(())
 }

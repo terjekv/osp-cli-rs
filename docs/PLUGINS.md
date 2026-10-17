@@ -117,6 +117,16 @@ environment are redacted in host-rendered structured fields only; inherited
 plugin streams are not redacted. `meta`
 may be omitted. An `ok: false` response is rendered as an error.
 
+`ResponseMetaV1` in `src/core/plugin.rs` is the wire schema. Final output comes
+from `data` through the shared renderer; `columns`, `column_labels`,
+`display_rules`, `row_path` and `preserve_json_document` describe its projection.
+One-line notices belong in levelled `messages`. The early-development protocol
+has removed `meta.presentation_lines` and the string-only `meta.progress_append`;
+plugins must return structured data instead. There is no replacement final-text
+override. Native streaming commands use the separate structured event channel
+documented in [Embedding](EMBEDDING.md#native-commands); a subprocess response
+remains one `ResponseV1` document.
+
 ## Environment and config
 
 The full inherited environment is retained. The host also supplies:

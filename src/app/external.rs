@@ -1294,10 +1294,8 @@ fn run_external_plugin_command(
                 }
                 for text in response
                     .meta
-                    .presentation_lines
+                    .column_labels
                     .iter_mut()
-                    .chain(&mut response.meta.progress_append)
-                    .chain(&mut response.meta.column_labels)
                     .chain(response.meta.partial_rows.iter_mut())
                 {
                     *text = plugin_text(text);
@@ -1448,8 +1446,6 @@ mod tests {
                             unix_timestamp_columns: Vec::new(),
                             display_rules: Vec::new(),
                             preserve_json_document: false,
-                            presentation_lines: Vec::new(),
-                            progress_append: Vec::new(),
                             progress_replace: false,
                             display_limit: None,
                             partial_rows: None,
@@ -1574,8 +1570,6 @@ mod tests {
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
                     preserve_json_document: false,
-                    presentation_lines: Vec::new(),
-                    progress_append: Vec::new(),
                     progress_replace: false,
                     display_limit: None,
                     partial_rows: None,
@@ -1758,8 +1752,6 @@ mod tests {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,

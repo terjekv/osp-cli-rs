@@ -225,7 +225,7 @@ impl NativeCommand for ApprovalWorkflow {
         context.present(
             NativeProgressEvent::new(json!({"notice": notice})).with_meta(ResponseMetaV1 {
                 context: Default::default(),
-                presentation_lines: vec![notice.into()],
+                format_hint: Some("value".into()),
                 ..ResponseMetaV1::default()
             }),
         )?;

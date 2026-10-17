@@ -158,8 +158,6 @@ pub struct RenderRequest<'a> {
     pub title_prefix: Option<&'a str>,
     /// Override the layout's default closing rule.
     pub show_footer_rule: Option<bool>,
-    /// Human-only complete lines, supplied by the command or progress sink.
-    pub presentation_lines: &'a [String],
 }
 
 impl<'a> RenderRequest<'a> {
@@ -171,7 +169,6 @@ impl<'a> RenderRequest<'a> {
             layout: None,
             title_prefix: None,
             show_footer_rule: None,
-            presentation_lines: &[],
         }
     }
 }
@@ -197,9 +194,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
     }
     let output = prepare_output_for_sink(output, request.settings, request.profile);
     let plan = plan_output(&output, request.settings, request.profile);
-    let mut doc = if plan.format != OutputFormat::Json && !request.presentation_lines.is_empty() {
-        lower::lower_presentation_lines(request.presentation_lines, plan.settings.width)
-    } else if matches!(
+    let mut doc = if matches!(
         plan.format,
         OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
     ) && let Some(layout) = request.layout

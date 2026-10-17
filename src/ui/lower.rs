@@ -162,24 +162,6 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     doc
 }
 
-pub(crate) fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
-    let lines = lines
-        .iter()
-        .map(|line| sanitize_human_text(&visible_inline_text(line)))
-        .flat_map(|line| wrap_presentation_line(&line, width))
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return Doc::default();
-    }
-    Doc {
-        blocks: vec![Block::Paragraph(ParagraphBlock {
-            text: lines.join("\n"),
-            indent: 0,
-            inline_markup: false,
-        })],
-    }
-}
-
 pub(crate) fn lower_document(document: &Document, format: OutputFormat) -> Doc {
     Doc {
         blocks: lower_document_blocks(
@@ -404,107 +386,6 @@ fn lower_document_blocks(
         }
     }
     lowered
-}
-
-fn wrap_presentation_line(line: &str, width: Option<usize>) -> Vec<String> {
-    let Some(width) = width.filter(|width| *width > 0) else {
-        return vec![line.to_string()];
-    };
-    if display_width(line) <= width {
-        return vec![line.to_string()];
-    }
-
-    let mut remaining = line.to_string();
-    let mut wrapped = Vec::new();
-    let tree_prefix = presentation_tree_continuation_prefix(line);
-    let mut first = true;
-    while !remaining.is_empty() {
-        let continuation = if first {
-            String::new()
-        } else {
-            let prefix = tree_prefix.as_deref().unwrap_or("    ");
-            if width > display_width(prefix) {
-                prefix.to_string()
-            } else {
-                String::new()
-            }
-        };
-        let available = width.saturating_sub(display_width(&continuation));
-        let (chunk, rest) = take_presentation_chunk(&remaining, available.max(1));
-        if chunk.is_empty() && rest == remaining {
-            break;
-        }
-        wrapped.push(format!("{continuation}{chunk}"));
-        remaining = rest;
-        first = false;
-    }
-    if wrapped.is_empty() {
-        vec![String::new()]
-    } else {
-        wrapped
-    }
-}
-
-fn presentation_tree_continuation_prefix(line: &str) -> Option<String> {
-    let prefix_end = line
-        .char_indices()
-        .find(|(_, ch)| !matches!(ch, ' ' | '│' | '├' | '└' | '─'))
-        .map_or(line.len(), |(index, _)| index);
-    let prefix = &line[..prefix_end];
-    if !prefix.chars().any(|ch| matches!(ch, '│' | '├' | '└')) {
-        return None;
-    }
-
-    let Some((branch_index, branch)) = prefix
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| matches!(ch, '├' | '└'))
-    else {
-        return Some(prefix.to_string());
-    };
-    let mut continuation = prefix[..branch_index].to_string();
-    continuation.push(if branch == '├' { '│' } else { ' ' });
-    continuation.extend(
-        prefix[branch_index + branch.len_utf8()..]
-            .chars()
-            .map(|_| ' '),
-    );
-    Some(continuation)
-}
-
-fn take_presentation_chunk(text: &str, width: usize) -> (String, String) {
-    if display_width(text) <= width {
-        return (text.trim_end().to_string(), String::new());
-    }
-
-    let mut used = 0;
-    let mut end = 0;
-    let mut last_break = None;
-    for (index, ch) in text.char_indices() {
-        let next = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + next > width {
-            break;
-        }
-        used += next;
-        end = index + ch.len_utf8();
-        if ch.is_whitespace() {
-            last_break = Some(end);
-        }
-    }
-    let split = last_break
-        .filter(|split| *split > 0 && !text[..*split].trim().is_empty())
-        .unwrap_or(end);
-    if split == 0 {
-        let end = text
-            .char_indices()
-            .nth(1)
-            .map_or(text.len(), |(index, _)| index);
-        return (text[..end].to_string(), text[end..].to_string());
-    }
-    (
-        text[..split].trim_end().to_string(),
-        text[split..].trim_start().to_string(),
-    )
 }
 
 pub(crate) fn sanitize_doc(doc: &mut Doc) {
@@ -927,7 +808,10 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
     };
     let mut total = 0;
     let record_document = rows.len() == 1
-        && matches!(output.document, Some(OutputDocument::Json(Value::Object(_))));
+        && matches!(
+            output.document,
+            Some(OutputDocument::Json(Value::Object(_)))
+        );
     if rows.len() > limit && !record_document {
         total = rows.len();
         limited_rows.truncate(limit);

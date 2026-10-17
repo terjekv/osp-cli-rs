@@ -122,8 +122,6 @@ impl NativeCommand for NativeProbeCommand {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -153,23 +151,21 @@ impl NativeCommand for CuratedOrchRowsCommand {
         for state in ["running", "completed"] {
             context.emit_progress(
                 NativeProgressEvent::new(json!({
-                        "state": {"name": state},
-                        "name": "db01.uio.no",
-                        "provider": {"name": "vmware"},
-                        "created_at": 1700000000,
-                    }))
-                    .with_meta(ResponseMetaV1 {
- context_not_found: false,
-                context: Default::default(),
-                        presentation_lines: vec![
-                            format!("{state}: db01.uio.no"),
-                            "└─ Resource preparation with a description long enough to wrap on a narrow terminal".into(),
-                        ],
-                        progress_append: if state == "running" { vec![format!("{state}: db01.uio.no")] } else { Vec::new() },
-                        progress_replace: true,
-                        preserve_json_document: true,
-                        ..ResponseMetaV1::default()
-                    }),
+                    "state": {"name": state},
+                    "name": "db01.uio.no",
+                    "provider": {"name": "vmware"},
+                    "created_at": 1700000000,
+                    "description": "Resource preparation with a description long enough to wrap on a narrow terminal",
+                }))
+                .with_meta(ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
+                    format_hint: Some("mreg".into()),
+                    columns: Some(vec!["state.name".into(), "name".into(), "description".into()]),
+                    progress_replace: true,
+                    preserve_json_document: true,
+                    ..ResponseMetaV1::default()
+                }),
             )?;
         }
         context.flush_progress()?;
@@ -242,8 +238,6 @@ impl NativeCommand for CuratedOrchRowsCommand {
                     },
                 ],
                 preserve_json_document: true,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -284,8 +278,6 @@ impl NativeCommand for SiteStatusCommand {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -592,7 +584,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
 
     // Live output and the final document share filtering, but occupy separate
     // channels so consuming the final JSON never consumes transient progress.
-    assert!(json_sink.stderr.contains("running: db01.uio.no"));
+    assert!(json_sink.stderr.contains("running"));
+    assert!(json_sink.stderr.contains("db01.uio.no"));
     assert!(json_sink.stderr.contains("completed"));
     assert!(!json_sink.stderr.contains('\x1b'));
     for (width, height, resize_height) in [
@@ -612,8 +605,9 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             &mut terminal,
         )
         .expect("live presentations should fit the terminal or append safely");
-        assert!(terminal.output.stderr.contains("running: db01.uio.no"));
-        assert!(terminal.output.stderr.contains("completed: db01.uio.no"));
+        assert!(terminal.output.stderr.contains("running"));
+        assert!(terminal.output.stderr.contains("completed"));
+        assert!(terminal.output.stderr.contains("db01.uio.no"));
         assert_eq!(
             terminal.output.stderr.contains("\x1b[2K"),
             height > 2 && resize_height.is_none()
@@ -662,7 +656,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
         let stdout = String::from_utf8(redirected.stdout).unwrap();
         let stderr = String::from_utf8(redirected.stderr).unwrap();
         assert!(stdout.contains("4 CPU / 8 GiB"));
-        assert!(stderr.contains("running: db01.uio.no"));
+        assert!(stderr.contains("running"));
+        assert!(stderr.contains("db01.uio.no"));
         assert!(stderr.contains("completed"));
         assert!(!stderr.contains('\x1b'));
 
@@ -686,8 +681,9 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             let (captured, status) =
                 crate::pty_support::capture(pair, command, std::time::Duration::from_secs(20));
             assert!(status.success(), "{captured}");
-            assert!(captured.contains("running: db01.uio.no"));
-            assert!(captured.contains("completed: db01.uio.no"));
+            assert!(captured.contains("running"));
+            assert!(captured.contains("completed"));
+            assert!(captured.contains("db01.uio.no"));
             assert!(captured.contains("4 CPU / 8 GiB"), "{captured}");
         }
     }

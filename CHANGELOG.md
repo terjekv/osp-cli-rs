@@ -245,11 +245,21 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### API and protocol migration
 
+- **Breaking:** Remove `ResponseMetaV1.presentation_lines`,
+  `ResponseMetaV1.progress_append` and `RenderRequest.presentation_lines`.
+  Final native/plugin output is structured `data` plus renderer hints; notices
+  use levelled `messages`. Native streaming endpoints call `emit_stream` with
+  object events: `--json` writes event JSONL to stdout followed by the final
+  result document, and DSL stages see those same events. Optional structured
+  terminal snapshots use `with_frame`; preliminary `emit_progress` stays on
+  stderr. Removed metadata has no compatibility path.
+
 - **Breaking:** The embedding API now exposes one canonical path for shared
   types and keeps host engines and state internal. App setup, native-command
   hooks, rendering/DSL entry points, config bootstrap/editing, and drop-in
   plugins retain their behavior. Product wrappers must update imports and
-  runtime reads together with the library. The wire protocol is unchanged.
+  runtime reads together with the library. See the response-metadata removal
+  above for the wire protocol change.
 
 | Previous API | Current API |
 | --- | --- |
