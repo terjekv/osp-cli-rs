@@ -36,6 +36,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Treat `passwd` and `credential` names as sensitive alongside passwords, tokens,
   secrets and API keys wherever the shared sensitivity policy is used.
 
+- Keep root help available when config or secrets TOML cannot be loaded, without
+  calling product visibility policies before they have been configured.
+  Concise TOML errors retain the file, line and column even when the parser
+  message spans multiple lines; secrets source text remains hidden.
+
 - Ignore retired config keys with one warning listing their names and removal
   guidance. This includes plugin provider/state/discovery keys, history profile
   scoping, and removed UI, auth visibility and cache knobs. Unknown keys still fail.

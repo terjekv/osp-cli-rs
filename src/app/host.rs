@@ -1135,10 +1135,16 @@ fn base_error_message(
         }
         if let crate::config::ConfigError::LayerLoad { path, inner } = config_err {
             let message = inner.to_string();
+            let mut location = crate::diagnostics::safe_text(path);
+            if let crate::config::ConfigError::TomlParse(diagnostic) = inner.as_ref()
+                && let Some((line, column)) = diagnostic.location()
+            {
+                location.push_str(&format!(":{line}:{column}"));
+            }
             return crate::core::CommandError::new(format!(
                 "{} ({}).",
                 message.lines().next().unwrap_or("Invalid config"),
-                crate::diagnostics::safe_text(path)
+                location
             ))
             .with_action("Fix the config file.");
         }

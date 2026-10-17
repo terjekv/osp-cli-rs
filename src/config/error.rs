@@ -7,8 +7,9 @@ use miette::{LabeledSpan, NamedSource, SourceSpan};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TomlParseDiagnostic {
     message: String,
-    source_code: Option<NamedSource<String>>,
+    source_code: Option<Box<NamedSource<String>>>,
     span: Option<SourceSpan>,
+    location: Option<(usize, usize)>,
 }
 
 impl TomlParseDiagnostic {
@@ -19,6 +20,7 @@ impl TomlParseDiagnostic {
             message: message.into(),
             source_code: None,
             span: None,
+            location: None,
         }
     }
 
@@ -32,7 +34,7 @@ impl TomlParseDiagnostic {
     ) -> Self {
         let source_text = source_text.into();
         self = self.with_location_from_source(&source_text, span.clone());
-        self.source_code = Some(NamedSource::new(source_name.into(), source_text));
+        self.source_code = Some(Box::new(NamedSource::new(source_name.into(), source_text)));
         self.span = span.map(|range| (range.start, range.len()).into());
         self
     }
@@ -54,8 +56,13 @@ impl TomlParseDiagnostic {
                 .count()
                 + 1;
             self.message = format!("{} at line {line}, column {column}", self.message);
+            self.location = Some((line, column));
         }
         self
+    }
+
+    pub(crate) fn location(&self) -> Option<(usize, usize)> {
+        self.location
     }
 
     /// Returns the parser message without rendering additional context.
@@ -67,7 +74,7 @@ impl TomlParseDiagnostic {
     /// Returns the attached source text when the parser failure came from a known document.
     #[must_use]
     pub fn source_code(&self) -> Option<&NamedSource<String>> {
-        self.source_code.as_ref()
+        self.source_code.as_deref()
     }
 
     /// Returns a label for the offending TOML span when location data is available.

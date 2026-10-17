@@ -582,7 +582,8 @@ impl AuthState {
         if let (Some(policy), Some(config)) = (&policy, config) {
             policy.configure(config);
         }
-        self.access_policy = policy;
+        // Help can outlive a config load failure; only attach configured policies.
+        self.access_policy = policy.filter(|_| config.is_some());
     }
 
     pub(crate) fn from_commands(
