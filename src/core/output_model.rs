@@ -28,6 +28,17 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Sum inclusive IP ranges without adding an aggregate to canonical JSON.
+    AddressRangeTotal {
+        /// Canonical array of range records.
+        ranges: String,
+        /// Start-address field within each range.
+        start: String,
+        /// End-address field within each range.
+        end: String,
+        /// Human-only total field to insert.
+        field: String,
+    },
     /// Derive remaining address capacity from a CIDR and an exact used count.
     AddressCountRemaining {
         /// Canonical CIDR field.

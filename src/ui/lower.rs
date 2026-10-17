@@ -607,6 +607,37 @@ fn sanitize_key_value(value: &mut KeyValueValue) {
     }
 }
 
+/// Keep a base-2^128 carry so even a full IPv6 range has an exact human total.
+fn address_range_total(ranges: &Value, start: &str, end: &str) -> Option<String> {
+    use std::net::IpAddr;
+    let (mut high, mut low) = (0u128, 0u128);
+    for range in ranges.as_array()? {
+        let first = display_path(range, start)?
+            .as_str()?
+            .parse::<IpAddr>()
+            .ok()?;
+        let last = display_path(range, end)?.as_str()?.parse::<IpAddr>().ok()?;
+        let (first, last) = match (first, last) {
+            (IpAddr::V4(first), IpAddr::V4(last)) => {
+                (u128::from(u32::from(first)), u128::from(u32::from(last)))
+            }
+            (IpAddr::V6(first), IpAddr::V6(last)) => (u128::from(first), u128::from(last)),
+            _ => return None,
+        };
+        let (sum, carry) = low.overflowing_add(last.checked_sub(first)?);
+        let (sum, inclusive_carry) = sum.overflowing_add(1);
+        high = high.checked_add(u128::from(carry) + u128::from(inclusive_carry))?;
+        low = sum;
+    }
+    Some(match (high, low) {
+        (0, count) => count.to_string(),
+        (1, 0) => "2^128".into(),
+        (1, count) => format!("2^128 + {count}"),
+        (multiple, 0) => format!("{multiple} × 2^128"),
+        (multiple, count) => format!("{multiple} × 2^128 + {count}"),
+    })
+}
+
 fn display_output(output: &OutputResult) -> OutputResult {
     let mut display = output.clone();
     if let OutputItems::Rows(rows) = &mut display.items {
@@ -616,6 +647,19 @@ fn display_output(output: &OutputResult) -> OutputResult {
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::AddressRangeTotal {
+                        ranges,
+                        start,
+                        end,
+                        field,
+                    } => {
+                        if let Some(total) = display_path(&raw, ranges)
+                            .and_then(|ranges| address_range_total(ranges, start, end))
+                            && let Some(map) = original.as_object_mut()
+                        {
+                            map.insert(field.clone(), Value::String(total));
+                        }
+                    }
                     DisplayRule::AddressCountRemaining {
                         network,
                         used,
@@ -630,16 +674,16 @@ fn display_output(output: &OutputResult) -> OutputResult {
                             && let Some(used) = display_path(&raw, used).and_then(Value::as_u64)
                             && let Some(map) = original.as_object_mut()
                         {
-                            let remaining = 1u128
-                                .checked_shl(bits)
-                                .and_then(|size| size.checked_sub(u128::from(used)))
-                                .or_else(|| {
-                                    (bits == 128 && used > 0)
-                                        .then(|| u128::MAX - u128::from(used) + 1)
-                                })
-                                .map(|count| count.to_string())
-                                .unwrap_or_else(|| format!("2^{bits} − {used}"));
-                            map.insert(field.clone(), Value::String(remaining));
+                            let remaining = if bits > 64 {
+                                Some(format!("2^{bits} − {used}"))
+                            } else {
+                                (1u128 << bits)
+                                    .checked_sub(u128::from(used))
+                                    .map(|count| count.to_string())
+                            };
+                            if let Some(remaining) = remaining {
+                                map.insert(field.clone(), Value::String(remaining));
+                            }
                         }
                     }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
