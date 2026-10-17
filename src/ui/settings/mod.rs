@@ -582,7 +582,7 @@ impl RenderSettings {
         Some(width.min(self.width_max))
     }
 
-    pub fn resolve_render_settings(&self) -> ResolvedRenderSettings {
+    pub(crate) fn resolve_render_settings(&self) -> ResolvedRenderSettings {
         let backend = match self.mode {
             RenderMode::Plain => RenderBackend::Plain,
             RenderMode::Rich => RenderBackend::Rich,

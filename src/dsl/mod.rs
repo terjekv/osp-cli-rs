@@ -24,30 +24,14 @@
 //!   OutputResult  ← filtered · sorted · limited rows
 //! ```
 //!
-//! The main public surface:
+//! Apply stages to existing rows with [`crate::dsl::apply_pipeline`], or use
+//! [`crate::dsl::apply_output_pipeline`] to retain output metadata and semantic documents.
+//! [`crate::dsl::execute_pipeline`] is also available for row-based callers. Parsing and
+//! verb metadata belong to the host implementation.
 //!
-//! - [`crate::dsl::parse_pipeline`] turns a raw line into a [`crate::dsl::Pipeline`] value
-//! - [`crate::dsl::parse_stage`] parses one stage when the command has already been split away
-//! - [`crate::dsl::apply_pipeline`] / [`crate::dsl::apply_output_pipeline`] apply stages to
-//!   existing rows
-//! - [`crate::dsl::registered_verbs`] returns metadata for all supported stage verbs
-//! - [`crate::dsl::verb_info`] looks up a single verb by name
-//!
-//! Choose the smallest entrypoint that matches your starting point:
-//!
-//! - if you only need to split `"command | stages"` into structured pieces, use
-//!   [`crate::dsl::parse_pipeline`]
-//! - if you already have one raw stage like `"F uid=alice"` and need to inspect
-//!   its verb/spec shape, use [`crate::dsl::parse_stage`]
-//! - if your command already produced `Vec<Row>`, use [`crate::dsl::apply_pipeline`]
-//! - if you already have an [`crate::core::OutputResult`] and want
-//!   to retain applicable group or render metadata, use
-//!   [`crate::dsl::apply_output_pipeline`]
-//!
-//! Common verbs: `F` (filter), `P` (project), `S` (sort), `G` (group),
-//! `A` (aggregate), `L` (limit), `V`/`K` (quick search), `U` (unroll),
-//! `JQ` (jq expression). See [`crate::dsl::registered_verbs`] for the full list
-//! and short summaries.
+//! Common verbs include `F` (filter), `P` (project), `S` (sort), `G` (group),
+//! `A` (aggregate), `L` (limit), `V`/`K` (quick search), `U` (unroll), and
+//! `JQ` (jq expression).
 
 pub(crate) mod compiled;
 pub(crate) mod eval;
@@ -61,8 +45,8 @@ mod value;
 mod verbs;
 
 pub use engine::{apply_output_pipeline, apply_pipeline, execute_pipeline};
-pub use parse::pipeline::{Pipeline, parse_pipeline, parse_stage};
-pub use verb_info::{VerbInfo, is_registered_explicit_verb, registered_verbs, verb_info};
+pub(crate) use parse::pipeline::parse_pipeline;
+pub(crate) use verb_info::{registered_verbs, verb_info};
 pub(crate) use verbs::filter::parse_timestamp;
 
 #[cfg(test)]

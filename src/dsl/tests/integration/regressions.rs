@@ -1,6 +1,6 @@
-use osp_cli::core::{OutputDocument, OutputItems, OutputResult};
-use osp_cli::dsl::apply_output_pipeline;
-use osp_cli::row;
+use crate::core::{OutputDocument, OutputItems, OutputResult};
+use crate::dsl::apply_output_pipeline;
+use crate::row;
 use serde_json::json;
 
 fn pipeline(output: OutputResult, stages: &[&str]) -> OutputResult {

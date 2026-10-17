@@ -1,10 +1,10 @@
-use osp_cli::core::OutputFormat;
-use osp_cli::core::{DocBlock, Document};
-use osp_cli::dsl::{apply_output_pipeline, parse_pipeline};
-use osp_cli::ui::{RenderSettings, render};
+use crate::core::OutputFormat;
+use crate::core::{DocBlock, Document};
+use crate::dsl::{apply_output_pipeline, parse_pipeline};
+use crate::ui::{RenderSettings, render};
 use serde_json::json;
 
-fn run_guide_pipeline(view: Document, pipeline: &str) -> osp_cli::core::OutputResult {
+fn run_guide_pipeline(view: Document, pipeline: &str) -> crate::core::OutputResult {
     let parsed = parse_pipeline(&format!("fixture | {pipeline}")).expect("pipeline should parse");
     apply_output_pipeline(view.to_output_result(), &parsed.stages).expect("pipeline should succeed")
 }
@@ -26,7 +26,7 @@ fn guide_payload_narrowing_restores_and_renders_as_markdown_guide() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.width = Some(80);
     settings.format_explicit = true;
-    let markdown = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
+    let markdown = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(markdown.contains("list"));
     assert!(markdown.contains("List history entries"));
@@ -36,8 +36,8 @@ fn guide_payload_narrowing_restores_and_renders_as_markdown_guide() {
 
 #[test]
 fn one_shot_help_pipeline_explains_sort_syntax_and_examples() {
-    let mut sink = osp_cli::app::BufferedUiSink::default();
-    let exit = osp_cli::App::new()
+    let mut sink = crate::app::BufferedUiSink::default();
+    let exit = crate::App::new()
         .run_with_sink(
             ["osp", "--defaults-only", "--plain", "--help", "|", "H", "S"],
             &mut sink,
@@ -60,7 +60,7 @@ fn guide_payload_value_extraction_degrades_and_renders_as_plain_values() {
 
     let rendered = render(
         &output,
-        &osp_cli::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Value)),
+        &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Value)),
     );
     assert!(rendered.contains("clear"));
     assert!(rendered.contains("list"));
@@ -131,9 +131,9 @@ fn clap_command_metadata_projects_into_guides() {
             .is_some_and(|value| { value.as_str().is_some_and(|name| name.contains("--format")) }))
     );
 
-    let markdown = osp_cli::ui::render(
+    let markdown = crate::ui::render(
         &guide.to_output_result(),
-        &osp_cli::ui::RenderRequest::new(&{
+        &crate::ui::RenderRequest::new(&{
             let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
             settings.format_explicit = true;
             settings
@@ -190,11 +190,11 @@ fn parsed_and_authored_guides_merge_round_trip_and_render_through_semantic_outpu
     );
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
-    let markdown = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
+    let markdown = render(&output, &crate::ui::RenderRequest::new(&settings));
     assert!(markdown.contains("## Usage") && markdown.contains("## Session"));
     assert!(markdown.contains("current profile: prod"));
     settings.format = OutputFormat::Value;
-    let values = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
+    let values = render(&output, &crate::ui::RenderRequest::new(&settings));
     for value in [
         "Show deployment status",
         "Run doctor before deploy",
@@ -269,7 +269,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut guide_settings = RenderSettings::test_plain(OutputFormat::Auto);
     guide_settings.width = Some(40);
-    let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&guide_settings));
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&guide_settings));
     assert!(rendered.contains("Session"));
     assert!(rendered.contains("profile"));
     assert!(rendered.contains("osp history list"));
@@ -277,10 +277,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
-    let markdown = render(
-        &output,
-        &osp_cli::ui::RenderRequest::new(&markdown_settings),
-    );
+    let markdown = render(&output, &crate::ui::RenderRequest::new(&markdown_settings));
     assert!(markdown.contains("## Session"));
     assert!(markdown.contains("- profile: prod"));
     assert!(markdown.contains("| name"));
@@ -292,14 +289,14 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     assert_eq!(restored, guide);
     let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
     json_settings.format_explicit = true;
-    let json_output = render(&output, &osp_cli::ui::RenderRequest::new(&json_settings));
+    let json_output = render(&output, &crate::ui::RenderRequest::new(&json_settings));
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&json_output).unwrap(),
         serde_json::to_value(&guide).unwrap(),
     );
     let mut value_settings = RenderSettings::test_plain(OutputFormat::Value);
     value_settings.format_explicit = true;
-    let values = render(&output, &osp_cli::ui::RenderRequest::new(&value_settings));
+    let values = render(&output, &crate::ui::RenderRequest::new(&value_settings));
     for expected in [
         "prod",
         "rose-pine-moon",
@@ -316,20 +313,20 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     }
 
     let mut styled = RenderSettings::test_plain(OutputFormat::Auto);
-    styled.mode = osp_cli::core::RenderMode::Rich;
-    styled.color = osp_cli::core::ColorMode::Always;
-    styled.unicode = osp_cli::core::UnicodeMode::Always;
+    styled.mode = crate::core::RenderMode::Rich;
+    styled.color = crate::core::ColorMode::Always;
+    styled.unicode = crate::core::UnicodeMode::Always;
     styled.width = Some(60);
-    let rich = render(&output, &osp_cli::ui::RenderRequest::new(&styled));
+    let rich = render(&output, &crate::ui::RenderRequest::new(&styled));
     assert!(
         rich.contains('\x1b'),
         "explicit color should style the guide: {rich}"
     );
-    let copied = osp_cli::ui::render(
+    let copied = crate::ui::render(
         &output,
-        &osp_cli::ui::RenderRequest {
-            profile: osp_cli::ui::RenderProfile::CopySafe,
-            ..osp_cli::ui::RenderRequest::new(&styled)
+        &crate::ui::RenderRequest {
+            profile: crate::ui::RenderProfile::CopySafe,
+            ..crate::ui::RenderRequest::new(&styled)
         },
     );
     assert!(
@@ -353,7 +350,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
 
     let mut mreg_settings = RenderSettings::test_plain(OutputFormat::Mreg);
     mreg_settings.format_explicit = true;
-    let mreg = render(&output, &osp_cli::ui::RenderRequest::new(&mreg_settings));
+    let mreg = render(&output, &crate::ui::RenderRequest::new(&mreg_settings));
     for entry in [
         "Session",
         "profile",

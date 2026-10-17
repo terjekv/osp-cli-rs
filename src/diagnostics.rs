@@ -188,7 +188,7 @@ pub fn safe_url(raw: &str) -> String {
 }
 
 /// Escapes terminal controls and bounds a reviewed single-line field.
-pub fn safe_text(raw: &str) -> String {
+pub(crate) fn safe_text(raw: &str) -> String {
     raw.chars().take(240).flat_map(char::escape_debug).collect()
 }
 

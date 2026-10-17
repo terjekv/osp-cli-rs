@@ -67,9 +67,6 @@ pub enum MessageLayout {
 }
 
 impl MessageLayout {
-    /// All variants in canonical configuration order.
-    pub const ALL: [Self; 4] = [Self::Minimal, Self::Plain, Self::Compact, Self::Grouped];
-
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "minimal" | "austere" => Some(Self::Minimal),
@@ -77,16 +74,6 @@ impl MessageLayout {
             "compact" => Some(Self::Compact),
             "grouped" | "full" => Some(Self::Grouped),
             _ => None,
-        }
-    }
-
-    /// Returns the canonical configuration spelling.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Minimal => "minimal",
-            Self::Plain => "plain",
-            Self::Compact => "compact",
-            Self::Grouped => "grouped",
         }
     }
 }
@@ -133,6 +120,7 @@ pub fn render(messages: &MessageBuffer, request: &MessageRequest) -> String {
 }
 
 impl MessageBuffer {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }

@@ -165,7 +165,7 @@ theme.name = "dracula"
         .clone();
 
     let payload = parse_json_stdout(&output.stdout);
-    assert_eq!(payload["value"], osp_cli::ui::DEFAULT_THEME_NAME);
+    assert_eq!(payload["value"], osp_cli::ui::RenderSettings::default().theme_name);
     assert_eq!(payload["source"], "defaults");
     assert!(
         output.stderr.is_empty(),

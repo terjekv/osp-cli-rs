@@ -59,7 +59,7 @@ impl SectionFrameStyle {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::ui::section_chrome::SectionFrameStyle;
+    /// use osp_cli::ui::SectionFrameStyle;
     ///
     /// assert_eq!(SectionFrameStyle::parse("rules"), Some(SectionFrameStyle::TopBottom));
     /// assert_eq!(SectionFrameStyle::parse("boxed"), Some(SectionFrameStyle::Square));
@@ -126,7 +126,7 @@ impl SectionStyleTokens {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::ui::section_chrome::SectionStyleTokens;
     /// use osp_cli::ui::style::StyleToken;
     ///
@@ -254,7 +254,7 @@ pub fn render_section_divider(title: &str, request: &SectionDividerRequest<'_>) 
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::ui::section_chrome::{
 ///     SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
 ///     render_section_block_with_overrides,
@@ -575,6 +575,46 @@ fn section_body_lines(body: &str) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn render_internal_example_1() {
+        use crate::ui::section_chrome::SectionStyleTokens;
+        use crate::ui::style::StyleToken;
+
+        let tokens = SectionStyleTokens::same(StyleToken::PanelTitle);
+
+        assert_eq!(tokens.border, StyleToken::PanelTitle);
+        assert_eq!(tokens.title, StyleToken::PanelTitle);
+    }
+
+    #[test]
+    fn render_internal_example_2() {
+        use crate::ui::section_chrome::{
+            SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
+            render_section_block_with_overrides,
+        };
+        use crate::ui::style::{StyleOverrides, StyleToken};
+        use crate::ui::theme::resolve_theme;
+
+        let theme = resolve_theme("plain");
+        let rendered = render_section_block_with_overrides(
+            "Errors",
+            "- bad",
+            SectionFrameStyle::TopBottom,
+            false,
+            Some(18),
+            SectionRenderContext {
+                color: false,
+                theme: &theme,
+                style_overrides: &StyleOverrides::default(),
+            },
+            SectionStyleTokens::same(StyleToken::MessageError),
+        );
+
+        assert!(rendered.contains("Errors"));
+        assert!(rendered.contains("- bad"));
+    }
+
     use super::{
         SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
         render_section_block_with_overrides, render_section_divider,

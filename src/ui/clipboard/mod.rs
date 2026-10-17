@@ -104,6 +104,7 @@ impl ClipboardService {
     }
 
     /// Enables or disables OSC 52 before falling back to external commands.
+    #[cfg(test)]
     pub fn with_osc52(mut self, enabled: bool) -> Self {
         self.prefer_osc52 = enabled;
         self

@@ -943,3 +943,47 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
 }
 
 mod integration;
+
+#[path = "../../tests/support/output.rs"]
+mod output_support;
+#[test]
+fn contextual_messages_preserve_event_order_and_theme_controls() {
+    use crate::core::MessageLevel;
+    use crate::ui::messages::MessageBuffer;
+    let mut messages = MessageBuffer::new();
+    messages.warning("Task still running.");
+    messages.push_titled(
+        MessageLevel::Error,
+        "Host lookup failed",
+        "No matching host found.",
+    );
+    let mut settings = RenderSettings {
+        theme_name: "dracula".into(),
+        color: ColorMode::Always,
+        unicode: UnicodeMode::Always,
+        width: Some(72),
+        chrome_frame: crate::ui::SectionFrameStyle::TopBottom,
+        ruled_section_policy: crate::ui::RuledSectionPolicy::PerSection,
+        ..Default::default()
+    };
+    let rendered = crate::ui::render_messages(
+        &messages,
+        &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),
+    );
+    let plain = crate::ui::tests::output_support::strip_ansi(&rendered);
+    assert!(plain.find("Warning").unwrap() < plain.find("Host lookup failed").unwrap());
+    assert!(!plain.contains("Errors") && !plain.contains("Warnings"));
+    assert!(rendered.contains("\x1b[38;2;241;250;140m"));
+    assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
+    assert!(rendered.contains("\x1b[38;2;248;248;242m  No matching host found."));
+    settings.color = ColorMode::Never;
+    settings.unicode = UnicodeMode::Never;
+    let uncolored = crate::ui::render_messages(
+        &messages,
+        &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),
+    );
+    assert!(uncolored.contains("Host lookup failed") && !uncolored.contains('\x1b'));
+}
+
+#[path = "tests/guide.rs"]
+mod guide;

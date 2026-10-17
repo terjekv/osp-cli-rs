@@ -5,18 +5,17 @@ use crate::ui::theme::ThemeDefinition;
 /// Semantic style tokens used across the UI pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleToken {
-    None,
     Trace,
     Info,
     Warning,
     Error,
     Success,
     Border,
+    #[cfg(test)]
     PanelBorder,
     PanelTitle,
     Key,
     TableHeader,
-    MregKey,
     JsonKey,
     Text,
     Muted,
@@ -24,7 +23,6 @@ pub enum StyleToken {
     PromptText,
     PromptCommand,
     Value,
-    Number,
     ValueNumber,
     BoolTrue,
     BoolFalse,
@@ -36,7 +34,6 @@ pub enum StyleToken {
     MessageWarning,
     MessageSuccess,
     MessageInfo,
-    MessageTrace,
     Punctuation,
 }
 
@@ -131,7 +128,7 @@ pub fn apply_style_with_theme_overrides(
     theme: &ThemeDefinition,
     overrides: &StyleOverrides,
 ) -> String {
-    if !color || text.is_empty() || matches!(token, StyleToken::None) {
+    if !color || text.is_empty() {
         return text.to_string();
     }
 
@@ -149,11 +146,9 @@ pub fn style_spec<'a>(
     }
 
     match token {
-        StyleToken::None => "",
-        StyleToken::Trace
-        | StyleToken::Border
-        | StyleToken::PanelBorder
-        | StyleToken::MessageTrace => theme.palette.border.as_str(),
+        #[cfg(test)]
+        StyleToken::PanelBorder => theme.palette.border.as_str(),
+        StyleToken::Trace | StyleToken::Border => theme.palette.border.as_str(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Null | StyleToken::Punctuation => {
             theme.palette.muted.as_str()
         }
@@ -165,15 +160,14 @@ pub fn style_spec<'a>(
         }
         StyleToken::PanelTitle => theme.palette.title.as_str(),
         StyleToken::Code => theme.palette.accent.as_str(),
-        StyleToken::Key | StyleToken::TableHeader | StyleToken::MregKey | StyleToken::JsonKey => {
+        StyleToken::Key | StyleToken::TableHeader | StyleToken::JsonKey => {
             theme.palette.accent.as_str()
         }
         StyleToken::Text | StyleToken::PromptText | StyleToken::Value => {
             theme.palette.text.as_str()
         }
         // Literal data shares one colour; red and green stay for status.
-        StyleToken::Number
-        | StyleToken::ValueNumber
+        StyleToken::ValueNumber
         | StyleToken::BoolTrue
         | StyleToken::BoolFalse
         | StyleToken::Ipv4
@@ -183,8 +177,8 @@ pub fn style_spec<'a>(
 
 fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> {
     match token {
-        StyleToken::None | StyleToken::PromptCommand => None,
-        StyleToken::Trace | StyleToken::MessageTrace => overrides
+        StyleToken::PromptCommand => None,
+        StyleToken::Trace => overrides
             .message_trace
             .as_deref()
             .or(overrides.panel_border.as_deref()),
@@ -195,14 +189,15 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
             .as_deref()
             .or(overrides.panel_border.as_deref()),
         StyleToken::Success | StyleToken::MessageSuccess => overrides.message_success.as_deref(),
-        StyleToken::Border | StyleToken::PanelBorder => overrides.panel_border.as_deref(),
+        #[cfg(test)]
+        StyleToken::PanelBorder => overrides.panel_border.as_deref(),
+        StyleToken::Border => overrides.panel_border.as_deref(),
         StyleToken::PanelTitle => overrides.panel_title.as_deref(),
         StyleToken::Key => overrides.key.as_deref(),
         StyleToken::TableHeader => overrides
             .table_header
             .as_deref()
             .or(overrides.key.as_deref()),
-        StyleToken::MregKey => overrides.mreg_key.as_deref().or(overrides.key.as_deref()),
         StyleToken::JsonKey => overrides.json_key.as_deref().or(overrides.key.as_deref()),
         StyleToken::Text => overrides.text.as_deref(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Punctuation => {
@@ -212,7 +207,7 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
         StyleToken::Value | StyleToken::PromptText => {
             overrides.value.as_deref().or(overrides.text.as_deref())
         }
-        StyleToken::Number | StyleToken::ValueNumber => overrides.number.as_deref(),
+        StyleToken::ValueNumber => overrides.number.as_deref(),
         StyleToken::BoolTrue => overrides
             .bool_true
             .as_deref()

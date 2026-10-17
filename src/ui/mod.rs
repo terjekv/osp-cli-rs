@@ -34,12 +34,12 @@
 
 use std::borrow::Cow;
 
-pub mod clipboard;
-pub mod messages;
-pub mod section_chrome;
-pub mod style;
-pub mod theme;
-pub mod theme_catalog;
+pub(crate) mod clipboard;
+pub(crate) mod messages;
+pub(crate) mod section_chrome;
+pub(crate) mod style;
+pub(crate) mod theme;
+pub(crate) mod theme_catalog;
 
 mod chrome;
 mod doc;
@@ -54,21 +54,29 @@ use crate::core::output::OutputFormat;
 use crate::core::output_model::{DisplayRule, OutputResult};
 
 pub(crate) use lower::json_value;
-pub use messages::{MessageRequest, render as render_messages};
+pub(crate) use messages::{MessageRequest, render as render_messages};
 pub(crate) use plan::plan_output;
-pub use settings::RenderBackend;
+pub use section_chrome::{RuledSectionPolicy, SectionFrameStyle};
+pub(crate) use settings::RenderBackend;
+#[cfg(test)]
+use settings::resolve_settings;
 #[allow(unused_imports)]
 pub use settings::{
-    HelpLayout, PresentationEffect, RenderProfile, RenderRuntime, RenderSettings,
-    ResolvedRenderSettings, TableBorderOverride, TableBorderStyle, TableOverflow, UiPresentation,
-    help_layout_from_config, resolve_settings,
+    HelpLayout, RenderProfile, RenderRuntime, RenderSettings, TableBorderOverride,
+    TableBorderStyle, TableOverflow, UiPresentation,
 };
-pub(crate) use settings::{build_presentation_defaults_layer, explain_presentation_effect};
-pub use style::{StyleOverrides, StyleToken, ThemeStyler};
+pub(crate) use settings::{
+    ResolvedRenderSettings, build_presentation_defaults_layer, explain_presentation_effect,
+    help_layout_from_config,
+};
+pub use style::StyleOverrides;
+#[cfg(test)]
+pub(crate) use style::ThemeStyler;
 pub(crate) use text::{
     crop_display_width, display_width, sanitize_human_text, visible_inline_text,
 };
-pub use theme::DEFAULT_THEME_NAME;
+#[cfg(test)]
+pub(crate) use theme::DEFAULT_THEME_NAME;
 
 const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
 

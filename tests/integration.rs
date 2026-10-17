@@ -7,14 +7,8 @@ mod temp_support;
 #[path = "integration/app/mod.rs"]
 mod app;
 
-#[path = "integration/dsl/mod.rs"]
-mod dsl;
-
 #[path = "integration/embedding_workflow.rs"]
 mod embedding_workflow;
-
-#[path = "integration/guide_ui.rs"]
-mod guide_ui;
 
 #[path = "integration/repl/mod.rs"]
 mod repl;
