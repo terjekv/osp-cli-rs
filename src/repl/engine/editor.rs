@@ -290,7 +290,10 @@ fn probe_cursor_position_reports() -> bool {
     use std::mem::MaybeUninit;
     use std::os::fd::AsRawFd;
 
-    const CURSOR_PROBE_TIMEOUT: Duration = Duration::from_millis(75);
+    // Matches crossterm's own position() wait: over SSH the reply can take
+    // well over 100 ms, and a too-short probe both picks basic input wrongly
+    // and lets the late reply echo into the prompt.
+    const CURSOR_PROBE_TIMEOUT: Duration = Duration::from_millis(2000);
 
     struct RawModeGuard {
         fd: i32,
