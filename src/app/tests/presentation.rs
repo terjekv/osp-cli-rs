@@ -165,4 +165,7 @@ fn sensitive_key_detection_handles_common_variants_unit() {
     assert!(is_sensitive_key("bearer_token"));
     assert!(!is_sensitive_key("ui.keybinding"));
     assert!(!is_sensitive_key("monkey.business"));
+    // `config get` output labels the config key's name `key`.
+    assert!(!is_sensitive_key("key"));
+    assert!(is_sensitive_key("ssh.key"));
 }

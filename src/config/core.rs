@@ -1716,7 +1716,9 @@ pub fn is_sensitive_key(key: &str) -> bool {
         || normalized.contains("jwt")
         || normalized.contains("cookie")
         || normalized.contains("authorization")
-        || normalized.split('_').any(|part| part == "key")
+        // A bare `key` field names something (`config get` prints `key: theme.name`);
+        // `api_key`, `ssh_key` and `foo.key` hold key material.
+        || (normalized != "key" && normalized.split('_').any(|part| part == "key"))
         || normalized.ends_with(".key")
 }
 
