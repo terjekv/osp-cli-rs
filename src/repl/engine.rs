@@ -70,6 +70,8 @@ use session::evaluate_repl_submission;
 use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";
+const HOST_COMMAND_LAST_ARGUMENT: &str = "\0osp-repl-last-argument";
+const HOST_COMMAND_PREVIOUS_ARGUMENT: &str = "\0osp-repl-previous-argument";
 const HOST_COMMAND_HISTORY_PICKER: &str = "\u{0}osp-repl-history-picker";
 /// Page keys leave reedline through private host commands so they can step
 /// paginated results with an empty line and edit normally otherwise.

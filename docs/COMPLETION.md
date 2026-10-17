@@ -137,6 +137,11 @@ matched text. Equal scores retain newest-first order. Inside a shell it searches
 commands in that shell without their stored prefix; Ctrl-R again searches all
 history. Enter runs the selection and Tab puts it back in the editor.
 
+Alt+. inserts the previous command's last shell word at the cursor, preserving
+quotes and escapes. Consecutive presses replace that insertion with the last
+word from successively older entries; any other key ends the cycle. Inside a
+shell it uses the same scoped, prefix-free history as Up-arrow and Ctrl-R.
+
 Supported expansions:
 
 - `!!`

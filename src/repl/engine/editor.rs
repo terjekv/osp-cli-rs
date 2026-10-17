@@ -16,7 +16,10 @@ use reedline::{
     PromptHistorySearchStatus, ReedlineEvent, ReedlineRawEvent,
 };
 
-use super::{PromptRightRenderer, ReplInputMode, ReplTabMode};
+use super::{
+    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer, ReplInputMode,
+    ReplTabMode,
+};
 use crate::repl::menu::SharedCompletionMenu;
 
 /// The input line and cursor as reedline last painted them.
@@ -58,6 +61,7 @@ pub(crate) struct AutoCompleteEmacs {
     painted: PaintedLine,
     painted_revision: u64,
     pending_word_len: Option<usize>,
+    last_argument: bool,
 }
 
 impl AutoCompleteEmacs {
@@ -75,6 +79,7 @@ impl AutoCompleteEmacs {
             painted,
             painted_revision,
             pending_word_len: Some(pending_word_len),
+            last_argument: false,
         }
     }
 
@@ -170,6 +175,23 @@ impl EditMode for AutoCompleteEmacs {
     fn parse_event(&mut self, event: ReedlineRawEvent) -> ReedlineEvent {
         let word_len = self.sync_painted_word_len();
         let parsed = self.inner.parse_event(event);
+        if matches!(&parsed, ReedlineEvent::ExecuteHostCommand(name) if name == HOST_COMMAND_LAST_ARGUMENT)
+        {
+            let command = if self.last_argument {
+                HOST_COMMAND_PREVIOUS_ARGUMENT
+            } else {
+                HOST_COMMAND_LAST_ARGUMENT
+            };
+            self.last_argument = true;
+            self.pending_word_len = None;
+            return ReedlineEvent::Multiple(vec![
+                ReedlineEvent::Esc,
+                ReedlineEvent::ExecuteHostCommand(command.to_string()),
+            ]);
+        }
+        if !matches!(parsed, ReedlineEvent::Resize(..)) {
+            self.last_argument = false;
+        }
         // Selection moves become buffer edits here, before reedline paints;
         // see `OspCompletionMenu::navigate`.
         if let Some(commands) =

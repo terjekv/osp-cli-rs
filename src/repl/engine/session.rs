@@ -7,8 +7,9 @@ use super::editor::{
 use super::hint::ReplHinter;
 use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
 use super::{
-    COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_PAGE_NEXT,
-    HOST_COMMAND_PAGE_PREVIOUS, SharedHistory,
+    COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_LAST_ARGUMENT,
+    HOST_COMMAND_PAGE_NEXT, HOST_COMMAND_PAGE_PREVIOUS, HOST_COMMAND_PREVIOUS_ARGUMENT,
+    SharedHistory,
 };
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
@@ -196,6 +197,7 @@ where
     B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
 {
     crate::startup_trace::begin_first_prompt();
+    let mut last_argument = None;
     loop {
         // Keys typed during the startup probe: run lines finished with Enter
         // as if submitted, and leave an unfinished line in the editor.
@@ -229,6 +231,19 @@ where
                 }
             }
         };
+
+        if let Signal::Success(command) = &signal
+            && matches!(
+                command.as_str(),
+                HOST_COMMAND_LAST_ARGUMENT | HOST_COMMAND_PREVIOUS_ARGUMENT
+            )
+        {
+            if command == HOST_COMMAND_LAST_ARGUMENT {
+                last_argument = None;
+            }
+            insert_last_argument(editor, history_store, &mut last_argument)?;
+            continue;
+        }
 
         crate::repl::notices::begin_foreground();
         let result =
@@ -324,6 +339,11 @@ fn build_repl_keybindings() -> reedline::Keybindings {
         KeyCode::Char('r'),
         ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_HISTORY_PICKER.to_string()),
     );
+    keybindings.add_binding(
+        KeyModifiers::ALT,
+        KeyCode::Char('.'),
+        ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_LAST_ARGUMENT.to_string()),
+    );
     // Step through paginated results in both directions without retyping
     // `prev` / `next`, which any other command would otherwise reset.
     for (modifiers, previous, next) in [
@@ -342,6 +362,63 @@ fn build_repl_keybindings() -> reedline::Keybindings {
         );
     }
     keybindings
+}
+
+struct LastArgument {
+    next_entry: usize,
+    inserted: std::ops::Range<usize>,
+}
+
+fn insert_last_argument(
+    editor: &mut Reedline,
+    history: &SharedHistory,
+    cycle: &mut Option<LastArgument>,
+) -> Result<()> {
+    let cursor = editor.current_insertion_point();
+    let cycle = cycle.get_or_insert(LastArgument {
+        next_entry: 0,
+        inserted: cursor..cursor,
+    });
+    let entries = history
+        .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+        .map_err(anyhow::Error::msg)?;
+    let Some(entry) = entries.iter().rev().nth(cycle.next_entry) else {
+        return Ok(());
+    };
+    let Some(argument) = last_shell_word(&entry.command) else {
+        return Ok(());
+    };
+    editor.run_edit_commands(&[
+        EditCommand::MoveToPosition {
+            position: cycle.inserted.start,
+            select: false,
+        },
+        EditCommand::MoveToPosition {
+            position: cycle.inserted.end,
+            select: true,
+        },
+        EditCommand::InsertString(argument.to_string()),
+    ]);
+    cycle.inserted.end = cycle.inserted.start + argument.len();
+    cycle.next_entry += 1;
+    Ok(())
+}
+
+fn last_shell_word(line: &str) -> Option<&str> {
+    use crate::core::shell_words::{LexEventKind, scan_shell};
+
+    let mut start = None;
+    let mut last = None;
+    // Keep the original quotes and escapes so inserting the word preserves it.
+    scan_shell(line, |event| {
+        if event.kind == LexEventKind::Separator {
+            start = None;
+        } else {
+            let start = *start.get_or_insert(event.index);
+            last = Some(start..event.end);
+        }
+    });
+    last.map(|span| &line[span])
 }
 
 fn handle_interactive_signal<F>(
