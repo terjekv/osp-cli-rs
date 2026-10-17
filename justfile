@@ -60,6 +60,12 @@ startup-gate:
 startup-baseline:
     python3 ./scripts/confidence.py --check startup-baseline
 
+confidence-perf:
+    python3 ./scripts/confidence.py perf
+
+perf-baseline:
+    python3 ./scripts/confidence.py --check perf-baseline
+
 check:
     python3 ./scripts/confidence.py local
 

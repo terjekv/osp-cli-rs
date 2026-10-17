@@ -255,6 +255,11 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         description="Check release startup latency and binary size budgets.",
         command=[python, str(root / "scripts" / "release-budget.py")],
     )
+    perf = ConfidenceCheck(
+        name="perf",
+        description="Check release syscall, instruction and startup-phase budgets.",
+        command=[python, str(root / "scripts" / "perf.py")],
+    )
 
     static_checks = [contract_env, fmt, clippy, architecture]
     behavior_checks = [contracts, integration]
@@ -371,6 +376,22 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
                 startup_budget,
             ],
         ),
+        "perf": ConfidenceLane(
+            name="perf",
+            description=(
+                "Performance budgets: disk syncs, writes, execs and connects; instructions; startup phases."
+            ),
+            covers=(
+                "exact syscall budgets per scenario (strace)",
+                "instruction budgets against committed baselines (cachegrind)",
+                "loose startup-phase time limits",
+            ),
+            omits=(
+                "behavior and output correctness",
+                "UiO product scenarios (run scripts/check.py perf in the product checkout)",
+            ),
+            checks=[build, perf],
+        ),
         "pre-push": ConfidenceLane(
             name="pre-push",
             description=(
@@ -439,6 +460,9 @@ def check_catalog(root: Path, cwd: Path | None = None) -> dict[str, ConfidenceCh
         ("startup-baseline", "Capture an intentional release quality baseline.", [
             python, str(root / "scripts" / "release-budget.py"), "--baseline",
         ]),
+        ("perf-baseline", "Record this machine's instruction baselines for the perf lane.", [
+            python, str(root / "scripts" / "perf.py"), "--record",
+        ]),
         ("publish-dry-run", "Verify the packaged crate without publication.", [
             "cargo", "publish", "--dry-run", "--locked",
             "--target-dir", str(root / "target" / "publish-dry-run"),
@@ -460,6 +484,8 @@ def required_tools(checks: list[ConfidenceCheck], root: Path) -> set[str]:
         "public-api-examples": set(),
         "startup-budget": set(),
         "startup-baseline": set(),
+        "perf": set(),
+        "perf-baseline": set(),
         "fmt": {"cargo", "rustfmt"},
         "fmt-fix": {"cargo", "rustfmt"},
         "clippy": {"cargo", "clippy"},

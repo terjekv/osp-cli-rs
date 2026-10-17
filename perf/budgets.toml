@@ -1,0 +1,66 @@
+# Performance budgets checked by `scripts/perf.py`; see docs/TESTING.md.
+
+[gates]
+instructions_percent = 5        # per measured scenario, against perf/baselines
+instructions_total_percent = 3  # sum over measured scenarios
+phase_ms = 200                  # min-of-5 duration of any startup phase
+total_ms = 500                  # min-of-5 one-shot total or REPL first prompt
+
+# Each scenario runs once unmeasured in a fresh hermetic home, so these exact
+# counts describe a warm second start. Scenarios override what they persist.
+[defaults]
+fixture = "plugins"
+syncs = 0
+persistent_writes = 0
+execs = 0
+remote_connects = 0
+
+[scenarios.help]
+argv = ["--help"]
+measure = true
+
+[scenarios.theme-list]
+argv = ["theme", "list"]
+measure = true
+
+[scenarios.config-get]
+argv = ["config", "get", "extensions.plugins.timeout_ms"]
+
+[scenarios.dsl-pipeline]
+argv = ["rows", "|", "F", "team=core", "|", "S", "cpus", "desc", "name", "|", "P", "name,cpus"]
+execs = 1  # the plugin itself
+measure = true
+
+[scenarios.repl-exit]
+repl_keys = ["exit\r"]
+measure = true
+
+# Tab on an empty line completes from the full command tree; Ctrl-C clears it.
+# Each entry is typed after the next prompt or menu paint.
+[scenarios.repl-completion]
+repl_keys = ["\t", "\u0003", "exit\r"]
+measure = true
+
+# A first start describes the plugin and saves the metadata cache: one plugin
+# exec, then a synced atomic write (two cache directories, temp file, rename;
+# file and directory sync).
+[scenarios.plugin-describe-cold]
+argv = ["--help"]
+warm = false
+execs = 1
+syncs = 2
+persistent_writes = 4
+
+# Each new history entry is saved atomically (lock, temp file, rename) without
+# forcing a disk sync. The commands alternate so the warm run's entries are not
+# deduplicated away.
+[scenarios.repl-history]
+repl_keys = ["theme list\r", "config get debug.level\r", "exit\r"]
+persistent_writes = 6
+
+# A saved setting takes the config lock and replaces the file atomically with
+# file and directory syncs.
+[scenarios.config-set]
+argv = ["config", "set", "ui.format", "json"]
+syncs = 2
+persistent_writes = 3

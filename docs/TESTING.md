@@ -98,6 +98,43 @@ does not rebuild the CLI, inspect the package paths in `target/debug/.fingerprin
 Run `cargo clean --package osp-cli`, then rebuild and rerun the affected check.
 This removes the crate's artifacts while retaining dependency builds.
 
+## Performance budgets
+
+The `perf` lane builds the release binary and runs `scripts/perf.py`. It is
+not part of `local`, `pre-push` or `full`; run it when a change can affect
+startup, persistence or a hot path:
+
+```bash
+python3 scripts/confidence.py perf
+python3 scripts/perf.py --layer syscalls help   # one layer or scenario
+```
+
+`perf/budgets.toml` declares the scenarios and their limits. Each scenario
+runs once unmeasured in a fresh hermetic home, then:
+
+- under `strace` it must match exact counts of disk syncs, persistent writes
+  outside its temporary directory, child execs and non-loopback connects.
+  Read-only scenarios allow none; commands that persist declare their counts.
+  A failure names the scenario, budget and offending syscalls.
+- scenarios with `measure = true` run under cachegrind. Total instructions may
+  rise 5% per scenario and 3% in total over the committed baseline for this
+  CPU and toolchain in `perf/baselines/<partition>/`. Repeated runs differ by
+  about 0.01%.
+- the same scenarios report `OSP_TRACE_STARTUP=json` phases as the minimum of
+  five runs. Only gross stalls fail: a phase over 200 ms or a total over 500 ms.
+
+The lane needs Linux `strace` and `valgrind`; a missing tool skips its layer
+with a printed `SKIPPED` notice. A missing baseline for this machine fails.
+After an intended change, or on a new machine or toolchain, record baselines
+and commit them; that commit is the deliberate acceptance of the new cost:
+
+```bash
+python3 scripts/confidence.py --check build
+python3 scripts/confidence.py --check perf-baseline
+```
+
+The UiO product runs its own scenarios with `python3 scripts/check.py perf`.
+
 ## Snapshots and public examples
 
 Use `cargo insta review` to review intentional output changes. Keep snapshots
