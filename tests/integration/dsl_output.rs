@@ -1,6 +1,7 @@
 use osp_cli::core::{OutputDocument, OutputItems, OutputResult};
 use osp_cli::dsl::apply_output_pipeline;
 use osp_cli::row;
+use osp_cli::ui::{RenderRequest, RenderSettings, render};
 use serde_json::json;
 
 fn pipeline(output: OutputResult, stages: &[&str]) -> OutputResult {
@@ -261,7 +262,50 @@ fn scoped_quick_search_keeps_complete_matching_document_members() {
         let output = pipeline(input, &[stage]);
         assert_eq!(
             serde_json::to_value(output.as_rows().unwrap()).unwrap(),
-            json!([document])
+            json!([{"commands":[{"name":"doctor", "about":"diagnostics"}]}]),
+            "{stage}"
         );
+    }
+}
+
+#[test]
+fn single_account_quick_search_renders_matching_names_values_and_list_items() {
+    let account = json!({
+        "uid": "oistes",
+        "uioAffiliation": ["employee", "staff"],
+        "uioPrimaryAffiliation": "ANSATT@373034",
+        "uioPersonScopedAffiliation": ["employee@uio.no", "member@example.org"],
+        "netgroups": ["it-uio-azure-users", "los-alle", "mattermost-uio", "uio-ans", "usit"],
+        "dn": "uid=oistes,cn=users,dc=uio,dc=no"
+    });
+    let expected = json!([{
+        "uioAffiliation": ["employee", "staff"],
+        "uioPrimaryAffiliation": "ANSATT@373034",
+        "uioPersonScopedAffiliation": ["employee@uio.no", "member@example.org"],
+        "netgroups": ["it-uio-azure-users", "mattermost-uio", "uio-ans"],
+        "dn": "uid=oistes,cn=users,dc=uio,dc=no"
+    }]);
+    for document in [false, true] {
+        let mut input = OutputResult::from_rows(vec![account.as_object().unwrap().clone()]);
+        input.meta.display_columns = Some(vec!["uid".into()]);
+        if document {
+            input = input.with_document(OutputDocument::Json(account.clone()));
+        }
+        let output = pipeline(input, &["uio"]);
+        let mut settings = RenderSettings::test_plain(osp_cli::core::OutputFormat::Json);
+        settings.format_explicit = true;
+        let rendered = render(&output, &RenderRequest::new(&settings));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&rendered).unwrap(),
+            expected
+        );
+
+        settings.format = osp_cli::core::OutputFormat::Mreg;
+        settings.width = Some(120);
+        let rendered = render(&output, &RenderRequest::new(&settings));
+        for item in ["it-uio-azure-users", "mattermost-uio", "uio-ans", "dc=uio"] {
+            assert!(rendered.contains(item), "{rendered}");
+        }
+        assert!(rendered.contains("netgroups (3)"), "{rendered}");
     }
 }

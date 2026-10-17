@@ -300,7 +300,8 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
                     "--json",
                     "provision",
                     "|",
-                    "task-42"
+                    "F",
+                    "task_id=task-42"
                 ],
                 &mut sink
             )

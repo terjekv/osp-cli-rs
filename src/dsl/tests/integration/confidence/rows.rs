@@ -174,7 +174,7 @@ fn nested_single_rows_keep_matching_fields_when_descendant_matches() {
         rows,
         vec![row(json!({
             "title": "Deploy Reference",
-            "commands": [{"name": "deploy"}]
+            "commands": [{"name": "deploy", "summary": "Roll out service", "owner": "platform"}]
         }))]
     );
 }

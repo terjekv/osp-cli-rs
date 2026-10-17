@@ -176,8 +176,8 @@ fn output_pipeline_narrows_quick_and_filters_nested_single_record_documents_unit
         (
             "primary",
             json!({"siteadmins": {
-                "current": [{"role": "primary"}],
-                "expired": [{"role": "primary"}]
+                "current": [{"contact": "iti-ops@usit.uio.no", "role": "primary", "hosts": 242}],
+                "expired": [{"contact": "iti-ssd@usit.uio.no", "role": "primary", "hosts": 3}]
             }}),
         ),
         ("F role=primary", output_items_to_value(&output.items)),
