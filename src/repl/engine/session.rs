@@ -13,6 +13,7 @@ use super::{
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
 use crate::repl::menu::SharedCompletionMenu;
+use crate::ui::prompt::PendingLine;
 use anyhow::Result;
 use nu_ansi_term::{Color, Style};
 use reedline::{
@@ -195,7 +196,13 @@ where
         // Keys typed during the startup probe: run lines finished with Enter
         // as if submitted, and leave an unfinished line in the editor.
         let pending = crate::ui::prompt::take_pending_line();
-        let signal = if let Some((typed, true)) = pending {
+        let signal = if matches!(pending, Some(PendingLine::Eof)) {
+            Signal::CtrlD
+        } else if let Some(PendingLine::Typed {
+            text: typed,
+            terminated: true,
+        }) = pending
+        {
             println!("{}{}{typed}", prompt.left(), prompt.indicator());
             submission
                 .history_store
@@ -203,7 +210,7 @@ where
                 .map_err(anyhow::Error::msg)??;
             Signal::Success(typed)
         } else {
-            if let Some((typed, _)) = pending {
+            if let Some(PendingLine::Typed { text: typed, .. }) = pending {
                 editor.run_edit_commands(&[EditCommand::InsertString(typed)]);
             }
             match read_signal(editor) {
@@ -246,7 +253,7 @@ where
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;
         if read == 0 {
-            return Ok(ReplResult::Exit(0));
+            return (submission.execute)(crate::repl::ReplEvent::Eof, submission.history_store);
         }
 
         submission
@@ -439,7 +446,10 @@ where
             evaluate_repl_submission(&line, submission),
             Some(editor),
         )),
-        Signal::CtrlD => Ok(Some(ReplResult::Exit(0))),
+        Signal::CtrlD => {
+            submission.root_input = false;
+            (submission.execute)(crate::repl::ReplEvent::Eof, history_store).map(Some)
+        }
         Signal::CtrlC => {
             submission.root_input = false;
             Ok(None)
@@ -568,6 +578,9 @@ mod tests {
         let executed = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&executed);
         let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+            if event == crate::repl::ReplEvent::Eof {
+                return Ok(ReplResult::Exit(0));
+            }
             let crate::repl::ReplEvent::Line(line) = event else {
                 unreachable!()
             };

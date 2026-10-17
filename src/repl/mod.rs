@@ -69,6 +69,7 @@ mod tests {
 
             let _result = run_repl(config, |line, _history| -> Result<ReplResult> {
                 match line {
+                    crate::repl::ReplEvent::Eof => Ok(ReplResult::Exit(0)),
                     crate::repl::ReplEvent::Line(line) | crate::repl::ReplEvent::RootLine(line) => {
                         match line.trim() {
                             "exit" | "quit" => Ok(ReplResult::Exit(0)),

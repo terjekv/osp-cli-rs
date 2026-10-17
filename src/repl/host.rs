@@ -103,6 +103,9 @@ fn run_repl_cycle(
 
     run_repl(cycle.run_config, |event, history| {
         let line = match event {
+            crate::repl::ReplEvent::Eof => {
+                return Ok(dispatch::handle_repl_exit_request(&mut state.session));
+            }
             crate::repl::ReplEvent::Line(line) => line,
             crate::repl::ReplEvent::RootLine(line) => {
                 history

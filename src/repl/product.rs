@@ -3,6 +3,8 @@
 /// Input dispatched by the editor to its host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplEvent<'a> {
+    /// End of input; the host leaves the current shell or exits at root.
+    Eof,
     /// A user-submitted line, with ordinary history and shell semantics.
     Line(&'a str),
     /// A line selected from global history, executed outside the current shell.
