@@ -244,6 +244,16 @@ fn relaxed(command: Command) -> Command {
         .mut_subcommands(relaxed)
 }
 
+fn parsed_leaf(command: &Command, args: &[String]) -> Result<clap::ArgMatches, clap::Error> {
+    let mut matches = relaxed(command.clone()).try_get_matches_from(
+        std::iter::once(command.get_name().to_string()).chain(args.iter().cloned()),
+    )?;
+    while let Some((_, child)) = matches.remove_subcommand() {
+        matches = child;
+    }
+    Ok(matches)
+}
+
 /// Resolves entity arguments from a command declaration in a REPL session.
 pub fn resolve(
     command: Command,
@@ -270,7 +280,6 @@ pub fn resolve(
     };
     let mut leaf = &command;
     let mut selected = &matches;
-    let mut offset = 0;
     loop {
         if let Some(contract) = leaf.get::<ContextContract>() {
             result.contract.consumes.extend(contract.consumes.clone());
@@ -282,9 +291,6 @@ pub fn resolve(
         let Some(next) = leaf.find_subcommand(name) else {
             break;
         };
-        if let Some(index) = args[offset..].iter().position(|a| a == name) {
-            offset += index + 1;
-        }
         leaf = next;
         selected = child;
     }
@@ -315,12 +321,28 @@ pub fn resolve(
         if explicit.iter().any(|v| v == ".") {
             let value = current
                 .ok_or_else(|| anyhow::anyhow!("No current {}; specify a value", consume.kind))?;
-            // Clap indices restart at each subcommand; flags also occupy an index.
-            for index in selected.indices_of(id).into_iter().flatten() {
-                if let Some(arg) = result.args.get_mut(offset + index - 1)
-                    && arg == "."
-                {
-                    *arg = value.clone();
+            let mut marker = "__osp_context_value__".to_string();
+            while result.args.iter().any(|arg| arg.contains(&marker)) {
+                marker.push('_');
+            }
+            for index in 0..result.args.len() {
+                let token = &result.args[index];
+                if token != "." && !(token.starts_with('-') && token.ends_with('.')) {
+                    continue;
+                }
+                let prefix = &token[..token.len() - 1];
+                let mut probe = result.args.clone();
+                probe[index] = format!("{prefix}{marker}");
+                // Ask clap which argument owns this token; its indices also count
+                // attached option values and individual short flags.
+                if parsed_leaf(&command, &probe).ok().is_some_and(|matches| {
+                    matches
+                        .try_get_many::<String>(id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|mut values| values.any(|v| v == &marker))
+                }) {
+                    result.args[index] = format!("{prefix}{value}");
                     result.expanded = true;
                 }
             }
@@ -346,7 +368,7 @@ pub fn resolve(
             }
         }
     }
-    result.matches = selected.clone();
+    result.matches = parsed_leaf(&command, &result.args)?;
     Ok(result)
 }
 impl Resolution {

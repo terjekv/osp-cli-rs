@@ -7,6 +7,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- Expand context `.` values in attached options and short option groups, and
+  retain the expanded or filled invocation when producing context selections.
+
 - Merge persisted context changes under a file transaction so concurrent REPLs
   preserve other identities’ selections and use unique atomic writes.
 
