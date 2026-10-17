@@ -126,7 +126,7 @@ def run_cli(command: list[str], env: dict[str, str], cwd: Path, keys: list[str] 
     transcript = bytearray()
     deadline = time.monotonic() + timeout
     keys = list(keys)
-    raw_from = None
+    typed_from = 0
     last_output = time.monotonic()
     try:
         while True:
@@ -146,16 +146,17 @@ def run_cli(command: list[str], env: dict[str, str], cwd: Path, keys: list[str] 
                 for _ in range(chunk.count(b"\x1b[6n")):
                     os.write(master, b"\x1b[1;1R")
             # The editor's cursor-position queries read input and swallow keys
-            # typed meanwhile; it waits for input once a raw-mode paint (cursor
-            # shown) is followed by silence. Only sequencing depends on this.
-            if raw_from is None and not termios.tcgetattr(master)[3] & termios.ECHO:
-                raw_from = len(transcript)
+            # typed meanwhile; it waits for input once a paint (cursor shown)
+            # is followed by silence in raw mode. The paint can arrive before
+            # raw mode is observable, so it counts from the last key, not from
+            # raw-mode entry. Only sequencing depends on this.
             if (
-                keys and raw_from is not None and b"\x1b[?25h" in transcript[raw_from:]
+                keys and b"\x1b[?25h" in transcript[typed_from:]
                 and time.monotonic() - last_output > 0.3
+                and not termios.tcgetattr(master)[3] & termios.ECHO
             ):
                 os.write(master, keys.pop(0).encode())
-                raw_from = len(transcript)
+                typed_from = len(transcript)
     finally:
         os.close(master)
         returncode = child.wait(timeout=max(deadline - time.monotonic(), 1))

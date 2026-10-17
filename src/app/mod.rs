@@ -414,9 +414,7 @@ impl App {
         T: Into<OsString> + Clone,
     {
         crate::startup_trace::initialize();
-        let result = host::run_from_with_sink_and_app(args, sink, &self.definition);
-        crate::startup_trace::finish();
-        result
+        host::run_from_with_sink_and_app(args, sink, &self.definition)
     }
 
     /// Runs the application and converts execution failures into process exit
@@ -444,6 +442,7 @@ impl App {
         let mut sink = StdIoUiSink;
         sink::take_stdout_write_failure();
         let code = self.run_process_with_sink(args, &mut sink);
+        crate::startup_trace::finish();
         if sink::take_stdout_write_failure() && code == 0 {
             1
         } else {
@@ -593,7 +592,6 @@ impl App {
             elapsed_ms = started.elapsed().as_millis(),
             startup_ms = timing.parse.unwrap_or_default().as_millis(),
             command_ms = timing.execute.unwrap_or_default().as_millis(), "finished");
-        crate::startup_trace::finish();
         code
     }
 }
