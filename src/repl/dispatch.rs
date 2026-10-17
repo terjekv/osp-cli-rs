@@ -47,11 +47,10 @@ use command::{
 };
 #[cfg(test)]
 pub(crate) use shell::apply_repl_shell_prefix;
-pub(super) use shell::handle_repl_exit_request;
 #[cfg(test)]
 pub(crate) use shell::leave_repl_shell;
 #[cfg(test)]
-use shell::repl_help_for_scope;
+use shell::{handle_repl_exit_request, repl_help_for_scope};
 
 enum ReplLinePlan {
     Builtin {

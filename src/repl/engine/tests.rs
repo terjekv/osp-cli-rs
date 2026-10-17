@@ -810,9 +810,6 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     let executed = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&executed);
     let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
-        if event == crate::repl::ReplEvent::Eof {
-            return Ok(ReplResult::Exit(0));
-        }
         let crate::repl::ReplEvent::Line(line) = event else {
             unreachable!()
         };

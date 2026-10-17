@@ -253,7 +253,7 @@ where
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;
         if read == 0 {
-            return (submission.execute)(crate::repl::ReplEvent::Eof, submission.history_store);
+            return Ok(ReplResult::Exit(0));
         }
 
         submission
@@ -446,10 +446,7 @@ where
             evaluate_repl_submission(&line, submission),
             Some(editor),
         )),
-        Signal::CtrlD => {
-            submission.root_input = false;
-            (submission.execute)(crate::repl::ReplEvent::Eof, history_store).map(Some)
-        }
+        Signal::CtrlD => Ok(Some(ReplResult::Exit(0))),
         Signal::CtrlC => {
             submission.root_input = false;
             Ok(None)
@@ -578,9 +575,6 @@ mod tests {
         let executed = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&executed);
         let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
-            if event == crate::repl::ReplEvent::Eof {
-                return Ok(ReplResult::Exit(0));
-            }
             let crate::repl::ReplEvent::Line(line) = event else {
                 unreachable!()
             };

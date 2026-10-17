@@ -171,7 +171,7 @@ fn repl_help_result(
     )?))
 }
 
-pub(in crate::repl) fn handle_repl_exit_request(session: &mut AppSession) -> ReplResult {
+pub(super) fn handle_repl_exit_request(session: &mut AppSession) -> ReplResult {
     match session.request_repl_exit() {
         crate::app::session::ReplExitTransition::ExitRoot => ReplResult::Exit(0),
         crate::app::session::ReplExitTransition::LeftShell { frame } => ReplResult::Restart {
