@@ -1,8 +1,0 @@
----
-source: tests/contracts/plugins/dispatch.rs
-expression: sanitized
----
-- Command failed 
-  plugin boom exited with status 7: boom-from-stderr
-  Try: inspect the plugin stderr output or run osp plugins doctor
-------------
