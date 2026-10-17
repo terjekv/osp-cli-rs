@@ -27,7 +27,7 @@ pub(super) fn run(
         .themes
         .entries
         .values()
-        .map(|entry| entry.theme.clone())
+        .map(|entry| entry.theme.with_color_overrides(runtime.config.resolved()))
         .collect::<Vec<_>>();
     let labels = themes
         .iter()

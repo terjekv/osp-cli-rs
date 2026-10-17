@@ -346,7 +346,7 @@ fn render_settings(
     };
     settings.theme = themes
         .resolve(&settings.theme_name)
-        .map(|entry| entry.theme.clone());
+        .map(|entry| entry.theme.with_color_overrides(config));
     Ok(settings)
 }
 

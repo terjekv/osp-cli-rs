@@ -212,7 +212,7 @@ pub(crate) fn style_with_fg_bg(fg: Option<Color>, bg: Option<Color>) -> Style {
 /// ignored when selecting the effective color token.
 pub fn color_from_style_spec(spec: &str) -> Option<Color> {
     let token = extract_color_token(spec)?;
-    crate::ui::style::parse_color_token(&token.to_ascii_lowercase())
+    crate::core::style::parse_color_token(&token.to_ascii_lowercase())
 }
 
 fn extract_color_token(spec: &str) -> Option<&str> {

@@ -27,7 +27,11 @@ pub(crate) fn run_theme_command(
             preview::run(runtime, session, ui)
         }
         ThemeCommands::List => {
-            let rows = theme_list_rows(&runtime.themes, &ui.render_settings.theme_name);
+            let mut effective = runtime.themes.clone();
+            for entry in effective.entries.values_mut() {
+                entry.theme = entry.theme.with_color_overrides(runtime.config.resolved());
+            }
+            let rows = theme_list_rows(&effective, &ui.render_settings.theme_name);
             let mut output = rows_to_output_result(rows);
             output.meta.display_columns = Some(
                 [
@@ -49,6 +53,38 @@ pub(crate) fn run_theme_command(
                 crate::core::output::OutputFormat::Table,
             ));
             add_palette_styles(&mut output);
+            let overridden = crate::core::style::ColorRole::ALL
+                .into_iter()
+                .filter(|role| runtime.config.resolved().get(role.key()).is_some())
+                .collect::<Vec<_>>();
+            if !overridden.is_empty() {
+                for row in match &mut output.items {
+                    crate::core::output_model::OutputItems::Rows(rows) => rows,
+                    _ => unreachable!(),
+                } {
+                    row.insert(
+                        "overridden".into(),
+                        serde_json::json!(
+                            overridden
+                                .iter()
+                                .map(|role| (role.name(), true))
+                                .collect::<std::collections::BTreeMap<_, _>>()
+                        ),
+                    );
+                }
+                output
+                    .meta
+                    .display_rules
+                    .extend(overridden.iter().map(|role| DisplayRule::SuffixWhenTrue {
+                        field: role.name().into(),
+                        when: format!("overridden.{}", role.name()),
+                        suffix: "*".into(),
+                    }));
+                output
+                    .meta
+                    .display_notes
+                    .push("* = global color.* override".into());
+            }
             Ok(CommandOutput::output(output, None))
         }
         ThemeCommands::Preview(ThemePreviewArgs { name: Some(name) })

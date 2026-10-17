@@ -103,6 +103,8 @@ pub struct Group {
 /// Output identity and rendering metadata attached to an [`OutputResult`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OutputMeta {
+    /// Human-only notes after the displayed result; absent from data exports.
+    pub display_notes: Vec<String>,
     /// Remembered arguments used by the producing command.
     pub context: std::collections::BTreeMap<String, String>,
     /// Stable first-seen column order for row rendering.

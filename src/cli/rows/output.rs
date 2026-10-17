@@ -34,6 +34,7 @@ pub(crate) fn plugin_data_to_output_result(
         items: OutputItems::Rows(rows),
         document,
         meta: OutputMeta {
+            display_notes: Vec::new(),
             context: meta.map(|m| m.context.clone()).unwrap_or_default(),
             key_index,
             display_columns: meta.and_then(|meta| meta.columns.clone()),
@@ -445,6 +446,7 @@ mod tests {
             ]),
             document: None,
             meta: OutputMeta {
+            display_notes: Vec::new(),
                 context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "user".to_string()],
                 unix_timestamp_columns: Vec::new(),

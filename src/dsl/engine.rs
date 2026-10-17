@@ -297,6 +297,7 @@ pub(crate) fn run_compiled(
             // formatting (relative times, timestamps) still applies to any
             // field that survives, so it stays.
             output.meta.render_recommendation = None;
+            output.meta.display_notes.clear();
             output.meta.display_columns = None;
             output.meta.display_column_labels = None;
             output.meta.column_align.clear();

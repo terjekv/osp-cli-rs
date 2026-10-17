@@ -110,6 +110,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
 
     // Human projection is deliberately downstream of filtering and JSON output.
+    let style_source = output;
     let display;
     let output = if plan.format != OutputFormat::Json
         && (output.meta.display_columns.is_some()
@@ -136,10 +137,20 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         OutputFormat::Auto | OutputFormat::Csv | OutputFormat::Tsv => Doc::default(),
     };
     if plan.settings.color && plan.format != OutputFormat::Json {
-        apply_value_styles(&mut doc.blocks, output);
+        apply_value_styles(&mut doc.blocks, style_source);
     }
     if plan.format != OutputFormat::Json {
         sanitize_doc(&mut doc);
+    }
+    if plan.format != OutputFormat::Json {
+        doc.blocks
+            .extend(output.meta.display_notes.iter().map(|text| {
+                Block::Paragraph(ParagraphBlock {
+                    text: sanitize_human_text(text),
+                    indent: 0,
+                    inline_markup: false,
+                })
+            }));
     }
     if let Some((shown, total)) = shortened {
         doc.blocks.push(Block::Paragraph(ParagraphBlock {
@@ -690,7 +701,7 @@ fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
         .as_deref()
         .unwrap_or(&output.meta.key_index);
     let labels = display_labels(output, columns);
-    let style = |key: &str, value: &str| {
+    let style = |key: &str, value: &str, row_index: usize| {
         output.meta.display_rules.iter().find_map(|rule| {
             let DisplayRule::ValueStyle { field, bold } = rule else {
                 return None;
@@ -700,7 +711,13 @@ fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
                 .position(|column| column == field)
                 .and_then(|index| labels.get(index))
                 .unwrap_or(field);
-            (key == label && super::style::is_valid_style_spec(value)).then(|| {
+            if key != label { return None; }
+            let original = output
+                .as_rows()
+                .and_then(|rows| rows.get(row_index))
+                .and_then(|row| display_path(&Value::Object(row.clone()), field).cloned());
+            let value = original.as_ref().and_then(Value::as_str).unwrap_or(value);
+            crate::core::style::is_valid_style_spec(value).then(|| {
                 if *bold {
                     format!("bold {value}")
                 } else {
@@ -716,10 +733,11 @@ fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
                 table.cell_styles = table
                     .rows
                     .iter()
-                    .map(|row| {
+                    .enumerate()
+                    .map(|(row_index, row)| {
                         row.iter()
                             .zip(&table.headers)
-                            .map(|(value, key)| style(key, value))
+                            .map(|(value, key)| style(key, value, row_index))
                             .collect()
                     })
                     .collect();

@@ -196,10 +196,17 @@ fn config_show_rows(runtime: &AppRuntime, args: ConfigShowArgs) -> Vec<Row> {
         .chain(runtime.config.resolved().aliases().iter())
         .collect::<Vec<(&String, &ResolvedValue)>>();
     entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-    entries
+    let mut rows = entries
         .into_iter()
         .map(|(key, entry)| config_entry_row(key, entry, args.output.sources, args.output.raw))
-        .collect()
+        .collect::<Vec<_>>();
+    for role in crate::core::style::ColorRole::ALL {
+        if runtime.config.resolved().get(role.key()).is_none() {
+            rows.push(crate::row! { "key" => role.key(), "value" => serde_json::Value::Null });
+        }
+    }
+    rows.sort_by(|left, right| left["key"].as_str().cmp(&right["key"].as_str()));
+    rows
 }
 
 fn run_config_get(

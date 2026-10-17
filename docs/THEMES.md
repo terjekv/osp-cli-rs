@@ -160,6 +160,24 @@ Each colour value is painted in its own colour in terminal output. Use
 `theme list --json` for full definitions, including custom origins and bases,
 or `theme list | NAME` in the REPL to narrow the list to one palette.
 
+## Palette overrides
+
+`color.text`, `color.muted`, `color.accent`, `color.info`, `color.warning`,
+`color.success`, `color.error`, `color.border` and `color.title` override the
+corresponding role in whichever theme is active. They accept the same colour
+names, hex colours and style modifiers as theme palettes:
+
+```bash
+osp config set color.accent '#123123'
+osp config set color.error 'bold #eb6f92'
+osp config unset color.accent
+```
+
+`theme list` applies these global overrides to every row and marks each
+overridden cell with `*`. Its legend appears only when an override is present.
+Data exports retain undecorated values and expose the overridden role names.
+The preview picker also applies the overrides while cycling themes.
+
 ## If Themes Look Wrong
 
 Start with:

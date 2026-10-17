@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::{ConfigSource, ResolvedConfig};
-use crate::ui::style::is_valid_style_spec;
+use crate::core::style::is_valid_style_spec;
 use crate::ui::theme::{
     ThemeDefinition, ThemeOverrides, ThemePalette, builtin_themes, display_name_from_id,
     find_builtin_theme, normalize_theme_name,

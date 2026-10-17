@@ -65,6 +65,30 @@ pub struct ThemeOverrides {
 }
 
 impl ThemeDefinition {
+    /// Applies configured role overrides after theme inheritance is resolved.
+    pub(crate) fn with_color_overrides(&self, config: &crate::config::ResolvedConfig) -> Self {
+        use crate::core::style::ColorRole;
+        let mut theme = (**self).clone();
+        for role in ColorRole::ALL {
+            let Some(value) = config.get_string(role.key()) else {
+                continue;
+            };
+            let field = match role {
+                ColorRole::Text => &mut theme.palette.text,
+                ColorRole::Muted => &mut theme.palette.muted,
+                ColorRole::Accent => &mut theme.palette.accent,
+                ColorRole::Info => &mut theme.palette.info,
+                ColorRole::Warning => &mut theme.palette.warning,
+                ColorRole::Success => &mut theme.palette.success,
+                ColorRole::Error => &mut theme.palette.error,
+                ColorRole::Border => &mut theme.palette.border,
+                ColorRole::Title => &mut theme.palette.title,
+            };
+            *field = value.to_owned();
+        }
+        Self(Arc::new(theme))
+    }
+
     /// Builds a theme definition from palette data and optional overrides.
     pub fn new(
         id: impl Into<String>,

@@ -1893,6 +1893,21 @@ fn adapt_value_for_schema(
         }
     }
 
+    if crate::core::style::ColorRole::ALL
+        .iter()
+        .any(|role| role.key() == key)
+        && let ConfigValue::String(value) = adapted.reveal()
+        && (!crate::core::style::is_valid_style_spec(value)
+            || crate::core::style::parse_style_spec(value)
+                .and_then(|style| style.foreground)
+                .is_none())
+    {
+        return Err(ConfigError::InvalidConfigValue {
+            key: key.to_owned(),
+            reason: "expected a colour name or hex value, optionally prefixed by a style (for example 'bold #eb6f92')".into(),
+        });
+    }
+
     validate_value_constraints(key, &adapted, schema)?;
 
     Ok(adapted)

@@ -18,7 +18,7 @@ pub(super) struct BuiltinKey {
 pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
     static KEYS: std::sync::OnceLock<Vec<BuiltinKey>> = std::sync::OnceLock::new();
     KEYS.get_or_init(|| {
-        vec![
+        let mut keys = vec![
             BuiltinKey {
                 key: "secrets.backend",
                 schema: SchemaEntry::string()
@@ -402,6 +402,14 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                     .with_doc("Minimum log level written to the log file"),
                 default: Some(ConfigValue::from("info")),
             },
-        ]
+        ];
+        keys.extend(crate::core::style::ColorRole::ALL.map(|role| BuiltinKey {
+            key: role.key(),
+            schema: SchemaEntry::string().with_doc(
+                "Override this palette role for every theme; unset uses the theme's value",
+            ),
+            default: None,
+        }));
+        keys
     })
 }

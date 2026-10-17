@@ -52,6 +52,7 @@ pub(crate) mod row;
 pub(crate) mod runtime;
 /// Shell-like tokenization helpers.
 pub(crate) mod shell_words;
+pub(crate) mod style;
 
 pub use document::{DocBlock, Document, DocumentEntry, HelpLevel};
 pub use fuzzy::fold_case;
