@@ -449,7 +449,8 @@ pub(crate) fn run_cli_command(
     Ok(result.exit_code)
 }
 
-/// Renders a progress event on stderr; transformed empty results are silent.
+/// Renders transient progress on stderr at normal verbosity and above.
+/// Quiet output retains levelled messages but suppresses the progress body.
 pub(crate) fn run_progress_command_with_ui(
     config: &ResolvedConfig,
     ui: &UiState,
@@ -462,14 +463,16 @@ pub(crate) fn run_progress_command_with_ui(
     let json_output = resolve_render_settings_with_hint(&ui.render_settings, result.format_hint)
         .format
         == OutputFormat::Json;
-    let framed = result.presentation.progress_replace
+    let show_body = ui.verbosity >= MessageLevel::Success;
+    let framed = show_body
+        && result.presentation.progress_replace
         && !json_output
         && sink.stderr_is_terminal()
         && !progress_output_is_empty(output);
     if !result.messages.is_empty() && !framed {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
-    if progress_output_is_empty(output) {
+    if !show_body || progress_output_is_empty(output) {
         return Ok(());
     }
     let append_lines = !sink.stderr_is_terminal() || json_output;
