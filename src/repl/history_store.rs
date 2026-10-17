@@ -1034,7 +1034,14 @@ fn write_records(path: &Path, records: &[HistoryRecord]) -> std::io::Result<()> 
         serde_json::to_writer(&mut payload, record).map_err(std::io::Error::other)?;
         payload.push(b'\n');
     }
-    crate::config::write_text_atomic(path, &payload, true)
+    // History needs atomic visibility between sessions, without making each
+    // prompt wait for crash-durable storage on a busy or remote filesystem.
+    crate::config::write_text_atomic(
+        path,
+        &payload,
+        true,
+        crate::config::AtomicWriteDurability::Buffered,
+    )
 }
 
 fn trim_records_to_capacity(records: &mut Vec<HistoryRecord>, capacity: usize) -> usize {

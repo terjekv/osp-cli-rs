@@ -235,6 +235,7 @@ impl NativeSessionContext {
                 &path,
                 &serde_json::to_vec(&merged.into_values().collect::<Vec<_>>())?,
                 true,
+                crate::config::AtomicWriteDurability::Synced,
             )?;
             binding.saved = stored;
         }

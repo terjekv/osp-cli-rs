@@ -557,7 +557,7 @@ fn write_owner_only_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError>
             format!("failed to create {}: {err}", parent.display()),
         )
     })?;
-    write_text_atomic(path, bytes, true).map_err(|err| {
+    write_text_atomic(path, bytes, true, super::AtomicWriteDurability::Synced).map_err(|err| {
         secret_error(
             "keyring",
             format!("failed to atomically write {}: {err}", path.display()),

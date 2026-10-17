@@ -344,6 +344,7 @@ fn write_toml_root(
         path,
         document.to_string().as_bytes(),
         strict_secret_permissions,
+        AtomicWriteDurability::Synced,
     )
     .map_err(|err| ConfigError::FileWrite {
         path: path.display().to_string(),
@@ -403,10 +404,18 @@ fn update_toml_table(
     Ok(())
 }
 
+/// Whether an atomic replacement waits for the file and directory to reach disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AtomicWriteDurability {
+    Synced,
+    Buffered,
+}
+
 pub(crate) fn write_text_atomic(
     path: &Path,
     payload: &[u8],
     strict_secret_permissions: bool,
+    durability: AtomicWriteDurability,
 ) -> std::io::Result<()> {
     let file_name = path.file_name().ok_or_else(|| {
         std::io::Error::new(
@@ -453,11 +462,17 @@ pub(crate) fn write_text_atomic(
                         Some(permissions) => file.set_permissions(permissions.clone()),
                         None => Ok(()),
                     })
-                    .and_then(|()| file.sync_all());
+                    .and_then(|()| match durability {
+                        AtomicWriteDurability::Synced => file.sync_all(),
+                        AtomicWriteDurability::Buffered => Ok(()),
+                    });
                 drop(file);
                 let result = write_result
-                    .and_then(|()| replace_file_atomic(&temp_path, path))
-                    .and_then(|()| sync_parent_dir(parent));
+                    .and_then(|()| replace_file_atomic(&temp_path, path, durability))
+                    .and_then(|()| match durability {
+                        AtomicWriteDurability::Synced => sync_parent_dir(parent),
+                        AtomicWriteDurability::Buffered => Ok(()),
+                    });
                 if result.is_err() {
                     let _ = std::fs::remove_file(&temp_path);
                 }
@@ -475,12 +490,20 @@ pub(crate) fn write_text_atomic(
 }
 
 #[cfg(not(windows))]
-fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+fn replace_file_atomic(
+    source: &Path,
+    destination: &Path,
+    _durability: AtomicWriteDurability,
+) -> std::io::Result<()> {
     std::fs::rename(source, destination)
 }
 
 #[cfg(windows)]
-fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+fn replace_file_atomic(
+    source: &Path,
+    destination: &Path,
+    durability: AtomicWriteDurability,
+) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
 
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
@@ -509,7 +532,12 @@ fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()>
         MoveFileExW(
             source_wide.as_ptr(),
             destination_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING
+                | if durability == AtomicWriteDurability::Synced {
+                    MOVEFILE_WRITE_THROUGH
+                } else {
+                    0
+                },
         )
     };
     if replaced != 0 {

@@ -575,8 +575,13 @@ format = "json"
         other => panic!("unexpected error: {other:?}"),
     }
 
-    let err = write_text_atomic(std::path::Path::new("."), b"payload", false)
-        .expect_err("path without file name should fail");
+    let err = write_text_atomic(
+        std::path::Path::new("."),
+        b"payload",
+        false,
+        super::AtomicWriteDurability::Synced,
+    )
+    .expect_err("path without file name should fail");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("path has no file name"));
 }

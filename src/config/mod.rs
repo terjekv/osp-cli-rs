@@ -132,7 +132,7 @@ pub(crate) use core::{normalize_identifier, normalize_scope};
 use defaults::build_builtin_defaults;
 pub(crate) use error::with_path_context;
 pub(crate) use secrets::RuntimeSelectedSecretsLoader;
-pub(crate) use store::{lock_file_transaction, write_text_atomic};
+pub(crate) use store::{AtomicWriteDurability, lock_file_transaction, write_text_atomic};
 
 #[cfg(test)]
 use defaults::DEFAULT_PROFILE_NAME;

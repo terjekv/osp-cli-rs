@@ -132,6 +132,11 @@ entered bang request expands in the editor on Tab; Enter echoes and executes
 the expanded command and keeps it as the last command when it is accepted,
 including after an execution failure.
 
+History updates are written immediately under a file lock and atomically
+replaced with private permissions. They use normal filesystem buffering rather
+than forcing a disk flush before the next prompt; recent history can be lost
+if the machine crashes or loses power.
+
 Ctrl-R filters commands as you type, ranks matches by score, and underlines the
 matched text. Equal scores retain newest-first order. Inside a shell it searches
 commands in that shell without their stored prefix; Ctrl-R again searches all

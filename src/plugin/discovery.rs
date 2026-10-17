@@ -165,8 +165,13 @@ impl PluginManager {
                 .map(std::fs::create_dir_all)
                 .transpose()
                 .and_then(|_| {
-                    crate::config::write_text_atomic(&path, &payload, false)
-                        .map_err(std::io::Error::other)
+                    crate::config::write_text_atomic(
+                        &path,
+                        &payload,
+                        false,
+                        crate::config::AtomicWriteDurability::Synced,
+                    )
+                    .map_err(std::io::Error::other)
                 });
             if let Err(error) = result {
                 tracing::debug!(%error, "could not save plugin describe cache");
