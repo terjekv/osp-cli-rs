@@ -16,6 +16,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Merge persisted context changes under a file transaction so concurrent REPLs
   preserve other identities’ selections and use unique atomic writes.
 
+- Exclude REPL commands carrying sensitive named arguments from history and last
+  command recall, including quoted templates, aliases, expanded commands and
+  runtime failures.
+
 - Treat `passwd` and `credential` names as sensitive alongside passwords, tokens,
   secrets and API keys wherever the shared sensitivity policy is used.
 

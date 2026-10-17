@@ -403,7 +403,7 @@ impl OspHistoryStore {
 
     /// Remember the last submitted command independently of persisted history.
     pub(crate) fn remember_command(&mut self, command_line: &str) {
-        if !command_line.trim().is_empty() {
+        if !command_line.trim().is_empty() && !is_sensitive_line(command_line) {
             self.last_command = Some(command_line.trim().to_string());
         }
     }
@@ -429,7 +429,7 @@ impl OspHistoryStore {
         if input.starts_with(' ') {
             return Ok(());
         }
-        let keep = accepted && !self.is_command_excluded(resolved);
+        let keep = accepted && !is_sensitive_line(input) && !self.is_command_excluded(resolved);
         if input != resolved {
             let original = apply_shell_prefix(input, self.shell_prefix().as_deref());
             let expanded = apply_shell_prefix(resolved, self.shell_prefix().as_deref());
@@ -976,6 +976,9 @@ fn load_records_result(path: &Path) -> std::io::Result<Vec<HistoryRecord>> {
 fn write_records(path: &Path, records: &[HistoryRecord]) -> std::io::Result<()> {
     let mut payload = Vec::new();
     for record in records {
+        if is_sensitive_line(&record.command_line) {
+            continue;
+        }
         serde_json::to_writer(&mut payload, record).map_err(std::io::Error::other)?;
         payload.push(b'\n');
     }
@@ -1110,7 +1113,7 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
     }
     // Keep ordinary config writes, while using the existing command grammar and
     // sensitivity policy to avoid retaining inline credentials.
-    if is_sensitive_config_set_tokens(&words) {
+    if is_sensitive_line(trimmed) {
         return true;
     }
     exclude_patterns
@@ -1118,7 +1121,28 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
         .any(|pattern| matches_pattern(pattern, trimmed))
 }
 
-pub(super) fn is_sensitive_config_set_tokens(tokens: &[String]) -> bool {
+fn is_sensitive_line(line: &str) -> bool {
+    shell_words::split(line).map_or(true, |tokens| has_sensitive_arguments(&tokens))
+}
+
+fn is_sensitive_argument(token: &str) -> bool {
+    let (name, value) = token.split_once('=').unwrap_or((token, ""));
+    if (token.contains('=') || name.starts_with('-'))
+        && crate::config::is_sensitive_key(name.trim_start_matches('-'))
+    {
+        return true;
+    }
+    // Templates, alias bodies and attached --field=NAME=VALUE carry arguments too.
+    (!value.is_empty() && is_sensitive_argument(value))
+        || shell_words::split(token).is_ok_and(|words| {
+            words.len() > 1 && words.iter().any(|word| is_sensitive_argument(word))
+        })
+}
+
+pub(super) fn has_sensitive_arguments(tokens: &[String]) -> bool {
+    if tokens.iter().any(|token| is_sensitive_argument(token)) {
+        return true;
+    }
     let Ok(scanned) = crate::cli::invocation::scan_command_tokens(tokens) else {
         return true;
     };

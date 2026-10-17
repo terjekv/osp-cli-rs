@@ -215,7 +215,7 @@ pub(crate) fn execute_repl_plugin_line(
         // history backend does not own. Classify before a command can edit it.
         keep_history = input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved())
             .is_ok_and(|parsed| {
-                !super::history_store::is_sensitive_config_set_tokens(&parsed.dispatch_tokens)
+                !super::history_store::has_sensitive_arguments(&parsed.dispatch_tokens)
             });
         if !matches!(resolved.trim(), "next" | "prev") {
             state.session.native_context.clear_pagination();
@@ -261,7 +261,7 @@ pub(crate) fn execute_repl_plugin_line(
     {
         sink.write_stderr(&format!("failed to update REPL history: {err}\n"));
     }
-    if accepted && !is_repl_bang_request(&resolved) {
+    if accepted && keep_history && !is_repl_bang_request(&resolved) {
         let _ = history.with(|store| store.remember_command(&resolved));
     }
     for command in state.session.repl_feedback.take_history() {
