@@ -274,6 +274,16 @@ impl<'a> NativeCommandContext<'a> {
             None => Ok(()),
         }
     }
+
+    /// Emits a stream event and reports whether its terminal frame is replaceable.
+    /// JSON and redirected consumers receive the event without terminal gating.
+    pub fn emit_stream_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        match self.progress {
+            Some(progress) => progress.emit_stream_measured(event),
+            None => Ok(false),
+        }
+    }
 }
 
 /// One transient structured document emitted while a native command runs.
@@ -349,6 +359,12 @@ pub trait NativeProgressSink {
     /// Delivers an event without terminal coalescing or replay suppression.
     fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
         self.emit(event)
+    }
+
+    /// Delivers a stream event and reports whether its frame can be replaced.
+    fn emit_stream_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        self.emit_stream(event)?;
+        Ok(false)
     }
 
     /// Draws immediately and reports whether terminal replacement is available.
