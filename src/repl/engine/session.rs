@@ -569,20 +569,22 @@ fn apply_submission(result: ReplResult, editor: Option<&mut Reedline>) -> Option
 
 /// Standalone file input shares the REPL's completion menu and navigation.
 pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
-    use reedline::{Completer, Span, Suggestion};
+    use reedline::{Completer, CompletionResult, Span, Suggestion};
     struct Paths;
     impl Completer for Paths {
-        fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-            crate::completion::path_candidates(&line[..pos])
-                .into_iter()
-                .map(|(value, directory)| Suggestion {
-                    value,
-                    span: Span::new(0, pos),
-                    append_whitespace: false,
-                    description: Some(if directory { "dir" } else { "file" }.into()),
-                    ..Suggestion::default()
-                })
-                .collect()
+        fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+            CompletionResult::fresh(
+                crate::completion::path_candidates(&line[..pos])
+                    .into_iter()
+                    .map(|(value, directory)| Suggestion {
+                        value,
+                        span: Span::new(0, pos),
+                        append_whitespace: false,
+                        description: Some(if directory { "dir" } else { "file" }.into()),
+                        ..Suggestion::default()
+                    })
+                    .collect::<Vec<_>>(),
+            )
         }
     }
     let menu = SharedCompletionMenu::new(build_completion_menu(&ReplAppearance::default()));
