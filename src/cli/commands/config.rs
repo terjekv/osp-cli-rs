@@ -493,7 +493,7 @@ fn run_config_set(
         }
         requested_key
     };
-    let schema = ConfigSchema::default();
+    let schema = ConfigSchema::default().with_product_defaults(runtime.product_defaults());
     schema.validate_writable_key(&key).into_diagnostic()?;
     let input = match (args.value.as_slice(), &args.from_file) {
         (values, None) if !values.is_empty() => values.join(" "),

@@ -653,6 +653,20 @@ impl ConfigSchema {
             .and_then(SchemaEntry::bootstrap_spec)
     }
 
+    /// Product Boolean defaults also define the type of their extension writes.
+    pub(crate) fn with_product_defaults(mut self, defaults: &ConfigLayer) -> Self {
+        for entry in defaults.entries() {
+            if entry.key.starts_with("extensions.")
+                && matches!(entry.value.reveal(), ConfigValue::Bool(_))
+            {
+                self.entries
+                    .entry(entry.key.clone())
+                    .or_insert_with(SchemaEntry::boolean);
+            }
+        }
+        self
+    }
+
     /// Iterates over canonical schema entries.
     pub fn entries(&self) -> impl Iterator<Item = (&str, &SchemaEntry)> {
         self.entries
