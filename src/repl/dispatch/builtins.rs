@@ -169,14 +169,14 @@ fn execute_each_command(
     let tokens = parsed.prefixed_tokens(&state.session.scope);
     // Repeating a write is where `each` can hurt; reads run freely.
     const WRITE_VERBS: &[&str] = &[
-        "add", "approve", "cancel", "clear", "close", "create", "delete", "destroy", "disable",
-        "enable", "login", "logout", "move", "pair", "power", "prune", "reboot", "reject",
-        "remove", "rename", "renew", "reset", "resize", "rm", "set", "start", "stop", "unset",
+        "add", "apply", "approve", "assign", "attach", "cancel", "clear", "close", "create",
+        "delete", "destroy", "disable", "enable", "grant", "login", "logout", "move", "offboard",
+        "pair", "power", "prevent", "prune", "reboot", "reject", "remove", "rename", "renew",
+        "reset", "resize", "restore", "revoke", "retry", "rm", "set", "start", "stop", "unset",
         "update",
     ];
     let writes = tokens
         .iter()
-        .take_while(|word| !word.contains("{}") && !word.starts_with('-'))
         .any(|word| WRITE_VERBS.contains(&word.as_str()));
     if writes && !command.yes {
         return Err(miette!("each requires --yes for commands that change data"));
