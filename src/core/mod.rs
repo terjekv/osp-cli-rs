@@ -58,8 +58,8 @@ pub use document::{DocBlock, Document, DocumentEntry, HelpLevel};
 pub use fuzzy::fold_case;
 pub use output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 pub use output_model::{
-    ColumnAlignment, DisplayRule, Group, OutputDocument, OutputItems, OutputMeta, OutputResult,
-    RenderRecommendation,
+    ColumnAlignment, DisplayPart, DisplayRule, Group, OutputDocument, OutputItems, OutputMeta,
+    OutputResult, RenderRecommendation,
 };
 pub use row::Row;
 pub use runtime::{MessageLevel, RuntimeHints, RuntimeTerminalKind};

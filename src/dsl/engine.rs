@@ -377,6 +377,11 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
         DisplayRule::ValueStyle { field, .. }
+        | DisplayRule::NullText { field, .. }
+        | DisplayRule::Date { field, .. }
+        | DisplayRule::Decimal { field, .. }
+        | DisplayRule::TextLimit { field, .. }
+        | DisplayRule::Compose { field, .. }
         | DisplayRule::Hyperlink { field }
         | DisplayRule::Bytes { field }
         | DisplayRule::RelativeTimestamp { field }

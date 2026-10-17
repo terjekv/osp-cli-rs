@@ -66,15 +66,49 @@ pub fn confirm_phrase(phrase: &str) -> io::Result<bool> {
     Ok(!answer.is_empty() && answer.trim() == phrase)
 }
 
-/// Writes a question to stderr and reads a response, excluding cursor reports.
-/// Returns an empty string on EOF. The caller owns prompting and consent policy.
+/// Writes a visible question without history; EOF returns an empty string.
 pub fn ask(question: &str) -> io::Result<String> {
+    Ok(ask_line(question)?.unwrap_or_default())
+}
+
+fn ask_line(question: &str) -> io::Result<Option<String>> {
     let mut stderr = io::stderr().lock();
-    stderr.write_all(question.as_bytes())?;
+    stderr.write_all(super::sanitize_human_text(question).as_bytes())?;
     stderr.flush()?;
     let mut answer = String::new();
-    read_line(&mut answer)?;
-    Ok(answer)
+    Ok((read_line(&mut answer)? != 0).then_some(answer))
+}
+
+fn require_interactive() -> io::Result<()> {
+    if input_is_replay() || !io::stderr().is_terminal() {
+        return Err(io::Error::other("prompt requires an interactive terminal"));
+    }
+    Ok(())
+}
+
+/// Asks a visible question, including any dialogue choices, without history.
+/// Returns `None` on EOF and rejects replay or redirected input.
+pub fn read_text(question: &str) -> io::Result<Option<String>> {
+    require_interactive()?;
+    ask_line(question)
+}
+
+/// Asks a hidden question without echo or history. EOF and interruption cancel.
+/// Replay and redirected input are rejected before writing the question.
+pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
+    require_interactive()?;
+    match rpassword::prompt_password(super::sanitize_human_text(question)) {
+        Ok(answer) => Ok(Some(answer)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::UnexpectedEof | io::ErrorKind::Interrupted
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Reads a visible file path using the REPL editor and filesystem completion.

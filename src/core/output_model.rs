@@ -48,6 +48,42 @@ pub enum DisplayRule {
         /// Human-only field to insert.
         field: String,
     },
+    /// Substitute a human label for null without changing the payload.
+    NullText {
+        /// Canonical field selector.
+        field: String,
+        /// Text displayed only for null values.
+        text: String,
+    },
+    /// Format an ISO date or datetime using a chrono strftime pattern.
+    Date {
+        /// Canonical ISO date or datetime field selector.
+        field: String,
+        /// Chrono strftime pattern for human output.
+        pattern: String,
+    },
+    /// Display a number with a fixed decimal precision.
+    Decimal {
+        /// Canonical numeric field selector.
+        field: String,
+        /// Fractional digits, capped at 4096 by the renderer.
+        precision: usize,
+    },
+    /// Limit a non-null value's displayed character count.
+    TextLimit {
+        /// Canonical field selector.
+        field: String,
+        /// Maximum displayed Unicode character count.
+        length: usize,
+    },
+    /// Display an object or array as fields interspersed with literal wording.
+    /// Selectors in parts are relative to that collection, after scalar rules.
+    Compose {
+        /// Canonical object or array field selector.
+        field: String,
+        /// Ordered literal and field spans in the displayed value.
+        parts: Vec<DisplayPart>,
+    },
     /// Paint a colour/style specification using its own style in terminal cells.
     ValueStyle {
         /// Canonical string field containing a validated style specification.
@@ -91,6 +127,22 @@ pub enum DisplayRule {
     /// Format an RFC3339 or Unix-seconds timestamp relative to the current time.
     RelativeTimestamp {
         /// Canonical timestamp field path to format.
+        field: String,
+    },
+}
+
+/// Inline content references data; producers never interpolate field values.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DisplayPart {
+    /// Literal punctuation or wording surrounding a value.
+    Literal {
+        /// Wording that contains no interpolated response data.
+        text: String,
+    },
+    /// A typed value within the composed object.
+    Field {
+        /// Selector relative to the composed object.
         field: String,
     },
 }
