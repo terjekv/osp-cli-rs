@@ -42,6 +42,10 @@ import sys
 import tempfile
 import termios
 import time
+
+if sys.version_info < (3, 11):
+    sys.exit(f"perf.py needs Python 3.11+ for tomllib; found {sys.version.split()[0]}. Run it with python3.11 or newer.")
+
 import tomllib
 
 
