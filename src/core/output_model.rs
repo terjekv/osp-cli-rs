@@ -28,6 +28,15 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Derive remaining address capacity from a CIDR and an exact used count.
+    AddressCountRemaining {
+        /// Canonical CIDR field.
+        network: String,
+        /// Canonical used-address integer field.
+        used: String,
+        /// Human-only field to insert.
+        field: String,
+    },
     /// Paint a colour/style specification using its own style in terminal cells.
     ValueStyle {
         /// Canonical string field containing a validated style specification.

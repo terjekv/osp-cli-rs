@@ -368,6 +368,11 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
     };
     meta.unix_timestamp_columns.retain(|field| !created(field));
     meta.display_rules.retain(|rule| match rule {
+        DisplayRule::AddressCountRemaining {
+            network,
+            used,
+            field,
+        } => !created(network) && !created(used) && !created(field),
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
         DisplayRule::ValueStyle { field, .. }

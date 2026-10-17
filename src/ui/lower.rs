@@ -616,6 +616,32 @@ fn display_output(output: &OutputResult) -> OutputResult {
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::AddressCountRemaining {
+                        network,
+                        used,
+                        field,
+                    } => {
+                        if let Some(text) = display_path(&raw, network).and_then(Value::as_str)
+                            && let Some((address, prefix)) = text.split_once('/')
+                            && let Ok(address) = address.parse::<std::net::IpAddr>()
+                            && let Ok(prefix) = prefix.parse::<u32>()
+                            && let Some(bits) =
+                                (if address.is_ipv4() { 32u32 } else { 128 }).checked_sub(prefix)
+                            && let Some(used) = display_path(&raw, used).and_then(Value::as_u64)
+                            && let Some(map) = original.as_object_mut()
+                        {
+                            let remaining = 1u128
+                                .checked_shl(bits)
+                                .and_then(|size| size.checked_sub(u128::from(used)))
+                                .or_else(|| {
+                                    (bits == 128 && used > 0)
+                                        .then(|| u128::MAX - u128::from(used) + 1)
+                                })
+                                .map(|count| count.to_string())
+                                .unwrap_or_else(|| format!("2^{bits} − {used}"));
+                            map.insert(field.clone(), Value::String(remaining));
+                        }
+                    }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
                         if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
                             items.retain(|item| {
