@@ -1700,6 +1700,8 @@ pub fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), Co
 pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase();
     normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("credential")
         || normalized.contains("token")
         || normalized.contains("secret")
         || normalized.contains("apikey")
