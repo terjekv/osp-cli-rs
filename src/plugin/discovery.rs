@@ -134,7 +134,17 @@ impl PluginManager {
                 .collect::<Vec<_>>()
         });
         let mut cache = BTreeMap::new();
-        for (index, path, entry) in results {
+        for (index, path, mut entry) in results {
+            // Cached metadata crosses the same trust boundary as fresh describe output.
+            if let Some(describe) = &entry.describe
+                && crate::core::plugin::validate_command(
+                    &describe.clone().command(&plugins[index].name),
+                )
+                .is_err()
+            {
+                entry.describe = None;
+                entry.issue = Some("invalid describe command metadata".into());
+            }
             plugins[index].describe = entry.describe.clone();
             plugins[index].issue = entry.issue.clone();
             if let Some(issue) = &entry.issue {

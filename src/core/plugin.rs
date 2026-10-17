@@ -985,18 +985,60 @@ pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String
         validate_command_auth(auth)?;
     }
 
+    let mut ids = std::collections::BTreeSet::from(["help".to_string()]);
+    let mut optional = false;
+    let mut multi = false;
+    for (index, arg) in command.args.iter().enumerate() {
+        let id = arg.name.clone().unwrap_or_else(|| format!("arg{index}"));
+        if id.is_empty() || !ids.insert(id.clone()) {
+            return Err(format!("duplicate or empty argument id `{id}`"));
+        }
+        if optional && arg.required {
+            return Err("required positional follows an optional positional".into());
+        }
+        optional |= !arg.required;
+        if arg.multi {
+            if multi
+                || index + 2 < command.args.len()
+                || (index + 1 < command.args.len() && !command.args[index + 1].required)
+            {
+                return Err(
+                    "variadic positional must be last or precede one required positional".into(),
+                );
+            }
+            multi = true;
+        }
+        validate_suggestions(&arg.suggestions, "argument")?;
+    }
     for (name, flag) in &command.flags {
-        if !name.starts_with('-') {
-            return Err(format!("flag `{name}` must start with `-`"));
+        let spelling = name.trim_start_matches('-');
+        let valid = if let Some(long) = name.strip_prefix("--") {
+            !long.is_empty() && !long.starts_with('-') && !long.contains(['=', ' '])
+        } else {
+            name.starts_with('-') && spelling.chars().count() == 1
+        };
+        if !valid || matches!(name.as_str(), "--help" | "-h") {
+            return Err(format!("invalid flag spelling `{name}`"));
+        }
+        if let Some(target) = &flag.alias_of {
+            if target == name
+                || command
+                    .flags
+                    .get(target)
+                    .is_none_or(|f| f.alias_of.is_some())
+            {
+                return Err(format!("invalid flag alias `{name}`"));
+            }
+        } else if !ids.insert(spelling.to_string()) {
+            return Err(format!("duplicate argument id `{spelling}`"));
         }
         validate_suggestions(&flag.suggestions, &format!("flag `{name}`"))?;
     }
-
-    for arg in &command.args {
-        validate_suggestions(&arg.suggestions, "argument")?;
-    }
-
+    let mut names = std::collections::BTreeSet::from(["help"]);
     for subcommand in &command.subcommands {
+        if !names.insert(subcommand.name.as_str()) {
+            return Err(format!("duplicate subcommand `{}`", subcommand.name));
+        }
         validate_command(subcommand)?;
     }
 

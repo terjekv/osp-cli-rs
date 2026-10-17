@@ -16,6 +16,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Merge persisted context changes under a file transaction so concurrent REPLs
   preserve other identities’ selections and use unique atomic writes.
 
+- Reject plugin describe metadata with colliding argument IDs, invalid flag
+  aliases or unsupported positional layouts. Inventory reports the error while
+  the executable remains available as a plain drop-in, including for old caches.
+
 - Require `each --yes` when any template word is a write verb, including words
   after options or placeholders and restoration, assignment and access changes.
 
