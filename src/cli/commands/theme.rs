@@ -23,6 +23,7 @@ pub(crate) fn run_theme_command(
     args: ThemeArgs,
 ) -> Result<CommandOutput> {
     match args.command {
+        ThemeCommands::Reset => reset_theme(runtime, session),
         ThemeCommands::Preview(ThemePreviewArgs { name: None }) => {
             preview::run(runtime, session, ui)
         }
@@ -112,6 +113,40 @@ pub(crate) fn run_theme_command(
             Ok(result)
         }
     }
+}
+
+fn default_theme_name(runtime: &AppRuntime) -> Result<String> {
+    let config = crate::app::resolve_runtime_config(
+        crate::app::RuntimeConfigRequest::new(None, None)
+            .with_runtime_load(crate::config::RuntimeLoadOptions::defaults_only())
+            .with_product_defaults(runtime.product_defaults().clone()),
+    )?;
+    resolve_known_theme_name(
+        config
+            .get_string("theme.name")
+            .unwrap_or(DEFAULT_THEME_NAME),
+        &runtime.themes,
+    )
+}
+
+fn reset_theme(runtime: &AppRuntime, session: &mut AppSession) -> Result<CommandOutput> {
+    let default = default_theme_name(runtime)?;
+    let name = &runtime
+        .themes
+        .resolve(&default)
+        .ok_or_else(|| miette::miette!("default theme is unavailable: {default}"))?
+        .theme
+        .name;
+    let keys = std::iter::once("theme.name".to_string())
+        .chain(crate::core::style::ColorRole::ALL.map(|role| role.key().to_string()))
+        .collect::<Vec<_>>();
+    let mut changed = super::config::clear_theme_values(runtime, session, &keys)?;
+    changed.sort();
+    Ok(CommandOutput::text(if changed.is_empty() {
+        "Nothing needed resetting.".into()
+    } else {
+        format!("Reset theme to {name}; cleared {}.", changed.join(", "))
+    }))
 }
 
 pub(crate) fn theme_command() -> Command {

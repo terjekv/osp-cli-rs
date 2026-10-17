@@ -52,7 +52,7 @@ fn builtin_command_verbs_are_consistent() {
         set(&["list", "refresh", "enable", "disable"]),
     );
     assert_subcommands(&cmd, "notifications", set(&["preview"]));
-    assert_subcommands(&cmd, "theme", set(&["list", "preview", "use"]));
+    assert_subcommands(&cmd, "theme", set(&["list", "preview", "use", "reset"]));
     assert_subcommands(
         &cmd,
         "config",

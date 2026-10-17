@@ -436,6 +436,9 @@ pub(crate) enum ThemeCommands {
     /// Set active theme.
     #[command(display_order = 12)]
     Use(ThemeUseArgs),
+    /// Reset saved theme selection and colour overrides to product defaults.
+    #[command(display_order = 13)]
+    Reset,
 }
 
 /// Arguments for `theme preview`.

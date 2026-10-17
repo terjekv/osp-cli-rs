@@ -160,6 +160,17 @@ Each colour value is painted in its own colour in terminal output. Use
 `theme list --json` for full definitions, including custom origins and bases,
 or `theme list | NAME` in the REPL to narrow the list to one palette.
 
+## Resetting
+
+`osp theme reset` clears saved `theme.name` and the nine `color.*` keys in
+applicable global/current-profile scopes of the user config file, plus matching
+session overrides. It prints what was cleared, or that nothing needed resetting.
+Custom theme files are retained.
+
+The preview picker's `[ Reset ]` button stages the product default theme without
+role overrides. `[ Save ]` applies that reset; `[ Exit ]`, Esc and q discard it.
+The buttons are `[ Save ]  [ Save as theme… ]  [ Reset ]  [ Exit ]`.
+
 ## Palette overrides
 
 `color.text`, `color.muted`, `color.accent`, `color.info`, `color.warning`,

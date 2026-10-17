@@ -27,7 +27,7 @@ pub(super) fn run(
         .themes
         .entries
         .values()
-        .map(|entry| entry.theme.with_color_overrides(runtime.config.resolved()))
+        .map(|entry| entry.theme.clone())
         .collect::<Vec<_>>();
     let labels = themes
         .iter()
@@ -37,18 +37,33 @@ pub(super) fn run(
         .iter()
         .position(|theme| theme.id == ui.render_settings.theme_name)
         .unwrap_or(0);
+    let default_name = super::default_theme_name(runtime)?;
+    let default = themes
+        .iter()
+        .position(|theme| theme.id == default_name)
+        .ok_or_else(|| miette!("default theme is unavailable: {default_name}"))?;
     let mut model = Themes {
         themes,
         settings: ui.render_settings.clone(),
         save_as: None,
+        config: runtime.config.resolved(),
+        default,
+        reset_pending: false,
     };
     let Some(selected) = picker::run(&labels, initial, &mut model).into_diagnostic()? else {
         return Ok(CommandOutput::exit(0));
     };
     let mut selected = model.themes[selected].id.clone();
+    if model.reset_pending && model.save_as.is_none() {
+        let reset = super::reset_theme(runtime, session)?;
+        if selected == model.themes[model.default].id {
+            return Ok(reset);
+        }
+    }
     if let Some(name) = &model.save_as {
         let palette = crate::core::style::ColorRole::ALL
             .into_iter()
+            .filter(|_| !model.reset_pending)
             .filter_map(|role| {
                 runtime
                     .config
@@ -70,7 +85,7 @@ pub(super) fn run(
             .filter(|role| runtime.config.resolved().get(role.key()).is_some())
             .map(|role| role.key().to_string())
             .collect::<Vec<_>>();
-        super::super::config::absorb_palette_overrides(runtime, session, &keys)?;
+        super::super::config::clear_theme_values(runtime, session, &keys)?;
     }
     let output = super::super::config::set_picker_value(
         runtime,
@@ -91,15 +106,18 @@ pub(super) fn run(
     Ok(output)
 }
 
-struct Themes {
+struct Themes<'a> {
     themes: Vec<ThemeDefinition>,
     settings: RenderSettings,
     save_as: Option<String>,
+    config: &'a crate::config::ResolvedConfig,
+    default: usize,
+    reset_pending: bool,
 }
 
-impl PickerModel for Themes {
+impl PickerModel for Themes<'_> {
     fn buttons(&self) -> &'static [&'static str] {
-        &["Save", "Save as theme…", "Exit"]
+        &["Save", "Save as theme…", "Reset", "Exit"]
     }
     fn button_prompt(&self, button: usize) -> Option<&'static str> {
         (button == 1).then_some("Theme name")
@@ -108,7 +126,7 @@ impl PickerModel for Themes {
         &mut self,
         button: usize,
         input: Option<&str>,
-        _selected: &mut usize,
+        selected: &mut usize,
     ) -> std::result::Result<PickerAction, String> {
         match button {
             0 => Ok(PickerAction::Save),
@@ -124,6 +142,12 @@ impl PickerModel for Themes {
                 self.save_as = Some(name.to_string());
                 Ok(PickerAction::Save)
             }
+            2 => {
+                self.reset_pending = true;
+                self.save_as = None;
+                *selected = self.default;
+                Ok(PickerAction::Continue)
+            }
             _ => Ok(PickerAction::Exit),
         }
     }
@@ -131,7 +155,11 @@ impl PickerModel for Themes {
     fn settings(&self, selected: usize) -> RenderSettings {
         let mut settings = self.settings.clone();
         settings.theme_name = self.themes[selected].id.clone();
-        settings.theme = Some(self.themes[selected].clone());
+        settings.theme = Some(if self.reset_pending {
+            self.themes[selected].clone()
+        } else {
+            self.themes[selected].with_color_overrides(self.config)
+        });
         settings
     }
 

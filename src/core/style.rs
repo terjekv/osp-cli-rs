@@ -44,9 +44,7 @@ impl ColorRole {
     }
 
     pub(crate) fn name(self) -> &'static str {
-        self.key()
-            .strip_prefix("color.")
-            .expect("palette role prefix")
+        self.key().trim_start_matches("color.")
     }
 }
 

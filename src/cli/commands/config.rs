@@ -476,11 +476,11 @@ fn config_entry_row(
     row.build()
 }
 
-pub(super) fn absorb_palette_overrides(
+pub(super) fn clear_theme_values(
     runtime: &AppRuntime,
     session: &mut AppSession,
     keys: &[String],
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let paths = config_write_paths(runtime.launch.runtime_load, ConfigStore::Config)?;
     let path = paths
         .as_ref()
@@ -491,12 +491,13 @@ pub(super) fn absorb_palette_overrides(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigLayer::default(),
         Err(error) => return Err(error).into_diagnostic(),
     };
+    let mut changed = Vec::new();
     for entry in layer
         .entries()
         .iter()
         .filter(|entry| keys.contains(&entry.key) && scope_applies(&entry.scope, runtime))
     {
-        run_config_unset(
+        let output = run_config_unset(
             runtime,
             session,
             ConfigUnsetArgs {
@@ -514,9 +515,19 @@ pub(super) fn absorb_palette_overrides(
                 dry_run: false,
             },
         )?;
+        if let crate::app::CommandBody::Output(output) = output.body
+            && output
+                .as_rows()
+                .unwrap_or_default()
+                .iter()
+                .any(|row| row["changed"] == true)
+            && !changed.contains(&entry.key)
+        {
+            changed.push(entry.key.clone());
+        }
     }
-    clear_session_values(runtime, session, keys, &mut Vec::new());
-    Ok(())
+    clear_session_values(runtime, session, keys, &mut changed);
+    Ok(changed)
 }
 
 fn scope_applies(scope: &Scope, runtime: &AppRuntime) -> bool {

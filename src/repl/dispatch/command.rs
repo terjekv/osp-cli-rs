@@ -265,6 +265,9 @@ pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
         {
             false
         }
+        Commands::Theme(crate::cli::ThemeArgs {
+            command: ThemeCommands::Reset,
+        }) => false,
         Commands::Theme(args)
             if matches!(
                 args.command,
