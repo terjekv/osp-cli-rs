@@ -94,9 +94,14 @@ fn document_fanout_projection_drops_only_addressed_names() {
 }
 
 #[test]
-fn document_path_search_keeps_complete_matching_row() {
+fn document_path_search_narrows_single_record() {
     let output = run_document_pipeline(help_like_record(), "sections[1].entries[0].name");
-    assert_eq!(result_rows(&output), json!([help_like_record()]));
+    assert_eq!(
+        result_rows(&output),
+        json!([{
+            "sections": [{"entries": [{"name": "--verbose"}]}]
+        }])
+    );
 }
 
 #[test]

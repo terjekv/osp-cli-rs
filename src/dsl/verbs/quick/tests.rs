@@ -48,7 +48,7 @@ fn quick_search_keeps_leading_scope_letters_in_ordinary_tokens_unit() {
 }
 
 #[test]
-fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
+fn quick_family_narrows_single_rows_and_filters_multiple_rows_unit() {
     let matching = row(json!({
         "uid": "alice",
         "roles": ["eng", "ops"],
@@ -56,10 +56,15 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
     }));
     let other = row(json!({"name": "bob", "team": "eng"}));
 
-    for spec in ["ops", "V ops", "K uid", "?uid"] {
+    for (spec, expected) in [
+        ("ops", row(json!({"roles": ["ops"]}))),
+        ("V ops", row(json!({"roles": ["ops"]}))),
+        ("K uid", row(json!({"uid": "alice"}))),
+        ("?uid", matching.clone()),
+    ] {
         assert_eq!(
             apply_with_plan(vec![matching.clone()], &compile(spec).unwrap()).unwrap(),
-            vec![matching.clone()],
+            vec![expected],
             "{spec}"
         );
     }
@@ -71,10 +76,11 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
         .unwrap(),
         vec![matching.clone()]
     );
-    assert!(
-        apply_with_plan(vec![matching.clone()], &compile("! ops").unwrap())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        apply_with_plan(vec![matching.clone()], &compile("! ops").unwrap()).unwrap(),
+        vec![row(
+            json!({"uid": "alice", "roles": ["eng"], "city": "Oslo"})
+        )]
     );
     assert_eq!(
         apply_with_plan(vec![other.clone()], &compile("! ops").unwrap()).unwrap(),
@@ -82,22 +88,26 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
     );
 
     let value_matches_key = row(json!({"status": "running", "note": "status"}));
-    assert_eq!(
-        apply_with_plan(
-            vec![value_matches_key.clone()],
-            &compile("V status").unwrap()
-        )
-        .unwrap(),
-        vec![value_matches_key]
+    assert!(
+        apply_with_plan(vec![value_matches_key], &compile("V status").unwrap())
+            .unwrap()
+            .is_empty()
     );
-    for (row, query) in [
-        (row(json!({"metadata": {"owner": "Alice"}})), "V metadata"),
-        (row(json!({"members": [{"uid": "alice"}]})), "V members"),
+    for (source, query, expected) in [
+        (
+            row(json!({"metadata": {"owner": "Alice"}})),
+            "V metadata",
+            row(json!({"owner": "Alice"})),
+        ),
+        (
+            row(json!({"members": [{"uid": "alice"}]})),
+            "V members",
+            row(json!({"uid": "alice"})),
+        ),
     ] {
-        assert!(
-            apply_with_plan(vec![row], &compile(query).unwrap())
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            apply_with_plan(vec![source], &compile(query).unwrap()).unwrap(),
+            vec![expected]
         );
     }
 
@@ -108,15 +118,15 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
     }];
     let filtered =
         apply_groups_with_plan(groups, &compile("uid").unwrap()).expect("group quick should work");
-    assert_eq!(filtered[0].rows, vec![matching]);
+    assert_eq!(filtered[0].rows, vec![row(json!({"uid": "alice"}))]);
 }
 
 #[test]
-fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
+fn dotted_visible_values_and_structural_paths_narrow_single_rows_unit() {
     let visible = row(json!({"key": "theme.name", "value": "dracula"}));
     assert_eq!(
         apply_with_plan(vec![visible.clone()], &compile("theme.name").unwrap()).unwrap(),
-        vec![visible]
+        vec![row(json!({"key": "theme.name"}))]
     );
 
     let source = row(json!({
@@ -128,12 +138,14 @@ fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
     }));
     assert_eq!(
         apply_with_plan(vec![source.clone()], &compile("users[1]").unwrap()).unwrap(),
-        vec![source.clone()]
+        vec![row(json!({"uid": "bob", "team": "eng"}))]
     );
-    assert!(
-        apply_with_plan(vec![source.clone()], &compile("! users[0].uid").unwrap())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        apply_with_plan(vec![source.clone()], &compile("! users[0].uid").unwrap()).unwrap(),
+        vec![row(json!({
+            "meta": "people",
+            "users": [{"team": "ops"}, {"uid": "bob", "team": "eng"}]
+        }))]
     );
     assert!(
         apply_with_plan(vec![source], &compile("users[9]").unwrap())
@@ -143,7 +155,7 @@ fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
 }
 
 #[test]
-fn value_quick_filters_matching_document_members_without_projecting_fields_unit() {
+fn value_quick_narrows_matching_document_fields_and_selector_pairs_unit() {
     let source = json!({
         "commands": [
             {"name": "help", "short_help": "Show overview"},
@@ -152,7 +164,7 @@ fn value_quick_filters_matching_document_members_without_projecting_fields_unit(
     });
     assert_eq!(
         apply_value(source.clone(), "doctor").unwrap(),
-        json!([source])
+        json!([{"commands": [{"name": "doctor"}]}])
     );
 
     let addressed = json!({
@@ -164,7 +176,7 @@ fn value_quick_filters_matching_document_members_without_projecting_fields_unit(
     });
     assert_eq!(
         apply_value_with_plan(addressed.clone(), &compile("users[1]").unwrap()).unwrap(),
-        json!([addressed])
+        json!([{"uid": "bob", "team": "eng"}])
     );
 }
 

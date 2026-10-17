@@ -433,7 +433,7 @@ fn unicode_case_insensitive_matching_is_shared_by_quick_and_filter() {
 }
 
 #[test]
-fn quick_contract_preserves_matching_parent_objects_in_object_arrays() {
+fn quick_contract_narrows_matching_fields_in_object_arrays() {
     let rows = vec![row(json!({
         "commands": [
             {
@@ -448,7 +448,7 @@ fn quick_contract_preserves_matching_parent_objects_in_object_arrays() {
     }))];
 
     let output = apply_pipeline(rows, &["shared".to_string()])
-        .expect("quick should preserve full matching command entries");
+        .expect("quick should narrow matching command fields");
     let OutputItems::Rows(result_rows) = output.items else {
         panic!("expected row output");
     };
@@ -457,11 +457,9 @@ fn quick_contract_preserves_matching_parent_objects_in_object_arrays() {
         vec![row(json!({
             "commands": [
                 {
-                    "name": "alpha",
                     "short_help": "shared help text"
                 },
                 {
-                    "name": "beta",
                     "short_help": "shared help text"
                 }
             ]

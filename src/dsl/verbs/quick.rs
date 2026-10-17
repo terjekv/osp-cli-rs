@@ -10,12 +10,14 @@ use crate::core::output_model::Group;
 use crate::core::row::Row;
 use crate::dsl::{
     eval::{
-        flatten::{coalesce_flat_row, flatten_row},
+        flatten::{coalesce_flat_row, coalesce_flat_row_with_fill, flatten_row},
         matchers::{
             contains_case_insensitive, eq_case_insensitive, fuzzy_contains_case_insensitive,
             match_row_keys_detailed, match_row_keys_detailed_fuzzy, render_value,
         },
-        resolve::{is_truthy, resolve_pairs, resolve_values_truthy},
+        resolve::{
+            compact_sparse_arrays, is_truthy, resolve_pairs, resolve_values_truthy, sparse_hole,
+        },
     },
     parse::{
         key_spec::ExactMode,
@@ -125,7 +127,10 @@ fn decode_search_token(raw_token: &str) -> Result<String> {
     Ok(decoded)
 }
 
-pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &QuickPlan) -> Result<Vec<Row>> {
+pub(crate) fn apply_with_plan(mut rows: Vec<Row>, plan: &QuickPlan) -> Result<Vec<Row>> {
+    if rows.len() == 1 && !plan.spec.existence() {
+        return Ok(narrow_row(rows.remove(0), &plan.spec));
+    }
     Ok(rows
         .into_iter()
         .filter(|row| plan.matches_row_filter_mode(row))
@@ -148,46 +153,148 @@ fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
     }
 
     let flat = flatten_row(row);
+    if matches!(spec.scope, QuickScope::ValueOnly) {
+        let matched = flat
+            .values()
+            .any(|value| value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy));
+        return if spec.negated() { !matched } else { matched };
+    }
+    match_flat_row(&flat, spec).matched
+}
+
+struct RowMatch {
+    matched: bool,
+    key_hits: HashSet<String>,
+    value_hits: HashSet<String>,
+    synthetic: Row,
+}
+
+fn match_flat_row(flat: &Row, spec: &CompiledQuickSpec) -> RowMatch {
     let matches = if matches!(spec.scope, QuickScope::ValueOnly) {
         Default::default()
     } else if spec.fuzzy {
-        match_row_keys_detailed_fuzzy(&flat, spec.token(), spec.exact())
+        match_row_keys_detailed_fuzzy(flat, spec.token(), spec.exact())
     } else {
-        match_row_keys_detailed(&flat, spec.token(), spec.exact())
+        match_row_keys_detailed(flat, spec.token(), spec.exact())
     };
-    let key_hits = if matches.exact.is_empty() {
+    let mut key_hits = if matches.exact.is_empty() {
         matches.partial
     } else {
         matches.exact
-    };
-    let (value_hit, synthetic_hit) = match spec.scope {
-        QuickScope::ValueOnly => (
-            flat.values()
-                .any(|value| value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy)),
-            false,
-        ),
-        QuickScope::KeyOnly => (false, false),
-        QuickScope::KeyOrValue => {
-            let (pairs, _) = resolve_pairs(&flat, spec.token());
-            let value_hit = pairs.iter().any(|(_, value)| {
-                value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy)
-            });
-            let synthetic_hit = pairs.iter().any(|(key, _)| !flat.contains_key(key));
-            (value_hit, synthetic_hit)
+    }
+    .into_iter()
+    .collect::<HashSet<_>>();
+    if spec.is_structural() && !matches!(spec.scope, QuickScope::ValueOnly) && !spec.key_not_equals
+    {
+        let root = Value::Object(coalesce_flat_row(flat));
+        let addressed = spec.selector.resolve_matches(&root);
+        if !addressed.is_empty() {
+            key_hits = flat
+                .keys()
+                .filter(|key| {
+                    addressed.iter().any(|entry| {
+                        *key == &entry.flat_key
+                            || key
+                                .strip_prefix(&entry.flat_key)
+                                .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
+                    })
+                })
+                .cloned()
+                .collect();
         }
+    }
+    let (pairs, _) = resolve_pairs(flat, spec.token());
+    let value_hits = pairs
+        .iter()
+        .filter(|(_, value)| {
+            !matches!(spec.scope, QuickScope::KeyOnly)
+                && value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy)
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<HashSet<_>>();
+    let synthetic = pairs
+        .into_iter()
+        .filter(|(key, _)| !flat.contains_key(key))
+        .collect::<Row>();
+    let matched = if spec.key_not_equals {
+        flat.keys().any(|key| !key_hits.contains(key))
+    } else {
+        !key_hits.is_empty() || !value_hits.is_empty() || !synthetic.is_empty()
     };
 
-    let matched = match spec.scope {
-        QuickScope::KeyOnly if spec.key_not_equals => {
-            let key_set = key_hits.iter().collect::<HashSet<_>>();
-            flat.keys().any(|key| !key_set.contains(key))
-        }
-        QuickScope::KeyOnly => !key_hits.is_empty(),
-        QuickScope::ValueOnly => value_hit,
-        QuickScope::KeyOrValue => !key_hits.is_empty() || value_hit || synthetic_hit,
-    };
+    RowMatch {
+        matched: if spec.negated() { !matched } else { matched },
+        key_hits,
+        value_hits,
+        synthetic,
+    }
+}
 
-    if spec.negated() { !matched } else { matched }
+fn narrow_row(row: Row, spec: &CompiledQuickSpec) -> Vec<Row> {
+    let flat = flatten_row(&row);
+    let result = match_flat_row(&flat, spec);
+    let negated = spec.negated();
+    if !result.matched && !negated {
+        return Vec::new();
+    }
+
+    // Naming a field projects its complete value, even if other values contain
+    // the same text. Synthetic pairs carry containers and selector fanout.
+    let projection = !result.synthetic.is_empty()
+        || (!result.key_hits.is_empty()
+            && result.key_hits.iter().all(|key| {
+                let selector = selector::CompiledSelector::from_token(key.clone(), spec.exact());
+                eq_case_insensitive(&selector.label(), spec.token())
+            }));
+    if projection && !negated && !result.synthetic.is_empty() {
+        return result
+            .synthetic
+            .into_iter()
+            .map(|(key, value)| {
+                let projected = rebuild_row(&[(key, value)].into_iter().collect());
+                if projected.len() == 1 {
+                    match projected.values().next() {
+                        Some(Value::Object(map)) => return map.clone(),
+                        Some(Value::Array(items)) if items.len() == 1 => {
+                            if let Value::Object(map) = &items[0] {
+                                return map.clone();
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                projected
+            })
+            .filter(|row| !row.is_empty())
+            .collect();
+    }
+
+    let narrowed = flat
+        .into_iter()
+        .filter(|(key, _)| {
+            let selected = result.key_hits.contains(key)
+                || ((negated || !projection || result.key_hits.is_empty())
+                    && result.value_hits.contains(key))
+                || result.synthetic.keys().any(|parent| {
+                    key.strip_prefix(parent)
+                        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
+                });
+            selected != negated
+        })
+        .collect::<Row>();
+    if narrowed.is_empty() {
+        Vec::new()
+    } else {
+        vec![rebuild_row(&narrowed)]
+    }
+}
+
+fn rebuild_row(flat: &Row) -> Row {
+    let mut row = coalesce_flat_row_with_fill(flat, &sparse_hole());
+    for value in row.values_mut() {
+        compact_sparse_arrays(value);
+    }
+    row
 }
 
 fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool) -> bool {

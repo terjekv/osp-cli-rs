@@ -65,12 +65,7 @@ fn ported_quick_path_scoping_distinguishes_nested_and_explicit_root_matches() {
     };
     assert_eq!(
         asset_rows,
-        vec![row(json!({
-            "id": 55753,
-            "txts": {"id": 27994},
-            "ipaddresses": [{"id": 57171}, {"id": 57172}],
-            "metadata": {"asset": {"id": 42}}
-        }))]
+        vec![row(json!({"metadata": {"asset": {"id": 42}}}))]
     );
 
     let root_only = run_rows_pipeline(rows.clone(), ".asset.id");
@@ -85,17 +80,12 @@ fn ported_quick_path_scoping_distinguishes_nested_and_explicit_root_matches() {
     };
     assert_eq!(
         id_rows,
-        vec![row(json!({
-            "id": 55753,
-            "txts": {"id": 27994},
-            "ipaddresses": [{"id": 57171}, {"id": 57172}],
-            "metadata": {"asset": {"id": 42}}
-        }))]
+        vec![row(json!({"id": 55753}))]
     );
 }
 
 #[test]
-fn ported_quick_collects_all_exact_matches_across_nested_fields() {
+fn ported_quick_prefers_the_root_exact_field() {
     let rows = vec![row(json!({
         "id": 55753,
         "txts": {"id": 27994},
@@ -110,17 +100,12 @@ fn ported_quick_collects_all_exact_matches_across_nested_fields() {
 
     assert_eq!(
         rows,
-        vec![row(json!({
-            "id": 55753,
-            "txts": {"id": 27994},
-            "ipaddresses": [{"id": 57171}, {"id": 57172}],
-            "metadata": {"asset": {"id": 42}}
-        }))]
+        vec![row(json!({"id": 55753}))]
     );
 }
 
 #[test]
-fn ported_quick_list_selector_keeps_the_matching_row() {
+fn ported_quick_list_selector_projects_matching_members() {
     let rows = vec![row(json!({
         "networks": [
             {"network": "129.240.130.0/24", "vlan": 200},
@@ -135,12 +120,10 @@ fn ported_quick_list_selector_keeps_the_matching_row() {
 
     assert_eq!(
         rows,
-        vec![row(json!({
-            "networks": [
-                {"network": "129.240.130.0/24", "vlan": 200},
-                {"network": "2001:700:100:4003::/64", "vlan": 200}
-            ]
-        }))]
+        vec![
+            row(json!({"network": "129.240.130.0/24", "vlan": 200})),
+            row(json!({"network": "2001:700:100:4003::/64", "vlan": 200}))
+        ]
     );
 }
 

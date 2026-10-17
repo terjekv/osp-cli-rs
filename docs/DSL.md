@@ -82,7 +82,7 @@ distinct addresses.
 
 | Stage | Syntax and meaning | Example |
 | --- | --- | --- |
-| Bare search | Case-insensitive text search across keys and values; retains rows | `running` |
+| Bare search | Case-insensitive key/value search; narrows one object or filters multiple objects | `running` |
 | `F` | `F field OP value`; operators `=`, `==`, `!=`, `>`, `>=`, `<`, `<=`, `~` | `F status.name=running` |
 | `P` | `P field[,field...] [!field...]`; keep/drop fields | `P id,status` |
 | `S` | `S field [asc\|desc] [AS num\|str\|ip] ...` | `S created_at desc id` |
@@ -114,11 +114,22 @@ keep field formatting such as relative times for fields that survive.
 
 ## Matching and selectors
 
+Quick search (`| term`) uses the number of rows entering that stage. With one
+object, it narrows the object to matching fields and keeps only matching list
+items. With multiple objects, it filters rows and keeps each matching row whole.
+Negation (`| !term`) removes matching fields or list items from one object, or
+removes matching rows from multiple objects. Each group's member rows follow
+this rule independently, including after earlier pipeline stages.
+
+A term naming a field's last path segment projects that field's complete value;
+selectors can also project addressed objects or list members. `?field` and
+`!?field` always filter by truthy presence or absence without narrowing fields.
+
 Quick search supports these prefixes, with or without intervening spaces:
 
 | Prefix | Meaning |
 | --- | --- |
-| `!text` | Exclude matching rows |
+| `!text` | Remove matching fields/items or rows |
 | `=text` | Case-insensitive equality |
 | `==text` | Case-sensitive equality |
 | `!=text` | Negated case-insensitive equality |
