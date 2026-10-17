@@ -17,6 +17,8 @@ pub(crate) mod shared;
 mod table;
 mod terminal;
 
+pub(crate) use terminal::grid_lines;
+
 use crate::core::output::OutputFormat;
 
 use super::doc::{Block, Doc, JsonBlock};

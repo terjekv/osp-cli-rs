@@ -724,6 +724,14 @@ fn render_terminal_scalar_grid(
     render_grid_rows(&grid, indent, |cell| styler.paint_value(cell))
 }
 
+pub(crate) fn grid_lines(values: &[String], available_width: usize) -> Vec<String> {
+    render_grid_rows(
+        &PreparedGridList::from_items(values, available_width),
+        "",
+        str::to_owned,
+    )
+}
+
 fn render_grid_rows(
     grid: &PreparedGridList,
     indent: &str,
