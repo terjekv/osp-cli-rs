@@ -204,6 +204,8 @@ pub struct ReplRunConfig {
     pub actions: Vec<crate::repl::ReplAction>,
     /// Reports actual input selection: a rich lifetime, or `None` for basic input.
     pub on_start: Option<Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
+    /// Ends an embedded guided session on Ctrl-C or Esc.
+    pub exit_on_interrupt: bool,
 }
 
 impl ReplRunConfig {
@@ -224,6 +226,7 @@ impl ReplRunConfig {
             line_projector: None,
             actions: Vec::new(),
             on_start: None,
+            exit_on_interrupt: false,
         }
     }
 

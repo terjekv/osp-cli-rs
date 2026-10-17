@@ -237,13 +237,14 @@ impl App {
         self
     }
 
-    /// Handles product-owned REPL input before ordinary command dispatch.
+    /// Hosts a guided REPL with product-owned introduction and input.
     ///
     /// Return `None` for normal dispatch, `ControlFlow::Continue(text)` to
     /// print a message, or `ControlFlow::Break(code)` to leave the REPL.
     /// Consumed lines do not enter history or replace the previous command
-    /// result. This also runs for basic terminal input.
-    pub fn with_repl_line_handler(
+    /// result. The normal intro is suppressed; Ctrl-C and Esc end this REPL.
+    /// The line handler also runs for basic terminal input.
+    pub fn with_guided_repl(
         mut self,
         handler: impl Fn(&str) -> Option<std::ops::ControlFlow<i32, String>> + Send + Sync + 'static,
     ) -> Self {

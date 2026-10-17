@@ -55,10 +55,10 @@ impl<'a> ReplViewContext<'a> {
 pub(crate) fn run_plugin_repl(state: &mut AppState) -> Result<i32> {
     crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
     start_native_completion_refreshes(&state.runtime, &state.clients);
-    let mut loop_state = lifecycle::ReplLoopState::new(should_show_repl_intro(
-        state.runtime.config.resolved(),
-        state.runtime.ui.verbosity,
-    ));
+    let mut loop_state = lifecycle::ReplLoopState::new(
+        state.runtime.definition.repl_line_handler.is_none()
+            && should_show_repl_intro(state.runtime.config.resolved(), state.runtime.ui.verbosity),
+    );
     let mut sink = StdIoUiSink;
 
     loop {
