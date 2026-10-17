@@ -765,7 +765,10 @@ fn repl_command_spec_covers_repl_variant_and_builtin_dsl_matrix_unit() {
     assert!(plugins.supports_dsl);
 
     let history = repl_command_spec(&Commands::History(HistoryArgs {
-        command: HistoryCommands::Clear,
+        command: HistoryCommands::Clear(crate::cli::HistoryClearArgs {
+            pattern: "*".into(),
+            ..Default::default()
+        }),
     }));
     assert!(!history.supports_dsl);
 }

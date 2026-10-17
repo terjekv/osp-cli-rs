@@ -614,9 +614,22 @@ pub(crate) enum HistoryCommands {
     /// Keep last N entries.
     #[command(display_order = 11)]
     Prune(HistoryPruneArgs),
-    /// Clear history.
+    /// Delete history lines matching a prefix or glob.
     #[command(display_order = 12)]
-    Clear,
+    Clear(HistoryClearArgs),
+}
+
+/// Arguments for `history clear`.
+#[derive(Debug, Args, Default)]
+pub(crate) struct HistoryClearArgs {
+    /// Match the displayed command from its start; * and ? are wildcards.
+    pub pattern: String,
+    /// List matching lines without deleting them.
+    #[arg(long)]
+    pub preview: bool,
+    /// Allow deleting more than 100 lines.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Arguments for `history list`.
