@@ -106,6 +106,10 @@ The REPL is useful because it keeps a few things alive across commands:
 - session-scoped config overrides
 - session context published by native commands and plugins
 
+Context kinds include `account`, `group`, `person`, `host`, `netgroup`,
+`contact`, `task`, `provider`, `vm`, `network` and `zone`. Services declare which
+they consume and produce; only reads may fill an omitted subject.
+
 Use `context` to inspect current entities: kind, value, service,
 identity/profile scope, selecting command, age and last consuming command.
 `context set account alice` pins a value. `context clear` removes visible
