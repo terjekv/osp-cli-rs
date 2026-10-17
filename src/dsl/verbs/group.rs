@@ -8,7 +8,7 @@
 //! - grouping by plain objects or arrays of objects should fail and push the
 //!   user toward a leaf field or `?field`
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::{output_model::Group, row::Row};
 use anyhow::{Result, anyhow};
@@ -22,7 +22,7 @@ use crate::dsl::{
     },
     parse::{
         key_spec::{ExactMode, KeySpec},
-        path::{PathExpression, expression_to_flat_key, parse_path},
+        path::{PathExpression, expression_to_flat_key, is_structural_path_token, parse_path},
     },
     verbs::common::{parse_optional_alias_after_key, parse_stage_words},
 };
@@ -40,31 +40,24 @@ pub(crate) struct GroupPlan {
     keys: Vec<GroupKeyPlan>,
 }
 
+impl GroupPlan {
+    /// Header keys named by `as` instead of by their source field.
+    pub(crate) fn renamed_headers(&self) -> Vec<String> {
+        self.keys
+            .iter()
+            .filter(|key| key.header_key != canonical_header_key(&key.key_spec.token))
+            .map(|key| key.header_key.clone())
+            .collect()
+    }
+}
+
 pub(crate) fn compile(spec: &str) -> Result<GroupPlan> {
     Ok(GroupPlan {
         keys: parse_group_plan(spec)?,
     })
 }
 
-pub(crate) fn group_rows_with_plan(rows: Vec<Row>, plan: &GroupPlan) -> Result<Vec<Group>> {
-    let mut buckets = GroupBuckets::default();
-
-    for row in rows {
-        let flat = flatten_row(&row);
-        let headers = resolve_group_headers(&flat, &plan.keys)?;
-        for header in headers {
-            buckets.push(Group {
-                groups: header,
-                aggregates: Row::new(),
-                rows: vec![row.clone()],
-            })?;
-        }
-    }
-
-    Ok(buckets.finish())
-}
-
-pub(crate) fn regroup_groups_with_plan(groups: Vec<Group>, plan: &GroupPlan) -> Result<Vec<Group>> {
+fn group_partitions_with_plan(groups: Vec<Group>, plan: &GroupPlan) -> Result<Vec<Group>> {
     let mut buckets = GroupBuckets::default();
 
     for group in groups {
@@ -96,11 +89,15 @@ fn parse_group_plan(spec: &str) -> Result<Vec<GroupKeyPlan>> {
     }
 
     let mut plan = Vec::new();
+    let mut header_keys = HashSet::new();
     let mut index = 0usize;
     while index < words.len() {
         let token = words[index].clone();
         let (alias, consumed) = parse_optional_alias_after_key(&words, index, "G")?;
         let header_key = alias.unwrap_or_else(|| canonical_header_key(&token));
+        if !header_keys.insert(header_key.clone()) {
+            return Err(anyhow!("G: duplicate group header name '{}'", header_key));
+        }
         index += consumed;
         let key_spec = KeySpec::parse(&token);
         let (flat_hint, allow_multiple) = classify_group_key(&key_spec.token);
@@ -150,7 +147,10 @@ fn resolve_group_headers(row: &Row, plan: &[GroupKeyPlan]) -> Result<Vec<Row>> {
             for value in &values {
                 let mut candidate = combination.clone();
                 candidate.insert(key_plan.header_key.clone(), value.clone());
-                next.push(candidate);
+                // A list that repeats an element still joins its group once.
+                if !next.contains(&candidate) {
+                    next.push(candidate);
+                }
             }
         }
 
@@ -187,6 +187,16 @@ fn resolve_group_pairs(row: &Row, key_plan: &GroupKeyPlan) -> Result<Vec<(String
     if let Some(expr) = selector_expression(&key_plan.key_spec.token) {
         let nested = Value::Object(coalesce_flat_row(row));
         return Ok(enumerate_path_values(&nested, &expr));
+    }
+
+    if !key_plan.key_spec.existence
+        && !key_plan.allow_multiple
+        && let Some(flat_hint) = &key_plan.flat_hint
+        && row
+            .get(flat_hint)
+            .is_some_and(|value| matches!(value, Value::Array(items) if items.is_empty()))
+    {
+        return Ok(Vec::new());
     }
 
     let matches = match_row_keys_detailed(row, &key_plan.key_spec.token, key_plan.key_spec.exact);
@@ -274,15 +284,7 @@ fn is_descendant_key(key: &str, prefix: &str) -> bool {
 
 fn selector_expression(token: &str) -> Option<PathExpression> {
     let path = parse_path(token).ok()?;
-    if path
-        .segments
-        .iter()
-        .any(|segment| !segment.selectors.is_empty())
-    {
-        Some(path)
-    } else {
-        None
-    }
+    is_structural_path_token(token, &path).then_some(path)
 }
 
 fn select_match_keys(
@@ -328,17 +330,7 @@ pub(crate) fn apply_set(
     mut set: crate::dsl::model::RowSet,
     plan: &GroupPlan,
 ) -> Result<crate::dsl::model::RowSet> {
-    set.partitions = if set.grouped {
-        regroup_groups_with_plan(set.partitions, plan)?
-    } else {
-        group_rows_with_plan(
-            set.partitions
-                .into_iter()
-                .flat_map(|part| part.rows)
-                .collect(),
-            plan,
-        )?
-    };
+    set.partitions = group_partitions_with_plan(set.partitions, plan)?;
     set.grouped = true;
     Ok(set)
 }

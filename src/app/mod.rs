@@ -15,11 +15,11 @@
 //!
 //! Public API shape:
 //!
-//! - most callers should start with [`App`] or [`App::builder`]
-//! - embedders may inspect runtime/session state, but the preferred
-//!   construction path still flows through a small number of builders and
-//!   constructors here such as [`crate::app::AppStateBuilder`]
-//! - lower-level semantic payloads live in modules like [`crate::guide`] and
+//! - most callers should start with [`App`]
+//! - configure the host through [`crate::App::new`] and its `with_*` methods
+//! - access-policy hooks inspect configuration and command scope through
+//!   [`crate::app::AppRuntime`]
+//! - lower-level semantic payloads live in modules like [`crate::core`] and
 //!   [`crate::completion`]; this module assembles the host
 //!
 //! Use this module when you want:
@@ -32,7 +32,7 @@
 //!
 //! - rendering rows/documents: [`crate::ui`]
 //! - pure completion trees or guide payloads: [`crate::completion`] or
-//!   [`crate::guide`]
+//!   [`crate::core`]
 //!
 //! Broad-strokes host flow:
 //!
@@ -49,8 +49,7 @@
 //!
 //! - [`App::run_from`] when they want a structured `Result<i32>`
 //! - [`App::run_process`] when they want process-style exit code conversion
-//! - [`App::with_sink`] or [`App::builder`] plus
-//!   [`AppBuilder::build_with_sink`] when a test or outer host wants captured
+//! - [`App::run_with_sink`] when a test or outer host wants captured
 //!   host-rendered one-shot stdout/stderr; REPL input and prompts still use the
 //!   process terminal
 //! Downstream product-wrapper pattern:
@@ -59,26 +58,24 @@
 //!   crate rather than in [`crate::app`]
 //! - build a [`crate::NativeCommandRegistry`] for product-specific commands
 //! - build one product-owned defaults layer under `extensions.<site>.*`
-//! - inject both through [`App::builder`], then
-//!   [`AppBuilder::with_native_commands`] and
-//!   [`AppBuilder::with_product_defaults`]
+//! - inject both through [`App::with_native_commands`] and
+//!   [`App::with_product_defaults`]
 //! - expose a thin product-level `run_process` or `builder()` API on top
 //!   instead of forking generic host behavior
 
 use crate::config::ConfigLayer;
-use crate::core::command_policy::{CommandPolicyContext, CommandPolicyRegistry};
 use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
-use crate::ui::messages::{MessageBuffer, MessageLevel, adjust_verbosity};
-use crate::ui::render_messages_without_config;
+use crate::ui::messages::{MessageLevel, adjust_verbosity};
 use std::ffi::OsString;
 use std::sync::Arc;
 
-pub(crate) mod access_recovery;
+mod access;
 pub(crate) mod assembly;
 pub(crate) mod bootstrap;
 pub(crate) mod builtin;
 pub(crate) mod command_output;
+pub(crate) mod command_plan;
 pub(crate) mod config_explain;
 pub(crate) mod dispatch;
 pub(crate) mod external;
@@ -86,8 +83,6 @@ pub(crate) mod facts;
 pub(crate) mod help;
 pub(crate) mod host;
 pub(crate) mod logging;
-pub(crate) mod rebuild;
-pub(crate) mod repl_lifecycle;
 pub(crate) mod runtime;
 pub(crate) mod session;
 /// UI sink abstractions used by the host entrypoints.
@@ -96,109 +91,100 @@ pub(crate) mod sink;
 mod tests;
 pub(crate) mod timing;
 
-pub use access_recovery::{
-    AccessRecoveryOutcome, AccessRecoveryRequest, CommandAccessKind, CommandAccessRecovery,
-    StartupHook,
-};
+pub(crate) use crate::config::is_sensitive_key;
+pub use access::{AccessPolicy, Visibility};
+pub(crate) use assembly::rebuild_repl_in_place;
 pub(crate) use bootstrap::*;
 pub(crate) use builtin::*;
 pub(crate) use command_output::*;
 pub(crate) use config_explain::{
-    ConfigExplainContext, config_explain_json, config_explain_result, config_value_to_json_for_key,
-    explain_runtime_config, format_scope, is_sensitive_key, push_missing_config_key_messages,
+    config_explain_json, config_explain_result, config_value_to_json_for_key,
+    explain_runtime_config, format_scope, push_missing_config_key_messages,
     render_config_explain_text,
 };
-pub(crate) use dispatch::ensure_builtin_access;
 pub(crate) use facts::*;
-pub use host::ErrorDetail;
 pub use host::run_from;
 pub(crate) use host::*;
-pub(crate) use repl_lifecycle::rebuild_repl_in_place;
-pub use runtime::{
-    AppClients, AppRuntime, AuthState, ConfigState, LaunchContext, RuntimeContext, TerminalKind,
-    UiState,
+pub use runtime::AppRuntime;
+pub(crate) use runtime::{
+    AppClients, AuthState, ConfigState, LaunchContext, RuntimeContext, TerminalKind, UiState,
 };
 #[cfg(test)]
-pub(crate) use session::AppStateInit;
-pub use session::{
-    AppSession, AppState, AppStateBuilder, DebugTimingBadge, DebugTimingState, LastFailure,
-    ReplScopeFrame, ReplScopeStack,
+pub(crate) use session::DebugTimingBadge;
+pub(crate) use session::{
+    AppSession, AppState, AppStateBuilder, DebugTimingState, LastFailure, ReplScopeFrame,
+    ReplScopeStack,
 };
 pub use sink::{BufferedUiSink, StdIoUiSink, StderrSpinner, UiSink};
+
+type ReplLineHandler = dyn Fn(&str) -> Option<std::ops::ControlFlow<i32, String>> + Send + Sync;
+
+type ProductAction = dyn Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync;
+
+/// Optional action-flag argument placed in the invocation configuration layer.
+#[derive(Clone, Copy)]
+pub struct ActionFlagValue {
+    /// Argument name displayed in help.
+    pub value_name: &'static str,
+    /// Configuration key receiving a supplied argument.
+    pub config_key: &'static str,
+}
+
+#[derive(Clone)]
+struct ProductActionFlag {
+    name: &'static str,
+    help: &'static str,
+    optional_value: Option<ActionFlagValue>,
+    run: Arc<ProductAction>,
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct AppDefinition {
     native_commands: NativeCommandRegistry,
     product_defaults: ConfigLayer,
     product_help_options: Vec<(String, String)>,
+    action_flags: Vec<ProductActionFlag>,
     config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
-    policy_context: CommandPolicyContext,
-    builtin_policy: CommandPolicyRegistry,
-    access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
-    startup_hook: Option<Arc<dyn StartupHook>>,
-}
-
-impl AppDefinition {
-    fn with_native_commands(mut self, native_commands: NativeCommandRegistry) -> Self {
-        self.native_commands = native_commands;
-        self
-    }
-
-    fn with_product_defaults(mut self, product_defaults: ConfigLayer) -> Self {
-        self.product_defaults = product_defaults;
-        self
-    }
-
-    fn with_product_help_option(
-        mut self,
-        syntax: impl Into<String>,
-        help: impl Into<String>,
-    ) -> Self {
-        self.product_help_options.push((syntax.into(), help.into()));
-        self
-    }
-
-    fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.policy_context = policy_context;
-        self
-    }
-
-    fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.builtin_policy = builtin_policy;
-        self
-    }
-
-    fn with_access_recovery(mut self, access_recovery: Arc<dyn CommandAccessRecovery>) -> Self {
-        self.access_recovery = Some(access_recovery);
-        self
-    }
-
-    fn with_startup_hook(mut self, startup_hook: Arc<dyn StartupHook>) -> Self {
-        self.startup_hook = Some(startup_hook);
-        self
-    }
+    access_policy: Option<Arc<dyn AccessPolicy>>,
+    pub(crate) repl_line_handler: Option<Arc<ReplLineHandler>>,
 }
 
 #[derive(Clone, Default)]
 /// Top-level application entrypoint for CLI and REPL execution.
 ///
-/// Most embedders should start here or with [`AppBuilder`] instead of trying
+/// Most embedders should start here instead of trying
 /// to assemble runtime/session machinery directly.
+///
+/// ```no_run
+/// use osp_cli::App;
+///
+/// fn main() {
+///     std::process::exit(
+///         App::new().run_process(std::env::args_os()),
+///     );
+/// }
+/// ```
 #[must_use]
 pub struct App {
-    definition: AppDefinition,
+    definition: Arc<AppDefinition>,
 }
 
 impl App {
-    /// Starts the canonical public builder for host construction.
-    pub fn builder() -> AppBuilder {
-        AppBuilder::default()
-    }
-
     /// Creates an application with the default native command registry and no
     /// wrapper-owned defaults.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use osp_cli::App;
+    ///
+    /// let app = App::new();
+    /// let exit = app.run_process(["osp", "--help"]);
+    ///
+    /// assert_eq!(exit, 0);
+    /// ```
     pub fn new() -> Self {
-        Self::builder().build()
+        Self::default()
     }
 
     /// Replaces the native command registry used for command dispatch.
@@ -247,7 +233,22 @@ impl App {
     /// assert!(sink.stdout.contains("version"));
     /// ```
     pub fn with_native_commands(mut self, native_commands: NativeCommandRegistry) -> Self {
-        self.definition = self.definition.with_native_commands(native_commands);
+        Arc::make_mut(&mut self.definition).native_commands = native_commands;
+        self
+    }
+
+    /// Hosts a guided REPL with product-owned introduction and input.
+    ///
+    /// Return `None` for normal dispatch, `ControlFlow::Continue(text)` to
+    /// print a message, or `ControlFlow::Break(code)` to leave the REPL.
+    /// Consumed lines do not enter history or replace the previous command
+    /// result. The normal intro is suppressed; Ctrl-C and Esc end this REPL.
+    /// The line handler also runs for basic terminal input.
+    pub fn with_guided_repl(
+        mut self,
+        handler: impl Fn(&str) -> Option<std::ops::ControlFlow<i32, String>> + Send + Sync + 'static,
+    ) -> Self {
+        Arc::make_mut(&mut self.definition).repl_line_handler = Some(Arc::new(handler));
         self
     }
 
@@ -259,7 +260,7 @@ impl App {
     ///
     /// When omitted, the application uses only the built-in runtime defaults.
     pub fn with_product_defaults(mut self, product_defaults: ConfigLayer) -> Self {
-        self.definition = self.definition.with_product_defaults(product_defaults);
+        Arc::make_mut(&mut self.definition).product_defaults = product_defaults;
         self
     }
 
@@ -273,7 +274,35 @@ impl App {
         syntax: impl Into<String>,
         help: impl Into<String>,
     ) -> Self {
-        self.definition = self.definition.with_product_help_option(syntax, help);
+        Arc::make_mut(&mut self.definition)
+            .product_help_options
+            .push((syntax.into(), help.into()));
+        self
+    }
+
+    /// Registers an exclusive product action that exits after returning its message.
+    ///
+    /// An optional [`ActionFlagValue`] accepts zero or one value and places
+    /// a supplied value in the invocation's config layer before policy startup.
+    /// The action receives the assembled CLI runtime; it never enters the REPL.
+    pub fn with_action_flag<F>(
+        mut self,
+        name: &'static str,
+        help: &'static str,
+        optional_value: Option<ActionFlagValue>,
+        run: F,
+    ) -> Self
+    where
+        F: Fn(&mut AppRuntime) -> miette::Result<String> + Send + Sync + 'static,
+    {
+        Arc::make_mut(&mut self.definition)
+            .action_flags
+            .push(ProductActionFlag {
+                name,
+                help,
+                optional_value,
+                run: Arc::new(run),
+            });
         self
     }
 
@@ -286,52 +315,31 @@ impl App {
         key: &'static str,
         value: &'static str,
     ) -> Self {
-        self.definition.config_flags.push((name, help, key, value));
+        Arc::make_mut(&mut self.definition)
+            .config_flags
+            .push((name, help, key, value));
         self
     }
 
-    /// Replaces the product-owned command-policy context used at runtime.
+    /// Installs product visibility, startup, acquisition and live session facts.
     ///
-    /// Wrapper crates should use this to project their normalized auth/session
-    /// facts into the generic command-policy engine instead of re-checking
-    /// those facts ad hoc inside command handlers.
-    pub fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.definition = self.definition.with_policy_context(policy_context);
-        self
-    }
-
-    /// Replaces the product-owned policy registry for built-in commands.
-    ///
-    /// Wrapper crates should use this when they need product policy to gate
-    /// upstream built-ins such as `config` without forking the generic host
-    /// grammar or dispatch code.
-    pub fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.definition = self.definition.with_builtin_policy(builtin_policy);
-        self
-    }
-
-    /// Replaces the product-owned denied-access recovery hook.
-    ///
-    /// Wrapper crates should use this when denied command access may be
-    /// recoverable by refreshing a product-owned session, such as prompting
-    /// for login and then retrying the command once.
-    pub fn with_access_recovery<R>(mut self, access_recovery: R) -> Self
-    where
-        R: CommandAccessRecovery + 'static,
-    {
-        self.definition = self
-            .definition
-            .with_access_recovery(Arc::new(access_recovery));
-        self
-    }
-
-    /// Installs a product-owned hook that runs after final startup config
-    /// resolution and before command dispatch.
-    pub fn with_startup_hook<R>(mut self, startup_hook: R) -> Self
-    where
-        R: StartupHook + 'static,
-    {
-        self.definition = self.definition.with_startup_hook(Arc::new(startup_hook));
+    /// ```
+    /// use osp_cli::App;
+    /// use osp_cli::app::{AccessPolicy, Visibility};
+    /// struct ProductAccess;
+    /// impl AccessPolicy for ProductAccess {
+    ///     fn visibility(&self, path: &[String]) -> Visibility {
+    ///         if path.first().is_some_and(|name| name == "internal") {
+    ///             Visibility::Hidden(Some("Use the product's operator profile".into()))
+    ///         } else {
+    ///             Visibility::Shown
+    ///         }
+    ///     }
+    /// }
+    /// let app = App::new().with_access_policy(ProductAccess);
+    /// ```
+    pub fn with_access_policy<P: AccessPolicy + 'static>(mut self, policy: P) -> Self {
+        Arc::make_mut(&mut self.definition).access_policy = Some(Arc::new(policy));
         self
     }
 
@@ -356,40 +364,15 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        host::run_from_with_sink_and_app(args, &mut StdIoUiSink, &self.definition)
-    }
-
-    /// Binds the application to a specific UI sink for repeated invocations.
-    ///
-    /// Prefer this in tests, editor integrations, or foreign hosts that need
-    /// the same host behavior as `osp` but want host-rendered one-shot output
-    /// captured in a buffer. REPL input and prompts still use the process
-    /// terminal. Each invocation creates fresh runtime and session state.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::app::BufferedUiSink;
-    /// use osp_cli::App;
-    ///
-    /// let mut sink = BufferedUiSink::default();
-    /// let exit = App::new()
-    ///     .with_sink(&mut sink)
-    ///     .run_process(["osp", "--help"]);
-    ///
-    /// assert_eq!(exit, 0);
-    /// assert!(!sink.stdout.is_empty());
-    /// assert!(sink.stderr.is_empty());
-    /// ```
-    pub fn with_sink<'a>(self, sink: &'a mut dyn UiSink) -> AppRunner<'a> {
-        AppRunner { app: self, sink }
+        crate::startup_trace::initialize();
+        let result = host::run_from_with_sink_and_app(args, &mut StdIoUiSink, &self.definition);
+        crate::startup_trace::finish();
+        result
     }
 
     /// Runs the application with the provided UI sink.
     ///
-    /// Prefer this over [`App::with_sink`] when the caller only needs one
-    /// invocation. Use [`App::with_sink`] and [`AppRunner`] when the same sink
-    /// should be reused across multiple calls.
+    /// Pass the same sink to subsequent calls to append their output.
     /// REPL input and prompts still use the process terminal.
     ///
     /// # Examples
@@ -406,11 +389,31 @@ impl App {
     /// assert!(sink.stderr.is_empty());
     /// # Ok::<(), miette::Report>(())
     /// ```
+    ///
+    /// The same application and sink can serve subsequent invocations:
+    ///
+    /// ```
+    /// use osp_cli::App;
+    /// use osp_cli::app::BufferedUiSink;
+    ///
+    /// let mut sink = BufferedUiSink::default();
+    /// let app = App::new();
+    ///
+    /// let first = app.run_with_sink(["osp", "--help"], &mut sink)?;
+    /// let second = app.run_process_with_sink(["osp", "--help"], &mut sink);
+    ///
+    /// assert_eq!(first, 0);
+    /// assert_eq!(second, 0);
+    /// assert!(!sink.stdout.is_empty());
+    /// assert!(sink.stderr.is_empty());
+    /// # Ok::<(), miette::Report>(())
+    /// ```
     pub fn run_with_sink<I, T>(&self, args: I, sink: &mut dyn UiSink) -> miette::Result<i32>
     where
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
+        crate::startup_trace::initialize();
         host::run_from_with_sink_and_app(args, sink, &self.definition)
     }
 
@@ -435,8 +438,16 @@ impl App {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
+        crate::startup_trace::initialize();
         let mut sink = StdIoUiSink;
-        self.run_process_with_sink(args, &mut sink)
+        sink::take_stdout_write_failure();
+        let code = self.run_process_with_sink(args, &mut sink);
+        crate::startup_trace::finish();
+        if sink::take_stdout_write_failure() && code == 0 {
+            1
+        } else {
+            code
+        }
     }
 
     /// Runs the application with the provided sink and returns a process exit
@@ -460,258 +471,128 @@ impl App {
     /// assert!(!sink.stdout.is_empty());
     /// assert!(sink.stderr.is_empty());
     /// ```
-    pub fn run_process_with_sink<I, T>(&self, args: I, sink: &mut dyn UiSink) -> i32
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<OsString> + Clone,
-    {
-        let args = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
-        let error_detail = bootstrap_error_detail(&args);
-        let message_verbosity = bootstrap_message_verbosity(&args);
-        let error_render_settings =
-            help::render_settings_for_help(&args, &self.definition.product_defaults).settings;
-
-        match host::run_from_with_sink_and_app(args, sink, &self.definition) {
-            Ok(code) => code,
-            Err(err) => {
-                let rendered = render_process_error(
-                    &err,
-                    error_detail,
-                    &error_render_settings,
-                    message_verbosity,
-                );
-                sink.write_stderr(&rendered);
-                classify_exit_code(&err)
-            }
-        }
-    }
-}
-
-/// Reusable runner that keeps an [`App`] paired with a borrowed UI sink.
-///
-/// Prefer [`App::run_with_sink`] for one-shot calls. This type exists for
-/// scoped reuse when the same sink should back multiple invocations.
-/// Each invocation creates fresh runtime and session state; the runner does
-/// not retain an interactive session between calls.
-///
-/// # Lifetime
-///
-/// `'a` is the lifetime of the mutable borrow of the sink passed to
-/// [`App::with_sink`]. That means the runner cannot outlive the borrowed sink
-/// and is mainly useful as a stack-scoped helper. It is not a good cross-thread
-/// or async handoff type in its current form because it stores `&'a mut dyn
-/// UiSink`.
-///
-/// # Examples
-///
-/// ```
-/// use osp_cli::App;
-/// use osp_cli::app::BufferedUiSink;
-///
-/// let mut sink = BufferedUiSink::default();
-/// let mut runner = App::new().with_sink(&mut sink);
-///
-/// let first = runner.run_from(["osp", "--help"])?;
-/// let second = runner.run_process(["osp", "--help"]);
-///
-/// assert_eq!(first, 0);
-/// assert_eq!(second, 0);
-/// assert!(!sink.stdout.is_empty());
-/// assert!(sink.stderr.is_empty());
-/// # Ok::<(), miette::Report>(())
-/// ```
-#[must_use = "AppRunner only has an effect when you call run_from or run_process on it"]
-pub struct AppRunner<'a> {
-    app: App,
-    sink: &'a mut dyn UiSink,
-}
-
-impl<'a> AppRunner<'a> {
-    /// Runs the application and returns a structured exit status.
-    ///
-    /// This is the bound-sink counterpart to [`App::run_with_sink`]. The
-    /// borrowed sink stays attached so later calls on the same runner append to
-    /// the same buffered or redirected output destination.
-    pub fn run_from<I, T>(&mut self, args: I) -> miette::Result<i32>
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<OsString> + Clone,
-    {
-        self.app.run_with_sink(args, self.sink)
-    }
-
-    /// Runs the application and converts execution failures into process exit
-    /// codes.
-    ///
-    /// This is the bound-sink counterpart to [`App::run_process_with_sink`].
-    /// User-facing failures are rendered into the already-bound sink before the
-    /// numeric exit code is returned.
-    pub fn run_process<I, T>(&mut self, args: I) -> i32
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<OsString> + Clone,
-    {
-        self.app.run_process_with_sink(args, self.sink)
-    }
-}
-
-#[derive(Clone, Default)]
-/// Builder for configuring an [`App`] before construction.
-///
-/// This is the canonical public composition surface for host-level setup.
-///
-/// # Examples
-///
-/// Minimal embedder `main.rs`:
-///
-/// ```no_run
-/// use osp_cli::App;
-///
-/// fn main() {
-///     std::process::exit(
-///         App::builder().build().run_process(std::env::args_os()),
-///     );
-/// }
-/// ```
-#[must_use]
-pub struct AppBuilder {
-    definition: AppDefinition,
-}
-
-impl AppBuilder {
-    /// Replaces the native command registry used by the built application.
-    ///
-    /// This is the builder-friendly way to extend the host with extra native
-    /// commands before calling [`AppBuilder::build`]. When omitted, the built
-    /// app uses the crate's default native-command registry.
-    ///
-    /// This is the builder-side equivalent of [`App::with_native_commands`].
-    /// Prefer it when a wrapper crate wants to finish command registration
-    /// before deciding whether to build an owned [`App`] or a sink-bound
-    /// [`AppRunner`].
-    pub fn with_native_commands(mut self, native_commands: NativeCommandRegistry) -> Self {
-        self.definition = self.definition.with_native_commands(native_commands);
-        self
-    }
-
-    /// Replaces the product-owned defaults layered into runtime bootstrap.
-    ///
-    /// Wrapper crates should put site-owned keys under `extensions.<site>.*`
-    /// and inject that layer here so native commands, `config get`, `config
-    /// explain`, help rendering, and REPL rebuilds all see the same resolved
-    /// config.
-    ///
-    /// If omitted, the built app uses only the crate's built-in runtime
-    /// defaults.
-    pub fn with_product_defaults(mut self, product_defaults: ConfigLayer) -> Self {
-        self.definition = self.definition.with_product_defaults(product_defaults);
-        self
-    }
-
-    /// Adds one wrapper-owned bootstrap option to the root help surface.
-    pub fn with_product_help_option(
-        mut self,
-        syntax: impl Into<String>,
-        help: impl Into<String>,
-    ) -> Self {
-        self.definition = self.definition.with_product_help_option(syntax, help);
-        self
-    }
-
-    /// Registers a root flag that sets one invocation-only config value.
-    /// Flags targeting the same key are mutually exclusive.
-    pub fn with_config_flag(
-        mut self,
-        name: &'static str,
-        help: &'static str,
-        key: &'static str,
-        value: &'static str,
-    ) -> Self {
-        self.definition.config_flags.push((name, help, key, value));
-        self
-    }
-
-    /// Replaces the product-owned command-policy context used at runtime.
-    ///
-    /// Use this when a wrapper crate already has normalized auth/session facts
-    /// and wants those facts applied consistently across startup, dispatch, and
-    /// REPL rebuilds.
-    pub fn with_policy_context(mut self, policy_context: CommandPolicyContext) -> Self {
-        self.definition = self.definition.with_policy_context(policy_context);
-        self
-    }
-
-    /// Replaces the product-owned policy registry for built-in commands.
-    pub fn with_builtin_policy(mut self, builtin_policy: CommandPolicyRegistry) -> Self {
-        self.definition = self.definition.with_builtin_policy(builtin_policy);
-        self
-    }
-
-    /// Replaces the product-owned denied-access recovery hook.
-    pub fn with_access_recovery<R>(mut self, access_recovery: R) -> Self
-    where
-        R: CommandAccessRecovery + 'static,
-    {
-        self.definition = self
-            .definition
-            .with_access_recovery(Arc::new(access_recovery));
-        self
-    }
-
-    /// Installs a product-owned hook that runs after final startup config
-    /// resolution and before command dispatch.
-    pub fn with_startup_hook<R>(mut self, startup_hook: R) -> Self
-    where
-        R: StartupHook + 'static,
-    {
-        self.definition = self.definition.with_startup_hook(Arc::new(startup_hook));
-        self
-    }
-
-    /// Builds an [`App`] from the current builder state.
-    ///
-    /// Choose this when you want an owned application value that can be reused
-    /// across many calls. Use [`AppBuilder::build_with_sink`] when binding the
-    /// output sink is part of the setup.
-    ///
-    /// # Examples
     ///
     /// ```
+    /// use osp_cli::app::BufferedUiSink;
     /// use osp_cli::App;
     ///
-    /// let app = App::builder().build();
-    /// let exit = app.run_process(["osp", "--help"]);
+    /// let mut sink = BufferedUiSink::default();
+    /// let exit = App::new()
+    ///     .run_process_with_sink(["osp", "--help"], &mut sink);
     ///
     /// assert_eq!(exit, 0);
+    /// assert!(!sink.stdout.is_empty());
+    /// assert!(sink.stderr.is_empty());
     /// ```
-    pub fn build(self) -> App {
-        App {
-            definition: self.definition,
-        }
-    }
-
-    /// Builds an [`AppRunner`] bound to the provided UI sink.
-    ///
-    /// This is the shortest path for tests and embedders that want one sink
-    /// binding plus the full host behavior.
-    ///
-    /// # Examples
     ///
     /// ```
     /// use osp_cli::App;
     /// use osp_cli::app::BufferedUiSink;
     ///
     /// let mut sink = BufferedUiSink::default();
-    /// let exit = App::builder()
-    ///     .build_with_sink(&mut sink)
-    ///     .run_process(["osp", "--help"]);
+    /// let exit = App::new()
+    ///     .run_process_with_sink(["osp", "--help"], &mut sink);
     ///
     /// assert_eq!(exit, 0);
     /// assert!(!sink.stdout.is_empty());
     /// assert!(sink.stderr.is_empty());
     /// ```
-    pub fn build_with_sink<'a>(self, sink: &'a mut dyn UiSink) -> AppRunner<'a> {
-        self.build().with_sink(sink)
+    pub fn run_process_with_sink<I, T>(&self, args: I, sink: &mut dyn UiSink) -> i32
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        crate::startup_trace::initialize();
+        let args = {
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "process argv collection").entered();
+            args.into_iter().map(Into::into).collect::<Vec<OsString>>()
+        };
+        let started = std::time::Instant::now();
+        let mut timing = host::TimingSummary::default();
+        let pipe = args.iter().position(|arg| arg == "|").unwrap_or(args.len());
+        let mut scan = crate::cli::invocation::scan_cli_argv(&args[..pipe]);
+        let result = host::run_scanned_with_sink_and_app(
+            &args[pipe..],
+            &mut scan,
+            sink,
+            &self.definition,
+            &mut timing,
+        );
+        let code = match result {
+            Ok(code) => code,
+            Err(err) => {
+                let (verbosity, debug_level, error_render_settings) = {
+                    let _phase = tracing::info_span!(target: "osp_startup", "process error display preparation").entered();
+                    if let Some(ui) = host::error_display_settings(&err) {
+                        (ui.verbosity, ui.debug_level, ui.render_settings.clone())
+                    } else {
+                        let (verbose, quiet) = (scan.invocation.verbose, scan.invocation.quiet);
+                        let context = help::render_settings_for_help_with_scan(
+                            &scan,
+                            &self.definition.product_defaults,
+                            &crate::config::ConfigLayer::default(),
+                        );
+                        let verbosity = adjust_verbosity(
+                            context
+                                .config
+                                .as_ref()
+                                .map_or(MessageLevel::Success, bootstrap::verbosity_from_config),
+                            verbose,
+                            quiet,
+                        );
+                        let debug_level = context
+                            .config
+                            .as_ref()
+                            .map_or(0, bootstrap::debug_level_from_config)
+                            .saturating_add(scan.invocation.debug)
+                            .min(3);
+                        if let Some(config) = &context.config {
+                            logging::init_developer_logging(bootstrap::build_logging_config(
+                                config,
+                                debug_level,
+                            ));
+                        }
+                        (verbosity, debug_level, context.settings)
+                    }
+                };
+                let err = host::report_with_invocation(
+                    err,
+                    host::ErrorDisplaySettings {
+                        verbosity,
+                        debug_level,
+                        render_settings: error_render_settings.clone(),
+                    },
+                );
+                let evidence = host::report_evidence(&err, verbosity);
+                sink::write_diagnostics(sink, &evidence.0, &error_render_settings);
+                let rendered = render_process_error(&err, &error_render_settings, verbosity, false);
+                if error_render_settings.format == OutputFormat::Json {
+                    sink.write_stdout(&rendered);
+                    if debug_level >= 2 {
+                        sink.write_stderr(&format!(
+                            "{}\n",
+                            render_report_message(&err, verbosity, &error_render_settings)
+                                .trim_end()
+                        ));
+                    }
+                } else {
+                    sink::write_diagnostics(sink, &rendered, &error_render_settings);
+                }
+                if debug_level >= 2
+                    && let Some(backtrace) = host::render_backtrace(&err, &error_render_settings)
+                {
+                    sink.write_stderr(&format!("{backtrace}\n"));
+                }
+                sink::write_diagnostics(sink, &evidence.1, &error_render_settings);
+                classify_exit_code(&err)
+            }
+        };
+        tracing::info!(target: "osp", exit_code = code,
+            elapsed_ms = started.elapsed().as_millis(),
+            startup_ms = timing.parse.unwrap_or_default().as_millis(),
+            command_ms = timing.execute.unwrap_or_default().as_millis(), "finished");
+        code
     }
 }
 
@@ -733,6 +614,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    crate::startup_trace::initialize();
     App::new().run_process(args)
 }
 
@@ -743,7 +625,7 @@ where
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::app::{BufferedUiSink, run_process_with_sink};
 ///
 /// let mut sink = BufferedUiSink::default();
@@ -753,7 +635,8 @@ where
 /// assert!(!sink.stdout.is_empty());
 /// assert!(sink.stderr.is_empty());
 /// ```
-pub fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
+#[cfg(test)]
+pub(crate) fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
@@ -761,91 +644,65 @@ where
     App::new().run_process_with_sink(args, sink)
 }
 
-fn render_process_error(
+pub(crate) fn render_process_error(
     err: &miette::Report,
-    detail: ErrorDetail,
     settings: &crate::ui::RenderSettings,
-    message_verbosity: MessageLevel,
+    verbosity: MessageLevel,
+    detail_hint: bool,
 ) -> String {
-    let message = render_report_message(err, detail, settings);
+    let _ = (verbosity, detail_hint);
+    let message = render_report_message(err, MessageLevel::Success, settings);
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
         let code = match exit_code {
             host::EXIT_CODE_USAGE => "usage_error",
             _ => "command_error",
         };
-        return format!(
-            "{}\n",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "ok": false,
-                "error": {"code": code, "message": message},
-                "exit_code": exit_code,
-            }))
-            .unwrap_or_else(|_| {
-                r#"{"ok":false,"error":{"code":"serialization_error","message":"failed to serialize process error"},"exit_code":1}"#
-                    .to_string()
-            })
+        return command_output::render_json_failure(
+            command_output::json_failure_error(Some(err), code, message, settings),
+            exit_code,
+            Vec::new(),
+            serde_json::Value::Null,
         );
     }
 
-    let mut messages = MessageBuffer::default();
-    messages.push_titled(
-        MessageLevel::Error,
-        if classify_exit_code(err) == host::EXIT_CODE_USAGE {
-            "Invalid command"
-        } else {
-            "Command failed"
-        },
-        message,
-    );
-    render_messages_without_config(settings, &messages, message_verbosity)
-}
-
-fn bootstrap_message_verbosity(args: &[OsString]) -> MessageLevel {
-    let (verbose, quiet) = bootstrap_verbosity_counts(args);
-    adjust_verbosity(MessageLevel::Success, verbose, quiet)
-}
-
-fn bootstrap_error_detail(args: &[OsString]) -> ErrorDetail {
-    let (verbose, quiet) = bootstrap_verbosity_counts(args);
-    adjust_error_detail(ErrorDetail::Terse, verbose, quiet)
-}
-
-fn bootstrap_verbosity_counts(args: &[OsString]) -> (u8, u8) {
-    let mut verbose = 0u8;
-    let mut quiet = 0u8;
-
-    for token in args.iter().skip(1) {
-        let Some(value) = token.to_str() else {
-            continue;
-        };
-
-        if value == "--" {
-            break;
-        }
-
-        match value {
-            "--verbose" => {
-                verbose = verbose.saturating_add(1);
-                continue;
-            }
-            "--quiet" => {
-                quiet = quiet.saturating_add(1);
-                continue;
-            }
-            _ => {}
-        }
-
-        if value.starts_with('-') && !value.starts_with("--") {
-            for ch in value.chars().skip(1) {
-                match ch {
-                    'v' => verbose = verbose.saturating_add(1),
-                    'q' => quiet = quiet.saturating_add(1),
-                    _ => {}
-                }
-            }
-        }
+    let error = host::report_error_details(err, MessageLevel::Success, settings);
+    let first = error
+        .message
+        .lines()
+        .next()
+        .unwrap_or("Command failed.")
+        .trim_start_matches("error: ");
+    let mut rendered = format!("error: {first}\n");
+    if let Some(id) = &error.request_id {
+        rendered.push_str(&format!("request-id: {id}\n"));
     }
+    if let Some(action) = &error.action {
+        rendered.push_str(&format!("hint: {action}\n"));
+    }
+    rendered
+}
 
-    (verbose, quiet)
+/// Emits a levelled message before a command host or credential flow resumes.
+/// Uses the same config-derived presentation and filtering as command messages.
+pub fn emit_message(
+    config: &crate::config::ResolvedConfig,
+    level: crate::core::MessageLevel,
+    text: impl Into<String>,
+    sink: &mut dyn UiSink,
+) -> miette::Result<()> {
+    let context = RuntimeContext::new(
+        None,
+        if config.terminal() == Some("repl") {
+            TerminalKind::Repl
+        } else {
+            TerminalKind::Cli
+        },
+        std::env::var("TERM").ok(),
+    );
+    let ui = UiState::from_resolved_config(&context, config)?;
+    let mut messages = crate::ui::messages::MessageBuffer::default();
+    messages.push(level, text);
+    command_output::emit_messages_for_ui(config, &ui, &messages, ui.verbosity, sink);
+    Ok(())
 }

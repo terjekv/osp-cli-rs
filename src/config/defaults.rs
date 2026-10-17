@@ -1,163 +1,18 @@
-//! Builtin config defaults live in this file.
-//!
-//! Do not split builtin defaults across modules unless this file becomes
-//! impossible to understand.
-//!
-//! Keep different kinds of defaults in separate sections here instead:
-//!
-//! - semantic runtime fallbacks used directly by callers
-//! - literal builtin config defaults
-//! - computed defaults derived from runtime inputs
+//! Assemble the builtin default layer from literal key declarations in `builtin`
+//! and computed user, path, and theme defaults. Shared runtime fallbacks also
+//! live here; builtin schema metadata and documentation belong to `builtin`.
 
 use super::ConfigLayer;
 use super::runtime::RuntimeEnvironment;
 
 /// Default logical profile name used when no profile override is active.
-pub const DEFAULT_PROFILE_NAME: &str = "default";
+pub(crate) const DEFAULT_PROFILE_NAME: &str = "default";
 /// Default maximum number of REPL history entries to keep.
-pub const DEFAULT_REPL_HISTORY_MAX_ENTRIES: i64 = 1000;
-/// Default toggle for persistent REPL history.
-pub const DEFAULT_REPL_HISTORY_ENABLED: bool = true;
-/// Default toggle for deduplicating REPL history entries.
-pub const DEFAULT_REPL_HISTORY_DEDUPE: bool = true;
-/// Default toggle for profile-scoped REPL history storage.
-pub const DEFAULT_REPL_HISTORY_PROFILE_SCOPED: bool = true;
+pub(crate) const DEFAULT_REPL_HISTORY_MAX_ENTRIES: i64 = 1000;
 /// Default maximum number of rows shown in the REPL history search menu.
-pub const DEFAULT_REPL_HISTORY_MENU_ROWS: i64 = 5;
-/// Default upper bound for cached session results.
-pub const DEFAULT_SESSION_CACHE_MAX_RESULTS: i64 = 64;
-/// Default debug verbosity level.
-pub const DEFAULT_DEBUG_LEVEL: i64 = 0;
-/// Default toggle for file logging.
-pub const DEFAULT_LOG_FILE_ENABLED: bool = false;
-/// Default log level used for file logging.
-pub const DEFAULT_LOG_FILE_LEVEL: &str = "warn";
-/// Default render width hint.
-pub const DEFAULT_UI_WIDTH: i64 = 72;
+pub(crate) const DEFAULT_REPL_HISTORY_MENU_ROWS: i64 = 5;
 /// Default maximum terminal width used for rendered output.
-pub const DEFAULT_UI_WIDTH_MAX: i64 = -1;
-/// Default left margin for rendered output.
-pub const DEFAULT_UI_MARGIN: i64 = 0;
-/// Default indentation width for nested output.
-pub const DEFAULT_UI_INDENT: i64 = 2;
-/// Default presentation preset name.
-pub const DEFAULT_UI_PRESENTATION: &str = "expressive";
-/// Default paging policy for tall one-shot terminal output.
-pub const DEFAULT_UI_PAGER: &str = "auto";
-/// Default semantic guide-format preference.
-pub const DEFAULT_UI_GUIDE_DEFAULT_FORMAT: &str = "guide";
-/// Default grouped-message layout mode.
-pub const DEFAULT_UI_MESSAGES_LAYOUT: &str = "grouped";
-/// Default section chrome frame style.
-pub const DEFAULT_UI_CHROME_FRAME: &str = "top";
-/// Default rule-sharing policy for sibling section chrome.
-pub const DEFAULT_UI_CHROME_RULE_POLICY: &str = "shared";
-/// Default table border style.
-pub const DEFAULT_UI_TABLE_BORDER: &str = "square";
-/// Default REPL intro mode.
-pub const DEFAULT_REPL_INTRO: &str = "full";
-/// Default threshold for rendering medium lists before expanding further.
-pub const DEFAULT_UI_MEDIUM_LIST_MAX: i64 = 5;
-/// Default table overflow strategy.
-pub const DEFAULT_UI_TABLE_OVERFLOW: &str = "ellipsis";
-
-const DEFAULT_EXTENSIONS_PLUGINS_TIMEOUT_MS: i64 =
-    crate::plugin::DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS as i64;
-
-const LITERAL_DEFAULTS: &[LiteralDefault] = &[
-    LiteralDefault::string("secrets.backend", "toml"),
-    LiteralDefault::string("profile.default", DEFAULT_PROFILE_NAME),
-    LiteralDefault::string("repl.input_mode", "auto"),
-    LiteralDefault::string("repl.tab_mode", "tab"),
-    LiteralDefault::string("repl.exit_message", ""),
-    LiteralDefault::bool("repl.simple_prompt", false),
-    LiteralDefault::string("repl.shell_indicator", "[{shell}]"),
-    LiteralDefault::string("repl.intro", DEFAULT_REPL_INTRO),
-    LiteralDefault::int("repl.history.max_entries", DEFAULT_REPL_HISTORY_MAX_ENTRIES),
-    LiteralDefault::bool("repl.history.enabled", DEFAULT_REPL_HISTORY_ENABLED),
-    LiteralDefault::bool("repl.history.dedupe", DEFAULT_REPL_HISTORY_DEDUPE),
-    LiteralDefault::bool(
-        "repl.history.profile_scoped",
-        DEFAULT_REPL_HISTORY_PROFILE_SCOPED,
-    ),
-    LiteralDefault::int("repl.history.menu_rows", DEFAULT_REPL_HISTORY_MENU_ROWS),
-    LiteralDefault::int(
-        "session.cache.max_results",
-        DEFAULT_SESSION_CACHE_MAX_RESULTS,
-    ),
-    LiteralDefault::int("debug.level", DEFAULT_DEBUG_LEVEL),
-    LiteralDefault::bool("log.file.enabled", DEFAULT_LOG_FILE_ENABLED),
-    LiteralDefault::string("log.file.level", DEFAULT_LOG_FILE_LEVEL),
-    LiteralDefault::int("ui.width", DEFAULT_UI_WIDTH),
-    LiteralDefault::int("ui.width-max", DEFAULT_UI_WIDTH_MAX),
-    LiteralDefault::int("ui.margin", DEFAULT_UI_MARGIN),
-    LiteralDefault::int("ui.indent", DEFAULT_UI_INDENT),
-    LiteralDefault::string("ui.presentation", DEFAULT_UI_PRESENTATION),
-    LiteralDefault::string("ui.pager", DEFAULT_UI_PAGER),
-    LiteralDefault::string("ui.help.level", "inherit"),
-    LiteralDefault::string("ui.guide.default_format", DEFAULT_UI_GUIDE_DEFAULT_FORMAT),
-    LiteralDefault::string("ui.messages.layout", DEFAULT_UI_MESSAGES_LAYOUT),
-    LiteralDefault::string("ui.message.verbosity", "success"),
-    LiteralDefault::string("ui.chrome.frame", DEFAULT_UI_CHROME_FRAME),
-    LiteralDefault::string("ui.chrome.rule_policy", DEFAULT_UI_CHROME_RULE_POLICY),
-    LiteralDefault::string("ui.table.overflow", DEFAULT_UI_TABLE_OVERFLOW),
-    LiteralDefault::string("ui.table.border", DEFAULT_UI_TABLE_BORDER),
-    LiteralDefault::string("ui.table.nested_border", "none"),
-    LiteralDefault::string("ui.help.table_chrome", "none"),
-    LiteralDefault::string("ui.help.entry_indent", "inherit"),
-    LiteralDefault::string("ui.help.entry_gap", "inherit"),
-    LiteralDefault::string("ui.help.section_spacing", "inherit"),
-    LiteralDefault::int("ui.medium_list_max", DEFAULT_UI_MEDIUM_LIST_MAX),
-    LiteralDefault::int(
-        "extensions.plugins.timeout_ms",
-        DEFAULT_EXTENSIONS_PLUGINS_TIMEOUT_MS,
-    ),
-    LiteralDefault::bool("extensions.plugins.discovery.path", false),
-];
-
-#[derive(Clone, Copy)]
-enum LiteralDefaultValue {
-    String(&'static str),
-    Bool(bool),
-    Integer(i64),
-}
-
-#[derive(Clone, Copy)]
-struct LiteralDefault {
-    key: &'static str,
-    value: LiteralDefaultValue,
-}
-
-impl LiteralDefault {
-    const fn string(key: &'static str, value: &'static str) -> Self {
-        Self {
-            key,
-            value: LiteralDefaultValue::String(value),
-        }
-    }
-
-    const fn bool(key: &'static str, value: bool) -> Self {
-        Self {
-            key,
-            value: LiteralDefaultValue::Bool(value),
-        }
-    }
-
-    const fn int(key: &'static str, value: i64) -> Self {
-        Self {
-            key,
-            value: LiteralDefaultValue::Integer(value),
-        }
-    }
-
-    fn seed(self, layer: &mut ConfigLayer) {
-        match self.value {
-            LiteralDefaultValue::String(value) => layer.set(self.key, value),
-            LiteralDefaultValue::Bool(value) => layer.set(self.key, value),
-            LiteralDefaultValue::Integer(value) => layer.set(self.key, value),
-        }
-    }
-}
+pub(crate) const DEFAULT_UI_WIDTH_MAX: i64 = -1;
 
 pub(super) fn build_builtin_defaults(
     env: &RuntimeEnvironment,
@@ -171,8 +26,10 @@ pub(super) fn build_builtin_defaults(
 }
 
 fn seed_literal_defaults(layer: &mut ConfigLayer) {
-    for default in LITERAL_DEFAULTS {
-        default.seed(layer);
+    for builtin in super::builtin::builtin_keys() {
+        if let Some(value) = &builtin.default {
+            layer.set(builtin.key, value.clone());
+        }
     }
 }
 
@@ -217,19 +74,6 @@ mod tests {
     }
 
     #[test]
-    fn literal_default_helpers_seed_string_bool_and_integer_entries_unit() {
-        let mut layer = ConfigLayer::default();
-        LiteralDefault::string("test.string", "alpha").seed(&mut layer);
-        LiteralDefault::bool("test.bool", true).seed(&mut layer);
-        LiteralDefault::int("test.int", 7).seed(&mut layer);
-
-        assert_eq!(layer.entries().len(), 3);
-        assert_eq!(layer.entries()[0].key, "test.string");
-        assert_eq!(layer.entries()[1].key, "test.bool");
-        assert_eq!(layer.entries()[2].key, "test.int");
-    }
-
-    #[test]
     fn builtin_defaults_seed_literal_and_computed_environment_values_unit() {
         let resolved = resolve_defaults(
             RuntimeEnvironment::from_pairs([
@@ -243,10 +87,7 @@ mod tests {
         );
 
         assert_eq!(resolved.active_profile(), DEFAULT_PROFILE_NAME);
-        assert_eq!(
-            resolved.get_bool("repl.history.enabled"),
-            Some(DEFAULT_REPL_HISTORY_ENABLED)
-        );
+        assert_eq!(resolved.get_bool("repl.history.enabled"), Some(true));
         assert_eq!(resolved.get_string("theme.name"), Some("nord"));
         assert_eq!(resolved.get_string("user.name"), Some("alice"));
         assert_eq!(resolved.get_string("domain"), Some("example.com"));

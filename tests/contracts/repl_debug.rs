@@ -1,11 +1,10 @@
 use crate::temp_support::make_temp_dir;
 use crate::test_env::isolated_env;
-use assert_cmd::Command;
 use serde_json::Value;
 
 fn run_repl_debug(args: &[&str]) -> std::process::Output {
     let home = make_temp_dir("osp-cli-repl-debug");
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("TERM", "xterm-256color")

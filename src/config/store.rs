@@ -13,6 +13,7 @@
 //! - callers should treat these helpers as persistence primitives, not config
 //!   resolution APIs
 
+use serde::Serialize;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -22,6 +23,7 @@ use crate::config::{
     ConfigError, ConfigValue, Scope, TomlEditResult, TomlParseDiagnostic, normalize_scope,
     validate_key_scope, with_path_context,
 };
+use crate::normalize::normalize_identifier;
 
 /// Options that control how TOML-backed config edits are applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -166,7 +168,7 @@ pub fn set_scoped_value_in_toml(
     scope: &Scope,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
-    edit_scoped_value_in_toml(path, key, scope, TomlEditOperation::Set(value), options)
+    edit_scoped_value_in_toml(path, key, scope, Some(value), options)
 }
 
 /// Removes one scoped key from a TOML-backed config store.
@@ -182,24 +184,14 @@ pub fn unset_scoped_value_in_toml(
     scope: &Scope,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
-    edit_scoped_value_in_toml(path, key, scope, TomlEditOperation::Unset, options)
-}
-
-enum TomlEditOperation<'a> {
-    Set(&'a ConfigValue),
-    Unset,
-}
-
-enum ValidatedTomlEditOperation {
-    Set(ConfigValue),
-    Unset,
+    edit_scoped_value_in_toml(path, key, scope, None, options)
 }
 
 fn edit_scoped_value_in_toml(
     path: &Path,
     key: &str,
     scope: &Scope,
-    operation: TomlEditOperation<'_>,
+    value: Option<&ConfigValue>,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
     let normalized_scope = normalize_scope(scope.clone());
@@ -207,12 +199,9 @@ fn edit_scoped_value_in_toml(
     let schema = crate::config::ConfigSchema::default();
     schema.validate_writable_key(key)?;
     validate_key_scope(key, &normalized_scope)?;
-    let operation = match operation {
-        TomlEditOperation::Set(value) => {
-            ValidatedTomlEditOperation::Set(schema.validate_write_value(key, value)?)
-        }
-        TomlEditOperation::Unset => ValidatedTomlEditOperation::Unset,
-    };
+    let value = value
+        .map(|value| schema.validate_write_value(key, value))
+        .transpose()?;
     let _transaction_lock = options
         .should_write()
         .then(|| lock_file_transaction(path))
@@ -227,19 +216,15 @@ fn edit_scoped_value_in_toml(
         .as_table_mut()
         .ok_or(ConfigError::TomlRootMustBeTable)?;
 
-    let previous = match operation {
-        ValidatedTomlEditOperation::Set(value) => {
-            let scoped_table = scoped_table_mut(root_table, &normalized_scope)?;
-            set_dotted_value(
-                scoped_table,
-                key,
-                &value,
-                matches!(options.mode, TomlStoreEditMode::FillEmpty),
-            )?
-        }
-        ValidatedTomlEditOperation::Unset => {
-            unset_dotted_value(root_table, &normalized_scope, key)?
-        }
+    let previous = match value {
+        Some(value) => set_scoped_value(
+            root_table,
+            &normalized_scope,
+            key,
+            &value,
+            matches!(options.mode, TomlStoreEditMode::FillEmpty),
+        )?,
+        None => unset_dotted_value(root_table, &normalized_scope, key)?,
     };
 
     if options.should_write() {
@@ -277,7 +262,7 @@ fn load_or_create_toml_root_with_source(
         reason: err.to_string(),
     })?;
 
-    raw.parse::<toml::Value>().map_err(|err| {
+    toml::from_str::<toml::Value>(&raw).map_err(|err| {
         let diagnostic = TomlParseDiagnostic::new(err.message());
         with_path_context(
             path.display().to_string(),
@@ -333,30 +318,130 @@ fn write_toml_root(
         })?;
     }
 
-    let payload = toml::to_string_pretty(root)
-        .map_err(|err| ConfigError::TomlParse(TomlParseDiagnostic::new(err.to_string())))?;
-    write_text_atomic(path, payload.as_bytes(), strict_secret_permissions).map_err(|err| {
-        ConfigError::FileWrite {
-            path: path.display().to_string(),
-            reason: err.to_string(),
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            return Err(ConfigError::FileRead {
+                path: path.display().to_string(),
+                reason: err.to_string(),
+            });
         }
+    };
+    let mut document = raw
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|err| ConfigError::TomlParse(TomlParseDiagnostic::new(err.message())))?;
+    let previous: toml::Value = toml_edit::de::from_document(document.clone())
+        .map_err(|err| ConfigError::TomlParse(TomlParseDiagnostic::new(err.message())))?;
+    update_toml_table(
+        document.as_table_mut(),
+        previous
+            .as_table()
+            .ok_or(ConfigError::TomlRootMustBeTable)?,
+        root.as_table().ok_or(ConfigError::TomlRootMustBeTable)?,
+    )?;
+    write_text_atomic(
+        path,
+        document.to_string().as_bytes(),
+        strict_secret_permissions,
+        AtomicWriteDurability::Synced,
+    )
+    .map_err(|err| ConfigError::FileWrite {
+        path: path.display().to_string(),
+        reason: err.to_string(),
     })?;
 
     Ok(())
+}
+
+fn update_toml_table(
+    table: &mut dyn toml_edit::TableLike,
+    previous: &toml::value::Table,
+    updated: &toml::value::Table,
+) -> Result<(), ConfigError> {
+    for key in previous.keys().filter(|key| !updated.contains_key(*key)) {
+        table.remove(key);
+    }
+    for (key, value) in updated {
+        if previous.get(key) == Some(value) {
+            continue;
+        }
+        if let (Some(child), Some(before), Some(after)) = (
+            table
+                .get_mut(key)
+                .and_then(toml_edit::Item::as_table_like_mut),
+            previous.get(key).and_then(toml::Value::as_table),
+            value.as_table(),
+        ) {
+            update_toml_table(child, before, after)?;
+            if after.is_empty()
+                && let Some(child) = table.get_mut(key).and_then(toml_edit::Item::as_table_mut)
+            {
+                child.set_implicit(false);
+            }
+        } else {
+            let serialized = value
+                .serialize(toml_edit::ser::ValueSerializer::new())
+                .map_err(|err| ConfigError::TomlParse(TomlParseDiagnostic::new(err.to_string())))?;
+            let mut replacement = toml_edit::Item::Value(serialized);
+            if value.is_table() {
+                replacement = toml_edit::Item::Table(
+                    toml_edit::ser::to_document(value)
+                        .map_err(|err| {
+                            ConfigError::TomlParse(TomlParseDiagnostic::new(err.to_string()))
+                        })?
+                        .into_table(),
+                );
+            } else if let (Some(old), Some(new)) = (
+                table.get(key).and_then(toml_edit::Item::as_value),
+                replacement.as_value_mut(),
+            ) {
+                *new.decor_mut() = old.decor().clone();
+            }
+            table.insert(key, replacement);
+        }
+    }
+    Ok(())
+}
+
+/// Whether an atomic replacement waits for the file and directory to reach disk.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AtomicWriteDurability {
+    Synced,
+    Buffered,
 }
 
 pub(crate) fn write_text_atomic(
     path: &Path,
     payload: &[u8],
     strict_secret_permissions: bool,
+    durability: AtomicWriteDurability,
 ) -> std::io::Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path.file_name().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("path has no file name: {}", path.display()),
         )
     })?;
+    let destination = match std::fs::canonicalize(path) {
+        Ok(path) => path,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
+        Err(err) => return Err(err),
+    };
+    let path = destination.as_path();
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let permissions = if strict_secret_permissions {
+        None
+    } else {
+        match std::fs::metadata(path) {
+            Ok(metadata) => Some(metadata.permissions()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err),
+        }
+    };
     let pid = std::process::id();
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -371,11 +456,23 @@ pub(crate) fn write_text_atomic(
         let temp_path = parent.join(temp_name);
         match create_temp_file(&temp_path, strict_secret_permissions) {
             Ok(mut file) => {
-                let write_result = file.write_all(payload).and_then(|()| file.sync_all());
+                let write_result = file
+                    .write_all(payload)
+                    .and_then(|()| match &permissions {
+                        Some(permissions) => file.set_permissions(permissions.clone()),
+                        None => Ok(()),
+                    })
+                    .and_then(|()| match durability {
+                        AtomicWriteDurability::Synced => file.sync_all(),
+                        AtomicWriteDurability::Buffered => Ok(()),
+                    });
                 drop(file);
                 let result = write_result
-                    .and_then(|()| replace_file_atomic(&temp_path, path))
-                    .and_then(|()| sync_parent_dir(parent));
+                    .and_then(|()| replace_file_atomic(&temp_path, path, durability))
+                    .and_then(|()| match durability {
+                        AtomicWriteDurability::Synced => sync_parent_dir(parent),
+                        AtomicWriteDurability::Buffered => Ok(()),
+                    });
                 if result.is_err() {
                     let _ = std::fs::remove_file(&temp_path);
                 }
@@ -393,12 +490,20 @@ pub(crate) fn write_text_atomic(
 }
 
 #[cfg(not(windows))]
-fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+fn replace_file_atomic(
+    source: &Path,
+    destination: &Path,
+    _durability: AtomicWriteDurability,
+) -> std::io::Result<()> {
     std::fs::rename(source, destination)
 }
 
 #[cfg(windows)]
-fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()> {
+fn replace_file_atomic(
+    source: &Path,
+    destination: &Path,
+    durability: AtomicWriteDurability,
+) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
 
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
@@ -427,7 +532,12 @@ fn replace_file_atomic(source: &Path, destination: &Path) -> std::io::Result<()>
         MoveFileExW(
             source_wide.as_ptr(),
             destination_wide.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING
+                | if durability == AtomicWriteDurability::Synced {
+                    MOVEFILE_WRITE_THROUGH
+                } else {
+                    0
+                },
         )
     };
     if replaced != 0 {
@@ -476,7 +586,7 @@ fn create_temp_file(
 /// Returns the Unix permission bits for a secrets file.
 ///
 /// Unix-only.
-pub fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
+pub(crate) fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
     use std::os::unix::fs::PermissionsExt;
 
     let metadata = std::fs::metadata(path).map_err(|err| ConfigError::FileRead {
@@ -486,47 +596,114 @@ pub fn secret_file_mode(path: &Path) -> Result<u32, ConfigError> {
     Ok(metadata.permissions().mode() & 0o777)
 }
 
-fn scoped_table_mut<'a>(
-    root: &'a mut toml::value::Table,
-    scope: &Scope,
-) -> Result<&'a mut toml::value::Table, ConfigError> {
-    ensure_table_path(root, &scope_path(scope))
-}
-
-fn scoped_table<'a>(
-    root: &'a toml::value::Table,
-    scope: &Scope,
-) -> Result<Option<&'a toml::value::Table>, ConfigError> {
-    get_table_path(root, &scope_path(scope))
-}
-
-fn scope_path(scope: &Scope) -> Vec<&str> {
-    match (scope.profile.as_deref(), scope.terminal.as_deref()) {
+fn canonical_scope_path(scope: &Scope) -> Vec<String> {
+    let path = match (scope.profile.as_deref(), scope.terminal.as_deref()) {
         (None, None) => vec!["default"],
         (Some(profile), None) => vec!["profile", profile],
         (None, Some(terminal)) => vec!["terminal", terminal],
         (Some(profile), Some(terminal)) => vec!["terminal", terminal, "profile", profile],
+    };
+    path.into_iter().map(str::to_string).collect()
+}
+
+/// Returns every stored table path that holds a normalized scope, in the
+/// order the loader reads them.
+///
+/// The loader normalizes profile and terminal names, so `[profile.TSD]` and
+/// `[profile.tsd]` both hold the `tsd` scope and the later table wins.
+fn stored_scope_paths(root: &toml::value::Table, scope: &Scope) -> Vec<Vec<String>> {
+    let mut paths = vec![(Vec::new(), root)];
+    for (index, section) in canonical_scope_path(scope).into_iter().enumerate() {
+        let mut next = Vec::new();
+        for (path, table) in paths {
+            // Profile and terminal names follow their `profile`/`terminal` table.
+            let keys = table.keys().filter(|key| {
+                if index % 2 == 1 {
+                    normalize_identifier(key) == section
+                } else {
+                    **key == section
+                }
+            });
+            for key in keys {
+                if let Some(child) = table.get(key).and_then(toml::Value::as_table) {
+                    let mut child_path = path.clone();
+                    child_path.push(key.clone());
+                    next.push((child_path, child));
+                }
+            }
+        }
+        paths = next;
     }
+    paths.into_iter().map(|(path, _)| path).collect()
+}
+
+/// Sets a value so that it is the one the loader sees for the scope: written
+/// to the exact table if one exists, otherwise to an existing spelling, and
+/// removed from any other table holding the same scope.
+fn set_scoped_value(
+    root: &mut toml::value::Table,
+    scope: &Scope,
+    dotted_key: &str,
+    value: &ConfigValue,
+    only_if_empty: bool,
+) -> Result<Option<ConfigValue>, ConfigError> {
+    let parts = dotted_key_parts(dotted_key)?;
+    let stored = stored_scope_paths(root, scope);
+    // Report and test the value the loader sees, before any table changes.
+    let previous = scoped_value(root, &stored, &parts).cloned();
+    if only_if_empty
+        && let Some(existing) = &previous
+        && !matches!(existing, toml::Value::String(text) if text.trim().is_empty())
+    {
+        return ConfigValue::from_toml(dotted_key, existing).map(Some);
+    }
+    let canonical = canonical_scope_path(scope);
+    let target = if stored.contains(&canonical) {
+        canonical
+    } else {
+        stored.first().cloned().unwrap_or(canonical)
+    };
+    for path in stored.iter().filter(|path| **path != target) {
+        let removed = remove_dotted_value(ensure_table_path(root, path)?, &parts)?;
+        if removed && scope.profile.is_none() {
+            prune_empty_table_path(root, path)?;
+        }
+    }
+    set_dotted_value(ensure_table_path(root, &target)?, dotted_key, value, false)?;
+    Ok(previous.and_then(|existing| ConfigValue::from_toml(dotted_key, &existing).ok()))
+}
+
+/// The value the loader sees for `parts` across the scope's stored tables.
+fn scoped_value<'a>(
+    root: &'a toml::value::Table,
+    stored: &[Vec<String>],
+    parts: &[&str],
+) -> Option<&'a toml::Value> {
+    stored
+        .iter()
+        .rev()
+        .filter_map(|path| get_table_path(root, path).ok().flatten())
+        .find_map(|table| read_dotted_value(table, parts))
 }
 
 fn ensure_table_path<'a>(
     table: &'a mut toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<&'a mut toml::value::Table, ConfigError> {
     let mut cursor = table;
     for section in path {
-        cursor = ensure_table(cursor, section)?;
+        cursor = ensure_table(cursor, section.as_ref())?;
     }
     Ok(cursor)
 }
 
 fn get_table_path<'a>(
     table: &'a toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<Option<&'a toml::value::Table>, ConfigError> {
     let mut cursor = table;
     for section in path {
-        let Some(next) = get_table(cursor, section)? else {
+        let Some(next) = get_table(cursor, section.as_ref())? else {
             return Ok(None);
         };
         cursor = next;
@@ -541,13 +718,7 @@ fn ensure_table<'a>(
     let entry = table
         .entry(key.to_string())
         .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-    match entry {
-        toml::Value::Table(inner) => Ok(inner),
-        _ => Err(ConfigError::InvalidSection {
-            section: key.to_string(),
-            expected: "table".to_string(),
-        }),
-    }
+    as_table_mut(entry, key)
 }
 
 fn get_table<'a>(
@@ -572,23 +743,8 @@ fn set_dotted_value(
     value: &ConfigValue,
     only_if_empty: bool,
 ) -> Result<Option<ConfigValue>, ConfigError> {
-    let parts = dotted_key
-        .split('.')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<&str>>();
-
-    if parts.is_empty() {
-        return Err(ConfigError::InvalidConfigKey {
-            key: dotted_key.to_string(),
-            reason: "empty key path".to_string(),
-        });
-    }
-
-    let mut cursor = table;
-    for key in &parts[..parts.len() - 1] {
-        cursor = ensure_table(cursor, key)?;
-    }
+    let parts = dotted_key_parts(dotted_key)?;
+    let cursor = ensure_table_path(table, &parts[..parts.len() - 1])?;
 
     let leaf = parts[parts.len() - 1];
     if only_if_empty
@@ -609,37 +765,34 @@ fn unset_dotted_value(
     scope: &Scope,
     dotted_key: &str,
 ) -> Result<Option<ConfigValue>, ConfigError> {
+    let parts = dotted_key_parts(dotted_key)?;
+    let stored = stored_scope_paths(root, scope);
+    let previous = scoped_value(root, &stored, &parts)
+        .and_then(|value| ConfigValue::from_toml(dotted_key, value).ok());
+
+    for path in &stored {
+        let removed = remove_dotted_value(ensure_table_path(root, path)?, &parts)?;
+        if removed && scope.profile.is_none() {
+            prune_empty_table_path(root, path)?;
+        }
+    }
+
+    Ok(previous)
+}
+
+fn dotted_key_parts(dotted_key: &str) -> Result<Vec<&str>, ConfigError> {
     let parts = dotted_key
         .split('.')
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect::<Vec<&str>>();
-
     if parts.is_empty() {
         return Err(ConfigError::InvalidConfigKey {
             key: dotted_key.to_string(),
             reason: "empty key path".to_string(),
         });
     }
-
-    let previous = scoped_table(root, scope)?
-        .and_then(|table| read_dotted_value(table, &parts))
-        .and_then(|value| ConfigValue::from_toml(dotted_key, value).ok());
-
-    let _ = remove_scoped_value(root, scope, &parts)?;
-    prune_empty_scope_tables(root, scope)?;
-
-    Ok(previous)
-}
-
-fn remove_scoped_value(
-    root: &mut toml::value::Table,
-    scope: &Scope,
-    parts: &[&str],
-) -> Result<bool, ConfigError> {
-    let table = ensure_table_path(root, &scope_path(scope))?;
-
-    remove_dotted_value(table, parts)
+    Ok(parts)
 }
 
 fn remove_dotted_value(
@@ -657,15 +810,7 @@ fn remove_dotted_value(
     let Some(entry) = table.get_mut(parts[0]) else {
         return Ok(false);
     };
-    let child = match entry {
-        toml::Value::Table(inner) => inner,
-        _ => {
-            return Err(ConfigError::InvalidSection {
-                section: parts[0].to_string(),
-                expected: "table".to_string(),
-            });
-        }
-    };
+    let child = as_table_mut(entry, parts[0])?;
 
     let removed = remove_dotted_value(child, &parts[1..])?;
     if removed && child.is_empty() {
@@ -674,27 +819,20 @@ fn remove_dotted_value(
     Ok(removed)
 }
 
-fn prune_empty_scope_tables(
-    root: &mut toml::value::Table,
-    scope: &Scope,
-) -> Result<(), ConfigError> {
-    prune_empty_table_path(root, &scope_path(scope))?;
-    Ok(())
-}
-
 fn prune_empty_table_path(
     table: &mut toml::value::Table,
-    path: &[&str],
+    path: &[impl AsRef<str>],
 ) -> Result<(), ConfigError> {
     let Some((head, tail)) = path.split_first() else {
         return Ok(());
     };
+    let head = head.as_ref();
     if tail.is_empty() {
         remove_empty_table(table, head);
         return Ok(());
     }
 
-    let should_remove = if let Some(value) = table.get_mut(*head) {
+    let should_remove = if let Some(value) = table.get_mut(head) {
         let child = as_table_mut(value, head)?;
         prune_empty_table_path(child, tail)?;
         child.is_empty()
@@ -702,7 +840,7 @@ fn prune_empty_table_path(
         false
     };
     if should_remove {
-        table.remove(*head);
+        table.remove(head);
     }
     Ok(())
 }
@@ -753,15 +891,8 @@ fn config_value_to_toml(value: &ConfigValue) -> toml::Value {
 }
 
 #[cfg(unix)]
-pub(crate) fn validate_secrets_permissions(
-    path: &PathBuf,
-    strict: bool,
-) -> Result<(), ConfigError> {
+pub(crate) fn validate_secrets_permissions(path: &PathBuf) -> Result<(), ConfigError> {
     use std::os::unix::fs::PermissionsExt;
-
-    if !strict {
-        return Ok(());
-    }
 
     let metadata = std::fs::metadata(path).map_err(|err| ConfigError::FileRead {
         path: path.display().to_string(),
@@ -779,10 +910,7 @@ pub(crate) fn validate_secrets_permissions(
 }
 
 #[cfg(not(unix))]
-pub(crate) fn validate_secrets_permissions(
-    _path: &PathBuf,
-    _strict: bool,
-) -> Result<(), ConfigError> {
+pub(crate) fn validate_secrets_permissions(_path: &PathBuf) -> Result<(), ConfigError> {
     Ok(())
 }
 

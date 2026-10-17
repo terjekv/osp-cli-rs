@@ -9,7 +9,7 @@ commands when you are scripting, automating, or just need one answer.
 
 Examples that use `inventory ...` below are illustrative provider-backed
 commands. Replace them with a real plugin command from
-`plugins commands`.
+`plugins list`.
 
 ## How a line is processed
 
@@ -33,17 +33,30 @@ keep session state for the next prompt
 osp
 ```
 
+## Intro and help documents
+
+The intro and root `help` compose ordered semantic document blocks. Configure
+`repl.intro` and `repl.intro_template.minimal`, `.compact`, or `.full` to author
+an intro with Markdown headings, paragraphs, inline markup, and lists. Nested
+and loose list items retain their parent text. `{{ help }}` and `{{ overview }}`
+insert the root help blocks at that position.
+
+Fenced `osp` blocks contain passive JSON data; other fences and invalid JSON
+remain literal text. Repeated fences stay separate and ordered. Templates do
+not execute commands. `intro --json` emits a document object; `intro | L 2`
+limits its flat rows. Root help uses the same row pipeline and section headings.
+
 ## Same Grammar as the CLI
 
 If a command works as a one-shot invocation, the same command text should work
 inside the REPL.
 
 ```bash
-osp plugins commands --json -v
+osp plugins list --json -v
 ```
 
 ```text
-plugins commands --json -v
+plugins list --json -v
 ```
 
 That includes:
@@ -51,28 +64,23 @@ That includes:
 - DSL pipes
 - `--format` and format shorthands like `--json`
 - `-v/-q/-d`
-- `--plugin-provider`
 
-For failures, the same detail ladder applies inside the REPL:
+Failures use the same renderer as one-shot commands: `error:`, an optional
+`request-id:`, and at most one `hint:`. Failure wording stays stable as verbosity
+increases. Plugin messages preserve sanitized text, levels and ordering on
+failed commands; known injected secrets are redacted.
 
-- default
-  - terse actionable summary
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic report
-- `-vvv`
-  - rich diagnostic report plus stack backtrace
+Launch `-v`/`-q`/`-d` flags set session defaults. Per-line flags add to those
+defaults for one command only. `-v` explains service and session selection,
+`-vv` shows exchanges, and `-vvv` adds response/cache evidence. These diagnostics
+and verbose field supplements are complete stderr lines above the prompt.
+`-d` shows host dispatch; `-dd` adds internal host decisions and captured
+backtraces. File logging is independent of per-line stderr settings.
 
-`-d/-dd/-ddd` are still about debug logs and timing, not the failure render
-itself.
-
-Practical failure workflow:
-
-1. run the command normally
-2. if it fails, read the terse failure
-3. rerun the command with `-v`, `-vv`, or `-vvv`, or inspect the recorded
-   failure with `doctor last -v`, `doctor last -vv`, or `doctor last -vvv`
+Read the error and its hint. `doctor last -vvv` reads retained sanitized evidence
+without repeating the failed operation. `doctor last -dd` writes the captured
+backtrace to stderr. `doctor` checks local setup without contacting services.
+A configured `repl.intro=none` remains disabled at every verbosity level.
 
 For successful results, the REPL also keeps the last replayable output:
 
@@ -96,11 +104,43 @@ The REPL is useful because it keeps a few things alive across commands:
 - completion
 - the last successful result for local replay and inspection
 - session-scoped config overrides
+- session context published by native commands and plugins
+
+Context kinds include `account`, `group`, `person`, `host`, `netgroup`,
+`contact`, `task`, `provider`, `vm`, `network` and `zone`. Services declare which
+they consume and produce; only reads may fill an omitted subject.
+
+Use `context` to inspect current entities: kind, value, service,
+identity/profile scope, selecting command, age and last consuming command.
+`context set account alice` pins a value. `context clear` removes visible
+entries, including persisted copies; `context clear host` removes only hosts.
+Normal output flags and DSL pipes work, for example `context --json` or
+`context | F kind == 'host'`.
+
+Read arguments declared by commands may be omitted; the host announces the
+remembered value and stores the expanded command in history. Writes require an
+explicit value or `.`; expansion is echoed before execution. Prompt tokens use
+`kind:value`, qualified by service only when kinds clash.
+For declared read subjects, an explicit argument wins over context, and context
+wins over the command's default value.
+
+Changing profile, effective identity or service endpoint hides foreign values;
+switching back restores them. Logout removes the service's values. Most kinds
+live only for the REPL process. Services may opt a kind into persistence: those
+entries load before the first prompt and are ignored by one-shot commands.
+`context` itself is REPL-only.
 
 ## Shell Scope
 
-`repl.shellable_commands` selects eligible
-top-level roots; its defaults are `nh`, `mreg`, `ldap`, `vm`, and `orch`.
+Suggested commands match the current prompt. Inside `orch`, both `task …` and
+`orch task …` work unless a host command or alias shadows the relative first
+word: use `orch help task` to distinguish it from the host's `help` command.
+Suggestions for another root keep their root form; leave the current shell
+before running them. JSON follow-ups in the REPL use the same form, while
+one-shot output uses `osp …`.
+
+Products choose shellable roots through `repl.shellable_commands`; the library
+enables none by default.
 Built-in namespaces such as `plugins`, `config`, `theme`, and `help` do not
 become shells.
 
@@ -145,12 +185,8 @@ The REPL provides:
 - shell-like tokenization
 - command and flag completion
 - scoped completion inside shells
-- history navigation
-- `!!` repeats the last accepted command, including one that failed during
-  execution; `sudo !!` repeats it with elevation. Tab expands these into the
-  editor without running; Enter expands and runs them. Unknown commands and
-  invalid syntax are excluded from saved history.
-- saved-history expansion such as `!123`, `!-2`, and `!prefix`
+- history search, bang replay and leading-space privacy; see
+  [COMPLETION.md](COMPLETION.md#history) for keys and persistence rules
 - paged results: `next` and `prev`, or Shift+→ / Shift+← (also PageDown /
   PageUp) on an empty line; with text on the line, Shift+arrows move the cursor
 
@@ -159,6 +195,8 @@ the known command catalog, config vocabulary, and already-available runtime
 state.
 
 See [COMPLETION.md](COMPLETION.md).
+
+`history clear PATTERN [--preview] [--force]` deletes matching displayed lines in the current history scope: matching starts at the beginning, `*` and `?` are wildcards, and a trailing `*` is implicit. More than 100 matches require `--force`; `--preview` lists the original history numbers without deleting. Root history includes shell prefixes; inside a shell the prefix is stripped, as in `history list` and Ctrl-R.
 
 ## Command Aliases
 
@@ -255,7 +293,7 @@ Do a short built-in investigation:
 
 ```text
 plugins list
-plugins commands --format md
+plugins list --format md
 help config
 ```
 
@@ -288,10 +326,84 @@ In those cases, use ordinary CLI commands with explicit render flags such as:
 osp --format json --render-mode plain plugins list
 ```
 
-## Background notices
+## Shortcuts and terminal bells
 
-Products can use `osp_cli::repl::post_notice` for a short informational line
-computed after startup. The editor prints it above the prompt; work posted
-before the editor starts is queued. The basic reader also displays notices on
-stderr, although it cannot redraw a partially typed line. Notice delivery does
-not wait for network work or block the prompt.
+Products choose named actions and bindings; basic and JSON sessions omit product
+shortcuts. See [EMBEDDING.md](EMBEDDING.md#repl-product-hooks) for the host API.
+
+### Terminal bells
+
+`repl.notifications.sound = "off" | "bell"` is the master policy (library default
+`off`; products can choose another default). `notifications preview` explicitly
+exercises the same local sink without HTTP. It respects the master, rate limit
+and machine-output suppression. Native commands request semantic feedback with
+`NativeCommandContext::request_bell()`, flushed after foreground output. Workers
+may request a best-effort bell through their current `ReplSession`. Background
+bells are immediate and subject to the same master policy and rate limit.
+
+BEL is best effort: the local terminal may play a sound, flash or ignore it,
+including over SSH and tmux. OSP never runs an audio subprocess or configures
+terminal passthrough. At most one BEL is emitted per ten seconds process-wide.
+One-shot, basic/non-TTY and JSON output never emit event or preview bells.
+Disable sound for this session with
+`config set repl.notifications.sound off --session`. Muting never replays audio.
+
+Intro templates and daily tips may use `{{actions}}` to show registered action
+labels with their resolved keys; disabled and unavailable actions are omitted.
+The root help surface uses the same resolved metadata.
+
+A leading `|` replays the saved answer: `| F status=failed` means
+`last | F status=failed` and makes no new request. Separate leading-pipe lines
+each start from the saved answer, not the previous replay. Quoted literal pipes
+remain ordinary command arguments.
+
+Pasting `osp COMMAND …` with a known root command removes only `osp` and
+returns the rest as editable input. Press Enter to execute it. Launcher flags
+such as `osp -u USER …` or `osp --prod …` stay visible; these lines are not
+normalized because their first word after `osp` is not a command root.
+
+`!! <args>` recalls the last command and appends arguments as editable input.
+For example, `!! --force --override cname` prepares a retry; Enter submits it.
+
+`each 'host {}'` runs once per `VALUE` value of the saved result, after its
+pipeline. Values are shell-quoted into `{}`; put the placeholder outside quotes
+inside the template. More than 50 values requires `--yes`. Commands that change
+state require both `--yes` and `--count N`, where N is exactly the number of
+values. Native integrations declare read/write effects on their command metadata;
+commands without declarations require acknowledgement unless their resolved leaf
+is a recognized read command. Templates with unresolved command names require
+acknowledgement. Domain `--force` and named overrides do not acknowledge a bulk
+write. Existing command confirmations still apply. `--ignore-errors` continues after failures;
+a final `N ok, M failed` tally is always printed after execution. Like `source`,
+exit or reload stops the batch, and nested source/each commands are refused.
+
+`help --all` lists every visible command path and description as ordinary rows.
+Use `help --all | uptime`, `help --all | F command ~ task`, `help --all --json`,
+or `help --all | Y` to filter, export, or copy the catalog. Hidden commands
+and positional/value completion entries are excluded.
+
+Alt+Enter inserts the command from the most recent structured `hint: Run …`
+into the input line. Press Enter to execute, or edit it first. The command is
+formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
+(the default), `F2` through `F12`, or `none`; duplicate bindings are rejected.
+Hints without a command do not replace the remembered command. Native commands
+produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
+retains recovery commands in errors. No terminal text is scraped.
+
+## Session recording
+
+`recording start FILE` creates a new private (0600) JSON Lines file.
+`recording stop` closes it; `recording status` shows the active file. Recording
+also stops when the REPL exits and survives configuration or theme reloads.
+Existing files are refused. Each submitted line produces a `command` event
+with `line`, `output` events with `stream` and plain `text`, and `http` events
+with `method`, sanitized `url`, `status` (null for transport failure), and
+`duration_ms`. HTTP events reuse command diagnostics, independent of `-v`.
+Headers and request/response bodies are never captured. Leading-space lines,
+sensitive command arguments, and explicit secret-display commands are omitted,
+including their output and HTTP events. Password prompt input is never captured;
+known config secrets and sensitive output fields are redacted.
+
+Replay uses ordinary command files, not recording files. Extract commands with
+`jq -r 'select(.event == "command") | .line' session.jsonl > commands.osp`,
+then run `source commands.osp`. Review the commands before sourcing a recording.

@@ -3,7 +3,9 @@
 //! documents are retained only for unstaged rendering.
 
 use crate::core::{
-    output_model::{OutputItems, OutputResult, compute_key_index},
+    output_model::{
+        DisplayRule, OutputItems, OutputMeta, OutputResult, compute_key_index, group_header_row,
+    },
     row::Row,
 };
 use anyhow::Result;
@@ -57,13 +59,13 @@ pub fn apply_pipeline(rows: Vec<Row>, stages: &[String]) -> Result<OutputResult>
 ///
 /// Use this when the command already produced an [`OutputResult`]. An empty
 /// pipeline returns it unchanged. Transformations invalidate the original
-/// document and presentation metadata; render and guide metadata are retained
+/// document and presentation metadata; render and document-row metadata are retained
 /// or rebuilt only where the stages support them.
 ///
 /// # Examples
 ///
 /// ```
-/// use osp_cli::core::output_model::OutputResult;
+/// use osp_cli::core::OutputResult;
 /// use osp_cli::dsl::apply_output_pipeline;
 /// use osp_cli::row;
 ///
@@ -133,7 +135,9 @@ fn resolve_stage_keys(output: &OutputResult, stages: &[String]) -> Result<Vec<St
     stages
         .iter()
         .map(|stage| {
-            use crate::dsl::parse::lexer::{Span, StageSegment, TokenKind, tokenize_stage};
+            use crate::dsl::parse::lexer::{
+                Span, StageSegment, TokenKind, tokenize_stage, tokenize_stage_terms,
+            };
             let tokens = tokenize_stage(&StageSegment {
                 raw: stage.clone(),
                 span: Span {
@@ -167,20 +171,47 @@ fn resolve_stage_keys(output: &OutputResult, stages: &[String]) -> Result<Vec<St
                 {
                     continue;
                 }
-                let resolved = token
-                    .text
-                    .split(',')
-                    .map(|key| {
-                        if key.is_empty() {
-                            Ok(String::new())
-                        } else {
-                            resolve(key)
+                if verb == "P" {
+                    let raw = &stage[token.span.start..token.span.end];
+                    let term_segment = StageSegment {
+                        raw: raw.to_string(),
+                        span: Span {
+                            start: 0,
+                            end: raw.len(),
+                        },
+                    };
+                    let terms = tokenize_stage_terms(&term_segment)?;
+                    let mut resolved = raw.to_string();
+                    let mut changed = false;
+                    for term in terms.iter().rev() {
+                        let field = resolve(&term.text)?;
+                        if field != term.text {
+                            resolved.replace_range(
+                                term.span.start..term.span.end,
+                                &serde_json::to_string(&field)?,
+                            );
+                            changed = true;
                         }
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .join(",");
-                if resolved != token.text {
-                    replacements.push((token.span, serde_json::to_string(&resolved)?));
+                    }
+                    if changed {
+                        replacements.push((token.span, resolved));
+                    }
+                } else {
+                    let resolved = token
+                        .text
+                        .split(',')
+                        .map(|key| {
+                            if key.is_empty() {
+                                Ok(String::new())
+                            } else {
+                                resolve(key)
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?
+                        .join(",");
+                    if resolved != token.text {
+                        replacements.push((token.span, serde_json::to_string(&resolved)?));
+                    }
                 }
                 if verb == "F" {
                     break;
@@ -236,19 +267,11 @@ pub(crate) fn run_compiled(
     }
     // A transformed result describes the selected rows, never a stale service
     // envelope (whose total/cursors describe a different collection).
-    let guide_view = output
-        .document
-        .as_ref()
-        .and_then(crate::guide::GuideView::pipeline_document);
     output.document = None;
-    let mut preserve_guide = guide_view.is_some();
-    let mut rows = match &guide_view {
-        Some(guide) => RowSet::rows(guide.pipeline_rows()),
-        None => RowSet::from(output.items),
-    };
+    let mut rows = RowSet::from(output.items);
     for stage in &compiled.stages {
         // Cleanup is structural only when it changes rows. In particular, a
-        // no-op `?` must not discard a narrowed guide's layout and render hint.
+        // no-op `?` must not discard a narrowed document's layout and render hint.
         if matches!(stage, CompiledStage::Clean)
             && rows.partitions.iter().all(|partition| {
                 partition
@@ -261,39 +284,46 @@ pub(crate) fn run_compiled(
         }
         // Presentation overrides describe the producer's untransformed view.
         // Once a real stage runs, only the transformed rows may be shown.
-        output.meta.presentation_lines.clear();
-        output.meta.progress_append.clear();
         output.meta.display_limit = None;
         output.meta.wants_copy |= matches!(stage, CompiledStage::Copy);
-        if !stage.behavior().preserves_render_recommendation {
-            // Shape changes derive columns from the result. Field-keyed
+        let narrows = stage.quick_plan().is_some_and(|plan| {
+            rows.partitions
+                .iter()
+                .any(|partition| plan.narrows(partition.rows.len()))
+        });
+        if narrows || !stage.behavior().preserves_render_recommendation {
+            // Shape changes, including quick narrowing a lone object, derive
+            // columns from the result. Field-keyed
             // formatting (relative times, timestamps) still applies to any
             // field that survives, so it stays.
             output.meta.render_recommendation = None;
+            output.meta.display_notes.clear();
             output.meta.display_columns = None;
             output.meta.display_column_labels = None;
             output.meta.column_align.clear();
         }
-        preserve_guide &= matches!(
-            stage.behavior().semantic_effect,
-            crate::dsl::compiled::SemanticEffect::Preserve
-        );
+        output.meta.document_rows &= !narrows
+            && matches!(
+                stage.behavior().semantic_effect,
+                crate::dsl::compiled::SemanticEffect::Preserve
+            );
         rows = apply_stage(rows, stage)?;
+        match stage.synthesized_fields() {
+            Some(created) => forget_formatting(&mut output.meta, &created),
+            None => {
+                output.meta.unix_timestamp_columns.clear();
+                output.meta.display_rules.clear();
+            }
+        }
     }
     output.meta.grouped = rows.grouped;
     output.items = rows.into();
     output.meta.key_index = match &output.items {
         OutputItems::Rows(rows) => compute_key_index(rows),
         OutputItems::Groups(groups) => {
-            compute_key_index(&groups.iter().map(merged_group_header).collect::<Vec<_>>())
+            compute_key_index(&groups.iter().map(group_header_row).collect::<Vec<_>>())
         }
     };
-    if preserve_guide && let (Some(view), OutputItems::Rows(rows)) = (&guide_view, &output.items) {
-        output.document = Some(crate::core::output_model::OutputDocument::new(
-            crate::core::output_model::OutputDocumentKind::Guide,
-            serde_json::to_value(view.select_pipeline_rows(rows))?,
-        ));
-    }
     Ok(output)
 }
 
@@ -322,10 +352,41 @@ pub(crate) fn apply_stage(items: RowSet, stage: &CompiledStage) -> Result<RowSet
     }
 }
 
-fn merged_group_header(group: &crate::core::output_model::Group) -> Row {
-    let mut row = group.groups.clone();
-    row.extend(group.aggregates.clone());
-    row
+/// Drops field-keyed formatting for fields a stage created: a count named
+/// `created_at` is not a timestamp just because an input field was.
+fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
+    if synthesized.is_empty() {
+        return;
+    }
+    let created = |field: &String| {
+        synthesized.contains(field)
+            || field
+                .strip_prefix('/')
+                .and_then(|path| path.split('/').next())
+                .map(|key| key.replace("~1", "/").replace("~0", "~"))
+                .is_some_and(|key| synthesized.contains(&key))
+    };
+    meta.unix_timestamp_columns.retain(|field| !created(field));
+    meta.display_rules.retain(|rule| match rule {
+        DisplayRule::AddressRangeTotal { ranges, field, .. } => !created(ranges) && !created(field),
+        DisplayRule::AddressCountRemaining {
+            network,
+            used,
+            field,
+        } => !created(network) && !created(used) && !created(field),
+        DisplayRule::SuffixWhenTrue { field, when, .. }
+        | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
+        DisplayRule::ValueStyle { field, .. }
+        | DisplayRule::NullText { field, .. }
+        | DisplayRule::Date { field, .. }
+        | DisplayRule::Decimal { field, .. }
+        | DisplayRule::TextLimit { field, .. }
+        | DisplayRule::Compose { field, .. }
+        | DisplayRule::Hyperlink { field }
+        | DisplayRule::Bytes { field }
+        | DisplayRule::RelativeTimestamp { field }
+        | DisplayRule::HideArrayItemsWhenTrue { field, .. } => !created(field),
+    });
 }
 
 #[cfg(test)]

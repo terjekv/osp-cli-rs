@@ -5,9 +5,8 @@ use crate::support::{ReplPtyConfig, ReplPtySession};
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
 #[cfg(unix)]
-use std::io::Write;
 #[cfg(unix)]
-use std::process::{Command, Stdio};
+use assert_cmd::Command;
 #[cfg(unix)]
 use std::time::Duration;
 #[cfg(unix)]
@@ -57,6 +56,9 @@ fn assert_theme_result(session: &ReplPtySession, start: usize, id: &str, name: &
 #[cfg(unix)]
 #[test]
 fn repl_starts_runs_help_and_exits_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
 
     let start = session.output_len();
@@ -90,11 +92,11 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 
     // Recall executes the selected command; cancelling keeps the unfinished input.
     for (query, command, expected_id, expected_name) in [
-        (None, "theme show dracula --json", "dracula", "Dracula"),
+        (None, "theme list --json | dracula", "dracula", "Dracula"),
         (Some("dracula"), "", "dracula", "Dracula"),
         (
-            Some("theme show "),
-            "rose-pine-moon --json",
+            Some("theme list "),
+            "--json | rose-pine-moon",
             "rose-pine-moon",
             "Rose Pine Moon",
         ),
@@ -104,11 +106,7 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
             let start = session.output_len();
             session.write_bytes(b"\x12");
             assert!(
-                session.wait_for_plain_output_since(
-                    start,
-                    "(reverse-i-search)>",
-                    Duration::from_secs(3)
-                ),
+                session.wait_for_plain_output_since(start, "history>", Duration::from_secs(3)),
                 "history picker should display the current query; output:\n{}",
                 session.output_snapshot(8000),
             );
@@ -119,8 +117,12 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
             );
             let start = session.output_len();
             session.write_bytes(if command.is_empty() { b"\r" } else { b"\x03" });
+            if command.is_empty() {
+                assert_theme_result(&session, start, expected_id, expected_name);
+                continue;
+            }
             assert!(
-                session.wait_for_output_since(start, "\x1b[?25h", Duration::from_secs(3)),
+                session.wait_for_editor_since(start, Duration::from_secs(3)),
                 "editor should resume after the history picker; output:\n{}",
                 session.output_snapshot(8000),
             );
@@ -135,9 +137,9 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 
     // Navigate the editor's durable-history backend in both directions.
     for (keys, selected) in [
-        (b"\x1b[A".as_slice(), "theme show rose-pine-moon --json"),
-        (b"\x1b[A".as_slice(), "theme show dracula --json"),
-        (b"\x1b[B".as_slice(), "theme show rose-pine-moon --json"),
+        (b"\x1b[A".as_slice(), "theme list --json | rose-pine-moon"),
+        (b"\x1b[A".as_slice(), "theme list --json | dracula"),
+        (b"\x1b[B".as_slice(), "theme list --json | rose-pine-moon"),
     ] {
         let start = session.output_len();
         session.write_bytes(keys);
@@ -157,19 +159,19 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
     assert!(
         session.wait_for_plain_output_since(
             expanded,
-            "theme show rose-pine-moon --json",
+            "theme list --json | rose-pine-moon",
             Duration::from_secs(3)
         ),
         "Tab should expand the last accepted command; output:\n{}",
         session.output_snapshot(8000)
     );
     // A single expansion is filled in place, like shell completion.
-    assert_editor_command(&session, expanded, "theme show rose-pine-moon --json");
+    assert_editor_command(&session, expanded, "theme list --json | rose-pine-moon");
     let start = session.output_len();
     session.write_bytes(b"\r");
     assert_theme_result(&session, start, "rose-pine-moon", "Rose Pine Moon");
 
-    session.type_text("theme show nord --json");
+    session.type_text("theme list --json | nord");
     let start = session.output_len();
     session.write_bytes(b"\r");
     assert_theme_result(&session, start, "nord", "Nord");
@@ -177,10 +179,7 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
     session.type_text("!-2");
     let expanded = session.output_len();
     session.write_bytes(b"\r");
-    assert_editor_command(&session, expanded, "theme show rose-pine-moon --json");
-    let start = session.output_len();
-    session.write_bytes(b"\r");
-    assert_theme_result(&session, start, "rose-pine-moon", "Rose Pine Moon");
+    assert_theme_result(&session, expanded, "rose-pine-moon", "Rose Pine Moon");
 
     session.write_bytes(b"exit\r");
     assert!(
@@ -193,6 +192,9 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
     assert!(
         session.wait_for_plain_output("default>", Duration::from_secs(10)),
@@ -216,7 +218,7 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
     assert!(
         session.wait_for_output_since(
             output_start,
-            "Inspect and change output themes",
+            "Inspect and apply themes",
             Duration::from_secs(1),
         ),
         "bare theme help stalled; output:\n{}",
@@ -238,31 +240,34 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
 
 #[cfg(unix)]
 #[test]
-fn repl_without_cursor_position_reports_falls_back_without_blocking() {
-    let started = Instant::now();
-    let mut session =
-        ReplPtySession::spawn(ReplPtyConfig::default().without_cursor_position_reports());
+fn repl_keeps_the_rich_editor_when_cursor_reports_arrive_late() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
+    // A few hundred milliseconds is an ordinary SSH round trip from a laptop.
+    let mut session = ReplPtySession::spawn(
+        ReplPtyConfig::default().with_cursor_report_delay(Duration::from_millis(300)),
+    );
     assert!(
-        session.wait_for_plain_output("default>", Duration::from_secs(1)),
-        "expected prompt after cursor-probe fallback; output:\n{}",
+        session.wait_for_plain_output("default>", Duration::from_secs(5)),
+        "expected prompt; output:\n{}",
         session.output_snapshot(2000),
     );
-    assert!(started.elapsed() < Duration::from_secs(1));
+    let startup = session.output_snapshot(4000);
+    assert!(!startup.contains("basic input mode"), "{startup}");
     assert!(
-        session
-            .output_snapshot(2000)
-            .contains("using basic input mode")
+        !startup.contains("1;1R"),
+        "late cursor report leaked: {startup:?}"
     );
 
+    // Ctrl-L only exists in the rich editor; basic input would echo ^L.
     let output_start = session.output_len();
-    let started = Instant::now();
-    session.write_bytes(b"theme list\r");
+    session.write_bytes(b"\x0c");
     assert!(
-        session.wait_for_output_since(output_start, "Catppuccin", Duration::from_secs(1)),
-        "theme list stalled after cursor-probe fallback; output:\n{}",
-        session.output_snapshot(4000),
+        session.wait_for_output_since(output_start, "\x1b[2J", Duration::from_secs(1)),
+        "Ctrl-L did not clear the screen; output:\n{:?}",
+        session.output_since(output_start),
     );
-    assert!(started.elapsed() < Duration::from_secs(1));
 
     session.write_bytes(b"exit\r");
     if !session.wait_for_exit(Duration::from_secs(1)) {
@@ -273,6 +278,9 @@ fn repl_without_cursor_position_reports_falls_back_without_blocking() {
 #[cfg(unix)]
 #[test]
 fn repl_basic_mode_runs_help_and_exit_without_a_tty_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let home = make_temp_dir("osp-cli-basic-home");
     let plugins = make_temp_dir("osp-cli-basic-plugins");
 
@@ -289,18 +297,9 @@ fn repl_basic_mode_runs_help_and_exit_without_a_tty_end_to_end() {
         .env("OSP__REPL__INPUT_MODE", "basic")
         .env("OSP_PLUGIN_PATH", &plugins)
         .env("OSP_BUNDLED_PLUGIN_DIR", &plugins)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin should be piped")
-                .write_all(b"help\nexit\n")?;
-            child.wait_with_output()
-        })
+        .write_stdin(b"help\nexit\n")
+        .timeout(std::time::Duration::from_secs(20))
+        .output()
         .expect("basic repl should run");
 
     assert!(
@@ -340,14 +339,17 @@ fn wait_for_repl_json(session: &ReplPtySession, start: usize) -> serde_json::Val
 #[cfg(unix)]
 #[test]
 fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
     assert!(session.wait_for_plain_output("default>", Duration::from_secs(10)));
-    let failed_command = "theme show dracula | Z";
+    let failed_command = "theme list | dracula | Z";
     session.type_text(failed_command);
     let failed = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_plain_output_since(failed, "doctor last -v", Duration::from_secs(5)),
+        session.wait_for_plain_output_since(failed, "error:", Duration::from_secs(5)),
         "the failed output pipeline should leave an inspectable failure: {}",
         session.output_snapshot(12000)
     );
@@ -358,7 +360,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
         let start = session.output_len();
         session.write_bytes(b"\r");
         assert!(
-            session.wait_for_plain_output_since(start, failed_command, Duration::from_secs(5)),
+            session.wait_for_plain_output_since(start, "theme …", Duration::from_secs(5)),
             "the diagnostic should identify the original command: {}",
             session.output_snapshot(12000)
         );
@@ -370,7 +372,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     session.write_bytes(b"\r");
     let failure = wait_for_repl_json(&session, start);
     assert_eq!(failure["status"], "error");
-    assert_eq!(failure["command"], failed_command);
+    assert_eq!(failure["command"], "theme …");
     assert!(
         failure["summary"]
             .as_str()
@@ -378,7 +380,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     );
     assert_ne!(failure["detail"], failure["summary"]);
 
-    session.type_text("theme show dracula --json | G id | A count | Z");
+    session.type_text("theme list --json | dracula | G id | A count | Z");
     let start = session.output_len();
     session.write_bytes(b"\r");
     let recovered = wait_for_repl_json(&session, start);

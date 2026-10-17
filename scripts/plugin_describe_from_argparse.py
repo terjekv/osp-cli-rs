@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Best-effort argparse -> osp DescribeV1 helper.
+"""Best-effort argparse -> osp command metadata helper.
 
 This is intentionally a convenience script, not a compatibility contract.
 If it drifts from modern argparse behavior, treat the output as a starter
@@ -84,23 +84,16 @@ def convert_parser(name: str, parser: argparse.ArgumentParser) -> dict[str, Any]
     return command
 
 
-def build_describe(parser: argparse.ArgumentParser, plugin_id: str, plugin_version: str) -> dict[str, Any]:
-    prog = (parser.prog or plugin_id).split()[0]
-    top_name = prog.removeprefix("osp-")
-    return {
-        "protocol_version": 1,
-        "plugin_id": plugin_id,
-        "plugin_version": plugin_version,
-        "min_osp_version": None,
-        "commands": [convert_parser(top_name, parser)],
-    }
+def build_describe(parser: argparse.ArgumentParser) -> dict[str, Any]:
+    payload = convert_parser("", parser)
+    payload.pop("name")
+    payload["output"] = "json"
+    return payload
 
 
 def main() -> int:
-    cli = argparse.ArgumentParser(description="Convert an argparse parser into a DescribeV1 skeleton.")
+    cli = argparse.ArgumentParser(description="Convert an argparse parser into a optional describe skeleton.")
     cli.add_argument("parser_ref", help="Python reference in MODULE:ATTR form")
-    cli.add_argument("--plugin-id", required=True)
-    cli.add_argument("--plugin-version", default="0.1.0")
     args = cli.parse_args()
 
     parser = load_attr(args.parser_ref)
@@ -109,7 +102,7 @@ def main() -> int:
     if not isinstance(parser, argparse.ArgumentParser):
         raise SystemExit("target is not an argparse.ArgumentParser")
 
-    json.dump(build_describe(parser, args.plugin_id, args.plugin_version), sys.stdout, indent=2)
+    json.dump(build_describe(parser), sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
 

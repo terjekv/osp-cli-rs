@@ -79,7 +79,7 @@ format = "json"
     )
     .expect("list set should succeed");
     let payload = std::fs::read_to_string(&list_path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("default")
             .and_then(|value| value.get("theme"))
@@ -118,7 +118,7 @@ format = "json"
     assert_eq!(set_result.previous, None);
 
     let payload = std::fs::read_to_string(&terminal_profile_path).expect("config should exist");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
@@ -143,13 +143,14 @@ format = "json"
     );
     let payload =
         std::fs::read_to_string(&terminal_profile_path).expect("config should still be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
             .and_then(|value| value.get("profile"))
             .and_then(|value| value.get("tsd"))
-            .is_none()
+            .and_then(toml::Value::as_table)
+            .is_some_and(toml::value::Table::is_empty)
     );
 }
 
@@ -230,7 +231,7 @@ ui.format = "json"
     .expect("unset should succeed");
     assert_eq!(result.previous, None);
     let payload = std::fs::read_to_string(&path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
@@ -273,8 +274,12 @@ format = "json"
     )
     .expect("unset should succeed");
     let payload = std::fs::read_to_string(&prune_path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
-    assert!(root.get("terminal").is_none());
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
+    assert!(
+        root["terminal"]["repl"]["profile"]["ops"]
+            .as_table()
+            .is_some_and(toml::value::Table::is_empty)
+    );
 }
 
 #[cfg_attr(miri, ignore = "config store filesystem integration test")]
@@ -296,10 +301,10 @@ fn store_reports_invalid_toml_sections_and_blank_keys_for_set_and_unset_unit() {
     match err {
         ConfigError::LayerLoad {
             path: err_path,
-            source,
+            inner,
         } => {
             assert!(err_path.contains("config.toml"));
-            assert!(matches!(*source, ConfigError::TomlParse(_)));
+            assert!(matches!(*inner, ConfigError::TomlParse(_)));
         }
         other => panic!("unexpected error: {other:?}"),
     }
@@ -414,7 +419,7 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600);
-    validate_secrets_permissions(&path, true).expect("strict validation should pass");
+    validate_secrets_permissions(&path).expect("strict validation should pass");
 
     enum Fixture {
         GroupReadable,
@@ -422,26 +427,17 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
     }
 
     enum Expected {
-        Ok,
         Insecure(u32),
         FileRead,
     }
 
-    for (label, strict, fixture, expected) in [
+    for (label, fixture, expected) in [
         (
             "strict group-readable",
-            true,
             Fixture::GroupReadable,
             Expected::Insecure(0o640),
         ),
-        (
-            "non-strict group-readable",
-            false,
-            Fixture::GroupReadable,
-            Expected::Ok,
-        ),
-        ("non-strict missing", false, Fixture::Missing, Expected::Ok),
-        ("strict missing", true, Fixture::Missing, Expected::FileRead),
+        ("strict missing", Fixture::Missing, Expected::FileRead),
     ] {
         let mut owner = None;
         let path = match fixture {
@@ -455,8 +451,7 @@ fn secret_write_and_permission_validation_cover_strict_non_strict_and_missing_pa
         };
         let _owner = owner;
 
-        match (expected, validate_secrets_permissions(&path, strict)) {
-            (Expected::Ok, Ok(())) => {}
+        match (expected, validate_secrets_permissions(&path)) {
             (
                 Expected::Insecure(expected_mode),
                 Err(ConfigError::InsecureSecretsPermissions { mode, .. }),
@@ -496,11 +491,12 @@ fn helper_value_and_path_functions_cover_scalar_secret_nested_and_pruned_cases_u
         ])
     );
 
-    let root: toml::Value = r#"
+    let root: toml::Value = toml::from_str(
+        r#"
 [default.ui]
 format = "json"
-"#
-    .parse()
+"#,
+    )
     .expect("fixture should parse");
     let table = root.as_table().expect("root should be a table");
     assert_eq!(
@@ -544,7 +540,7 @@ format = "json"
         other => panic!("unexpected error: {other:?}"),
     }
 
-    prune_empty_table_path(&mut nested, &[]).expect("empty path should short-circuit");
+    prune_empty_table_path(&mut nested, &[] as &[&str]).expect("empty path should short-circuit");
 
     let mut empty_root = toml::value::Table::new();
     empty_root.insert(
@@ -560,11 +556,12 @@ format = "json"
 fn write_and_load_helpers_cover_regular_io_and_error_paths_unit() {
     let dir = make_temp_dir("osp-config-store-write-root");
     let path = dir.join("config.toml");
-    let root: toml::Value = r#"
+    let root: toml::Value = toml::from_str(
+        r#"
 [default.ui]
 format = "json"
-"#
-    .parse()
+"#,
+    )
     .expect("fixture should parse");
 
     write_toml_root(&path, &root, false).expect("toml root should be written");
@@ -580,8 +577,13 @@ format = "json"
         other => panic!("unexpected error: {other:?}"),
     }
 
-    let err = write_text_atomic(std::path::Path::new("."), b"payload", false)
-        .expect_err("path without file name should fail");
+    let err = write_text_atomic(
+        std::path::Path::new("."),
+        b"payload",
+        false,
+        super::AtomicWriteDurability::Synced,
+    )
+    .expect_err("path without file name should fail");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains("path has no file name"));
 }

@@ -21,7 +21,7 @@
 //! clap grammar for builtins and shared flags
 //!      │
 //!      ├── [ invocation ] one-shot execution/render flags (`--format`, `-v`,
-//!      │                  `--plugin-provider`, ...)
+//!      │                  rendering options, ...)
 //!      ├── [ pipeline ]   alias-aware command token parsing plus DSL stages
 //!      └── [ commands ]   built-in command handlers once parsing is complete
 //!      │
@@ -32,8 +32,8 @@
 //! Most callers only need a few entry points:
 //!
 //! - [`crate::cli::Cli`] for the binary-facing grammar
-//! - [`crate::cli::InlineCommandCli`] for command text that omits the binary name
-//! - [`crate::cli::parse_command_text_with_aliases`] when you need alias-aware command plus
+//! - `InlineCommandCli` for command text that omits the binary name
+//! - `parse_command_text_with_aliases` when you need alias-aware command plus
 //!   DSL parsing
 //!
 //! The split here is deliberate. One-shot flags that affect rendering or
@@ -53,15 +53,14 @@ pub(crate) mod invocation;
 pub(crate) mod pipeline;
 pub(crate) mod rows;
 use crate::config::{ConfigLayer, RuntimeLoadOptions};
-use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::ui::UiPresentation;
 
-pub use pipeline::{
-    ParsedCommandLine, is_cli_help_stage, parse_command_text_with_aliases,
-    parse_command_tokens_with_aliases, validate_cli_dsl_stages,
-};
+pub(crate) use pipeline::{ParsedCommandLine, is_cli_help_stage, validate_cli_dsl_stages};
+#[cfg(test)]
+pub(crate) use pipeline::{parse_command_text_with_aliases, parse_command_tokens_with_aliases};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum PresentationArg {
@@ -89,9 +88,12 @@ impl From<PresentationArg> for UiPresentation {
     about = "OSP CLI",
     after_help = "Run `osp COMMAND --help` for a command family, or `osp` alone for the interactive shell. Pipe output through the OSP DSL with `|`; use `| H` for in-band DSL help."
 )]
+#[non_exhaustive]
 pub struct Cli {
     #[arg(skip)]
     pub(crate) product_overrides: ConfigLayer,
+    #[arg(skip)]
+    pub(crate) product_action: Option<String>,
     /// Override the effective user name for this invocation.
     #[arg(short = 'u', long = "user")]
     pub user: Option<String>,
@@ -141,50 +143,13 @@ pub struct Cli {
 
     /// Top-level built-in or plugin command selection.
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub(crate) command: Option<Commands>,
 }
 
 impl Cli {
-    /// Reads host-owned bootstrap options using the normal CLI grammar, with
-    /// additional root-only options supplied by a product wrapper.
-    ///
-    /// This is a preflight view: incomplete commands and help are left for the
-    /// host to validate/render. The returned CLI has no command payload. Product
-    /// options remain in the matches; wrappers must remove only options actually
-    /// matched at the root before forwarding the original argv to the host.
-    pub fn bootstrap_from<I, T>(
-        args: I,
-        product_options: impl IntoIterator<Item = clap::Arg>,
-    ) -> miette::Result<(Self, clap::ArgMatches)>
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<std::ffi::OsString> + Clone,
-    {
-        use miette::IntoDiagnostic;
-        let argv = args.into_iter().map(Into::into).collect::<Vec<_>>();
-        let scanned = invocation::scan_cli_argv(&argv)?;
-        let mut matches = bootstrap_command(Self::command())
-            .args(product_options)
-            .arg(
-                clap::Arg::new("bootstrap_help")
-                    .long("help")
-                    .short('h')
-                    .global(true)
-                    .action(clap::ArgAction::SetTrue),
-            )
-            .arg(
-                clap::Arg::new("bootstrap_version")
-                    .long("version")
-                    .short('V')
-                    .global(true)
-                    .action(clap::ArgAction::SetTrue),
-            )
-            .ignore_errors(true)
-            .try_get_matches_from(scanned.argv)
-            .into_diagnostic()?;
-        matches.remove_subcommand();
-        let cli = Self::from_arg_matches(&matches).into_diagnostic()?;
-        Ok((cli, matches))
+    /// Reports whether a built-in or external command was selected.
+    pub fn has_command(&self) -> bool {
+        self.command.is_some()
     }
 
     /// Returns the runtime source-loading options implied by global CLI flags.
@@ -193,28 +158,25 @@ impl Cli {
     }
 }
 
-fn bootstrap_command(command: clap::Command) -> clap::Command {
-    command
-        .disable_help_flag(true)
-        .disable_version_flag(true)
-        .disable_help_subcommand(true)
-        .mut_subcommands(bootstrap_command)
-}
-
 /// Top-level commands accepted by `osp`.
 #[derive(Subcommand)]
-pub enum Commands {
-    /// Inspect and manage discovered plugins.
+pub(crate) enum Commands {
+    #[command(hide = true)]
+    /// Inspect, set or clear entities remembered in this REPL session.
+    Context(ContextArgs),
+    /// Inspect and manage plugins.
     Plugins(PluginsArgs),
     /// Run diagnostics checks.
     Doctor(DoctorArgs),
-    /// Inspect and change output themes.
+    /// Inspect and apply themes.
     Theme(ThemeArgs),
-    /// Inspect and mutate CLI configuration.
+    /// Inspect and edit runtime config.
     Config(ConfigArgs),
     /// Create and manage command aliases.
     Alias(AliasArgs),
-    /// Manage persisted REPL history.
+    /// Preview local terminal feedback (no service requests).
+    Notifications(NotificationsArgs),
+    /// Inspect or prune REPL history.
     History(HistoryArgs),
     /// Generate static shell completion for built-in commands and flags.
     Completions(CompletionsArgs),
@@ -229,19 +191,92 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+/// Local terminal notification controls.
+#[derive(Debug, Clone, Args)]
+pub(crate) struct NotificationsArgs {
+    /// The local feedback operation.
+    #[command(subcommand)]
+    pub command: NotificationsCommands,
+}
+
+/// Explicit local notification operations.
+#[derive(Debug, Clone, Subcommand)]
+pub(crate) enum NotificationsCommands {
+    /// Request the same terminal bell as enabled event feedback.
+    Preview,
+}
+
+impl Commands {
+    // Completion scripts run before host dispatch; session commands need REPL state.
+    pub(crate) fn validate_dispatch_surface(&self, is_repl: bool) -> miette::Result<()> {
+        match self {
+            Self::Context(_) if !is_repl => Err(miette::miette!(
+                "`context` is available only in the REPL session"
+            )),
+            Self::Completions(_) => Err(miette::miette!(
+                "`completions` is available only as a one-shot CLI command"
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// Inspect, set or clear entities remembered in the current REPL session.
+#[derive(Debug, Args)]
+pub(crate) struct ContextArgs {
+    /// Context operation to run.
+    #[command(subcommand)]
+    pub command: Option<ContextCommands>,
+}
+
+/// Operations for REPL session context.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ContextCommands {
+    /// Remove all remembered values, or only the given kind.
+    #[command(display_order = 10)]
+    Clear(ContextClearArgs),
+    /// Remember a value for an entity kind.
+    Set(ContextSetArgs),
+}
+
+/// Selects context values to clear.
+#[derive(Debug, Args)]
+pub(crate) struct ContextClearArgs {
+    /// Entity kind to remove, such as `account` or `host`.
+    pub kind: Option<String>,
+}
+
+/// A named entity to remember.
+#[derive(Debug, Args)]
+pub(crate) struct ContextSetArgs {
+    /// Shared entity kind.
+    pub kind: String,
+    /// Entity name or identifier.
+    pub value: String,
+}
+
 /// Arguments for static shell-completion generation.
 #[derive(Debug, Args)]
 #[command(
     after_help = "Static scripts cover built-in commands and flags. Commands loaded dynamically from native integrations or plugins remain available through the interactive REPL completion engine."
 )]
-pub struct CompletionsArgs {
+pub(crate) struct CompletionsArgs {
     /// Shell whose completion script should be generated.
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
 }
 
 pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
-    let mut command = Cli::command();
+    // Hidden commands are REPL-only or internal, so the scripts leave them out.
+    let full = Cli::command();
+    let mut command = clap::Command::new("osp")
+        .version(env!("CARGO_PKG_VERSION"))
+        .args(full.get_arguments().cloned())
+        .subcommands(
+            full.get_subcommands()
+                .filter(|subcommand| !subcommand.is_hide_set())
+                .cloned(),
+        );
     let mut output = Vec::new();
     clap_complete::generate(args.shell, &mut command, "osp", &mut output);
     String::from_utf8(output).unwrap_or_default()
@@ -249,16 +284,16 @@ pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
 
 /// Parser used for inline command execution without the binary name prefix.
 #[derive(Parser)]
-#[command(name = "osp", no_binary_name = true)]
-pub struct InlineCommandCli {
+#[command(name = "osp", about = "OSP CLI", no_binary_name = true)]
+pub(crate) struct InlineCommandCli {
     /// Parsed command payload, if any.
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub(crate) command: Option<Commands>,
 }
 
 /// Hidden REPL-only command namespace.
 #[derive(Debug, Args)]
-pub struct ReplArgs {
+pub(crate) struct ReplArgs {
     /// Hidden REPL subcommand to run.
     #[command(subcommand)]
     pub command: ReplCommands,
@@ -266,7 +301,7 @@ pub struct ReplArgs {
 
 /// Hidden REPL debugging commands.
 #[derive(Debug, Subcommand)]
-pub enum ReplCommands {
+pub(crate) enum ReplCommands {
     #[command(name = "debug-complete", hide = true)]
     /// Trace completion candidates for a partially typed line.
     DebugComplete(DebugCompleteArgs),
@@ -277,16 +312,14 @@ pub enum ReplCommands {
 
 /// Popup menu target to inspect through the hidden REPL debug surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum DebugMenuArg {
+pub(crate) enum DebugMenuArg {
     /// Trace the normal completion popup.
     Completion,
-    /// Trace the history-search popup used by `Ctrl-R`.
-    History,
 }
 
 /// Arguments for REPL completion debugging.
 #[derive(Debug, Args)]
-pub struct DebugCompleteArgs {
+pub(crate) struct DebugCompleteArgs {
     /// Input line to complete.
     #[arg(long)]
     pub line: String,
@@ -322,7 +355,7 @@ pub struct DebugCompleteArgs {
 
 /// Arguments for REPL highlighting debugging.
 #[derive(Debug, Args)]
-pub struct DebugHighlightArgs {
+pub(crate) struct DebugHighlightArgs {
     /// Input line to highlight.
     #[arg(long)]
     pub line: String,
@@ -330,7 +363,7 @@ pub struct DebugHighlightArgs {
 
 /// Top-level plugin command arguments.
 #[derive(Debug, Args)]
-pub struct PluginsArgs {
+pub(crate) struct PluginsArgs {
     /// Plugin management action to perform.
     #[command(subcommand)]
     pub command: PluginsCommands,
@@ -338,7 +371,7 @@ pub struct PluginsArgs {
 
 /// Top-level doctor command arguments.
 #[derive(Debug, Args)]
-pub struct DoctorArgs {
+pub(crate) struct DoctorArgs {
     /// Optional narrowed diagnostic target.
     #[command(subcommand)]
     pub command: Option<DoctorCommands>,
@@ -346,47 +379,46 @@ pub struct DoctorArgs {
 
 /// Built-in diagnostic groups exposed through `osp doctor`.
 #[derive(Debug, Subcommand)]
-pub enum DoctorCommands {
+pub(crate) enum DoctorCommands {
     /// Run all visible diagnostics.
+    #[command(display_order = 10)]
     All,
     /// Show config diagnostics.
+    #[command(display_order = 11)]
     Config,
     /// Show the last REPL failure; combine with -v/-vv/-vvv for more detail.
+    #[command(display_order = 12)]
     Last,
     /// Run plugin diagnostics.
+    #[command(display_order = 13)]
     Plugins,
     /// Show theme diagnostics.
+    #[command(display_order = 14)]
     Theme,
 }
 
 /// Built-in plugin management subcommands.
 #[derive(Debug, Subcommand)]
-pub enum PluginsCommands {
-    /// List discovered plugins.
+pub(crate) enum PluginsCommands {
+    /// List plugins.
     List,
-    /// List commands exported by plugins.
-    Commands,
-    /// Show plugin-declared configuration metadata.
-    Config(PluginConfigArgs),
-    /// Force a fresh plugin discovery pass.
+    /// Drop cached describe metadata.
     Refresh,
-    /// Enable a plugin-backed command.
-    Enable(PluginCommandStateArgs),
-    /// Disable a plugin-backed command.
-    Disable(PluginCommandStateArgs),
-    /// Clear persisted state for a command.
-    ClearState(PluginCommandClearArgs),
-    /// Select the provider implementation used for a command.
-    SelectProvider(PluginProviderSelectArgs),
-    /// Clear an explicit provider selection for a command.
-    ClearProvider(PluginProviderClearArgs),
-    /// Run plugin-specific diagnostics.
-    Doctor,
+    /// Enable a plugin.
+    Enable {
+        /// Plugin name.
+        name: String,
+    },
+    /// Disable a plugin.
+    Disable {
+        /// Plugin name.
+        name: String,
+    },
 }
 
 /// Top-level theme command arguments.
 #[derive(Debug, Args)]
-pub struct ThemeArgs {
+pub(crate) struct ThemeArgs {
     /// Theme action to perform.
     #[command(subcommand)]
     pub command: ThemeCommands,
@@ -394,52 +426,38 @@ pub struct ThemeArgs {
 
 /// Theme inspection and selection commands.
 #[derive(Debug, Subcommand)]
-pub enum ThemeCommands {
+pub(crate) enum ThemeCommands {
     /// List available themes.
+    #[command(display_order = 10)]
     List,
-    /// Show details for a specific theme.
-    Show(ThemeShowArgs),
-    /// Persist or apply a selected theme.
+    /// Preview themes interactively, or apply a named theme for this session.
+    #[command(display_order = 11)]
+    Preview(ThemePreviewArgs),
+    /// Set active theme.
+    #[command(display_order = 12)]
     Use(ThemeUseArgs),
+    /// Reset saved theme selection and colour overrides to product defaults.
+    #[command(display_order = 13)]
+    Reset,
 }
 
-/// Arguments for `theme show`.
+/// Arguments for `theme preview`.
 #[derive(Debug, Args)]
-pub struct ThemeShowArgs {
-    /// Theme name to inspect; defaults to the active theme.
+pub(crate) struct ThemePreviewArgs {
+    /// Theme to apply for this process; omit to choose and save interactively.
     pub name: Option<String>,
 }
 
 /// Arguments for `theme use`.
 #[derive(Debug, Args)]
-pub struct ThemeUseArgs {
+pub(crate) struct ThemeUseArgs {
     /// Theme name to activate.
     pub name: String,
 }
 
-/// Shared arguments for enabling or disabling a plugin command.
-#[derive(Debug, Args, Clone, Default)]
-pub struct PluginScopeArgs {
-    /// Apply the change globally instead of to a profile.
-    #[arg(long = "global", conflicts_with = "profile")]
-    pub global: bool,
-
-    /// Apply the change to a named profile.
-    #[arg(long = "profile")]
-    pub profile: Option<String>,
-
-    /// Target a specific terminal context, or the current one when omitted.
-    #[arg(
-        long = "terminal",
-        num_args = 0..=1,
-        default_missing_value = "__current__"
-    )]
-    pub terminal: Option<String>,
-}
-
 /// Shared config write scope arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigScopeArgs {
+pub(crate) struct ConfigScopeArgs {
     /// Write to the global store instead of a profile-scoped store.
     #[arg(long = "global", conflicts_with_all = ["profile", "profile_all"])]
     pub global: bool,
@@ -463,7 +481,7 @@ pub struct ConfigScopeArgs {
 
 /// Shared config store-selection arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigStoreArgs {
+pub(crate) struct ConfigStoreArgs {
     /// Apply the change only to the current in-memory session.
     #[arg(long = "session", conflicts_with_all = ["config_store", "secrets", "save"])]
     pub session: bool,
@@ -481,20 +499,9 @@ pub struct ConfigStoreArgs {
     pub save: bool,
 }
 
-/// Shared plugin command target arguments.
-#[derive(Debug, Args, Clone)]
-pub struct PluginCommandTargetArgs {
-    /// Command name to mutate.
-    pub command: String,
-
-    /// Shared global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub scope: PluginScopeArgs,
-}
-
 /// Shared config read-output arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct ConfigReadOutputArgs {
+pub(crate) struct ConfigReadOutputArgs {
     /// Include source provenance for returned keys.
     #[arg(long = "sources")]
     pub sources: bool,
@@ -504,51 +511,9 @@ pub struct ConfigReadOutputArgs {
     pub raw: bool,
 }
 
-/// Shared arguments for enabling or disabling a plugin command.
-#[derive(Debug, Args)]
-pub struct PluginCommandStateArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for clearing persisted command state.
-#[derive(Debug, Args)]
-pub struct PluginCommandClearArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for selecting a provider implementation for a command.
-#[derive(Debug, Args)]
-pub struct PluginProviderSelectArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-
-    /// Plugin identifier to bind to the command.
-    pub plugin_id: String,
-}
-
-/// Arguments for clearing a provider selection.
-#[derive(Debug, Args)]
-pub struct PluginProviderClearArgs {
-    /// Shared command name plus global/profile/terminal targeting flags.
-    #[command(flatten)]
-    pub target: PluginCommandTargetArgs,
-}
-
-/// Arguments for `plugins config`.
-#[derive(Debug, Args)]
-pub struct PluginConfigArgs {
-    /// Plugin identifier whose config schema should be shown.
-    pub plugin_id: String,
-}
-
 /// Top-level config command arguments.
 #[derive(Args)]
-pub struct ConfigArgs {
+pub(crate) struct ConfigArgs {
     /// Config action to perform.
     #[command(subcommand)]
     pub command: ConfigCommands,
@@ -559,7 +524,7 @@ pub struct ConfigArgs {
 #[command(
     after_help = "Examples:\n  osp alias add lsng 'ldap netgroup ${1} --value | P members'\n  osp alias list\n  osp alias remove lsng --save"
 )]
-pub struct AliasArgs {
+pub(crate) struct AliasArgs {
     /// Alias action to perform.
     #[command(subcommand)]
     pub command: AliasCommands,
@@ -567,18 +532,21 @@ pub struct AliasArgs {
 
 /// Commands for the friendly `alias.*` config wrapper.
 #[derive(Debug, Subcommand)]
-pub enum AliasCommands {
+pub(crate) enum AliasCommands {
     /// List aliases available in the active profile and terminal.
+    #[command(display_order = 10)]
     List(AliasListArgs),
-    /// Add or replace an alias after validating its command template.
+    /// Add or replace an alias.
+    #[command(display_order = 11)]
     Add(AliasAddArgs),
     /// Remove an alias from the selected config scope.
+    #[command(display_order = 12)]
     Remove(AliasRemoveArgs),
 }
 
 /// Arguments for `alias list`.
 #[derive(Debug, Args, Clone, Default)]
-pub struct AliasListArgs {
+pub(crate) struct AliasListArgs {
     /// Include the winning config source and scope for each alias.
     #[arg(long)]
     pub sources: bool,
@@ -586,7 +554,7 @@ pub struct AliasListArgs {
 
 /// Arguments for `alias add`.
 #[derive(Debug, Args)]
-pub struct AliasAddArgs {
+pub(crate) struct AliasAddArgs {
     /// Short command name, for example `lsng`.
     pub name: String,
 
@@ -608,7 +576,7 @@ pub struct AliasAddArgs {
 
 /// Arguments for `alias remove`.
 #[derive(Debug, Args)]
-pub struct AliasRemoveArgs {
+pub(crate) struct AliasRemoveArgs {
     /// Short command name to remove.
     pub name: String,
 
@@ -627,7 +595,7 @@ pub struct AliasRemoveArgs {
 
 /// Top-level history command arguments.
 #[derive(Debug, Args)]
-pub struct HistoryArgs {
+pub(crate) struct HistoryArgs {
     /// History action to perform.
     #[command(subcommand)]
     pub command: HistoryCommands,
@@ -635,22 +603,38 @@ pub struct HistoryArgs {
 
 /// Hidden intro command arguments.
 #[derive(Debug, Args, Clone, Default)]
-pub struct IntroArgs {}
+pub(crate) struct IntroArgs {}
 
 /// History management commands.
 #[derive(Debug, Subcommand)]
-pub enum HistoryCommands {
-    /// List persisted history entries.
+pub(crate) enum HistoryCommands {
+    /// List recent history.
+    #[command(display_order = 10)]
     List(HistoryListArgs),
-    /// Retain only the newest `keep` entries.
+    /// Keep last N entries.
+    #[command(display_order = 11)]
     Prune(HistoryPruneArgs),
-    /// Remove all persisted history entries.
-    Clear,
+    /// Delete history lines matching a prefix or glob.
+    #[command(display_order = 12)]
+    Clear(HistoryClearArgs),
+}
+
+/// Arguments for `history clear`.
+#[derive(Debug, Args, Default)]
+pub(crate) struct HistoryClearArgs {
+    /// Match the displayed command from its start; * and ? are wildcards.
+    pub pattern: String,
+    /// List matching lines without deleting them.
+    #[arg(long)]
+    pub preview: bool,
+    /// Allow deleting more than 100 lines.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Arguments for `history list`.
 #[derive(Debug, Args, Clone, Default)]
-pub struct HistoryListArgs {
+pub(crate) struct HistoryListArgs {
     /// Maximum number of recent matching entries to show.
     #[arg(long, value_name = "COUNT", default_value = "20")]
     pub limit: Option<std::num::NonZeroUsize>,
@@ -674,32 +658,47 @@ pub struct HistoryListArgs {
 
 /// Arguments for `history prune`.
 #[derive(Debug, Args)]
-pub struct HistoryPruneArgs {
+pub(crate) struct HistoryPruneArgs {
     /// Number of recent entries to keep.
     pub keep: usize,
 }
 
 /// Configuration inspection and mutation commands.
 #[derive(Subcommand)]
-pub enum ConfigCommands {
+pub(crate) enum ConfigCommands {
+    /// Edit configuration interactively; Save uses config set's default target.
+    Edit(ConfigEditArgs),
     /// Show the resolved configuration view.
+    #[command(display_order = 10)]
     Show(ConfigShowArgs),
     /// Read a single resolved config key.
+    #[command(display_order = 11)]
     Get(ConfigGetArgs),
     /// Explain how a config key was resolved.
+    #[command(display_order = 12)]
     Explain(ConfigExplainArgs),
     /// Set a config key in one or more writable stores.
+    #[command(display_order = 13)]
     Set(ConfigSetArgs),
     /// Remove a config key from one or more writable stores.
+    #[command(display_order = 14)]
     Unset(ConfigUnsetArgs),
     #[command(alias = "diagnostics")]
     /// Run config-specific diagnostics.
+    #[command(display_order = 15)]
     Doctor,
+}
+
+/// Arguments for `config edit`.
+#[derive(Debug, Args)]
+pub(crate) struct ConfigEditArgs {
+    /// Initially selected config key.
+    pub key: Option<String>,
 }
 
 /// Arguments for `config show`.
 #[derive(Debug, Args)]
-pub struct ConfigShowArgs {
+pub(crate) struct ConfigShowArgs {
     /// Shared source/raw output flags for config reads.
     #[command(flatten)]
     pub output: ConfigReadOutputArgs,
@@ -707,7 +706,7 @@ pub struct ConfigShowArgs {
 
 /// Arguments for `config get`.
 #[derive(Debug, Args)]
-pub struct ConfigGetArgs {
+pub(crate) struct ConfigGetArgs {
     /// Config key to read.
     pub key: String,
 
@@ -718,7 +717,7 @@ pub struct ConfigGetArgs {
 
 /// Arguments for `config explain`.
 #[derive(Debug, Args)]
-pub struct ConfigExplainArgs {
+pub(crate) struct ConfigExplainArgs {
     /// Config key to explain.
     pub key: String,
 
@@ -729,7 +728,7 @@ pub struct ConfigExplainArgs {
 
 /// Arguments for `config set`.
 #[derive(Args)]
-pub struct ConfigSetArgs {
+pub(crate) struct ConfigSetArgs {
     /// Config key to write.
     pub key: String,
     /// Config value to write. Multiple words are joined with spaces.
@@ -767,7 +766,7 @@ pub struct ConfigSetArgs {
 
 /// Arguments for `config unset`.
 #[derive(Debug, Args)]
-pub struct ConfigUnsetArgs {
+pub(crate) struct ConfigUnsetArgs {
     /// Config key to remove.
     pub key: String,
 
@@ -786,7 +785,6 @@ pub struct ConfigUnsetArgs {
 
 impl Cli {
     pub(crate) fn append_static_session_overrides(&self, layer: &mut ConfigLayer) {
-        layer.extend_from_layer(&self.product_overrides);
         if let Some(user) = self
             .user
             .as_deref()
@@ -795,6 +793,7 @@ impl Cli {
         {
             layer.set("user.name", user);
         }
+        layer.extend_from_layer(&self.product_overrides);
         if self.incognito {
             layer.set("repl.history.enabled", false);
         }
@@ -845,32 +844,202 @@ pub(crate) fn runtime_load_options_from_flags(
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::cli::{Commands, ThemeCommands, parse_inline_command_tokens};
 ///
 /// let tokens = vec![
 ///     "theme".to_string(),
-///     "show".to_string(),
+///     "use".to_string(),
 ///     "dracula".to_string(),
 /// ];
 ///
 /// let command = parse_inline_command_tokens(&tokens).unwrap().unwrap();
 /// match command {
 ///     Commands::Theme(args) => match args.command {
-///         ThemeCommands::Show(show) => {
-///             assert_eq!(show.name.as_deref(), Some("dracula"));
+///         ThemeCommands::Use(selected) => {
+///             assert_eq!(selected.name, "dracula");
 ///         }
 ///         _ => panic!("unexpected theme command"),
 ///     },
 ///     _ => panic!("unexpected command"),
 /// }
 /// ```
-pub fn parse_inline_command_tokens(tokens: &[String]) -> Result<Option<Commands>, clap::Error> {
+pub(crate) fn parse_inline_command_tokens(
+    tokens: &[String],
+) -> Result<Option<Commands>, clap::Error> {
     InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str)).map(|parsed| parsed.command)
+}
+
+pub(crate) fn passive_command(command: clap::Command) -> clap::Command {
+    command
+        .disable_help_subcommand(true)
+        .ignore_errors(true)
+        .mut_args(|arg| match arg.get_action() {
+            clap::ArgAction::Help | clap::ArgAction::HelpShort | clap::ArgAction::HelpLong => {
+                arg.action(clap::ArgAction::SetTrue)
+            }
+            _ => arg,
+        })
+        .mut_subcommands(passive_command)
+}
+
+pub(crate) fn help_parse_tokens(tokens: &[String]) -> &[String] {
+    // Clap answers at the first help flag, so later words cannot pick the target.
+    let options_end = tokens
+        .iter()
+        .position(|token| token == "--")
+        .unwrap_or(tokens.len());
+    tokens[..options_end]
+        .iter()
+        .position(|token| token == "-h" || token == "--help")
+        .map_or(tokens, |index| &tokens[..=index])
+}
+
+/// Select the help target with clap's parser, then read that command's metadata.
+pub(crate) fn command_help_document(
+    mut command: clap::Command,
+    tokens: &[String],
+    scope: &crate::core::CommandScope,
+) -> (crate::core::document::Document, bool, bool) {
+    let name = if command.get_name() == "osp" {
+        ""
+    } else {
+        command.get_name()
+    };
+    command = command.clone().bin_name(scope.command(name));
+    let tokens = help_parse_tokens(tokens);
+    command.build();
+    let parser = passive_command(command.clone());
+    let matches = parser.try_get_matches_from(tokens);
+    let mut selected = &command;
+    let mut root = true;
+    let mut help_subcommand = false;
+    if let Ok(matches) = &matches {
+        let mut current = matches;
+        while let Some((name, child_matches)) = current.subcommand() {
+            current = child_matches;
+            if name == "help" {
+                help_subcommand = true;
+                if let Ok(Some(targets)) = current.try_get_many::<String>("subcommand") {
+                    for name in targets {
+                        if let Some(child) = selected.find_subcommand(name) {
+                            selected = child;
+                            root = false;
+                        }
+                    }
+                }
+            } else if let Some(child) = selected.find_subcommand(name) {
+                selected = child;
+                root = false;
+            }
+        }
+    }
+    let long = help_subcommand || tokens.iter().any(|token| token == "--help");
+    (
+        crate::core::document::Document::from_clap_command(selected, long),
+        root,
+        long,
+    )
+}
+
+#[derive(clap::Parser)]
+#[command(name = "help", about = "Show REPL help")]
+pub(crate) struct ReplHelpCommand {
+    /// List all visible command paths.
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+pub(crate) fn is_help_all(tokens: &[String]) -> bool {
+    tokens.first().is_some_and(|word| word == "help")
+        && ReplHelpCommand::try_parse_from(tokens).is_ok_and(|help| help.all)
+}
+
+pub(crate) fn repl_only_commands() -> [clap::Command; 7] {
+    use clap::{Arg, ArgAction, Command, ValueHint};
+    [
+        <ReplHelpCommand as clap::CommandFactory>::command(),
+        Command::new("last")
+            .about("Replay the last successful result")
+            .arg(
+                Arg::new("raw")
+                    .long("raw")
+                    .action(ArgAction::SetTrue)
+                    .help("Show the pre-pipeline result"),
+            ),
+        <crate::repl::dispatch::builtins::EachCommand as clap::CommandFactory>::command(),
+        Command::new("source")
+            .about("Run commands from files")
+            .arg(
+                Arg::new("file")
+                    .value_name("FILE")
+                    .help("Command file")
+                    .num_args(0..)
+                    .value_hint(ValueHint::FilePath),
+            )
+            .arg(
+                Arg::new("ignore-errors")
+                    .long("ignore-errors")
+                    .action(ArgAction::SetTrue)
+                    .help("Continue after a command fails"),
+            ),
+        <crate::repl::recording::RecordingCommand as clap::CommandFactory>::command(),
+        Command::new("exit").about("Exit REPL"),
+        Command::new("quit").about("Exit REPL"),
+    ]
+}
+
+pub(crate) fn builtin_command_names() -> Vec<String> {
+    InlineCommandCli::command()
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .collect()
+}
+
+#[expect(clippy::expect_used, reason = "callers name declared builtins")]
+pub(crate) fn builtin_command(name: &str) -> clap::Command {
+    InlineCommandCli::command()
+        .find_subcommand(name)
+        .expect("known builtin command")
+        .clone()
+}
+
+pub(crate) fn inline_help_document(
+    tokens: &[String],
+    scope: &crate::core::CommandScope,
+) -> (crate::core::document::Document, bool) {
+    let (document, _, long) = command_help_document(InlineCommandCli::command(), tokens, scope);
+    (document, long)
 }
 
 #[cfg(test)]
 mod tests {
+    mod pipeline_parse;
+
+    mod aliases;
+
+    #[test]
+    fn internal_example_1() {
+        use crate::cli::{Commands, ThemeCommands, parse_inline_command_tokens};
+
+        let tokens = vec![
+            "theme".to_string(),
+            "use".to_string(),
+            "dracula".to_string(),
+        ];
+
+        let command = parse_inline_command_tokens(&tokens).unwrap().unwrap();
+        match command {
+            Commands::Theme(args) => match args.command {
+                ThemeCommands::Use(selected) => {
+                    assert_eq!(selected.name, "dracula");
+                }
+                _ => panic!("unexpected theme command"),
+            },
+            _ => panic!("unexpected command"),
+        }
+    }
+
     use super::{
         AliasCommands, Cli, Commands, ConfigCommands, InlineCommandCli, RuntimeLoadOptions,
         append_appearance_overrides, parse_inline_command_tokens,

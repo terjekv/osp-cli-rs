@@ -14,8 +14,9 @@ pub(crate) fn apply_stage(value: Value, stage: &CompiledStage) -> Result<Value> 
     let mut settings =
         crate::ui::RenderSettings::test_plain(crate::core::output::OutputFormat::Json);
     settings.format_explicit = true;
-    Ok(serde_json::from_str(&crate::ui::render_output(
-        &output, &settings,
+    Ok(serde_json::from_str(&crate::ui::render(
+        &output,
+        &crate::ui::RenderRequest::new(&settings),
     ))?)
 }
 

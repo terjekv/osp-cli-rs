@@ -17,7 +17,7 @@
 //! ```text
 //! plugin executable
 //!      │
-//!      ├── `describe` -> DescribeV1 / DescribeCommandV1
+//!      ├── `describe` -> PluginDescribe / DescribeCommandV1
 //!      │                host builds command catalog, completion, and policy
 //!      │
 //!      └── `run`      -> ResponseV1
@@ -31,7 +31,7 @@
 //!   command catalogs, policy registries, and rendered output
 //!
 //! Clap-backed convenience constructors such as
-//! [`crate::core::plugin::DescribeV1::from_clap_command`] translate command
+//! [`crate::core::plugin::DescribeCommandV1::from_clap`] translate command
 //! trees into the wire DTOs.
 //!
 //! Contract:
@@ -43,38 +43,56 @@
 //! - caller-facing docs should describe stable wire behavior rather than
 //!   internal plugin manager details
 
+use crate::core::MessageLevel;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::command_def::{
-    ArgDef, CommandDef, CommandPolicyDef, FlagDef, ValueChoice, ValueKind,
-};
-use crate::core::command_policy::{
-    AuthStrength, CommandPath, CommandPolicy, CredentialRequirement, SessionRequirements,
-    VisibilityMode,
-};
+use crate::core::clap_metadata as clap_meta;
+use crate::core::command_policy::CommandPath;
 
 /// Current plugin wire protocol version understood by this crate.
 pub const PLUGIN_PROTOCOL_V1: u32 = 1;
 
-/// `describe` payload emitted by a plugin that speaks protocol v1.
-///
-/// This is the host's browse-time contract with a plugin. The host uses it to
-/// build command catalogs, completion trees, and coarse auth/policy metadata
-/// before any real command execution happens.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DescribeV1 {
-    /// Protocol version declared by the plugin.
-    pub protocol_version: u32,
-    /// Stable plugin identifier.
-    pub plugin_id: String,
-    /// Plugin version string.
-    pub plugin_version: String,
-    /// Minimum `osp-cli` version required by the plugin, if any.
-    pub min_osp_version: Option<String>,
-    /// Top-level commands exported by the plugin.
-    pub commands: Vec<DescribeCommandV1>,
+/// Optional reply to `--osp-describe`; the executable filename supplies the name.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PluginDescribe {
+    /// Entity production and consumption declarations.
+    #[serde(flatten)]
+    pub context: crate::context::ContextContract,
+    /// Short help text.
+    #[serde(default)]
+    pub about: String,
+    /// Set to `json` to render stdout through the host by default.
+    #[serde(default)]
+    pub output: Option<String>,
+    /// Authorization metadata for this command.
+    #[serde(default)]
+    pub auth: Option<DescribeCommandAuthV1>,
+    /// Positional arguments.
+    #[serde(default)]
+    pub args: Vec<DescribeArgV1>,
+    /// Flags keyed by their spelling.
+    #[serde(default)]
+    pub flags: BTreeMap<String, DescribeFlagV1>,
+    /// Nested commands.
+    #[serde(default)]
+    pub subcommands: Vec<DescribeCommandV1>,
+}
+impl PluginDescribe {
+    pub(crate) fn command(self, name: &str) -> DescribeCommandV1 {
+        let mut command = DescribeCommandV1 {
+            context: self.context,
+            name: name.into(),
+            about: self.about,
+            auth: self.auth,
+            args: self.args,
+            flags: self.flags,
+            subcommands: self.subcommands,
+        };
+        command.inherit_auth_from_parents();
+        command
+    }
 }
 
 /// Recursive command description used in plugin metadata.
@@ -84,6 +102,9 @@ pub struct DescribeV1 {
 /// semantic command tree the host uses for help, completion, and policy lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DescribeCommandV1 {
+    /// Entity production and consumption declarations.
+    #[serde(flatten)]
+    pub context: crate::context::ContextContract,
     /// Command name exposed by the plugin.
     pub name: String,
     /// Short help text for the command.
@@ -104,18 +125,18 @@ pub struct DescribeCommandV1 {
 }
 
 /// Authorization metadata attached to a described command.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DescribeCommandAuthV1 {
     /// Visibility level for the command.
     #[serde(default)]
     pub visibility: Option<DescribeVisibilityModeV1>,
-    /// Capabilities required to run the command.
+    /// Legacy capabilities, accepted for wire compatibility and ignored.
     #[serde(default)]
     pub required_capabilities: Vec<String>,
-    /// Feature flags that must be enabled for the command.
+    /// Legacy feature flags, accepted for wire compatibility and ignored.
     #[serde(default)]
     pub feature_flags: Vec<String>,
-    /// Session-state requirements that gate command visibility.
+    /// Legacy visibility requirements, accepted and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_session: Option<DescribeSessionRequirementsV1>,
     /// Session-state requirements that gate command execution.
@@ -133,29 +154,6 @@ pub enum DescribeAuthStrengthV1 {
     Strong,
 }
 
-impl DescribeAuthStrengthV1 {
-    fn as_auth_strength(self) -> AuthStrength {
-        match self {
-            Self::Basic => AuthStrength::Basic,
-            Self::Strong => AuthStrength::Strong,
-        }
-    }
-
-    fn from_auth_strength(value: AuthStrength) -> Self {
-        match value {
-            AuthStrength::Basic => Self::Basic,
-            AuthStrength::Strong => Self::Strong,
-        }
-    }
-
-    fn as_label(self) -> &'static str {
-        match self {
-            Self::Basic => "basic",
-            Self::Strong => "strong",
-        }
-    }
-}
-
 /// Wire-format credential requirement used by plugin metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
@@ -170,8 +168,7 @@ pub enum DescribeCredentialRequirementV1 {
         /// Credential or token namespace, such as `osp` or `mreg`.
         service: String,
     },
-    /// Require that the named credential exists, is valid, and has at least
-    /// the specified remaining lifetime.
+    /// Legacy freshness requirement, accepted and ignored.
     Fresh {
         /// Credential or token namespace, such as `osp` or `mreg`.
         service: String,
@@ -181,35 +178,6 @@ pub enum DescribeCredentialRequirementV1 {
 }
 
 impl DescribeCredentialRequirementV1 {
-    fn as_command_requirement(&self) -> CredentialRequirement {
-        match self {
-            Self::Present { service } => CredentialRequirement::present(service.clone()),
-            Self::Valid { service } => CredentialRequirement::valid(service.clone()),
-            Self::Fresh {
-                service,
-                min_ttl_seconds,
-            } => CredentialRequirement::fresh(service.clone(), *min_ttl_seconds),
-        }
-    }
-
-    fn from_command_requirement(requirement: &CredentialRequirement) -> Self {
-        match requirement {
-            CredentialRequirement::Present { service } => Self::Present {
-                service: service.clone(),
-            },
-            CredentialRequirement::Valid { service } => Self::Valid {
-                service: service.clone(),
-            },
-            CredentialRequirement::Fresh {
-                service,
-                min_ttl_seconds,
-            } => Self::Fresh {
-                service: service.clone(),
-                min_ttl_seconds: *min_ttl_seconds,
-            },
-        }
-    }
-
     fn hint(&self) -> String {
         match self {
             Self::Present { service } => format!("token: {service}"),
@@ -233,7 +201,7 @@ impl DescribeCredentialRequirementV1 {
 /// Wire-format session requirements attached to a command.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DescribeSessionRequirementsV1 {
-    /// Minimum auth strength required, when any.
+    /// Legacy auth strength, accepted and ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_strength: Option<DescribeAuthStrengthV1>,
     /// Credential or token requirements that must be satisfied.
@@ -242,48 +210,17 @@ pub struct DescribeSessionRequirementsV1 {
 }
 
 impl DescribeSessionRequirementsV1 {
-    fn is_empty(&self) -> bool {
-        self.auth_strength.is_none() && self.credentials.is_empty()
-    }
-
     fn hint(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if let Some(auth_strength) = self.auth_strength {
-            parts.push(format!("auth: {}", auth_strength.as_label()));
-        }
         parts.extend(
             self.credentials
                 .iter()
+                .filter(|credential| {
+                    !matches!(credential, DescribeCredentialRequirementV1::Fresh { .. })
+                })
                 .map(DescribeCredentialRequirementV1::hint),
         );
         (!parts.is_empty()).then(|| parts.join(", "))
-    }
-
-    fn as_command_requirements(&self) -> SessionRequirements {
-        SessionRequirements {
-            auth_strength: self
-                .auth_strength
-                .map(DescribeAuthStrengthV1::as_auth_strength),
-            credentials: self
-                .credentials
-                .iter()
-                .map(DescribeCredentialRequirementV1::as_command_requirement)
-                .collect(),
-        }
-    }
-
-    fn from_command_requirements(requirements: &SessionRequirements) -> Option<Self> {
-        let session = Self {
-            auth_strength: requirements
-                .auth_strength
-                .map(DescribeAuthStrengthV1::from_auth_strength),
-            credentials: requirements
-                .credentials
-                .iter()
-                .map(DescribeCredentialRequirementV1::from_command_requirement)
-                .collect(),
-        };
-        (!session.is_empty()).then_some(session)
     }
 }
 
@@ -295,35 +232,13 @@ pub enum DescribeVisibilityModeV1 {
     Public,
     /// Command requires an authenticated user.
     Authenticated,
-    /// Command requires one or more capabilities.
+    /// Legacy capability mode, accepted and treated as public.
     CapabilityGated,
     /// Command should be hidden from normal help surfaces.
     Hidden,
 }
 
 impl DescribeVisibilityModeV1 {
-    /// Converts the protocol visibility label into the internal policy enum.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::command_policy::VisibilityMode;
-    /// use osp_cli::core::plugin::DescribeVisibilityModeV1;
-    ///
-    /// assert_eq!(
-    ///     DescribeVisibilityModeV1::CapabilityGated.as_visibility_mode(),
-    ///     VisibilityMode::CapabilityGated
-    /// );
-    /// ```
-    pub fn as_visibility_mode(self) -> VisibilityMode {
-        match self {
-            DescribeVisibilityModeV1::Public => VisibilityMode::Public,
-            DescribeVisibilityModeV1::Authenticated => VisibilityMode::Authenticated,
-            DescribeVisibilityModeV1::CapabilityGated => VisibilityMode::CapabilityGated,
-            DescribeVisibilityModeV1::Hidden => VisibilityMode::Hidden,
-        }
-    }
-
     /// Returns the canonical protocol label for this visibility mode.
     ///
     /// # Examples
@@ -371,7 +286,7 @@ impl DescribeCommandAuthV1 {
     ///
     /// assert_eq!(
     ///     auth.hint().as_deref(),
-    ///     Some("cap: ldap.write; feature: write-mode; run: auth: strong, token: osp valid")
+    ///     Some("run: token: osp valid")
     /// );
     /// ```
     pub fn hint(&self) -> Option<String> {
@@ -380,31 +295,10 @@ impl DescribeCommandAuthV1 {
         match self.visibility {
             Some(DescribeVisibilityModeV1::Public) | None => {}
             Some(DescribeVisibilityModeV1::Authenticated) => parts.push("auth".to_string()),
-            Some(DescribeVisibilityModeV1::CapabilityGated) => {
-                if self.required_capabilities.len() == 1 {
-                    parts.push(format!("cap: {}", self.required_capabilities[0]));
-                } else if self.required_capabilities.is_empty() {
-                    parts.push("cap".to_string());
-                } else {
-                    parts.push(format!("caps: {}", self.required_capabilities.len()));
-                }
-            }
+            Some(DescribeVisibilityModeV1::CapabilityGated) => {}
             Some(DescribeVisibilityModeV1::Hidden) => parts.push("hidden".to_string()),
         }
 
-        match self.feature_flags.as_slice() {
-            [] => {}
-            [feature] => parts.push(format!("feature: {feature}")),
-            features => parts.push(format!("features: {}", features.len())),
-        }
-
-        if let Some(session) = self
-            .visible_session
-            .as_ref()
-            .and_then(|session| session.hint())
-        {
-            parts.push(format!("show: {session}"));
-        }
         if let Some(session) = self.run_session.as_ref().and_then(|session| session.hint()) {
             parts.push(format!("run: {session}"));
         }
@@ -530,7 +424,27 @@ pub struct ResponseV1 {
     #[serde(default)]
     pub messages: Vec<ResponseMessageV1>,
     /// Rendering and presentation metadata for the payload.
+    #[serde(default)]
     pub meta: ResponseMetaV1,
+    /// Optional values the host should remember in its current session,
+    /// keyed by subject kind (for example `host` or `user`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<BTreeMap<String, String>>,
+}
+
+impl ResponseV1 {
+    /// Creates a successful protocol v1 response with default metadata.
+    pub fn ok(data: impl Into<serde_json::Value>) -> Self {
+        Self {
+            protocol_version: PLUGIN_PROTOCOL_V1,
+            ok: true,
+            data: data.into(),
+            error: None,
+            messages: Vec::new(),
+            meta: ResponseMetaV1::default(),
+            context: None,
+        }
+    }
 }
 
 /// Structured error payload returned when `ok` is `false`.
@@ -556,9 +470,16 @@ pub struct ResponseErrorV1 {
 /// over the host's renderer.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResponseMetaV1 {
+    /// The entity targeted by this response was not found; clear filled read context.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub context_not_found: bool,
+    /// Remembered values filled for this execution.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub context: BTreeMap<String, String>,
     /// Preferred output format for rendering the payload.
     pub format_hint: Option<String>,
     /// Preferred field paths for row or curated record projections.
+    /// Paths accept dotted keys or JSON Pointers for literal field segments.
     pub columns: Option<Vec<String>>,
     /// Preferred alignment hints for displayed columns.
     #[serde(default)]
@@ -585,14 +506,9 @@ pub struct ResponseMetaV1 {
     /// itself their stable machine contract.
     #[serde(default)]
     pub preserve_json_document: bool,
-    /// Human-only complete lines for a presentation override. The host may
-    /// replace the ordinary structured rendering with these lines when the
-    /// output is human-facing; canonical JSON and pipeline rows stay in data.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub presentation_lines: Vec<String>,
-    /// Human-only lines to append when a progress block cannot be replaced.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub progress_append: Vec<String>,
+    /// Native-only human supplements, rendered on stderr without changing payload data.
+    #[serde(skip)]
+    pub detail_columns: Vec<String>,
     /// Replace the previous progress block when stderr is a terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub progress_replace: bool,
@@ -628,22 +544,6 @@ pub enum ColumnAlignmentV1 {
     Right,
 }
 
-/// Message severity carried in plugin responses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ResponseMessageLevelV1 {
-    /// Error-level message.
-    Error,
-    /// Warning-level message.
-    Warning,
-    /// Success-level message.
-    Success,
-    /// Informational message.
-    Info,
-    /// Trace or debug-style message.
-    Trace,
-}
-
 /// User-facing message emitted alongside a plugin response.
 ///
 /// These messages are rendered on the host's diagnostic/message path, not
@@ -651,150 +551,10 @@ pub enum ResponseMessageLevelV1 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMessageV1 {
     /// Severity level for the message.
-    pub level: ResponseMessageLevelV1,
+    #[serde(with = "message_level_v1")]
+    pub level: MessageLevel,
     /// Human-readable message text.
     pub text: String,
-}
-
-impl DescribeV1 {
-    /// Builds a v1 describe payload from a single `clap` command tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use clap::Command;
-    /// use osp_cli::core::plugin::DescribeV1;
-    ///
-    /// let describe = DescribeV1::from_clap_command(
-    ///     "ldap",
-    ///     "0.1.0",
-    ///     None,
-    ///     Command::new("ldap").about("Directory lookups"),
-    /// );
-    ///
-    /// assert_eq!(describe.plugin_id, "ldap");
-    /// assert_eq!(describe.commands[0].name, "ldap");
-    /// ```
-    pub fn from_clap_command(
-        plugin_id: impl Into<String>,
-        plugin_version: impl Into<String>,
-        min_osp_version: Option<String>,
-        command: clap::Command,
-    ) -> Self {
-        Self::from_clap_commands(
-            plugin_id,
-            plugin_version,
-            min_osp_version,
-            std::iter::once(command),
-        )
-    }
-
-    /// Builds a v1 describe payload from multiple top-level `clap` commands.
-    ///
-    /// Use this when one plugin executable exposes multiple top-level command
-    /// roots.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use clap::Command;
-    /// use osp_cli::core::plugin::DescribeV1;
-    ///
-    /// let describe = DescribeV1::from_clap_commands(
-    ///     "directory-tools",
-    ///     "0.1.0",
-    ///     None,
-    ///     [
-    ///         Command::new("ldap").about("Directory lookups"),
-    ///         Command::new("groups").about("Group lookups"),
-    ///     ],
-    /// );
-    ///
-    /// assert_eq!(describe.plugin_id, "directory-tools");
-    /// assert_eq!(describe.commands.len(), 2);
-    /// assert_eq!(describe.commands[1].name, "groups");
-    /// ```
-    pub fn from_clap_commands(
-        plugin_id: impl Into<String>,
-        plugin_version: impl Into<String>,
-        min_osp_version: Option<String>,
-        commands: impl IntoIterator<Item = clap::Command>,
-    ) -> Self {
-        Self {
-            protocol_version: PLUGIN_PROTOCOL_V1,
-            plugin_id: plugin_id.into(),
-            plugin_version: plugin_version.into(),
-            min_osp_version,
-            commands: commands
-                .into_iter()
-                .map(CommandDef::from_clap)
-                .map(|command| DescribeCommandV1::from(&command))
-                .collect(),
-        }
-    }
-
-    /// Validates the describe payload and returns an error string on protocol
-    /// violations.
-    ///
-    /// Hosts should do this before trusting plugin describe data enough to turn
-    /// it into command catalogs, completion trees, or policy registries.
-    /// Validation errors are returned as plain strings because protocol
-    /// violations are currently treated as operator-facing diagnostics rather
-    /// than a machine-matchable error taxonomy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::plugin::{DescribeV1, PLUGIN_PROTOCOL_V1};
-    ///
-    /// let describe = DescribeV1 {
-    ///     protocol_version: PLUGIN_PROTOCOL_V1,
-    ///     plugin_id: "ldap".to_string(),
-    ///     plugin_version: "0.1.0".to_string(),
-    ///     min_osp_version: None,
-    ///     commands: Vec::new(),
-    /// };
-    ///
-    /// assert!(describe.validate_v1().is_ok());
-    ///
-    /// let invalid = DescribeV1 {
-    ///     plugin_id: "   ".to_string(),
-    ///     ..describe.clone()
-    /// };
-    /// assert_eq!(invalid.validate_v1().unwrap_err(), "plugin_id must not be empty");
-    /// ```
-    pub fn validate_v1(&self) -> Result<(), String> {
-        if self.protocol_version != PLUGIN_PROTOCOL_V1 {
-            return Err(format!(
-                "unsupported describe protocol version: {}",
-                self.protocol_version
-            ));
-        }
-        canonical_plugin_id(&self.plugin_id)?;
-        for command in &self.commands {
-            validate_command(command)?;
-        }
-        Ok(())
-    }
-}
-
-pub(crate) fn canonical_plugin_id(plugin_id: &str) -> Result<String, String> {
-    let plugin_id = plugin_id.trim();
-    if plugin_id.is_empty() {
-        return Err("plugin_id must not be empty".to_string());
-    }
-    if plugin_id == "env" {
-        return Err("plugin_id `env` is reserved for shared plugin config".to_string());
-    }
-    if !plugin_id
-        .chars()
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
-    {
-        return Err(format!(
-            "plugin_id `{plugin_id}` must use lowercase ASCII letters, digits, `-`, or `_`"
-        ));
-    }
-    Ok(plugin_id.to_string())
 }
 
 pub(crate) fn canonical_plugin_command_name(command: &str) -> Result<String, String> {
@@ -813,16 +573,33 @@ pub(crate) fn canonical_plugin_command_name(command: &str) -> Result<String, Str
     Ok(command.to_string())
 }
 
+mod message_level_v1 {
+    use super::MessageLevel;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        level: &MessageLevel,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(if *level >= MessageLevel::Trace {
+            "trace"
+        } else {
+            level.as_str()
+        })
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<MessageLevel, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        MessageLevel::parse(&value)
+            .filter(|level| *level <= MessageLevel::Trace)
+            .ok_or_else(|| serde::de::Error::custom("unsupported plugin message level"))
+    }
+}
+
 impl DescribeCommandV1 {
-    /// Resolves the command path and delegated-help intent in one grammar pass.
-    ///
-    /// Plugin descriptions do not carry enough information to reproduce every
-    /// parser feature a plugin may use. The host therefore only treats help as
-    /// delegated when it can prove the shape from the description: zero or
-    /// more described subcommands followed by one terminal `help`, `--help`,
-    /// or `-h` token. Options and positional operands before the marker are
-    /// normal execution, so they cannot turn a guarded command into a
-    /// visibility-only request.
+    /// Resolves described options and subcommands for authorization checks.
     pub(crate) fn resolve_invocation(&self, args: &[String]) -> DescribeInvocation {
         let mut segments = vec![self.name.clone()];
         let mut current = self;
@@ -830,29 +607,14 @@ impl DescribeCommandV1 {
         let mut positional_index = 0;
         let mut open_multi_positional = false;
         let mut index = 0;
-        let mut exact_help_shape = true;
 
         while let Some(token) = args.get(index) {
             if token == "--" {
                 break;
             }
 
-            // A help token is delegated only when it is the final token. This
-            // intentionally excludes `--help value` and `help value`, whose
-            // meaning belongs to the plugin's own parser.
-            if token == "help" && current.args.get(positional_index).is_some() {
-                return DescribeInvocation {
-                    path: CommandPath::new(segments),
-                    delegated_help: false,
-                    ambiguous: !current.subcommands.is_empty(),
-                };
-            }
-            if matches!(token.as_str(), "help" | "--help" | "-h") {
-                return DescribeInvocation {
-                    path: CommandPath::new(segments),
-                    delegated_help: exact_help_shape && index + 1 == args.len(),
-                    ambiguous: index + 1 != args.len() && !current.subcommands.is_empty(),
-                };
+            if matches!(token.as_str(), "--help" | "-h") {
+                break;
             }
 
             if let Some(subcommand) = current
@@ -867,7 +629,6 @@ impl DescribeCommandV1 {
                 if open_multi_positional || current.args.get(positional_index).is_some() {
                     return DescribeInvocation {
                         path: CommandPath::new(segments),
-                        delegated_help: false,
                         ambiguous: true,
                     };
                 }
@@ -890,7 +651,6 @@ impl DescribeCommandV1 {
                     && !token.starts_with("--")
                     && token.chars().count() > 2);
             if let Some(flag) = flag {
-                exact_help_shape = false;
                 if !flag.flag_only && !has_attached_value {
                     // Missing option values are ambiguous; do not try to
                     // interpret a later token as a subcommand or help flag.
@@ -912,7 +672,6 @@ impl DescribeCommandV1 {
             }
 
             if let Some(argument) = current.args.get(positional_index) {
-                exact_help_shape = false;
                 positional_index += 1;
                 index += 1;
                 if argument.multi {
@@ -941,94 +700,12 @@ impl DescribeCommandV1 {
 
         DescribeInvocation {
             path: CommandPath::new(segments),
-            delegated_help: false,
             ambiguous: match args.get(index) {
                 None => false,
                 Some(token) if token == "--" => args.get(index + 1).is_some(),
                 Some(_) => true,
             } && !current.subcommands.is_empty(),
         }
-    }
-
-    /// Converts command auth metadata into an internal command policy for
-    /// `path`.
-    ///
-    /// This is the host-side bridge from wire-format describe data into the
-    /// runtime policy evaluator in [`crate::core::command_policy`].
-    ///
-    /// Required capabilities and feature flags are normalized by trimming
-    /// surrounding whitespace and lowercasing the values before they enter the
-    /// runtime policy.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::command_policy::{CommandPath, VisibilityMode};
-    /// use osp_cli::core::plugin::{
-    ///     DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1,
-    /// };
-    /// use std::collections::BTreeMap;
-    ///
-    /// let command = DescribeCommandV1 {
-    ///     name: "decide".to_string(),
-    ///     about: String::new(),
-    ///     auth: Some(DescribeCommandAuthV1 {
-    ///         visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
-    ///         required_capabilities: vec![" Orch.Approval.Decide ".to_string()],
-    ///         feature_flags: vec![" Review ".to_string()],
-    ///         ..DescribeCommandAuthV1::default()
-    ///     }),
-    ///     args: Vec::new(),
-    ///     flags: BTreeMap::new(),
-    ///     subcommands: Vec::new(),
-    /// };
-    ///
-    /// let policy = command
-    ///     .command_policy(CommandPath::new(["orch", "approval", "decide"]))
-    ///     .unwrap();
-    ///
-    /// assert_eq!(policy.visibility, VisibilityMode::CapabilityGated);
-    /// assert!(policy
-    ///     .required_capabilities
-    ///     .contains("orch.approval.decide"));
-    /// assert!(policy.feature_flags.contains("review"));
-    /// ```
-    pub fn command_policy(&self, path: CommandPath) -> Option<CommandPolicy> {
-        let auth = self.auth.as_ref()?;
-        Some(Self::command_policy_for_auth(path, auth))
-    }
-
-    pub(crate) fn command_policy_for_auth(
-        path: CommandPath,
-        auth: &DescribeCommandAuthV1,
-    ) -> CommandPolicy {
-        let mut policy = CommandPolicy::new(path);
-        if let Some(visibility) = auth.visibility {
-            policy = policy.visibility(visibility.as_visibility_mode());
-        }
-        for capability in &auth.required_capabilities {
-            policy = policy.require_capability(capability.clone());
-        }
-        for feature in &auth.feature_flags {
-            policy = policy.feature_flag(feature.clone());
-        }
-        if let Some(requirements) = auth.visible_session.as_ref() {
-            if let Some(auth_strength) = requirements.auth_strength {
-                policy = policy.require_visible_auth_strength(auth_strength.as_auth_strength());
-            }
-            for requirement in &requirements.credentials {
-                policy = policy.require_visible_credential(requirement.as_command_requirement());
-            }
-        }
-        if let Some(requirements) = auth.run_session.as_ref() {
-            if let Some(auth_strength) = requirements.auth_strength {
-                policy = policy.require_auth_strength(auth_strength.as_auth_strength());
-            }
-            for requirement in &requirements.credentials {
-                policy = policy.require_credential(requirement.as_command_requirement());
-            }
-        }
-        policy
     }
 
     /// Fills unannotated descendants with their nearest parent's auth policy.
@@ -1052,8 +729,6 @@ impl DescribeCommandV1 {
 pub(crate) struct DescribeInvocation {
     /// Best-known canonical command path for policy evaluation.
     pub(crate) path: CommandPath,
-    /// Whether the exact delegated-help contract was proven.
-    pub(crate) delegated_help: bool,
     /// Whether an unknown token could hide a nested command path.
     pub(crate) ambiguous: bool,
 }
@@ -1088,6 +763,7 @@ impl ResponseV1 {
     ///     error: None,
     ///     messages: Vec::new(),
     ///     meta: ResponseMetaV1::default(),
+    ///     context: None,
     /// };
     ///
     /// assert!(response.validate_v1().is_ok());
@@ -1115,6 +791,13 @@ impl ResponseV1 {
         }
         if !self.ok && self.error.is_none() {
             return Err("ok=false requires error payload".to_string());
+        }
+        if self
+            .context
+            .as_ref()
+            .is_some_and(|entries| entries.keys().any(|kind| kind.trim().is_empty()))
+        {
+            return Err("response context kinds must not be empty".to_string());
         }
         if self
             .messages
@@ -1185,190 +868,169 @@ impl DescribeCommandV1 {
     /// assert_eq!(command.subcommands[0].name, "user");
     /// ```
     pub fn from_clap(command: clap::Command) -> Self {
-        Self::from(&CommandDef::from_clap(command))
-    }
-}
-
-impl From<&CommandDef> for DescribeCommandV1 {
-    fn from(command: &CommandDef) -> Self {
+        let mut context = command
+            .get::<crate::context::ContextContract>()
+            .cloned()
+            .unwrap_or_default();
+        for consume in &mut context.consumes {
+            if let Some(argument) = command
+                .get_positionals()
+                .find(|arg| arg.get_id().as_str() == consume.argument)
+            {
+                consume.argument = clap_meta::arg_name(argument);
+            }
+            for conflict in &mut consume.conflicts {
+                if let Some(argument) = command
+                    .get_arguments()
+                    .find(|arg| arg.get_id().as_str() == conflict)
+                {
+                    *conflict = argument
+                        .get_long()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| clap_meta::arg_name(argument));
+                }
+            }
+        }
         Self {
-            name: command.name.clone(),
-            about: command.about.clone().unwrap_or_default(),
-            auth: (!command.policy.is_empty()).then(|| DescribeCommandAuthV1 {
-                visibility: match command.policy.visibility {
-                    VisibilityMode::Public => None,
-                    VisibilityMode::Authenticated => Some(DescribeVisibilityModeV1::Authenticated),
-                    VisibilityMode::CapabilityGated => {
-                        Some(DescribeVisibilityModeV1::CapabilityGated)
-                    }
-                    VisibilityMode::Hidden => Some(DescribeVisibilityModeV1::Hidden),
-                },
-                required_capabilities: command.policy.required_capabilities.clone(),
-                feature_flags: command.policy.feature_flags.clone(),
-                visible_session: DescribeSessionRequirementsV1::from_command_requirements(
-                    &command.policy.visible_session_requirements,
-                ),
-                run_session: DescribeSessionRequirementsV1::from_command_requirements(
-                    &command.policy.run_session_requirements,
-                ),
-            }),
-            args: command.args.iter().map(DescribeArgV1::from).collect(),
+            context,
+            name: command.get_name().to_string(),
+            about: clap_meta::plain(command.get_about()).unwrap_or_default(),
+            auth: None,
+            args: command
+                .get_positionals()
+                .filter(|arg| !arg.is_hide_set())
+                .map(|arg| DescribeArgV1 {
+                    name: Some(clap_meta::arg_name(arg)),
+                    about: clap_meta::arg_help(arg),
+                    required: arg.is_required_set(),
+                    multi: clap_meta::is_multi(arg),
+                    value_type: clap_meta::is_path(arg).then_some(DescribeValueTypeV1::Path),
+                    suggestions: clap_suggestions(arg),
+                })
+                .collect(),
             flags: command
-                .flags
-                .iter()
-                .flat_map(describe_flag_entries)
+                .get_arguments()
+                .filter(|arg| !arg.is_positional() && !arg.is_hide_set())
+                .flat_map(|arg| {
+                    let spellings = clap_meta::flag_spellings(arg);
+                    let preferred = spellings.first().cloned();
+                    spellings.into_iter().enumerate().map(move |(index, name)| {
+                        (
+                            name,
+                            DescribeFlagV1 {
+                                alias_of: (index > 0).then(|| preferred.clone()).flatten(),
+                                about: clap_meta::arg_help(arg),
+                                required: arg.is_required_set(),
+                                flag_only: !arg.get_action().takes_values(),
+                                multi: clap_meta::is_multi(arg),
+                                value_type: clap_meta::is_path(arg)
+                                    .then_some(DescribeValueTypeV1::Path),
+                                suggestions: clap_suggestions(arg),
+                            },
+                        )
+                    })
+                })
                 .collect(),
             subcommands: command
-                .subcommands
-                .iter()
-                .map(DescribeCommandV1::from)
+                .get_subcommands()
+                .filter(|child| !child.is_hide_set())
+                .map(|child| Self::from_clap(child.clone()))
                 .collect(),
         }
     }
 }
 
-impl From<&DescribeCommandV1> for CommandDef {
-    fn from(command: &DescribeCommandV1) -> Self {
-        Self {
-            name: command.name.clone(),
-            about: (!command.about.trim().is_empty()).then(|| command.about.clone()),
-            long_about: None,
-            usage: None,
-            before_help: None,
-            after_help: None,
-            aliases: Vec::new(),
-            hidden: matches!(
-                command.auth.as_ref().and_then(|auth| auth.visibility),
-                Some(DescribeVisibilityModeV1::Hidden)
-            ),
-            sort_key: None,
-            policy: command
-                .auth
-                .as_ref()
-                .map(command_policy_from_describe)
-                .unwrap_or_default(),
-            args: command.args.iter().map(ArgDef::from).collect(),
-            flags: collect_describe_flags(&command.flags),
-            subcommands: command.subcommands.iter().map(CommandDef::from).collect(),
-        }
-    }
+fn clap_suggestions(arg: &clap::Arg) -> Vec<DescribeSuggestionV1> {
+    arg.get_possible_values()
+        .into_iter()
+        .filter(|value| !value.is_hide_set())
+        .map(|value| DescribeSuggestionV1 {
+            value: value.get_name().to_string(),
+            meta: value.get_help().map(ToString::to_string),
+            display: None,
+            sort: None,
+        })
+        .collect()
 }
 
-impl From<&ArgDef> for DescribeArgV1 {
-    fn from(arg: &ArgDef) -> Self {
-        Self {
-            name: arg.value_name.clone().or_else(|| Some(arg.id.clone())),
-            about: arg.help.clone(),
-            required: arg.required,
-            multi: arg.multi,
-            value_type: describe_value_type(arg.value_kind),
-            suggestions: arg.choices.iter().map(DescribeSuggestionV1::from).collect(),
+pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
+    for consume in &command.context.consumes {
+        if !crate::context::KINDS.contains(&consume.kind.as_str()) {
+            return Err(format!("unknown context kind: {}", consume.kind));
+        }
+        if matches!(
+            consume.argument.trim_start_matches('-'),
+            "password" | "token" | "otp" | "auth" | "user" | "profile" | "url"
+        ) {
+            return Err("context cannot supply credentials, identity, profile or URLs".into());
         }
     }
-}
-
-impl From<&FlagDef> for DescribeFlagV1 {
-    fn from(flag: &FlagDef) -> Self {
-        Self {
-            alias_of: None,
-            about: flag.help.clone(),
-            required: flag.required,
-            flag_only: !flag.takes_value,
-            multi: flag.multi,
-            value_type: describe_value_type(flag.value_kind),
-            suggestions: flag
-                .choices
-                .iter()
-                .map(DescribeSuggestionV1::from)
-                .collect(),
+    for kind in command.context.produces.keys() {
+        if !crate::context::KINDS.contains(&kind.as_str()) {
+            return Err(format!("unknown context kind: {kind}"));
         }
     }
-}
-
-impl From<&DescribeArgV1> for ArgDef {
-    fn from(arg: &DescribeArgV1) -> Self {
-        let mut def = ArgDef::new(arg.name.clone().unwrap_or_else(|| "value".to_string()));
-        if let Some(value_name) = &arg.name {
-            def = def.value_name(value_name.clone());
-        }
-        if let Some(help) = &arg.about {
-            def = def.help(help.clone());
-        }
-        if arg.required {
-            def = def.required();
-        }
-        if arg.multi {
-            def = def.multi();
-        }
-        if let Some(value_kind) = command_value_kind(arg.value_type) {
-            def = def.value_kind(value_kind);
-        }
-        def.choices(arg.suggestions.iter().map(ValueChoice::from))
+    if canonical_plugin_command_name(&command.name)? != command.name {
+        return Err("command name must not have leading or trailing whitespace".to_string());
     }
-}
-
-impl From<&DescribeFlagV1> for FlagDef {
-    fn from(flag: &DescribeFlagV1) -> Self {
-        let mut def = FlagDef::new("flag");
-        if let Some(help) = &flag.about {
-            def = def.help(help.clone());
-        }
-        if flag.required {
-            def = def.required();
-        }
-        if !flag.flag_only {
-            def = def.takes_value("value");
-        }
-        if flag.multi {
-            def = def.multi();
-        }
-        if let Some(value_kind) = command_value_kind(flag.value_type) {
-            def = def.value_kind(value_kind);
-        }
-        def.choices(flag.suggestions.iter().map(ValueChoice::from))
-    }
-}
-
-impl From<&ValueChoice> for DescribeSuggestionV1 {
-    fn from(choice: &ValueChoice) -> Self {
-        Self {
-            value: choice.value.clone(),
-            meta: choice.help.clone(),
-            display: choice.display.clone(),
-            sort: choice.sort_key.clone(),
-        }
-    }
-}
-
-impl From<&DescribeSuggestionV1> for ValueChoice {
-    fn from(entry: &DescribeSuggestionV1) -> Self {
-        Self {
-            value: entry.value.clone(),
-            help: entry.meta.clone(),
-            display: entry.display.clone(),
-            sort_key: entry.sort.clone(),
-        }
-    }
-}
-
-fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
-    canonical_plugin_command_name(&command.name)?;
     if let Some(auth) = &command.auth {
         validate_command_auth(auth)?;
     }
 
+    let mut ids = std::collections::BTreeSet::from(["help".to_string()]);
+    let mut optional = false;
+    let mut multi = false;
+    for (index, arg) in command.args.iter().enumerate() {
+        let id = arg.name.clone().unwrap_or_else(|| format!("arg{index}"));
+        if id.is_empty() || !ids.insert(id.clone()) {
+            return Err(format!("duplicate or empty argument id `{id}`"));
+        }
+        if optional && arg.required {
+            return Err("required positional follows an optional positional".into());
+        }
+        optional |= !arg.required;
+        if arg.multi {
+            if multi
+                || index + 2 < command.args.len()
+                || (index + 1 < command.args.len() && !command.args[index + 1].required)
+            {
+                return Err(
+                    "variadic positional must be last or precede one required positional".into(),
+                );
+            }
+            multi = true;
+        }
+        validate_suggestions(&arg.suggestions, "argument")?;
+    }
     for (name, flag) in &command.flags {
-        if !name.starts_with('-') {
-            return Err(format!("flag `{name}` must start with `-`"));
+        let spelling = name.trim_start_matches('-');
+        let valid = if let Some(long) = name.strip_prefix("--") {
+            !long.is_empty() && !long.starts_with('-') && !long.contains(['=', ' '])
+        } else {
+            name.starts_with('-') && spelling.chars().count() == 1
+        };
+        if !valid || matches!(name.as_str(), "--help" | "-h") {
+            return Err(format!("invalid flag spelling `{name}`"));
+        }
+        if let Some(target) = &flag.alias_of {
+            if target == name
+                || command
+                    .flags
+                    .get(target)
+                    .is_none_or(|f| f.alias_of.is_some())
+            {
+                return Err(format!("invalid flag alias `{name}`"));
+            }
+        } else if !ids.insert(spelling.to_string()) {
+            return Err(format!("duplicate argument id `{spelling}`"));
         }
         validate_suggestions(&flag.suggestions, &format!("flag `{name}`"))?;
     }
-
-    for arg in &command.args {
-        validate_suggestions(&arg.suggestions, "argument")?;
-    }
-
+    let mut names = std::collections::BTreeSet::from(["help"]);
     for subcommand in &command.subcommands {
+        if !names.insert(subcommand.name.as_str()) {
+            return Err(format!("duplicate subcommand `{}`", subcommand.name));
+        }
         validate_command(subcommand)?;
     }
 
@@ -1386,23 +1048,6 @@ fn validate_suggestions(suggestions: &[DescribeSuggestionV1], owner: &str) -> Re
 }
 
 fn validate_command_auth(auth: &DescribeCommandAuthV1) -> Result<(), String> {
-    if auth
-        .required_capabilities
-        .iter()
-        .any(|value| value.trim().is_empty())
-    {
-        return Err("required_capabilities must not contain empty values".to_string());
-    }
-    if auth
-        .feature_flags
-        .iter()
-        .any(|value| value.trim().is_empty())
-    {
-        return Err("feature_flags must not contain empty values".to_string());
-    }
-    if let Some(requirements) = auth.visible_session.as_ref() {
-        validate_session_requirements("visible_session", requirements)?;
-    }
     if let Some(requirements) = auth.run_session.as_ref() {
         validate_session_requirements("run_session", requirements)?;
     }
@@ -1413,11 +1058,10 @@ fn validate_session_requirements(
     owner: &str,
     requirements: &DescribeSessionRequirementsV1,
 ) -> Result<(), String> {
-    if requirements
-        .credentials
-        .iter()
-        .any(|requirement| requirement.service().trim().is_empty())
-    {
+    if requirements.credentials.iter().any(|requirement| {
+        !matches!(requirement, DescribeCredentialRequirementV1::Fresh { .. })
+            && requirement.service().trim().is_empty()
+    }) {
         return Err(format!(
             "{owner} credentials must not contain empty services"
         ));
@@ -1425,171 +1069,18 @@ fn validate_session_requirements(
     Ok(())
 }
 
-fn describe_flag_entries(flag: &FlagDef) -> Vec<(String, DescribeFlagV1)> {
-    let mut names = Vec::new();
-    if let Some(long) = flag.long.as_deref() {
-        names.push(format!("--{long}"));
-    }
-    if let Some(short) = flag.short {
-        names.push(format!("-{short}"));
-    }
-    names.extend(flag.aliases.iter().cloned());
-    let preferred = names.first().cloned();
-    names
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
-            let mut value = DescribeFlagV1::from(flag);
-            if index > 0 {
-                value.alias_of = preferred.clone();
-            }
-            (name, value)
-        })
-        .collect()
-}
-
-fn group_describe_flag((name, flag): (&String, &DescribeFlagV1)) -> Option<FlagDef> {
-    if !name.starts_with('-') {
-        return None;
-    }
-
-    let mut def = FlagDef::from(flag);
-    if let Some(long) = name.strip_prefix("--") {
-        def.long = Some(long.to_string());
-        def.id = long.to_string();
-    } else if let Some(short) = name.strip_prefix('-') {
-        def.short = short.chars().next();
-        def.id = short.to_string();
-    }
-    Some(def)
-}
-
-fn collect_describe_flags(flags: &BTreeMap<String, DescribeFlagV1>) -> Vec<FlagDef> {
-    let mut definitions = BTreeMap::<String, FlagDef>::new();
-    for (name, flag) in flags {
-        if flag.alias_of.is_none()
-            && let Some(definition) = group_describe_flag((name, flag))
-        {
-            definitions.insert(name.clone(), definition);
-        }
-    }
-
-    for (name, flag) in flags {
-        let Some(preferred) = flag.alias_of.as_deref() else {
-            continue;
-        };
-        let Some(definition) = definitions.get_mut(preferred) else {
-            if let Some(definition) = group_describe_flag((name, flag)) {
-                definitions.insert(name.clone(), definition);
-            }
-            continue;
-        };
-        definition.aliases.push(name.clone());
-    }
-
-    definitions.into_values().collect()
-}
-
-fn command_policy_from_describe(auth: &DescribeCommandAuthV1) -> CommandPolicyDef {
-    CommandPolicyDef {
-        visibility: match auth.visibility {
-            Some(DescribeVisibilityModeV1::Authenticated) => VisibilityMode::Authenticated,
-            Some(DescribeVisibilityModeV1::CapabilityGated) => VisibilityMode::CapabilityGated,
-            Some(DescribeVisibilityModeV1::Hidden) => VisibilityMode::Hidden,
-            Some(DescribeVisibilityModeV1::Public) | None => VisibilityMode::Public,
-        },
-        required_capabilities: auth.required_capabilities.clone(),
-        feature_flags: auth.feature_flags.clone(),
-        visible_session_requirements: auth
-            .visible_session
-            .as_ref()
-            .map(DescribeSessionRequirementsV1::as_command_requirements)
-            .unwrap_or_default(),
-        run_session_requirements: auth
-            .run_session
-            .as_ref()
-            .map(DescribeSessionRequirementsV1::as_command_requirements)
-            .unwrap_or_default(),
-    }
-}
-
-fn describe_value_type(value_kind: Option<ValueKind>) -> Option<DescribeValueTypeV1> {
-    match value_kind {
-        Some(ValueKind::Path) => Some(DescribeValueTypeV1::Path),
-        Some(ValueKind::Enum | ValueKind::FreeText) | None => None,
-    }
-}
-
-fn command_value_kind(value_type: Option<DescribeValueTypeV1>) -> Option<ValueKind> {
-    value_type.map(|_| ValueKind::Path)
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCommandV1,
-        DescribeCredentialRequirementV1, DescribeSessionRequirementsV1, DescribeV1,
-        DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1, ResponseMetaV1, ResponseV1,
-        canonical_plugin_command_name, validate_command_auth,
+        DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCredentialRequirementV1,
+        DescribeSessionRequirementsV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
+        ResponseMetaV1, ResponseV1, canonical_plugin_command_name,
     };
-    use crate::core::command_policy::{AuthStrength, CommandPath, VisibilityMode};
     use serde_json::json;
-
     #[test]
     fn protocol_validation_names_the_invalid_field_unit() {
-        let describe = json!({
-            "protocol_version": PLUGIN_PROTOCOL_V1,
-            "plugin_id": "vm",
-            "plugin_version": "1.0.0",
-            "commands": [{
-                "name": "vm",
-                "auth": {"feature_flags": ["beta"], "visible_session": {"credentials": [{"state": "present", "service": "orch"}]}},
-                "flags": {"--size": {"suggestions": [{"value": "small"}]}},
-                "args": [{"suggestions": [{"value": "db01"}]}],
-                "subcommands": [{"name": "list"}]
-            }]
-        });
-        let validate_describe = |value: serde_json::Value| {
-            serde_json::from_value::<DescribeV1>(value)
-                .expect("describe fixture should deserialize")
-                .validate_v1()
-        };
-        assert_eq!(validate_describe(describe.clone()), Ok(()));
-        for (pointer, value, field) in [
-            ("/protocol_version", json!(2), "protocol version"),
-            ("/plugin_id", json!("env"), "reserved"),
-            ("/plugin_id", json!("VM"), "plugin_id"),
-            ("/commands/0/subcommands/0/name", json!(" "), "command name"),
-            ("/commands/0/flags", json!({"size": {}}), "flag `size`"),
-            (
-                "/commands/0/flags/--size/suggestions/0/value",
-                json!(" "),
-                "flag `--size` suggestions",
-            ),
-            (
-                "/commands/0/args/0/suggestions/0/value",
-                json!(""),
-                "argument",
-            ),
-            (
-                "/commands/0/auth/feature_flags",
-                json!([" "]),
-                "feature_flags",
-            ),
-            (
-                "/commands/0/auth/visible_session/credentials/0/service",
-                json!(" "),
-                "visible_session credentials",
-            ),
-        ] {
-            let mut invalid = describe.clone();
-            *invalid.pointer_mut(pointer).expect("fixture path") = value;
-            let error = validate_describe(invalid).expect_err(pointer);
-            assert!(error.contains(field), "{pointer}: {error}");
-        }
-
         let response = json!({
             "protocol_version": PLUGIN_PROTOCOL_V1,
             "ok": true,
@@ -1631,7 +1122,9 @@ mod tests {
             }),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
             },
@@ -1663,6 +1156,26 @@ mod tests {
     }
 
     #[test]
+    fn response_context_is_optional_and_round_trips_unit() {
+        let mut legacy = serde_json::from_value::<ResponseV1>(json!({
+            "protocol_version": 1,
+            "ok": true,
+            "data": [],
+            "error": null,
+            "meta": {}
+        }))
+        .expect("legacy response should deserialize");
+        assert!(legacy.context.is_none());
+
+        legacy.context = Some(BTreeMap::from([(
+            "host".to_string(),
+            "foo.uio.no".to_string(),
+        )]));
+        let wire = serde_json::to_value(legacy).expect("response should serialize");
+        assert_eq!(wire["context"]["host"], "foo.uio.no");
+    }
+
+    #[test]
     fn response_column_labels_align_with_columns_unit() {
         let response = ResponseV1 {
             protocol_version: PLUGIN_PROTOCOL_V1,
@@ -1670,7 +1183,9 @@ mod tests {
             data: json!({"items": [{"provider": {"name": "vmware"}}]}),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 columns: Some(vec!["provider.name".to_string()]),
                 column_labels: vec!["PROVIDER".to_string()],
                 row_path: Some("items".to_string()),
@@ -1680,7 +1195,9 @@ mod tests {
         assert!(response.validate_v1().is_ok());
 
         let mismatched = ResponseV1 {
+            context: None,
             meta: ResponseMetaV1 {
+                context: Default::default(),
                 column_labels: vec!["PROVIDER".to_string(), "STATE".to_string()],
                 ..response.meta.clone()
             },
@@ -1690,54 +1207,6 @@ mod tests {
             mismatched.validate_v1().unwrap_err(),
             "meta.column_labels must align with meta.columns"
         );
-    }
-
-    #[test]
-    fn command_auth_converts_to_generic_command_policy_unit() {
-        let command = DescribeCommandV1 {
-            name: "orch".to_string(),
-            about: String::new(),
-            auth: Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
-                required_capabilities: vec!["orch.approval.decide".to_string()],
-                feature_flags: vec!["orch".to_string()],
-                run_session: Some(DescribeSessionRequirementsV1 {
-                    auth_strength: Some(DescribeAuthStrengthV1::Strong),
-                    credentials: vec![DescribeCredentialRequirementV1::valid("osp")],
-                }),
-                ..DescribeCommandAuthV1::default()
-            }),
-            args: Vec::new(),
-            flags: BTreeMap::new(),
-            subcommands: Vec::new(),
-        };
-
-        let policy = command
-            .command_policy(CommandPath::new(["orch", "approval", "decide"]))
-            .expect("auth metadata should build a policy");
-        assert_eq!(policy.visibility, VisibilityMode::CapabilityGated);
-        assert!(
-            policy
-                .required_capabilities
-                .contains("orch.approval.decide")
-        );
-        assert!(policy.feature_flags.contains("orch"));
-        assert_eq!(
-            policy.run_session_requirements.auth_strength,
-            Some(AuthStrength::Strong)
-        );
-    }
-
-    #[test]
-    fn command_auth_validation_rejects_blank_entries_unit() {
-        let err = validate_command_auth(&DescribeCommandAuthV1 {
-            visibility: None,
-            required_capabilities: vec![" ".to_string()],
-            feature_flags: Vec::new(),
-            ..DescribeCommandAuthV1::default()
-        })
-        .expect_err("blank capabilities should be rejected");
-        assert!(err.contains("required_capabilities"));
     }
 
     #[test]
@@ -1752,12 +1221,7 @@ mod tests {
             }),
             ..DescribeCommandAuthV1::default()
         };
-        assert_eq!(
-            auth.hint().as_deref(),
-            Some(
-                "cap: orch.approval.decide; feature: orch; run: auth: strong, token: osp fresh(600s)"
-            )
-        );
+        assert_eq!(auth.hint(), None);
         assert_eq!(
             DescribeVisibilityModeV1::Authenticated.as_label(),
             "authenticated"
@@ -1781,194 +1245,11 @@ mod tests {
                 .contains("must use lowercase ASCII letters")
         );
     }
-
-    #[test]
-    fn describe_validation_rejects_mixed_case_command_names_unit() {
-        let describe = DescribeV1 {
-            protocol_version: PLUGIN_PROTOCOL_V1,
-            plugin_id: "demo".to_string(),
-            plugin_version: "0.1.0".to_string(),
-            min_osp_version: None,
-            commands: vec![DescribeCommandV1 {
-                name: "Ldap".to_string(),
-                about: String::new(),
-                auth: None,
-                args: Vec::new(),
-                flags: BTreeMap::new(),
-                subcommands: Vec::new(),
-            }],
-        };
-
-        assert!(
-            describe
-                .validate_v1()
-                .expect_err("mixed-case command names should be rejected")
-                .contains("must use lowercase ASCII letters")
-        );
-    }
-
-    #[test]
-    fn resolve_invocation_follows_described_subcommands_and_values_unit() {
-        let mut root_flags = BTreeMap::new();
-        root_flags.insert(
-            "--format".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: false,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let mut approval_flags = BTreeMap::new();
-        approval_flags.insert(
-            "--verbose".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: true,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let command = DescribeCommandV1 {
-            name: "orch".to_string(),
-            about: String::new(),
-            auth: None,
-            args: Vec::new(),
-            flags: root_flags,
-            subcommands: vec![DescribeCommandV1 {
-                name: "approval".to_string(),
-                about: String::new(),
-                auth: None,
-                args: vec![super::DescribeArgV1::default()],
-                flags: approval_flags,
-                subcommands: vec![DescribeCommandV1 {
-                    name: "decide".to_string(),
-                    about: String::new(),
-                    auth: None,
-                    args: Vec::new(),
-                    flags: BTreeMap::new(),
-                    subcommands: Vec::new(),
-                }],
-            }],
-        };
-
-        assert!(!command.resolve_invocation(&[]).ambiguous);
-        assert!(
-            command
-                .resolve_invocation(&["--format".to_string()])
-                .ambiguous
-        );
-        assert!(
-            command
-                .resolve_invocation(&["--".to_string(), "approval".to_string()])
-                .ambiguous
-        );
-        assert!(!command.resolve_invocation(&["--".to_string()]).ambiguous);
-        assert_eq!(
-            command
-                .resolve_invocation(&[
-                    "--format".to_string(),
-                    "json".to_string(),
-                    "approval".to_string(),
-                    "--verbose".to_string(),
-                    "ticket-123".to_string(),
-                    "decide".to_string(),
-                ])
-                .path
-                .as_slice(),
-            &[
-                "orch".to_string(),
-                "approval".to_string(),
-                "decide".to_string(),
-            ]
-        );
-        assert!(
-            command
-                .resolve_invocation(&["approval".to_string(), "--help".to_string()])
-                .delegated_help
-        );
-        assert_eq!(
-            command
-                .resolve_invocation(&[
-                    "--format=json".to_string(),
-                    "APPROVAL".to_string(),
-                    "--help".to_string(),
-                ])
-                .path
-                .as_slice(),
-            &["orch".to_string(), "approval".to_string()]
-        );
-
-        let ambiguous = DescribeCommandV1 {
-            args: vec![super::DescribeArgV1::default()],
-            ..command
-        };
-        assert!(
-            ambiguous
-                .resolve_invocation(&["approval".to_string()])
-                .ambiguous
-        );
-    }
-
-    #[test]
-    fn help_intent_respects_described_values_and_option_terminator_unit() {
-        let mut flags = BTreeMap::new();
-        flags.insert(
-            "--label".to_string(),
-            super::DescribeFlagV1 {
-                flag_only: false,
-                ..super::DescribeFlagV1::default()
-            },
-        );
-        let command = DescribeCommandV1 {
-            name: "demo".to_string(),
-            about: String::new(),
-            auth: None,
-            args: vec![super::DescribeArgV1::default()],
-            flags,
-            subcommands: Vec::new(),
-        };
-
-        assert!(
-            command
-                .resolve_invocation(&["--help".to_string()])
-                .delegated_help
-        );
-        assert!(
-            !command
-                .resolve_invocation(&["--label".to_string(), "--help".to_string(),])
-                .delegated_help
-        );
-        assert!(
-            !command
-                .resolve_invocation(&["--".to_string(), "--help".to_string(),])
-                .delegated_help
-        );
-
-        let command_with_two_args = DescribeCommandV1 {
-            args: vec![
-                super::DescribeArgV1::default(),
-                super::DescribeArgV1::default(),
-            ],
-            ..command
-        };
-        assert!(
-            !command_with_two_args
-                .resolve_invocation(&["ordinary".to_string(), "help".to_string()])
-                .delegated_help
-        );
-
-        let command_with_one_arg = DescribeCommandV1 {
-            args: vec![super::DescribeArgV1::default()],
-            ..command_with_two_args
-        };
-        assert!(
-            !command_with_one_arg
-                .resolve_invocation(&["help".to_string()])
-                .delegated_help
-        );
-    }
 }
 
 #[cfg(test)]
 mod clap_tests {
-    use super::{DescribeCommandV1, DescribeV1, DescribeValueTypeV1};
+    use super::{DescribeCommandV1, DescribeValueTypeV1};
     use clap::{Arg, ArgAction, Command, ValueHint};
 
     #[test]
@@ -1993,11 +1274,7 @@ mod clap_tests {
                 ),
         );
 
-        let describe =
-            DescribeV1::from_clap_command("ldap", "0.1.0", Some("0.1.0".to_string()), command);
-
-        assert_eq!(describe.commands.len(), 1);
-        let ldap = &describe.commands[0];
+        let ldap = DescribeCommandV1::from_clap(command);
         assert_eq!(ldap.name, "ldap");
         assert_eq!(ldap.subcommands.len(), 1);
 

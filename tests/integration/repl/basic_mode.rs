@@ -1,6 +1,6 @@
 use crate::temp_support::make_temp_dir;
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use assert_cmd::Command;
+use std::process::Output;
 
 fn run_basic_repl(input: &[u8]) -> Output {
     let home = make_temp_dir("osp-cli-repl-basic-home");
@@ -14,18 +14,9 @@ fn run_basic_repl(input: &[u8]) -> Output {
         .env("NO_COLOR", "1")
         .arg("--defaults-only")
         .arg("--quiet")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            child
-                .stdin
-                .as_mut()
-                .expect("stdin should be piped")
-                .write_all(input)?;
-            child.wait_with_output()
-        })
+        .write_stdin(input)
+        .timeout(std::time::Duration::from_secs(20))
+        .output()
         .expect("basic repl should run")
 }
 
@@ -40,12 +31,12 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
     .expect("command file should write");
     let first = files.path().join("first result.osp");
     let second = files.path().join("second result.osp");
-    std::fs::write(&first, "theme show dracula | P id,name\n").unwrap();
-    std::fs::write(&second, "theme show nord | P id,name\n").unwrap();
+    std::fs::write(&first, "theme list | dracula | P id,name\n").unwrap();
+    std::fs::write(&second, "theme list | nord | P id,name\n").unwrap();
     let recovery = files.path().join("recovery batch.osp");
     std::fs::write(
         &recovery,
-        "theme show dracula | P id,name\ntheme show dracula | Z\ntheme show nord | P id,name\n",
+        "theme list | dracula | P id,name\ntheme list | dracula | Z\ntheme list | nord | P id,name\n",
     )
     .unwrap();
     let input = format!(
@@ -70,10 +61,16 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
     assert!(stdout.contains("help"));
     assert!(stdout.contains("exit"));
     assert!(
-        stdout.matches("rose-pine-moon").count() == 2,
+        stdout
+            .split("[\n")
+            .next()
+            .unwrap_or_default()
+            .matches("rose-pine-moon")
+            .count()
+            == 2,
         "source and recall should each execute the resolved config command; stdout:\n{stdout}"
     );
-    assert!(stderr.contains("Warning: input is not a terminal"));
+    assert!(stderr.contains("warning: Input is not a terminal"));
 
     let mut documents = Vec::new();
     let mut remaining = stdout.as_ref();
@@ -98,10 +95,15 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
         documents[2], selected,
         "last should replay the saved pipeline"
     );
-    assert_eq!(documents[3][0]["id"], "nord");
-    assert_eq!(documents[3][0]["name"], "Nord");
+    let raw_nord = documents[3]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "nord")
+        .unwrap();
+    assert_eq!(raw_nord["name"], "Nord");
     assert_eq!(
-        documents[3][0]["accent"], "#88c0d0",
+        raw_nord["accent"], "#88c0d0",
         "raw replay should retain the theme palette"
     );
     let before_failure = serde_json::json!([{"id": "dracula", "name": "Dracula"}]);
@@ -129,7 +131,7 @@ fn repl_basic_mode_recovers_from_ignored_batch_errors() {
     let files = make_temp_dir("osp-cli-repl-source-errors");
     let missing = files.path().join("missing.osp");
     let batch = files.path().join("batch.osp");
-    std::fs::write(&batch, "source other.osp\ntheme show nord | P id,name\n").unwrap();
+    std::fs::write(&batch, "source other.osp\ntheme list | nord | P id,name\n").unwrap();
     // A terminal cursor report left in the input buffer must not corrupt
     // the command typed after it.
     let input = format!(
@@ -278,7 +280,7 @@ fn repl_basic_mode_exits_cleanly_on_immediate_eof() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("default> "));
-    assert!(stderr.contains("Warning: input is not a terminal"));
+    assert!(stderr.contains("warning: Input is not a terminal"));
 }
 
 #[test]
@@ -287,7 +289,7 @@ fn repl_basic_mode_restarts_after_refresh_without_tty() {
     let commands = files.path().join("refresh.osp");
     std::fs::write(&commands, "plugins refresh\n").unwrap();
     let input = format!(
-        "source '{}'\ntheme show dracula --json\nexit\n",
+        "source '{}'\ntheme list --json | dracula\nexit\n",
         commands.display()
     );
     let output = run_basic_repl(input.as_bytes());
@@ -300,7 +302,7 @@ fn repl_basic_mode_restarts_after_refresh_without_tty() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let prompt_count = stdout.matches("default> ").count();
-    let warning_count = stderr.matches("Warning: input is not a terminal").count();
+    let warning_count = stderr.matches("warning: Input is not a terminal").count();
 
     assert!(
         prompt_count >= 2,

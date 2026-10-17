@@ -47,6 +47,20 @@ Useful switches:
 - `--permanent`
   - persist the change when running inside the REPL
 
+## Interactive editing
+
+Run `osp config edit` in a terminal, or `osp config edit ui.format` to start on
+a particular key. The right pane shows the staged value, current source layer
+and schema documentation. Up/Down select keys; Tab or Left/Right cycle boolean
+and enum values. Enter edits other values inline; Ctrl-U clears the editor.
+
+End focuses `[ Save ]`. Enter applies changed keys through `config set`, using
+its default store and scope (including `config.default-target`). In a REPL this
+normally changes the session only. `[ Exit ]`, Esc and q discard staged edits.
+Secret values remain redacted and inline secret input is masked. Validation
+errors stay in the picker. The picker needs a terminal of at least 60×12;
+`config get KEY` and `config set KEY VALUE` work non-interactively.
+
 ## Display names
 
 Set the current user's greeting name; quotes are optional:
@@ -82,16 +96,6 @@ explicit profiles and unknown environment-selected defaults fail with
 `UnknownProfile` during configuration resolution, before command/network work.
 They never silently fall back to another environment.
 
-## Data Model
-
-Each value is tracked with its origin and scope:
-
-- `ConfigKey` = `key`, `profile`, `terminal`
-- `ConfigValue` = raw value + source + scope
-- `ResolvedValue` = final value + raw value + source + scope + origin hint
-
-Scopes are always optional. Unscoped values act as the baseline.
-
 ## Scoping Rules (Profile + Terminal)
 
 Within a single loader, the resolver picks the most specific match using this
@@ -114,7 +118,11 @@ Lowest to highest priority, later sources override earlier ones:
 4. Environment variables
 5. Session overrides (in-memory)
 
-This order is the public contract. Changing it is a breaking change.
+An `OSP_SECRET__...` environment override is an exception: it wins over a plain
+`OSP__...` environment value for the same key. Session overrides still win.
+
+This order, including that exception, is the public contract. Changing it is a
+breaking change.
 
 Notes:
 
@@ -122,7 +130,7 @@ Notes:
 - Launch-time bootstrap flags like `--theme` and `-u` may still affect startup
   state or session defaults.
 - Invocation flags like `--json`, `--format`, `--render-mode`, `--color`, `--ascii`,
-  `-v/-q`, `-d`, and `--plugin-provider` do not write into config state.
+  `-v/-q` and `-d` do not write into config state.
 - `config get --sources` therefore reflects stored defaults, not one-shot
   invocation overrides.
 
@@ -132,34 +140,22 @@ For UI keys, there is one more rule inside the resolved config:
 - `ui.presentation` only seeds keys still at builtin default
 - `config explain` shows that seeded effect when it matters
 
-## Loader Abstraction
-
-`osp_cli::config` exposes a generic loader interface so each source can be wired
-without custom host loading code:
-
-- `ConfigLoader` trait (`load() -> ConfigLayer`)
-- `StaticLayerLoader` for in-memory defaults/session layers
-- `TomlFileLoader` for file-backed layers (optional or required)
-- `EnvVarLoader` for `OSP__...` environment overrides
-- `SecretsTomlLoader` for file-backed secrets with strict permissions checks
-- `EnvSecretsLoader` for `OSP_SECRET__...` secret overrides
-- `ChainedLoader` for combining multiple backends within one precedence stage
-- `LoaderPipeline` for assembling all loaders in precedence order
+See [EMBEDDING.md](EMBEDDING.md#config-loader-composition) for loader composition.
 
 ## Typed Schema and Validation
 
-`osp_cli::config` validates resolved keys against a typed schema (`ConfigSchema`):
+The host validates resolved keys against its internal typed schema:
 
 - Unknown keys are rejected by default.
 - `extensions.*` is the only open namespace for unknown keys.
-- Plugin-owned config can live under `extensions.plugins.*`; the CLI projects
-  `extensions.plugins.env.*` and `extensions.plugins.<plugin-id>.env.*` into
-  plugin subprocess env. Inspect the effective projection with
-  `osp plugins config <plugin-id>`. See `docs/PLUGIN_PROTOCOL.md`.
-- `extensions.plugins.timeout_ms` bounds plugin discovery (`--describe`) and
-  command execution. Default: `10000`.
-- `extensions.plugins.discovery.path` enables discovery of `osp-*` executables
-  from ambient `PATH`. Default: `false`.
+- Plugin environment config uses `extensions.plugins.env.*` and
+  `extensions.plugins.<command>.env.*`. See [PLUGINS.md](PLUGINS.md).
+- `extensions.plugins.timeout_ms` bounds optional `--osp-describe` calls only.
+  Default: `10000`. Ordinary runs have no timeout.
+- `extensions.plugins.disabled` lists disabled command names. PATH discovery
+  is enabled by default; there is no discovery toggle in config.
+- The `extensions.plugins.*` namespace accepts the keys above and environment
+  projection keys. Other extension namespaces remain open.
 - Values are adapted to schema type after merge/interpolation:
   strings, booleans, integers, floats.
 - Enum-like string keys (for example `ui.format`) are validated against
@@ -197,6 +193,14 @@ sources are merged. Rules:
 - Cycles are errors.
 - Placeholders can reference other placeholders.
 - Placeholders may reference secrets but must be redacted in diagnostics.
+- `config set` validates the proposed value before changing a session or store,
+  using this invocation's selected values, including dry runs and values currently
+  masked by higher-priority sources.
+
+If a stored placeholder is broken, `config show --raw` and `config unset` load
+selected values without interpolation or schema adaptation so the file can be
+inspected and repaired. `doctor` uses the same raw view and reports resolution
+errors in its config diagnostics. Normal commands still require valid resolution.
 
 ## TOML Structure
 
@@ -215,7 +219,7 @@ ui.format = "json"
 
 [terminal.repl]
 profile.default = "tsd"
-ui.prompt.secrets = true
+repl.history.enabled = true
 
 [terminal.repl.profile.tsd]
 ui.format = "table"
@@ -223,13 +227,17 @@ ui.format = "table"
 
 Notes:
 
-- The profile list is derived from the `[profile.*]` tables.
+- The profile list is derived from the `[profile.*]` tables. Removing the last
+  value from a profile keeps its declaration so it remains selectable.
 - Unscoped keys live in `[default]`.
 - Bootstrap keys such as `profile.default` may be set in `[default]` and
   `terminal.<term>`.
 - Bootstrap keys such as `profile.default` must not be set in `[profile.*]` or
   `terminal.<term>.profile.<name>`.
 - Fully scoped values use `terminal.<term>.profile.<name>`.
+
+Config edits preserve comments and formatting outside the changed values, follow
+existing symlinks to their targets, and retain existing config-file permissions.
 
 ## Environment Variable Mapping
 
@@ -326,16 +334,6 @@ The resolver should provide:
 
 Diagnostics must redact secrets and avoid logging token contents.
 
-## Testing Checklist
-
-Minimum contract tests:
-
-1. Profile scoping beats unscoped values.
-2. Terminal scoping beats unscoped values.
-3. Session overrides beat environment and config.
-4. Placeholder cycles raise errors.
-5. Unknown keys are rejected unless under `extensions.*`.
-
 ## UI/REPL Keys (Current)
 
 These keys currently drive user-visible rendering and REPL presentation:
@@ -343,6 +341,9 @@ These keys currently drive user-visible rendering and REPL presentation:
 - `ui.presentation`
   - `expressive | compact | austere`
 - `ui.format`
+- `ui.guide.default_format`
+  - `guide | inherit | none`; defaults to `guide`. Uses the document renderer
+    for help-like output; `inherit` and `none` follow the configured format.
 - `ui.mode`
 - `ui.color.mode`
 - `ui.unicode.mode`
@@ -365,7 +366,7 @@ These keys currently drive user-visible rendering and REPL presentation:
 - `ui.table.overflow`
   - `clip | ellipsis | wrap | none`; defaults to `ellipsis`
 - `ui.help.level`
-  - `inherit | none | tiny | normal | verbose`
+  - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `theme.name`
 - `theme.path`
 - `user.name`
@@ -432,3 +433,13 @@ config set ui.margin 4 --session
 The first command saves the default destination for all profiles. Subsequent
 plain writes go to profile `uio`; the last command remains temporary. Successful
 temporary writes show a concrete `--permanent` command with the resolved scope.
+`config set --dry-run --explain` retains the proposed value and destination and
+adds a `current` explanation of the key before the write.
+
+## Fixed presentation settings in v2
+
+See [UI.md](UI.md#fixed-layout-defaults) for fixed presentation settings.
+
+Retired keys are ignored with one warning naming them. Remove them with
+`osp config unset KEY`. Other unknown keys still fail validation. See
+[CHANGELOG.md](../CHANGELOG.md) for the removal list.

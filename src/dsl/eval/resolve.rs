@@ -11,7 +11,7 @@
 //! path `{"a": {"b": 2}}`. It must not silently fall back to the literal
 //! dotted key.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::row::Row;
 use serde_json::Value;
@@ -94,36 +94,18 @@ pub fn resolve_first_value(row: &Row, token: &str, exact: ExactMode) -> Option<V
 
 /// Evaluates a parsed path against `root` and returns all matched values.
 pub fn evaluate_path(root: &Value, path: &PathExpression) -> Vec<Value> {
-    let mut current: Vec<Value> = vec![root.clone()];
-
-    for segment in &path.segments {
-        let mut next = Vec::new();
-
-        for node in current {
-            let mut values = Vec::new();
-            if let Some(name) = &segment.name {
-                descend_to_named_values(node, name, &mut values);
-            } else {
-                values.push(node);
-            }
-
-            for selector in &segment.selectors {
-                values = apply_selector(values, selector);
-                if values.is_empty() {
-                    break;
-                }
-            }
-
-            next.extend(values);
-        }
-
-        current = next;
-        if current.is_empty() {
-            break;
-        }
-    }
-
-    current
+    let mut out = Vec::new();
+    traverse_path(
+        root,
+        path,
+        0,
+        String::new(),
+        Vec::new(),
+        &mut |value, _, _| {
+            out.push(value.clone());
+        },
+    );
+    out
 }
 
 /// Evaluates `path` and returns matched values together with their flattened keys.
@@ -177,15 +159,17 @@ pub fn resolve_descendant_matches(
         .map(|entry| (entry.flat_key.clone(), entry.value.clone()))
         .collect::<Row>();
     let matched = match_row_keys(&flattened, trimmed, exact);
+    let mut by_key = HashMap::<_, Vec<_>>::new();
+    for entry in addressed {
+        by_key
+            .entry(entry.flat_key.clone())
+            .or_default()
+            .push(entry);
+    }
     dedup_addressed_values(
         matched
             .into_iter()
-            .flat_map(|key| {
-                addressed
-                    .iter()
-                    .filter(move |entry| entry.flat_key == key)
-                    .cloned()
-            })
+            .flat_map(|key| by_key.remove(key).unwrap_or_default())
             .collect(),
     )
 }
@@ -197,7 +181,63 @@ pub fn enumerate_path_matches(root: &Value, path: &PathExpression) -> Vec<Addres
     }
 
     let mut out = Vec::new();
-    traverse_path(root, path, 0, String::new(), Vec::new(), &mut out);
+    traverse_path(
+        root,
+        path,
+        0,
+        String::new(),
+        Vec::new(),
+        &mut |value, flat_key, address| {
+            out.push(AddressedValue {
+                address,
+                flat_key,
+                value: value.clone(),
+            });
+        },
+    );
+    out
+}
+
+/// Finds arrays owned by fields named `field` anywhere below `root`.
+pub(crate) fn enumerate_named_descendant_arrays(root: &Value, field: &str) -> Vec<AddressedValue> {
+    fn visit(
+        value: &Value,
+        field: &str,
+        flat_key: &str,
+        address: &mut Vec<AddressStep>,
+        out: &mut Vec<AddressedValue>,
+    ) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let child_key = append_name(flat_key, key);
+                    address.push(AddressStep::Field(key.clone()));
+                    if key == field && matches!(child, Value::Array(_)) {
+                        out.push(AddressedValue {
+                            address: address.clone(),
+                            flat_key: child_key,
+                            value: child.clone(),
+                        });
+                    } else {
+                        visit(child, field, &child_key, address, out);
+                    }
+                    address.pop();
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    let child_key = append_index(flat_key, index);
+                    address.push(AddressStep::Index(index));
+                    visit(child, field, &child_key, address, out);
+                    address.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    visit(root, field, "", &mut Vec::new(), &mut out);
     out
 }
 
@@ -297,58 +337,17 @@ pub fn resolve_pairs(flat_row: &Row, token: &str) -> (Vec<(String, Value)>, bool
     (pairs, true)
 }
 
-fn apply_selector(values: Vec<Value>, selector: &Selector) -> Vec<Value> {
-    match selector {
-        Selector::Fanout => values
-            .into_iter()
-            .flat_map(|value| match value {
-                Value::Array(items) => items,
-                _ => Vec::new(),
-            })
-            .collect(),
-        Selector::Index(index) => values
-            .into_iter()
-            .filter_map(|value| match value {
-                Value::Array(items) => {
-                    let len = items.len() as i64;
-                    let idx = if *index < 0 { len + index } else { *index };
-                    if idx >= 0 {
-                        items.get(idx as usize).cloned()
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .collect(),
-        Selector::Slice { start, stop, step } => values
-            .into_iter()
-            .flat_map(|value| match value {
-                Value::Array(items) => slice_indices(items.len() as i64, *start, *stop, *step)
-                    .into_iter()
-                    .filter_map(|index| items.get(index as usize).cloned())
-                    .collect(),
-                _ => Vec::new(),
-            })
-            .collect(),
-    }
-}
-
 fn dedup_addressed_values(values: Vec<AddressedValue>) -> Vec<AddressedValue> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
 
     for value in values {
-        if seen.insert(address_key(&value.address)) {
+        if seen.insert(value.address.clone()) {
             out.push(value);
         }
     }
 
     out
-}
-
-fn address_key(address: &[AddressStep]) -> Vec<AddressStep> {
-    address.to_vec()
 }
 
 fn traverse_path(
@@ -357,20 +356,15 @@ fn traverse_path(
     segment_index: usize,
     flat_key: String,
     address: Vec<AddressStep>,
-    out: &mut Vec<AddressedValue>,
+    visit: &mut impl FnMut(&Value, String, Vec<AddressStep>),
 ) {
     if segment_index == path.segments.len() {
-        out.push(AddressedValue {
-            address,
-            flat_key,
-            value: root.clone(),
-        });
+        visit(root, flat_key, address);
         return;
     }
 
     let segment = &path.segments[segment_index];
-    let mut current: Vec<(Value, String, Vec<AddressStep>)> =
-        vec![(root.clone(), flat_key, address)];
+    let mut current = vec![(root, flat_key, address)];
 
     if let Some(name) = &segment.name {
         let mut next = Vec::new();
@@ -388,43 +382,27 @@ fn traverse_path(
     }
 
     for (value, key, address) in current {
-        traverse_path(&value, path, segment_index + 1, key, address, out);
+        traverse_path(value, path, segment_index + 1, key, address, visit);
     }
 }
 
-fn descend_to_named_values(value: Value, name: &str, out: &mut Vec<Value>) {
-    match value {
-        Value::Object(map) => {
-            if let Some(child) = map.get(name) {
-                out.push(child.clone());
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                descend_to_named_values(item, name, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn descend_to_named_pairs(
-    value: Value,
+fn descend_to_named_pairs<'a>(
+    value: &'a Value,
     key: String,
     address: Vec<AddressStep>,
     name: &str,
-    out: &mut Vec<(Value, String, Vec<AddressStep>)>,
+    out: &mut Vec<(&'a Value, String, Vec<AddressStep>)>,
 ) {
     match value {
         Value::Object(map) => {
             if let Some(child) = map.get(name) {
                 let mut next_address = address;
                 next_address.push(AddressStep::Field(name.to_string()));
-                out.push((child.clone(), append_name(&key, name), next_address));
+                out.push((child, append_name(&key, name), next_address));
             }
         }
         Value::Array(items) => {
-            for (index, item) in items.into_iter().enumerate() {
+            for (index, item) in items.iter().enumerate() {
                 let mut next_address = address.clone();
                 next_address.push(AddressStep::Index(index));
                 descend_to_named_pairs(item, append_index(&key, index), next_address, name, out);
@@ -434,20 +412,19 @@ fn descend_to_named_pairs(
     }
 }
 
-fn apply_selector_pairs(
-    values: Vec<(Value, String, Vec<AddressStep>)>,
+fn apply_selector_pairs<'a>(
+    values: Vec<(&'a Value, String, Vec<AddressStep>)>,
     selector: &Selector,
-) -> Vec<(Value, String, Vec<AddressStep>)> {
+) -> Vec<(&'a Value, String, Vec<AddressStep>)> {
     let mut out = Vec::new();
     for (value, key, address) in values {
-        let items = match value {
-            Value::Array(items) => items,
-            _ => Vec::new(),
+        let Value::Array(items) = value else {
+            continue;
         };
         let len = items.len() as i64;
         match selector {
             Selector::Fanout => {
-                for (index, item) in items.into_iter().enumerate() {
+                for (index, item) in items.iter().enumerate() {
                     let mut next_address = address.clone();
                     next_address.push(AddressStep::Index(index));
                     out.push((item, append_index(&key, index), next_address));
@@ -463,7 +440,7 @@ fn apply_selector_pairs(
                 {
                     let mut next_address = address.clone();
                     next_address.push(AddressStep::Index(idx as usize));
-                    out.push((item.clone(), append_index(&key, idx as usize), next_address));
+                    out.push((item, append_index(&key, idx as usize), next_address));
                 }
             }
             Selector::Slice { start, stop, step } => {
@@ -472,7 +449,7 @@ fn apply_selector_pairs(
                     if let Some(item) = items.get(idx as usize) {
                         let mut next_address = address.clone();
                         next_address.push(AddressStep::Index(idx as usize));
-                        out.push((item.clone(), append_index(&key, idx as usize), next_address));
+                        out.push((item, append_index(&key, idx as usize), next_address));
                     }
                 }
             }
@@ -505,7 +482,10 @@ fn slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: Option<i
             if index >= 0 {
                 out.push(index);
             }
-            index += step;
+            let Some(next_index) = index.checked_add(step) else {
+                break;
+            };
+            index = next_index;
         }
     } else {
         let mut index = start.unwrap_or(len - 1);
@@ -529,7 +509,10 @@ fn slice_indices(len: i64, start: Option<i64>, stop: Option<i64>, step: Option<i
             if index >= 0 {
                 out.push(index);
             }
-            index += step;
+            let Some(next_index) = index.checked_add(step) else {
+                break;
+            };
+            index = next_index;
         }
     }
 

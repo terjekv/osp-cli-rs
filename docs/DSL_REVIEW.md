@@ -27,9 +27,10 @@ query and a per-group query have identical scope.
 
 ## Precision and scope limits
 
-Numeric comparison and aggregation use floating point, so large JSON integers
-may lose precision. Timestamp comparisons use whole-second resolution.
-Do not promise exact large-integer accounting or subsecond ordering.
+Integer comparisons are exact. Integer-only sums retain exact integer totals
+within the JSON i64/u64 range and otherwise fall back to floating point.
+Mixed or floating-point arithmetic may lose precision. Timestamp comparisons
+preserve fractional seconds; history bounds convert explicitly to milliseconds.
 
 Addressed quick expressions can prune nested structure while ordinary quick
 search filters complete records. Presence, null and truthiness also remain

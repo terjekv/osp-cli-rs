@@ -1,12 +1,13 @@
 use super::*;
 use chrono::{TimeZone, Utc};
 
-fn history_config() -> HistoryConfigBuilder {
-    HistoryConfig::builder()
-        .with_enabled(true)
-        .with_max_entries(10)
-        .with_dedupe(false)
-        .with_profile_scoped(false)
+fn history_config() -> HistoryConfig {
+    HistoryConfig {
+        enabled: true,
+        max_entries: 10,
+        dedupe: false,
+        ..HistoryConfig::default()
+    }
 }
 
 #[test]
@@ -40,25 +41,23 @@ fn excluded_commands_respect_prefixes_and_patterns() {
 #[test]
 fn list_entries_filters_shell_and_excludes() {
     let shell = HistoryShellContext::new("ldap");
-    let config = history_config()
-        .with_exclude_patterns(["user *"])
-        .with_shell_context(shell)
-        .build();
+    let config = HistoryConfig {
+        exclude_patterns: ["user *"].into_iter().map(String::from).collect(),
+        shell_context: shell,
+        ..history_config()
+    };
     let mut store = OspHistoryStore::new(config);
-    let _ = History::save(
-        &mut store,
-        HistoryItem::from_command_line("ldap user alice"),
-    )
-    .expect("save should succeed");
-    let _ = History::save(
-        &mut store,
-        HistoryItem::from_command_line("ldap netgroup ucore"),
-    )
-    .expect("save should succeed");
-    let _ = History::save(&mut store, HistoryItem::from_command_line("mreg host a"))
+    let _ = store
+        .save(HistoryItem::from_command_line("ldap user alice"))
+        .expect("save should succeed");
+    let _ = store
+        .save(HistoryItem::from_command_line("ldap netgroup ucore"))
+        .expect("save should succeed");
+    let _ = store
+        .save(HistoryItem::from_command_line("mreg host a"))
         .expect("save should succeed");
 
-    let entries = store.list_entries();
+    let entries = store.list_entries_for(store.shell_prefix().as_deref());
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].command, "netgroup ucore");
     assert_eq!(entries[1].command, "mreg host a");
@@ -67,42 +66,46 @@ fn list_entries_filters_shell_and_excludes() {
 #[test]
 fn list_entries_tracks_live_shell_context_updates() {
     let shell = HistoryShellContext::default();
-    let config = history_config().with_shell_context(shell.clone()).build();
+    let config = HistoryConfig {
+        shell_context: shell.clone(),
+        ..history_config()
+    };
     let mut store = OspHistoryStore::new(config);
-    let _ = History::save(
-        &mut store,
-        HistoryItem::from_command_line("ldap user alice"),
-    )
-    .expect("save should succeed");
-    let _ = History::save(&mut store, HistoryItem::from_command_line("mreg host a"))
+    let _ = store
+        .save(HistoryItem::from_command_line("ldap user alice"))
+        .expect("save should succeed");
+    let _ = store
+        .save(HistoryItem::from_command_line("mreg host a"))
         .expect("save should succeed");
 
     shell.set_prefix("ldap");
-    let ldap_entries = store.list_entries();
+    let ldap_entries = store.list_entries_for(store.shell_prefix().as_deref());
     assert_eq!(ldap_entries.len(), 1);
     assert_eq!(ldap_entries[0].command, "user alice");
 
     shell.set_prefix("mreg");
-    let mreg_entries = store.list_entries();
+    let mreg_entries = store.list_entries_for(store.shell_prefix().as_deref());
     assert_eq!(mreg_entries.len(), 1);
     assert_eq!(mreg_entries[0].command, "host a");
 
     shell.clear();
-    let root_entries = store.list_entries();
+    let root_entries = store.list_entries_for(store.shell_prefix().as_deref());
     assert_eq!(root_entries.len(), 2);
 }
 
 #[test]
 fn explicit_scope_queries_override_live_shell_context() {
     let shell = HistoryShellContext::default();
-    let config = history_config().with_shell_context(shell.clone()).build();
+    let config = HistoryConfig {
+        shell_context: shell.clone(),
+        ..history_config()
+    };
     let mut store = OspHistoryStore::new(config);
-    let _ = History::save(
-        &mut store,
-        HistoryItem::from_command_line("ldap user alice"),
-    )
-    .expect("save should succeed");
-    let _ = History::save(&mut store, HistoryItem::from_command_line("mreg host a"))
+    let _ = store
+        .save(HistoryItem::from_command_line("ldap user alice"))
+        .expect("save should succeed");
+    let _ = store
+        .save(HistoryItem::from_command_line("mreg host a"))
         .expect("save should succeed");
 
     shell.set_prefix("ldap");
@@ -123,65 +126,63 @@ fn explicit_scope_queries_override_live_shell_context() {
 #[test]
 fn save_expands_history_and_dedupes_with_shell_scope() {
     let shell = HistoryShellContext::new("ldap");
-    let config = history_config()
-        .with_dedupe(true)
-        .with_shell_context(shell)
-        .build();
+    let config = HistoryConfig {
+        dedupe: true,
+        shell_context: shell,
+        ..history_config()
+    };
     let mut store = OspHistoryStore::new(config);
 
-    let first = History::save(&mut store, HistoryItem::from_command_line("user alice"))
+    let first = store
+        .save(HistoryItem::from_command_line("user alice"))
         .expect("save should succeed");
     assert_eq!(first.command_line, "ldap user alice");
 
-    let duplicate = History::save(&mut store, HistoryItem::from_command_line("!!"))
+    let duplicate = store
+        .save(HistoryItem::from_command_line("!!"))
         .expect("history expansion should succeed");
     assert_eq!(duplicate.command_line, "!!");
-    assert_eq!(store.list_entries().len(), 1);
+    assert_eq!(
+        store
+            .list_entries_for(store.shell_prefix().as_deref())
+            .len(),
+        1
+    );
 
-    let second = History::save(&mut store, HistoryItem::from_command_line("netgroup ops"))
+    let second = store
+        .save(HistoryItem::from_command_line("netgroup ops"))
         .expect("save should succeed");
     assert_eq!(second.command_line, "ldap netgroup ops");
 
-    let recent = store.recent_commands();
+    let recent = store.recent_commands_for(store.shell_prefix().as_deref());
     assert_eq!(recent, vec!["ldap user alice", "ldap netgroup ops"]);
-    let visible = store.list_entries();
+    let visible = store.list_entries_for(store.shell_prefix().as_deref());
     assert_eq!(visible[0].command, "user alice");
     assert_eq!(visible[1].command, "netgroup ops");
 }
 
 #[test]
 fn search_respects_filters_direction_bounds_and_skip_logic() {
-    let config = history_config()
-        .with_shell_context(HistoryShellContext::default())
-        .build();
+    let config = HistoryConfig {
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    };
     let mut store = OspHistoryStore::new(config);
 
     let mut first = HistoryItem::from_command_line("ldap user alice");
-    first.cwd = Some("/srv/ldap".to_string());
-    first.hostname = Some("ops-a".to_string());
-    first.exit_status = Some(0);
     first.start_timestamp = Some(Utc.timestamp_millis_opt(1_000).single().unwrap());
-    History::save(&mut store, first).expect("save should succeed");
+    store.save(first).expect("save should succeed");
 
     let mut second = HistoryItem::from_command_line("ldap user bob");
-    second.cwd = Some("/srv/ldap/cache".to_string());
-    second.hostname = Some("ops-b".to_string());
-    second.exit_status = Some(1);
     second.start_timestamp = Some(Utc.timestamp_millis_opt(2_000).single().unwrap());
-    History::save(&mut store, second).expect("save should succeed");
+    store.save(second).expect("save should succeed");
 
     let mut third = HistoryItem::from_command_line("mreg host a");
-    third.cwd = Some("/srv/mreg".to_string());
-    third.hostname = Some("ops-a".to_string());
-    third.exit_status = Some(0);
     third.start_timestamp = Some(Utc.timestamp_millis_opt(3_000).single().unwrap());
-    History::save(&mut store, third).expect("save should succeed");
+    store.save(third).expect("save should succeed");
 
     let mut filter = SearchFilter::anything(None);
     filter.command_line = Some(CommandLineSearch::Prefix("ldap".to_string()));
-    filter.cwd_prefix = Some("/srv/ldap".to_string());
-    filter.exit_successful = Some(true);
-    filter.hostname = Some("ops-a".to_string());
 
     let forward = SearchQuery {
         direction: SearchDirection::Forward,
@@ -230,13 +231,12 @@ fn persisted_records_skip_invalid_lines_and_trim_to_capacity() {
     )
     .expect("history fixture should be written");
 
-    let store = OspHistoryStore::new(
-        history_config()
-            .with_path(Some(path))
-            .with_max_entries(1)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let store = OspHistoryStore::new(HistoryConfig {
+        path: Some(path),
+        max_entries: 1,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     let entries = store.list_entries_for(None);
     assert_eq!(entries.len(), 1);
@@ -249,36 +249,75 @@ fn persisted_records_skip_invalid_lines_and_trim_to_capacity() {
 fn shared_history_supports_save_load_prune_clear_and_sync() {
     let temp_dir = make_temp_dir("osp-repl-shared-history");
     let path = temp_dir.join("history.jsonl");
-    let mut history = SharedHistory::new(
-        history_config()
-            .with_path(Some(path.clone()))
-            .with_max_entries(8)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let mut history = SharedHistory::new(HistoryConfig {
+        path: Some(path.clone()),
+        max_entries: 8,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     history
-        .save_command_line("config show")
+        .with(|store| {
+            store.stage_command_line("ldap user")?;
+            store.finalize_execution("ldap user", "ldap user alice", true)
+        })
+        .expect("history lock should be available")
         .expect("save should succeed");
     history
-        .save_command_line("config get ui.format")
+        .with(|store| store.save_command_line("config get ui.format"))
+        .expect("history lock should be available")
         .expect("save should succeed");
-    assert!(history.enabled());
-    assert_eq!(history.recent_commands().len(), 2);
+    assert!(
+        history
+            .with(|store| store.history_enabled())
+            .unwrap_or(false)
+    );
+    assert_eq!(
+        history
+            .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default()
+            .len(),
+        2
+    );
     assert_eq!(
         history
             .load(HistoryItemId::new(0))
             .expect("load should succeed")
             .command_line,
-        "config show"
+        "ldap user alice"
     );
 
-    assert_eq!(history.prune(1).expect("prune should succeed"), 1);
-    assert_eq!(history.list_entries().len(), 1);
+    assert_eq!(
+        history
+            .with(|store| store.prune_for(1, store.shell_prefix().as_deref()))
+            .expect("history lock should be available")
+            .expect("prune should succeed"),
+        1
+    );
+    assert_eq!(
+        history
+            .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default()
+            .len(),
+        1
+    );
     history.sync().expect("sync should succeed");
     assert!(path.exists());
-    assert_eq!(history.clear_for(None).expect("clear should succeed"), 1);
-    assert!(history.list_entries().is_empty());
+    assert_eq!(
+        history
+            .with(|store| store
+                .clear_matching_for("*", None, false, true)
+                .map(|entries| entries.len()))
+            .expect("history lock should be available")
+            .expect("clear should succeed"),
+        1
+    );
+    assert!(
+        history
+            .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default()
+            .is_empty()
+    );
     History::clear(&mut history).expect("clear should succeed");
     assert!(!path.exists());
 }
@@ -313,12 +352,11 @@ fn shell_prefix_helpers_normalize_and_round_trip_commands() {
 
 #[test]
 fn unsupported_history_mutations_surface_feature_errors() {
-    let mut store = OspHistoryStore::new(
-        history_config()
-            .with_max_entries(4)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let mut store = OspHistoryStore::new(HistoryConfig {
+        max_entries: 4,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     let update_err = store
         .update(HistoryItemId::new(0), &|item| item)
@@ -334,12 +372,11 @@ fn unsupported_history_mutations_surface_feature_errors() {
 
 #[test]
 fn load_missing_history_item_returns_not_found_error() {
-    let store = OspHistoryStore::new(
-        history_config()
-            .with_max_entries(4)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let store = OspHistoryStore::new(HistoryConfig {
+        max_entries: 4,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     let err = store
         .load(HistoryItemId::new(7))
@@ -349,28 +386,33 @@ fn load_missing_history_item_returns_not_found_error() {
 
 #[test]
 fn disabled_history_returns_original_item_without_persisting_records() {
-    let mut store = OspHistoryStore::new(
-        history_config()
-            .with_enabled(false)
-            .with_dedupe(true)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let mut store = OspHistoryStore::new(HistoryConfig {
+        enabled: false,
+        dedupe: true,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
-    let item = History::save(
-        &mut store,
-        HistoryItem::from_command_line("ldap user alice"),
-    )
-    .expect("disabled history should be a no-op");
+    let item = store
+        .save(HistoryItem::from_command_line("ldap user alice"))
+        .expect("disabled history should be a no-op");
 
     assert_eq!(item.command_line, "ldap user alice");
-    assert!(store.list_entries().is_empty());
-    assert!(store.recent_commands().is_empty());
+    assert!(
+        store
+            .list_entries_for(store.shell_prefix().as_deref())
+            .is_empty()
+    );
+    assert!(
+        store
+            .recent_commands_for(store.shell_prefix().as_deref())
+            .is_empty()
+    );
 }
 
 #[test]
 fn history_never_records_recalls_help_or_inline_config_secrets() {
-    let mut history = SharedHistory::new(history_config().build());
+    let mut history = SharedHistory::new(history_config());
     assert!(matches_pattern("*", "anything"));
     assert!(!matches_pattern("  ", "anything"));
     assert!(!matches_pattern("a*b*c", "a c"));
@@ -401,12 +443,17 @@ fn history_never_records_recalls_help_or_inline_config_secrets() {
         History::save(&mut history, HistoryItem::from_command_line(command))
             .expect("save should succeed");
     }
-    assert_eq!(history.recent_commands(), vec!["config set ui.format json"]);
+    assert_eq!(
+        history
+            .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default(),
+        vec!["config set ui.format json"]
+    );
 }
 
 #[cfg_attr(miri, ignore = "history store filesystem integration test")]
 #[test]
-fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
+fn file_scoped_history_loads_legacy_records_and_drops_rejected_commands() {
     let temp_dir = make_temp_dir("osp-repl-history-profiles");
     let path = temp_dir.join("history.jsonl");
     std::fs::write(
@@ -419,34 +466,43 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
     )
     .expect("history fixture should be written");
     let shell = HistoryShellContext::new("ldap");
-    let mut history = SharedHistory::new(
-        history_config()
-            .with_path(Some(path.clone()))
-            .with_profile_scoped(true)
-            .with_profile(Some(" Dev ".to_string()))
-            .with_terminal(Some("CLI".to_string()))
-            .with_shell_context(shell.clone())
-            .build(),
+    let mut history = SharedHistory::new(HistoryConfig {
+        path: Some(path.clone()),
+
+        shell_context: shell.clone(),
+        ..history_config()
+    });
+    assert_eq!(
+        history
+            .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+            .unwrap_or_default(),
+        vec!["ldap user legacy", "ldap user ops", "ldap user alice"]
     );
-    assert_eq!(history.recent_commands(), vec!["ldap user alice"]);
 
     history
-        .save_command_line("user bob")
+        .with(|store| store.save_command_line("user bob"))
+        .expect("history lock should be available")
         .expect("save should succeed");
     History::save(&mut history, HistoryItem::from_command_line("user typo"))
         .expect("save should succeed");
     history
-        .finalize_execution("user other", "user other", false)
+        .with(|store| store.finalize_execution("user other", "user other", false))
+        .expect("history lock should be available")
         .expect("an unrelated finalization leaves the pending record alone");
     history
-        .finalize_execution("user typo", "user typo", false)
+        .with(|store| store.finalize_execution("user typo", "user typo-expanded", false))
+        .expect("history lock should be available")
         .expect("a rejected command should be dropped");
     let visible = history
-        .list_entries()
+        .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+        .unwrap_or_default()
         .into_iter()
         .map(|entry| entry.command)
         .collect::<Vec<_>>();
-    assert_eq!(visible, vec!["user alice", "user bob"]);
+    assert_eq!(
+        visible,
+        vec!["user legacy", "user ops", "user alice", "user bob"]
+    );
 
     let count = |filter: SearchFilter| {
         let mut query = SearchQuery::everything(SearchDirection::Forward, None);
@@ -459,40 +515,62 @@ fn profile_scoped_history_keeps_other_profiles_and_drops_rejected_commands() {
     let mut substring = SearchFilter::anything(None);
     substring.command_line = Some(CommandLineSearch::Substring("ali".to_string()));
     assert_eq!(count(substring), 1);
-    let mut cwd = SearchFilter::anything(None);
-    cwd.cwd_exact = Some("/srv".to_string());
-    assert_eq!(count(cwd), 1);
-    let mut cwd_prefix = SearchFilter::anything(None);
-    cwd_prefix.cwd_prefix = Some("/srv".to_string());
-    assert_eq!(count(cwd_prefix), 1);
-    let mut failed = SearchFilter::anything(None);
-    failed.exit_successful = Some(false);
-    assert_eq!(count(failed), 1);
-    let mut host = SearchFilter::anything(None);
-    host.hostname = Some("ops-b".to_string());
-    assert_eq!(count(host), 0);
 
     assert!(History::update(&mut history, HistoryItemId::new(0), &|item| item).is_err());
     assert!(History::delete(&mut history, HistoryItemId::new(0)).is_err());
     assert_eq!(History::session(&history), None);
 
-    history.remember_command("   ");
-    history.remember_command("user bob");
+    let _ = history.with(|store| store.remember_command("   "));
+    let _ = history.with(|store| store.remember_command("user bob"));
     assert_eq!(
-        history.expand_last_command("sudo !!").as_deref(),
+        history
+            .with(|store| store.expand_bang_request("sudo !!"))
+            .ok()
+            .flatten()
+            .as_deref(),
         Some("sudo user bob")
     );
 
     shell.clear();
-    assert_eq!(history.prune(5).expect("prune should succeed"), 0);
-    assert_eq!(history.clear_scoped().expect("clear should succeed"), 2);
-    assert_eq!(history.clear_scoped().expect("clear should succeed"), 0);
+    assert_eq!(
+        history
+            .with(|store| store.prune_for(5, store.shell_prefix().as_deref()))
+            .expect("history lock should be available")
+            .expect("prune should succeed"),
+        0
+    );
+    assert_eq!(
+        history
+            .with(|store| store
+                .clear_matching_for("*", store.shell_prefix().as_deref(), false, true)
+                .map(|entries| entries.len()))
+            .expect("history lock should be available")
+            .expect("clear should succeed"),
+        4
+    );
+    assert_eq!(
+        history
+            .with(|store| store
+                .clear_matching_for("*", store.shell_prefix().as_deref(), false, true)
+                .map(|entries| entries.len()))
+            .expect("history lock should be available")
+            .expect("clear should succeed"),
+        0
+    );
     let persisted = std::fs::read_to_string(&path).expect("history should persist");
-    assert_eq!(persisted.lines().count(), 2, "{persisted}");
-    assert!(persisted.contains("legacy") && persisted.contains("\"ops\""));
+    assert_eq!(persisted.lines().count(), 0, "{persisted}");
 
-    let disabled = SharedHistory::new(history_config().with_enabled(false).build());
-    assert_eq!(disabled.prune(1).expect("disabled prune is a no-op"), 0);
+    let disabled = SharedHistory::new(HistoryConfig {
+        enabled: false,
+        ..history_config()
+    });
+    assert_eq!(
+        disabled
+            .with(|store| store.prune_for(1, store.shell_prefix().as_deref()))
+            .expect("history lock should be available")
+            .expect("disabled prune is a no-op"),
+        0
+    );
     assert_eq!(apply_shell_prefix("  ", Some("ldap ")), "");
     assert_eq!(strip_shell_prefix("  ", Some("ldap ")), "");
 }

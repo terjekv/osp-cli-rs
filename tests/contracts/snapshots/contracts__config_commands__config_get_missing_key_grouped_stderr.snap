@@ -1,7 +1,7 @@
 ---
-source: crates/osp-cli/tests/contracts/config_commands.rs
-expression: "String::from_utf8(output.stderr).expect(\"stderr should be utf-8\")"
+source: tests/contracts/config_commands/read.rs
+assertion_line: 246
+expression: sanitized
 ---
-- Unknown configuration key --------------------------------------------
-  config key not found: missing.key
-------------------------------------------------------------------------
+error: Unknown config key 'missing.key'.
+hint: Run osp config list to see the keys.

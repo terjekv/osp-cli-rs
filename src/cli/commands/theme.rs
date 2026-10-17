@@ -1,118 +1,196 @@
 //! `theme` builtin command implementation.
 //!
-//! Theme behavior is intentionally small: inspect available themes, show one
-//! theme definition, or set an in-process theme override for the current run.
+//! Palette inspection and live theme selection share the normal renderer and
+//! configuration writer. Temporary selection remains an in-process override.
 
-use crate::app::{AppRuntime, UiState};
-use crate::app::{CliCommandResult, resolve_known_theme_name};
+use crate::app::{AppRuntime, AppSession, UiState};
+use crate::app::{CommandOutput, resolve_known_theme_name};
 use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs, ThemeUseArgs};
-use crate::config::ConfigLayer;
-use crate::core::command_def::{ArgDef, CommandDef, ValueChoice};
-use crate::core::output_model::{OutputDocument, OutputDocumentKind};
+use crate::cli::{ThemeArgs, ThemeCommands, ThemePreviewArgs, ThemeUseArgs};
+use crate::completion::{CompletionNode, SuggestionEntry};
+use crate::config::Scope;
+use crate::core::output_model::{DisplayRule, OutputResult, RenderRecommendation};
 use crate::core::row::Row;
 use crate::ui::theme::{DEFAULT_THEME_NAME, normalize_theme_name};
 use crate::ui::theme_catalog::{ThemeCatalog, ThemeSource};
+use clap::Command;
 use miette::Result;
-use miette::miette;
-
-#[derive(Clone, Copy)]
-pub(crate) struct ThemeCommandContext<'a> {
-    pub(crate) ui: &'a UiState,
-    pub(crate) themes: &'a ThemeCatalog,
-}
-
-impl<'a> ThemeCommandContext<'a> {
-    pub(crate) fn from_parts(runtime: &'a AppRuntime, ui: &'a UiState) -> Self {
-        Self {
-            ui,
-            themes: &runtime.themes,
-        }
-    }
-}
 
 pub(crate) fn run_theme_command(
-    config_overrides: &mut ConfigLayer,
-    context: ThemeCommandContext<'_>,
+    session: &mut AppSession,
+    runtime: &AppRuntime,
+    ui: &UiState,
     args: ThemeArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     match args.command {
+        ThemeCommands::Reset => reset_theme(runtime, session),
+        ThemeCommands::Preview(ThemePreviewArgs { name: None }) => {
+            preview::run(runtime, session, ui)
+        }
         ThemeCommands::List => {
-            let rows = theme_list_rows(context.themes, &context.ui.render_settings.theme_name);
-            let display_rows = rows
-                .iter()
-                .map(|row| {
-                    crate::row! {
-                        "name" => row.get("name").cloned().unwrap_or_default(),
-                        "source" => row.get("source").cloned().unwrap_or_default(),
-                        "status" => row.get("status").cloned().unwrap_or_default(),
-                    }
-                })
-                .collect();
-            let document =
-                serde_json::Value::Array(rows.into_iter().map(serde_json::Value::Object).collect());
-            let mut output = rows_to_output_result(display_rows);
-            output.document = Some(OutputDocument::new(OutputDocumentKind::Json, document));
-            output.meta.key_index = ["name", "source", "status"].map(str::to_string).to_vec();
-            Ok(CliCommandResult::output(output, None))
+            let mut effective = runtime.themes.clone();
+            for entry in effective.entries.values_mut() {
+                entry.theme = entry.theme.with_color_overrides(runtime.config.resolved());
+            }
+            let rows = theme_list_rows(&effective, &ui.render_settings.theme_name);
+            let mut output = rows_to_output_result(rows);
+            output.meta.display_columns = Some(
+                [
+                    "name", "source", "text", "accent", "info", "warning", "success", "error",
+                    "border", "muted", "title", "status",
+                ]
+                .map(str::to_string)
+                .to_vec(),
+            );
+            output.meta.display_column_labels = Some(
+                [
+                    "name", "type", "text", "accent", "info", "warning", "success", "error",
+                    "border", "muted", "title", "status",
+                ]
+                .map(str::to_string)
+                .to_vec(),
+            );
+            if ui.render_settings.format == crate::core::output::OutputFormat::Auto {
+                output.meta.render_recommendation = Some(RenderRecommendation::Format(
+                    crate::core::output::OutputFormat::Table,
+                ));
+            }
+            add_palette_styles(&mut output);
+            let overridden = crate::core::style::ColorRole::ALL
+                .into_iter()
+                .filter(|role| runtime.config.resolved().get(role.key()).is_some())
+                .collect::<Vec<_>>();
+            if !overridden.is_empty() {
+                for row in match &mut output.items {
+                    crate::core::output_model::OutputItems::Rows(rows) => rows,
+                    _ => unreachable!(),
+                } {
+                    row.insert(
+                        "overridden".into(),
+                        serde_json::json!(
+                            overridden
+                                .iter()
+                                .map(|role| (role.name(), true))
+                                .collect::<std::collections::BTreeMap<_, _>>()
+                        ),
+                    );
+                }
+                output
+                    .meta
+                    .display_rules
+                    .extend(overridden.iter().map(|role| DisplayRule::SuffixWhenTrue {
+                        field: role.name().into(),
+                        when: format!("overridden.{}", role.name()),
+                        suffix: "*".into(),
+                    }));
+                output
+                    .meta
+                    .display_notes
+                    .push("* = global color.* override".into());
+            }
+            Ok(CommandOutput::output(output, None))
         }
-        ThemeCommands::Show(ThemeShowArgs { name }) => {
-            let selected = name.unwrap_or_else(|| context.ui.render_settings.theme_name.clone());
-            Ok(CliCommandResult::output(
-                rows_to_output_result(theme_show_rows(context.themes, &selected)?),
-                None,
-            ))
-        }
-        ThemeCommands::Use(ThemeUseArgs { name }) => {
-            let selected = resolve_known_theme_name(&name, context.themes)?;
-            config_overrides.set("theme.name", selected.clone());
+        ThemeCommands::Preview(ThemePreviewArgs { name: Some(name) })
+        | ThemeCommands::Use(ThemeUseArgs { name }) => {
+            let selected = resolve_known_theme_name(&name, &runtime.themes)?;
+            session.config_overrides.replace_scoped(
+                "theme.name",
+                selected.clone().into(),
+                Scope::global(),
+            );
 
-            let mut result = CliCommandResult::exit(0);
+            let mut result = CommandOutput::exit(0);
             result
                 .messages
                 .success(format!("active theme set to: {selected}"));
-            result.messages.info(
-                "theme change is for the current process; persistent writes land with `config set`",
-            );
+            result.messages.info(format!(
+                "theme change is for the current process; persistent writes land with `{}`",
+                ui.render_settings
+                    .runtime
+                    .command_scope
+                    .command("config set")
+            ));
             Ok(result)
         }
     }
 }
 
-pub(crate) fn theme_command_def(themes: &ThemeCatalog, sort_key: impl Into<String>) -> CommandDef {
-    let theme_choices = themes
+fn default_theme_name(runtime: &AppRuntime) -> Result<String> {
+    let config = crate::app::resolve_runtime_config(
+        crate::app::RuntimeConfigRequest::new(None, None)
+            .with_runtime_load(crate::config::RuntimeLoadOptions::defaults_only())
+            .with_product_defaults(runtime.product_defaults().clone()),
+    )?;
+    resolve_known_theme_name(
+        config
+            .get_string("theme.name")
+            .unwrap_or(DEFAULT_THEME_NAME),
+        &runtime.themes,
+    )
+}
+
+fn reset_theme(runtime: &AppRuntime, session: &mut AppSession) -> Result<CommandOutput> {
+    let default = default_theme_name(runtime)?;
+    let name = &runtime
+        .themes
+        .resolve(&default)
+        .ok_or_else(|| miette::miette!("default theme is unavailable: {default}"))?
+        .theme
+        .name;
+    let keys = std::iter::once("theme.name".to_string())
+        .chain(crate::core::style::ColorRole::ALL.map(|role| role.key().to_string()))
+        .collect::<Vec<_>>();
+    let mut changed = super::config::clear_theme_values(runtime, session, &keys)?;
+    changed.sort();
+    Ok(CommandOutput::text(if changed.is_empty() {
+        "Nothing needed resetting.".into()
+    } else {
+        format!("Reset theme to {name}; cleared {}.", changed.join(", "))
+    }))
+}
+
+pub(crate) fn theme_command() -> Command {
+    crate::cli::builtin_command("theme")
+}
+
+pub(crate) fn augment_theme_completion(spec: &mut CompletionNode, themes: &ThemeCatalog) {
+    let suggestions = themes
         .ids()
         .into_iter()
-        .map(ValueChoice::new)
+        .map(SuggestionEntry::value)
         .collect::<Vec<_>>();
+    for child in spec.children.values_mut() {
+        for arg in &mut child.args {
+            arg.name = Some("name".to_string());
+            arg.tooltip = Some("Theme name".to_string());
+            arg.suggestions = suggestions.clone();
+        }
+    }
+}
 
-    CommandDef::new("theme")
-        .about("Inspect and apply themes")
-        .sort(sort_key)
-        .subcommands([
-            CommandDef::new("list")
-                .about("List available themes")
-                .sort("10"),
-            CommandDef::new("show")
-                .about("Show a theme definition")
-                .sort("11")
-                .arg(
-                    ArgDef::new("name")
-                        .value_name("name")
-                        .help("Theme name")
-                        .choices(theme_choices.clone()),
-                ),
-            CommandDef::new("use")
-                .about("Set active theme")
-                .sort("12")
-                .arg(
-                    ArgDef::new("name")
-                        .value_name("name")
-                        .help("Theme name")
-                        .required()
-                        .choices(theme_choices),
-                ),
-        ])
+fn add_palette_styles(output: &mut OutputResult) {
+    output.meta.display_rules.extend(
+        [
+            "text",
+            "accent",
+            "info",
+            "warning",
+            "success",
+            "error",
+            "border",
+            "muted",
+            "title",
+            "selection",
+            "link",
+            "bg",
+            "bg_alt",
+        ]
+        .into_iter()
+        .map(|field| DisplayRule::ValueStyle {
+            field: field.to_owned(),
+            bold: field == "error",
+        }),
+    );
 }
 
 fn theme_list_rows(themes: &ThemeCatalog, active_theme: &str) -> Vec<Row> {
@@ -129,33 +207,18 @@ fn theme_list_rows(themes: &ThemeCatalog, active_theme: &str) -> Vec<Row> {
                 (false, true) => "default",
                 (false, false) => "",
             };
-            let origin = entry
-                .origin
-                .as_ref()
-                .map(|path| serde_json::Value::from(path.to_string_lossy().to_string()))
-                .unwrap_or(serde_json::Value::Null);
-            crate::row! {
-                "id" => entry.theme.id.to_string(),
-                "name" => entry.theme.name.to_string(),
-                "source" => match entry.source {
-                    ThemeSource::Builtin => "builtin",
-                    ThemeSource::Custom => "custom",
-                },
-                "origin" => origin,
+            let mut row = theme_palette_row(entry);
+            row.extend(crate::row! {
                 "active" => is_active,
                 "default" => is_default,
                 "status" => status,
-            }
+            });
+            row
         })
         .collect()
 }
 
-fn theme_show_rows(themes: &ThemeCatalog, name: &str) -> Result<Vec<Row>> {
-    let selected = resolve_known_theme_name(name, themes)?;
-    let entry = themes
-        .entries
-        .get(&selected)
-        .ok_or_else(|| miette!("theme missing: {selected}"))?;
+fn theme_palette_row(entry: &crate::ui::theme_catalog::ThemeEntry) -> Row {
     let theme = &entry.theme;
     let palette = &theme.palette;
     let origin = entry
@@ -174,7 +237,7 @@ fn theme_show_rows(themes: &ThemeCatalog, name: &str) -> Result<Vec<Row>> {
         .map(serde_json::Value::from)
         .unwrap_or(serde_json::Value::Null);
 
-    Ok(vec![crate::row! {
+    crate::row! {
         "id" => theme.id.to_string(),
         "name" => theme.name.to_string(),
         "base" => theme
@@ -193,26 +256,25 @@ fn theme_show_rows(themes: &ThemeCatalog, name: &str) -> Result<Vec<Row>> {
         "info" => palette.info.to_string(),
         "warning" => palette.warning.to_string(),
         "success" => palette.success.to_string(),
-        "error" => palette.error.to_string(),
+        "error" => palette.error.strip_prefix("bold ").unwrap_or(&palette.error),
         "border" => palette.border.to_string(),
         "title" => palette.title.to_string(),
         "selection" => palette.selection.to_string(),
         "link" => palette.link.to_string(),
         "bg" => bg,
         "bg_alt" => bg_alt,
-    }])
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ThemeCommandContext, run_theme_command, theme_command_def, theme_list_rows, theme_show_rows,
+        augment_theme_completion, run_theme_command, theme_command, theme_list_rows,
+        theme_palette_row,
     };
-    use crate::app::CliCommandResult;
-    use crate::app::ReplCommandOutput;
+    use crate::app::CommandOutput;
     use crate::app::UiState;
-    use crate::cli::{ThemeArgs, ThemeCommands, ThemeShowArgs};
-    use crate::config::ConfigLayer;
+    use crate::cli::{ThemeArgs, ThemeCommands};
     use crate::core::output::OutputFormat;
     use crate::core::row::Row;
     use crate::ui::RenderSettings;
@@ -258,12 +320,11 @@ mod tests {
         )
     }
 
-    fn extract_output_rows(result: CliCommandResult) -> Option<Vec<Row>> {
-        let output = match result.output? {
-            ReplCommandOutput::Output(output) => output.output,
-            ReplCommandOutput::Json(_) | ReplCommandOutput::Text(_) => return None,
-        };
-        output.into_rows()
+    fn extract_output_rows(result: CommandOutput) -> Option<Vec<Row>> {
+        match result.body {
+            crate::app::CommandBody::Output(output) => output.into_rows(),
+            _ => None,
+        }
     }
 
     #[test]
@@ -282,14 +343,26 @@ mod tests {
 
         let ui = test_ui_state();
         let themes = builtin_theme_catalog();
-        let mut overrides = ConfigLayer::default();
+        let mut defaults = crate::config::ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        let mut resolver = crate::config::ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(crate::config::ResolveOptions::default())
+            .unwrap();
+        let mut builder = crate::app::AppStateBuilder::new(
+            crate::app::RuntimeContext::new(None, crate::app::TerminalKind::Cli, None),
+            config,
+            ui.clone(),
+        );
+        builder.themes = Some(themes);
+        let state = builder.build();
+        let mut session = state.session;
 
         let result = run_theme_command(
-            &mut overrides,
-            ThemeCommandContext {
-                ui: &ui,
-                themes: &themes,
-            },
+            &mut session,
+            &state.runtime,
+            &ui,
             ThemeArgs {
                 command: ThemeCommands::List,
             },
@@ -303,8 +376,7 @@ mod tests {
             Some("builtin")
         );
 
-        let rows = theme_show_rows(&custom_theme_catalog(), "nord").expect("theme should resolve");
-        let row = &rows[0];
+        let row = theme_palette_row(&custom_theme_catalog().entries["nord"]);
 
         assert_eq!(
             row.get("source").and_then(|value| value.as_str()),
@@ -314,45 +386,22 @@ mod tests {
             row.get("origin").and_then(|value| value.as_str()),
             Some("/tmp/themes/nord.toml")
         );
-
-        let mut ui = test_ui_state();
-        ui.render_settings.theme_name = "nord".to_string();
-        let themes = builtin_theme_catalog();
-        let mut overrides = ConfigLayer::default();
-
-        let result = run_theme_command(
-            &mut overrides,
-            ThemeCommandContext {
-                ui: &ui,
-                themes: &themes,
-            },
-            ThemeArgs {
-                command: ThemeCommands::Show(ThemeShowArgs { name: None }),
-            },
-        )
-        .expect("theme show should succeed");
-
-        let rows = extract_output_rows(result).expect("rows");
-        let row = &rows[0];
-        assert_eq!(row.get("id").and_then(|value| value.as_str()), Some("nord"));
-        assert_eq!(
-            row.get("source").and_then(|value| value.as_str()),
-            Some("builtin")
-        );
     }
 
     #[test]
     fn theme_output_helpers_and_command_def_expose_runtime_choices_unit() {
-        assert!(extract_output_rows(CliCommandResult::text("hello")).is_none());
+        assert!(extract_output_rows(CommandOutput::text("hello")).is_none());
 
-        let def = theme_command_def(&builtin_theme_catalog(), "20");
+        let mut def = crate::completion::CompletionNode::from_clap(&theme_command());
+        augment_theme_completion(&mut def, &builtin_theme_catalog());
         assert_eq!(def.name, "theme");
-        assert_eq!(def.sort_key.as_deref(), Some("20"));
-        let show = def
-            .subcommands
-            .iter()
-            .find(|subcommand| subcommand.name == "show")
-            .expect("show subcommand");
-        assert_eq!(show.args[0].choices[0].value, "nord");
+        let use_theme = def
+            .children
+            .values()
+            .find(|subcommand| subcommand.name == "use")
+            .expect("use subcommand");
+        assert_eq!(use_theme.args[0].suggestions[0].value, "nord");
     }
 }
+
+mod preview;

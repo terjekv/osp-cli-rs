@@ -1,22 +1,21 @@
-use nu_ansi_term::{Color, Style};
+use crate::core::style::parse_style_spec;
 
 use crate::ui::theme::ThemeDefinition;
 
 /// Semantic style tokens used across the UI pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StyleToken {
-    None,
     Trace,
     Info,
     Warning,
     Error,
     Success,
     Border,
+    #[cfg(test)]
     PanelBorder,
     PanelTitle,
     Key,
     TableHeader,
-    MregKey,
     JsonKey,
     Text,
     Muted,
@@ -24,7 +23,6 @@ pub enum StyleToken {
     PromptText,
     PromptCommand,
     Value,
-    Number,
     ValueNumber,
     BoolTrue,
     BoolFalse,
@@ -36,7 +34,6 @@ pub enum StyleToken {
     MessageWarning,
     MessageSuccess,
     MessageInfo,
-    MessageTrace,
     Punctuation,
 }
 
@@ -131,7 +128,7 @@ pub fn apply_style_with_theme_overrides(
     theme: &ThemeDefinition,
     overrides: &StyleOverrides,
 ) -> String {
-    if !color || text.is_empty() || matches!(token, StyleToken::None) {
+    if !color || text.is_empty() {
         return text.to_string();
     }
 
@@ -149,11 +146,9 @@ pub fn style_spec<'a>(
     }
 
     match token {
-        StyleToken::None => "",
-        StyleToken::Trace
-        | StyleToken::Border
-        | StyleToken::PanelBorder
-        | StyleToken::MessageTrace => theme.palette.border.as_str(),
+        #[cfg(test)]
+        StyleToken::PanelBorder => theme.palette.border.as_str(),
+        StyleToken::Trace | StyleToken::Border => theme.palette.border.as_str(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Null | StyleToken::Punctuation => {
             theme.palette.muted.as_str()
         }
@@ -165,15 +160,14 @@ pub fn style_spec<'a>(
         }
         StyleToken::PanelTitle => theme.palette.title.as_str(),
         StyleToken::Code => theme.palette.accent.as_str(),
-        StyleToken::Key | StyleToken::TableHeader | StyleToken::MregKey | StyleToken::JsonKey => {
+        StyleToken::Key | StyleToken::TableHeader | StyleToken::JsonKey => {
             theme.palette.accent.as_str()
         }
         StyleToken::Text | StyleToken::PromptText | StyleToken::Value => {
             theme.palette.text.as_str()
         }
         // Literal data shares one colour; red and green stay for status.
-        StyleToken::Number
-        | StyleToken::ValueNumber
+        StyleToken::ValueNumber
         | StyleToken::BoolTrue
         | StyleToken::BoolFalse
         | StyleToken::Ipv4
@@ -183,8 +177,8 @@ pub fn style_spec<'a>(
 
 fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> {
     match token {
-        StyleToken::None | StyleToken::PromptCommand => None,
-        StyleToken::Trace | StyleToken::MessageTrace => overrides
+        StyleToken::PromptCommand => None,
+        StyleToken::Trace => overrides
             .message_trace
             .as_deref()
             .or(overrides.panel_border.as_deref()),
@@ -195,14 +189,15 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
             .as_deref()
             .or(overrides.panel_border.as_deref()),
         StyleToken::Success | StyleToken::MessageSuccess => overrides.message_success.as_deref(),
-        StyleToken::Border | StyleToken::PanelBorder => overrides.panel_border.as_deref(),
+        #[cfg(test)]
+        StyleToken::PanelBorder => overrides.panel_border.as_deref(),
+        StyleToken::Border => overrides.panel_border.as_deref(),
         StyleToken::PanelTitle => overrides.panel_title.as_deref(),
         StyleToken::Key => overrides.key.as_deref(),
         StyleToken::TableHeader => overrides
             .table_header
             .as_deref()
             .or(overrides.key.as_deref()),
-        StyleToken::MregKey => overrides.mreg_key.as_deref().or(overrides.key.as_deref()),
         StyleToken::JsonKey => overrides.json_key.as_deref().or(overrides.key.as_deref()),
         StyleToken::Text => overrides.text.as_deref(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Punctuation => {
@@ -212,7 +207,7 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
         StyleToken::Value | StyleToken::PromptText => {
             overrides.value.as_deref().or(overrides.text.as_deref())
         }
-        StyleToken::Number | StyleToken::ValueNumber => overrides.number.as_deref(),
+        StyleToken::ValueNumber => overrides.number.as_deref(),
         StyleToken::BoolTrue => overrides
             .bool_true
             .as_deref()
@@ -272,135 +267,13 @@ pub fn apply_style_spec(text: &str, spec: &str, enabled: bool) -> String {
     format!("{prefix}{text}{}", style.suffix())
 }
 
-/// Validates that a style specification uses syntax the renderer understands.
-pub fn is_valid_style_spec(value: &str) -> bool {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return true;
-    }
-
-    trimmed.split_whitespace().all(|raw| {
-        let token = raw.trim().to_ascii_lowercase();
-        !token.is_empty() && (is_style_modifier(&token) || parse_color_token(&token).is_some())
-    })
-}
-
-fn parse_style_spec(spec: &str) -> Option<Style> {
-    let mut style = Style::new();
-    let mut changed = false;
-
-    for raw in spec.split_whitespace() {
-        let token = raw.trim().to_ascii_lowercase();
-        if token.is_empty() {
-            continue;
-        }
-        if let Some(updated) = apply_style_token(style, &token) {
-            style = updated;
-            changed = true;
-        }
-    }
-
-    changed.then_some(style)
-}
-
-fn is_style_modifier(token: &str) -> bool {
-    matches!(token, "bold" | "dim" | "dimmed" | "italic" | "underline")
-}
-
-fn apply_style_token(style: Style, token: &str) -> Option<Style> {
-    match token {
-        "bold" => Some(style.bold()),
-        "dim" | "dimmed" => Some(style.dimmed()),
-        "italic" => Some(style.italic()),
-        "underline" => Some(style.underline()),
-        _ => parse_color_token(token).map(|color| style.fg(color)),
-    }
-}
-
-pub(crate) fn parse_color_token(token: &str) -> Option<Color> {
-    if let Some(value) = token.strip_prefix("ansi")
-        && let Ok(index) = value.parse::<u8>()
-    {
-        return Some(Color::Fixed(index));
-    }
-
-    if let Some(value) = token
-        .strip_prefix("rgb(")
-        .and_then(|value| value.strip_suffix(')'))
-    {
-        let mut parts = value.split(',').map(|part| part.trim().parse::<u8>().ok());
-        if let (Some(Some(r)), Some(Some(g)), Some(Some(b))) =
-            (parts.next(), parts.next(), parts.next())
-        {
-            return Some(Color::Rgb(r, g, b));
-        }
-    }
-
-    match token {
-        "black" => Some(Color::Black),
-        "red" => Some(Color::Red),
-        "green" => Some(Color::Green),
-        "yellow" => Some(Color::Yellow),
-        "blue" => Some(Color::Blue),
-        "purple" | "magenta" => Some(Color::Purple),
-        "cyan" => Some(Color::Cyan),
-        "white" => Some(Color::White),
-        "bright-black" | "darkgray" | "dark_gray" | "gray" | "grey" => Some(Color::DarkGray),
-        "bright-red" | "lightred" | "light_red" => Some(Color::LightRed),
-        "bright-green" | "lightgreen" | "light_green" => Some(Color::LightGreen),
-        "bright-yellow" | "lightyellow" | "light_yellow" => Some(Color::LightYellow),
-        "bright-blue" | "lightblue" | "light_blue" => Some(Color::LightBlue),
-        "bright-purple" | "bright-magenta" | "lightmagenta" | "light_magenta" | "lightpurple"
-        | "light_purple" => Some(Color::LightPurple),
-        "bright-cyan" | "lightcyan" | "light_cyan" => Some(Color::LightCyan),
-        "bright-white" | "lightgray" | "light_gray" | "lightgrey" | "light_grey" => {
-            Some(Color::LightGray)
-        }
-        _ => parse_hex_rgb(token).map(|(r, g, b)| Color::Rgb(r, g, b)),
-    }
-}
-
-fn parse_hex_rgb(value: &str) -> Option<(u8, u8, u8)> {
-    match value.as_bytes() {
-        [b'#', r, g, b] => Some((
-            expand_hex_nibble(*r)?,
-            expand_hex_nibble(*g)?,
-            expand_hex_nibble(*b)?,
-        )),
-        [b'#', r1, r2, g1, g2, b1, b2] => Some((
-            parse_hex_pair(*r1, *r2)?,
-            parse_hex_pair(*g1, *g2)?,
-            parse_hex_pair(*b1, *b2)?,
-        )),
-        _ => None,
-    }
-}
-
-fn expand_hex_nibble(value: u8) -> Option<u8> {
-    let nibble = parse_hex_digit(value)?;
-    Some((nibble << 4) | nibble)
-}
-
-fn parse_hex_pair(high: u8, low: u8) -> Option<u8> {
-    Some((parse_hex_digit(high)? << 4) | parse_hex_digit(low)?)
-}
-
-fn parse_hex_digit(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::core::style::is_valid_style_spec;
     use crate::ui::theme::resolve_theme;
 
     use super::{
-        StyleOverrides, StyleToken, ThemeStyler, apply_style_spec, is_valid_style_spec, style_spec,
-        value_style_token,
+        StyleOverrides, StyleToken, ThemeStyler, apply_style_spec, style_spec, value_style_token,
     };
 
     #[test]

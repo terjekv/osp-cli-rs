@@ -5,24 +5,25 @@
 //! and scope rules used at runtime.
 
 use super::resolve_terminal_selector;
-use crate::app::{AppRuntime, AppSession, RuntimeContext, TerminalKind, UiState};
+use crate::app::{AppRuntime, AppSession, TerminalKind, UiState};
 use crate::app::{
-    CliCommandResult, ConfigExplainContext, ReplCommandOutput, RuntimeConfigRequest,
-    config_explain_json, config_explain_result, config_value_to_json_for_key,
-    explain_runtime_config, format_scope, is_sensitive_key, push_missing_config_key_messages,
-    render_config_explain_text, resolve_runtime_config,
+    CommandOutput, RuntimeConfigRequest, config_explain_json, config_explain_result,
+    config_value_to_json_for_key, explain_runtime_config, format_scope, is_sensitive_key,
+    prepare_runtime_config, push_missing_config_key_messages, render_config_explain_text,
+    resolve_runtime_config,
 };
 use crate::cli::pipeline::validate_alias_template;
 use crate::cli::rows::output::rows_to_output_result;
 use crate::cli::rows::row::RowBuilder;
 use crate::cli::{
     AliasAddArgs, AliasArgs, AliasCommands, AliasListArgs, AliasRemoveArgs, ConfigArgs,
-    ConfigCommands, ConfigGetArgs, ConfigSetArgs, ConfigShowArgs, ConfigUnsetArgs,
+    ConfigCommands, ConfigGetArgs, ConfigScopeArgs, ConfigSetArgs, ConfigShowArgs, ConfigStoreArgs,
+    ConfigUnsetArgs,
 };
 #[cfg(unix)]
 use crate::config::secret_file_mode;
 use crate::config::{
-    ConfigLayer, ConfigSchema, ResolvedConfig, ResolvedValue, RuntimeConfigPaths,
+    ConfigLayer, ConfigSchema, ConfigValue, ResolvedConfig, ResolvedValue, RuntimeConfigPaths,
     RuntimeLoadOptions, RuntimeSecretStore, Scope, SecretBackendKind, TomlStoreEditOptions,
     is_bootstrap_only_key, set_scoped_value_in_toml, unset_scoped_value_in_toml,
     validate_bootstrap_value, validate_key_scope,
@@ -31,126 +32,72 @@ use crate::core::output::OutputFormat;
 use crate::core::row::Row;
 use crate::core::shell_words::escape_for_shell;
 use crate::ui::messages::MessageBuffer;
-use crate::ui::theme_catalog::ThemeCatalog;
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 
-pub(crate) struct ConfigCommandContext<'a> {
-    pub(crate) context: &'a RuntimeContext,
-    pub(crate) config: &'a ResolvedConfig,
-    pub(crate) ui: &'a UiState,
-    pub(crate) themes: &'a ThemeCatalog,
-    pub(crate) config_overrides: &'a mut ConfigLayer,
-    pub(crate) product_defaults: &'a ConfigLayer,
-    pub(crate) runtime_load: RuntimeLoadOptions,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct ConfigReadContext<'a> {
-    pub(crate) context: &'a RuntimeContext,
-    pub(crate) config: &'a ResolvedConfig,
-    pub(crate) ui: &'a UiState,
-    pub(crate) themes: &'a ThemeCatalog,
-    pub(crate) config_overrides: &'a ConfigLayer,
-    pub(crate) product_defaults: &'a ConfigLayer,
-    pub(crate) runtime_load: RuntimeLoadOptions,
-}
-
-impl<'a> ConfigCommandContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a mut AppSession,
-        ui: &'a UiState,
-    ) -> Self {
-        Self {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            ui,
-            themes: &runtime.themes,
-            config_overrides: &mut session.config_overrides,
-            product_defaults: runtime.product_defaults(),
-            runtime_load: runtime.launch.runtime_load,
-        }
-    }
-
-    fn read(&self) -> ConfigReadContext<'_> {
-        ConfigReadContext {
-            context: self.context,
-            config: self.config,
-            ui: self.ui,
-            themes: self.themes,
-            config_overrides: &*self.config_overrides,
-            product_defaults: self.product_defaults,
-            runtime_load: self.runtime_load,
-        }
-    }
-}
-
-impl<'a> ConfigReadContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a AppSession,
-        ui: &'a UiState,
-    ) -> Self {
-        Self {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            ui,
-            themes: &runtime.themes,
-            config_overrides: &session.config_overrides,
-            product_defaults: runtime.product_defaults(),
-            runtime_load: runtime.launch.runtime_load,
-        }
-    }
+fn runtime_request(runtime: &AppRuntime, session: &AppSession) -> RuntimeConfigRequest {
+    RuntimeConfigRequest::new(
+        runtime.context.profile_override().map(str::to_owned),
+        Some(runtime.context.terminal_kind().as_config_terminal()),
+    )
+    .with_runtime_load(runtime.launch.runtime_load)
+    .with_product_defaults(runtime.product_defaults().clone())
+    .with_session_layer(Some(session.config_overrides.clone()))
 }
 
 pub(crate) fn run_config_command(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
     args: ConfigArgs,
-) -> Result<CliCommandResult> {
-    let read = context.read();
+) -> Result<CommandOutput> {
     match args.command {
-        ConfigCommands::Show(show) => Ok(CliCommandResult::output(
-            rows_to_output_result(config_show_rows(read, show)),
+        ConfigCommands::Edit(args) => picker::run(runtime, session, ui, args.key),
+        ConfigCommands::Show(show) => Ok(CommandOutput::output(
+            rows_to_output_result(config_show_rows(runtime, show)),
             None,
         )),
-        ConfigCommands::Get(get) => run_config_get(read, get),
+        ConfigCommands::Get(get) => run_config_get(runtime, session, get),
         ConfigCommands::Explain(explain) => config_explain_result(
-            &ConfigExplainContext {
-                context: read.context,
-                config: read.config,
-                ui: read.ui,
-                session_layer: read.config_overrides,
-                product_defaults: read.product_defaults,
-                runtime_load: read.runtime_load,
-            },
+            runtime.config.resolved(),
+            ui,
+            runtime_request(runtime, session),
             explain,
         ),
-        ConfigCommands::Set(set) => run_config_set(context, set),
-        ConfigCommands::Unset(unset) => run_config_unset(context, unset),
-        ConfigCommands::Doctor => Ok(CliCommandResult::output(
-            rows_to_output_result(config_diagnostics_rows(read)),
+        ConfigCommands::Set(set) => run_config_set(runtime, session, ui, set),
+        ConfigCommands::Unset(unset) => run_config_unset(runtime, session, unset),
+        ConfigCommands::Doctor => Ok(CommandOutput::output(
+            rows_to_output_result(config_diagnostics_rows(runtime, session, ui)),
             None,
         )),
     }
 }
 
 pub(crate) fn run_alias_command(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
     args: AliasArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     match args.command {
-        AliasCommands::List(list) => Ok(CliCommandResult::output(
-            rows_to_output_result(alias_list_rows(context.read(), list)),
-            None,
+        AliasCommands::List(list) => Ok(super::rows_with_empty_info(
+            alias_list_rows(runtime, list),
+            &format!(
+                "No aliases configured. Add one with `{}`.",
+                ui.render_settings
+                    .runtime
+                    .command_scope
+                    .command("alias add NAME TEMPLATE")
+            ),
         )),
-        AliasCommands::Add(add) => run_alias_add(context, add),
-        AliasCommands::Remove(remove) => run_alias_remove(context, remove),
+        AliasCommands::Add(add) => run_alias_add(runtime, session, ui, add),
+        AliasCommands::Remove(remove) => run_alias_remove(runtime, session, remove),
     }
 }
 
-fn alias_list_rows(context: ConfigReadContext<'_>, args: AliasListArgs) -> Vec<Row> {
-    let rows = context
+fn alias_list_rows(runtime: &AppRuntime, args: AliasListArgs) -> Vec<Row> {
+    runtime
         .config
+        .resolved()
         .aliases()
         .iter()
         .map(|(key, entry)| {
@@ -176,23 +123,21 @@ fn alias_list_rows(context: ConfigReadContext<'_>, args: AliasListArgs) -> Vec<R
             }
             row.build()
         })
-        .collect::<Vec<_>>();
-    if rows.is_empty() {
-        return vec![crate::row! {
-            "message" => "No aliases configured. Add one with `alias add NAME TEMPLATE`.",
-        }];
-    }
-    rows
+        .collect()
 }
 
 fn run_alias_add(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
     args: AliasAddArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let key = alias_key(&args.name)?;
-    validate_alias_template(&args.name, &args.template, context.config)?;
+    validate_alias_template(&args.name, &args.template, runtime.config.resolved())?;
     run_config_set(
-        context,
+        runtime,
+        session,
+        ui,
         ConfigSetArgs {
             key,
             value: vec![args.template],
@@ -208,11 +153,13 @@ fn run_alias_add(
 }
 
 fn run_alias_remove(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
     args: AliasRemoveArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     run_config_unset(
-        context,
+        runtime,
+        session,
         ConfigUnsetArgs {
             key: alias_key(&args.name)?,
             scope: args.scope,
@@ -240,58 +187,76 @@ fn alias_key(name: &str) -> Result<String> {
     Ok(format!("alias.{name}"))
 }
 
-fn config_show_rows(context: ConfigReadContext<'_>, args: ConfigShowArgs) -> Vec<Row> {
-    let mut entries = context
+fn config_show_rows(runtime: &AppRuntime, args: ConfigShowArgs) -> Vec<Row> {
+    let mut entries = runtime
         .config
+        .resolved()
         .values()
         .iter()
-        .chain(context.config.aliases().iter())
+        .chain(runtime.config.resolved().aliases().iter())
         .collect::<Vec<(&String, &ResolvedValue)>>();
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-    entries
+    entries.sort_by_key(|(key, _)| *key);
+    let mut rows = entries
         .into_iter()
         .map(|(key, entry)| config_entry_row(key, entry, args.output.sources, args.output.raw))
-        .collect()
+        .collect::<Vec<_>>();
+    for role in crate::core::style::ColorRole::ALL {
+        if runtime.config.resolved().get(role.key()).is_none() {
+            rows.push(crate::row! { "key" => role.key(), "value" => serde_json::Value::Null });
+        }
+    }
+    rows.sort_by(|left, right| left["key"].as_str().cmp(&right["key"].as_str()));
+    rows
 }
 
-fn run_config_get(context: ConfigReadContext<'_>, args: ConfigGetArgs) -> Result<CliCommandResult> {
+fn run_config_get(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    args: ConfigGetArgs,
+) -> Result<CommandOutput> {
+    if runtime.launch.runtime_load.include_env
+        && let Some(path) = std::env::var_os("OSP_CONFIG_FILE")
+        && !std::path::Path::new(&path).exists()
+    {
+        return Err(miette!(
+            "Config file {} does not exist.",
+            std::path::Path::new(&path).display()
+        ));
+    }
     let mut messages = MessageBuffer::default();
-    let rows = config_get_rows(context, &args, &mut messages)?;
+    let rows = config_get_rows(runtime, session, &args)?;
     match rows {
-        Some(rows) => Ok(CliCommandResult {
-            exit_code: 0,
+        Some(rows) => Ok(CommandOutput {
             messages,
-            output: Some(ReplCommandOutput::Output(Box::new(
-                crate::app::StructuredCommandOutput {
-                    source_guide: None,
-                    output: rows_to_output_result(rows),
-                    format_hint: None,
-                },
-            ))),
-            stderr_text: None,
-            failure_report: None,
+            ..CommandOutput::output(rows_to_output_result(rows), None)
         }),
-        None => Ok(CliCommandResult {
-            exit_code: 1,
-            messages,
-            output: None,
-            stderr_text: None,
-            failure_report: None,
-        }),
+        None => {
+            let error = push_missing_config_key_messages(
+                &mut messages,
+                runtime.config.resolved(),
+                &args.key,
+            );
+            Ok(CommandOutput {
+                exit_code: 1,
+                messages,
+                failure_report: Some(miette::Report::new(error)),
+                ..CommandOutput::exit(0)
+            })
+        }
     }
 }
 
 fn config_get_rows(
-    context: ConfigReadContext<'_>,
+    runtime: &AppRuntime,
+    session: &AppSession,
     args: &ConfigGetArgs,
-    messages: &mut MessageBuffer,
 ) -> Result<Option<Vec<Row>>> {
-    if let Some(entry) = context.config.get_value_entry(&args.key) {
+    if let Some(entry) = runtime.config.resolved().get_value_entry(&args.key) {
         let row = config_entry_row(&args.key, entry, args.output.sources, args.output.raw);
         return Ok(Some(vec![row]));
     }
 
-    if let Some(entry) = context.config.get_alias_entry(&args.key) {
+    if let Some(entry) = runtime.config.resolved().get_alias_entry(&args.key) {
         let key = if args.key.starts_with("alias.") {
             args.key.clone()
         } else {
@@ -302,16 +267,8 @@ fn config_get_rows(
     }
 
     if is_bootstrap_only_key(&args.key) {
-        let explain = explain_runtime_config(
-            RuntimeConfigRequest::new(
-                context.context.profile_override().map(str::to_owned),
-                Some(context.context.terminal_kind().as_config_terminal()),
-            )
-            .with_runtime_load(context.runtime_load)
-            .with_session_layer(Some(context.config_overrides.clone())),
-            &args.key,
-        )
-        .wrap_err_with(|| format!("failed to resolve bootstrap key `{}`", args.key))?;
+        let explain = explain_runtime_config(runtime_request(runtime, session), &args.key)
+            .wrap_err_with(|| format!("failed to resolve bootstrap key `{}`", args.key))?;
 
         if let Some(entry) = explain.final_entry {
             let row = config_entry_row(&args.key, &entry, args.output.sources, args.output.raw);
@@ -319,14 +276,18 @@ fn config_get_rows(
         }
     }
 
-    push_missing_config_key_messages(messages, context.config, &args.key);
     Ok(None)
 }
 
-pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row> {
-    let paths = RuntimeConfigPaths::discover_with(context.runtime_load);
-    let backend = context
+pub(crate) fn config_diagnostics_rows(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    ui: &UiState,
+) -> Vec<Row> {
+    let paths = RuntimeConfigPaths::discover_with(runtime.launch.runtime_load);
+    let backend = runtime
         .config
+        .resolved()
         .get_string("secrets.backend")
         .unwrap_or("toml");
     let selected_path = if backend.eq_ignore_ascii_case("keyring") {
@@ -334,17 +295,19 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
     } else {
         paths.secrets_file.clone()
     };
-    let secrets = secrets_permissions_diagnostic(selected_path);
+    let secrets =
+        secrets_permissions_diagnostic(selected_path, &ui.render_settings.runtime.command_scope);
     let known_profiles = serde_json::Value::Array(
-        context
+        runtime
             .config
+            .resolved()
             .known_profiles()
             .iter()
             .map(|value| value.clone().into())
             .collect(),
     );
     let theme_issues = serde_json::Value::Array(
-        context
+        runtime
             .themes
             .issues
             .iter()
@@ -356,13 +319,16 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
             })
             .collect(),
     );
-    vec![crate::row! {
-        "status" => "ok",
-        "active_profile" => context.config.active_profile().to_string(),
+    let resolution_error = prepare_runtime_config(runtime_request(runtime, session), false)
+        .and_then(crate::app::PreparedRuntimeConfig::resolve)
+        .err();
+    let mut row = crate::row! {
+        "status" => if resolution_error.is_some() { "error" } else { "ok" },
+        "active_profile" => runtime.config.resolved().active_profile().to_string(),
         "known_profiles" => known_profiles,
-        "resolved_keys" => (context.config.values().len()
-            + context.config.aliases().len()) as i64,
-        "theme_issue_count" => context.themes.issues.len() as i64,
+        "resolved_keys" => (runtime.config.resolved().values().len()
+            + runtime.config.resolved().aliases().len()) as i64,
+        "theme_issue_count" => runtime.themes.issues.len() as i64,
         "theme_issues" => theme_issues,
         "secrets_backend" => backend,
         "secrets_file" => paths.secrets_file
@@ -373,7 +339,11 @@ pub(crate) fn config_diagnostics_rows(context: ConfigReadContext<'_>) -> Vec<Row
         "secrets_permissions_status" => secrets.status,
         "secrets_permissions_mode" => secrets.mode,
         "secrets_permissions_message" => secrets.message,
-    }]
+    };
+    if let Some(error) = resolution_error {
+        row.insert("resolution_error".to_string(), error.to_string().into());
+    }
+    vec![row]
 }
 
 struct SecretsPermissionsDiagnostic {
@@ -385,6 +355,7 @@ struct SecretsPermissionsDiagnostic {
 
 fn secrets_permissions_diagnostic(
     path: Option<std::path::PathBuf>,
+    scope: &crate::core::CommandScope,
 ) -> SecretsPermissionsDiagnostic {
     let Some(path) = path else {
         return SecretsPermissionsDiagnostic {
@@ -419,8 +390,9 @@ fn secrets_permissions_diagnostic(
                 let message = match status {
                     "ok" => "secrets file permissions are 0600".to_string(),
                     "warning" => format!(
-                        "secrets file mode is {:o}; 0600 is recommended so `config set --secrets` stays predictable",
-                        mode
+                        "secrets file mode is {:o}; 0600 is recommended so `{}` stays predictable",
+                        mode,
+                        scope.command("config set --secrets")
                     ),
                     _ => format!(
                         "secrets file mode is {:o}; owner-only permissions are required",
@@ -504,17 +476,134 @@ fn config_entry_row(
     row.build()
 }
 
+pub(super) fn clear_theme_values(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    keys: &[String],
+) -> Result<Vec<String>> {
+    let paths = config_write_paths(runtime.launch.runtime_load, ConfigStore::Config)?;
+    let path = paths
+        .as_ref()
+        .and_then(|paths| paths.config_file.as_deref())
+        .ok_or_else(|| miette!("unable to resolve config path"))?;
+    let layer = match std::fs::read_to_string(path) {
+        Ok(text) => ConfigLayer::from_toml_str(&text).into_diagnostic()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigLayer::default(),
+        Err(error) => return Err(error).into_diagnostic(),
+    };
+    let mut changed = Vec::new();
+    for entry in layer
+        .entries()
+        .iter()
+        .filter(|entry| keys.contains(&entry.key) && scope_applies(&entry.scope, runtime))
+    {
+        let output = run_config_unset(
+            runtime,
+            session,
+            ConfigUnsetArgs {
+                key: entry.key.clone(),
+                scope: ConfigScopeArgs {
+                    global: entry.scope.profile.is_none(),
+                    profile: entry.scope.profile.clone(),
+                    terminal: entry.scope.terminal.clone(),
+                    ..ConfigScopeArgs::default()
+                },
+                store: ConfigStoreArgs {
+                    save: true,
+                    ..ConfigStoreArgs::default()
+                },
+                dry_run: false,
+            },
+        )?;
+        if let crate::app::CommandBody::Output(output) = output.body
+            && output
+                .as_rows()
+                .unwrap_or_default()
+                .iter()
+                .any(|row| row["changed"] == true)
+            && !changed.contains(&entry.key)
+        {
+            changed.push(entry.key.clone());
+        }
+    }
+    clear_session_values(runtime, session, keys, &mut changed);
+    Ok(changed)
+}
+
+fn scope_applies(scope: &Scope, runtime: &AppRuntime) -> bool {
+    scope
+        .profile
+        .as_deref()
+        .is_none_or(|profile| profile == runtime.config.resolved().active_profile())
+        && scope
+            .terminal
+            .as_deref()
+            .is_none_or(|terminal| terminal == runtime.context.terminal_kind().as_config_terminal())
+}
+
+fn clear_session_values(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    keys: &[String],
+    changed: &mut Vec<String>,
+) {
+    let applicable = session
+        .config_overrides
+        .entries()
+        .iter()
+        .filter(|entry| keys.contains(&entry.key) && scope_applies(&entry.scope, runtime))
+        .map(|entry| (entry.key.clone(), entry.scope.clone()))
+        .collect::<Vec<_>>();
+    for (key, scope) in applicable {
+        session.config_overrides.remove_scoped(&key, &scope);
+        if !changed.contains(&key) {
+            changed.push(key);
+        }
+    }
+}
+
+pub(super) fn set_picker_value(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
+    key: String,
+    value: String,
+    permanent: bool,
+) -> Result<CommandOutput> {
+    run_config_set(
+        runtime,
+        session,
+        ui,
+        ConfigSetArgs {
+            key,
+            value: vec![value],
+            display_user: None,
+            from_file: None,
+            scope: ConfigScopeArgs::default(),
+            store: ConfigStoreArgs {
+                save: permanent,
+                ..ConfigStoreArgs::default()
+            },
+            dry_run: false,
+            yes: true,
+            explain: false,
+        },
+    )
+}
+
 fn run_config_set(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
     args: ConfigSetArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let requested_key = args.key.trim().to_ascii_lowercase();
     let key = if requested_key == "user.display_name" {
         let user = args
             .display_user
             .as_deref()
-            .or_else(|| context.context.authenticated_subject())
-            .or_else(|| context.config.get_string("user.name"))
+            .or_else(|| runtime.context.authenticated_subject())
+            .or_else(|| runtime.config.resolved().get_string("user.name"))
             .filter(|user| !user.trim().is_empty())
             .ok_or_else(|| miette!("select a user with -u or --user"))?;
         if user.contains('.') {
@@ -527,7 +616,7 @@ fn run_config_set(
         }
         requested_key
     };
-    let schema = ConfigSchema::default();
+    let schema = ConfigSchema::default().with_product_defaults(runtime.product_defaults());
     schema.validate_writable_key(&key).into_diagnostic()?;
     let input = match (args.value.as_slice(), &args.from_file) {
         (values, None) if !values.is_empty() => values.join(" "),
@@ -544,10 +633,9 @@ fn run_config_set(
             } else {
                 let path = path
                     .to_str()
-                    .and_then(|path| path.strip_prefix("~/"))
-                    .map(|relative| {
-                        crate::config::default_home_dir()
-                            .map(|home| home.join(relative))
+                    .filter(|path| path.starts_with("~/"))
+                    .map(|path| {
+                        crate::normalize::expand_home(path)
                             .ok_or_else(|| miette!("unable to locate home directory"))
                     })
                     .transpose()?
@@ -581,13 +669,7 @@ fn run_config_set(
             }
         })
         .wrap_err("invalid bootstrap value")?;
-    let read = context.read();
-    let target = ConfigWriteTarget::from_set_args(&args).with_default(read);
-    let store = resolve_config_store(read, &target);
-    validate_store_key(store, &key)?;
-    let scopes = resolve_config_scopes(read, &target)
-        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
-    validate_write_scopes(&key, &scopes).into_diagnostic()?;
+    let (store, scopes) = resolve_edit_target(runtime, &key, &args.scope, &args.store)?;
 
     tracing::debug!(
         key = %key,
@@ -598,134 +680,53 @@ fn run_config_set(
         "config set"
     );
 
-    let mut rows = Vec::new();
     let mut messages = MessageBuffer::default();
     if matches!(store, ConfigStore::Config) && is_sensitive_key(&key) {
         messages.warning("writing a sensitive key to config store; prefer --secrets");
     }
 
-    let paths = config_write_paths(context.runtime_load, store)?;
-    for scope in &scopes {
-        let display_value = if matches!(store, ConfigStore::Secrets) {
-            value.clone().into_secret()
-        } else {
-            value.clone()
-        };
-        let mut row = RowBuilder::new();
-        row.insert("key", key.clone());
-        row.insert("value", config_value_to_json_for_key(&key, &display_value));
-        row.insert("scope", format_scope(scope));
-        row.insert("store", config_store_name(store));
-        row.insert("dry_run", args.dry_run);
+    runtime
+        .config
+        .resolved()
+        .validate_candidate(&key, &value)
+        .map_err(|err| miette!("invalid proposed value for key `{key}`: {err}"))?;
+    let current = if args.dry_run && args.explain {
+        let explain = explain_runtime_config(runtime_request(runtime, session), &key)?;
+        Some(config_explain_json(
+            &explain,
+            runtime.config.resolved(),
+            false,
+        ))
+    } else {
+        None
+    };
+    let rows = apply_scoped_edit(
+        runtime,
+        session,
+        store,
+        &scopes,
+        &key,
+        Edit::Set {
+            value: &value,
+            current: current.as_ref(),
+        },
+        args.dry_run,
+    )?;
 
-        match store {
-            ConfigStore::Session => {
-                if !args.dry_run {
-                    context
-                        .config_overrides
-                        .insert(key.clone(), value.clone(), scope.clone());
-                }
-                row.insert("path", serde_json::Value::Null);
-                row.insert("changed", true);
-            }
-            ConfigStore::Config => {
-                let target_path = paths
-                    .as_ref()
-                    .and_then(|paths| paths.config_file.as_deref())
-                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
-                tracing::trace!(
-                    key = %key,
-                    scope = %format_scope(scope),
-                    store = "config",
-                    path = %target_path.display(),
-                    dry_run = args.dry_run,
-                    "persisting config set"
-                );
-
-                let set_result = set_scoped_value_in_toml(
-                    target_path,
-                    &key,
-                    &value,
-                    scope,
-                    store_edit_options(ConfigStore::Config, args.dry_run),
-                )
-                .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!(
-                        "failed to persist config set for key `{key}` at {}",
-                        target_path.display()
-                    )
-                })?;
-
-                row.insert("path", target_path.display().to_string());
-                row.insert("changed", set_result.previous.as_ref() != Some(&value));
-                row.insert(
-                    "previous",
-                    set_result
-                        .previous
-                        .as_ref()
-                        .map(|previous| config_value_to_json_for_key(&key, previous))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Secrets => {
-                let paths = paths
-                    .as_ref()
-                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
-                let secret_store = selected_secret_store(context.config, paths)
-                    .into_diagnostic()
-                    .wrap_err("failed to select secrets backend")?;
-                let edit = secret_store
-                    .set_scoped(
-                        &key,
-                        &value,
-                        scope,
-                        store_edit_options(ConfigStore::Secrets, args.dry_run),
-                    )
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("failed to persist secret `{key}`"))?;
-                row.insert("path", edit.location);
-                row.insert("backend", edit.backend.as_str());
-                row.insert("changed", edit.previous.as_ref() != Some(&value));
-                row.insert(
-                    "previous",
-                    edit.previous
-                        .map(|previous| {
-                            let previous = previous.into_secret();
-                            config_value_to_json_for_key(&key, &previous)
-                        })
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-        }
-
-        rows.push(row.build());
-    }
-
-    let output = if args.explain {
-        let request = RuntimeConfigRequest::new(
-            context.context.profile_override().map(str::to_owned),
-            Some(context.context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(context.runtime_load)
-        .with_product_defaults(context.product_defaults.clone())
-        .with_session_layer(Some(context.config_overrides.clone()));
+    let output = if args.explain && !args.dry_run {
+        let request = runtime_request(runtime, session);
         let explain = explain_runtime_config(request.clone(), &key)
             .wrap_err_with(|| format!("failed to explain config for key `{key}` after set"))?;
         let config = resolve_runtime_config(request)
             .wrap_err_with(|| format!("failed to resolve config for key `{key}` after set"))?;
-        if matches!(context.ui.render_settings.format, OutputFormat::Json) {
+        if matches!(ui.render_settings.format, OutputFormat::Json) {
             let payload = config_explain_json(&explain, &config, false);
-            ReplCommandOutput::Json(payload)
+            CommandOutput::json(payload)
         } else {
-            ReplCommandOutput::Text(render_config_explain_text(&explain, &config, false))
+            CommandOutput::text(render_config_explain_text(&explain, &config, false))
         }
     } else {
-        ReplCommandOutput::Output(Box::new(crate::app::StructuredCommandOutput {
-            source_guide: None,
-            output: rows_to_output_result(rows),
-            format_hint: None,
-        }))
+        CommandOutput::output(rows_to_output_result(rows), None)
     };
 
     let persistence = if matches!(store, ConfigStore::Session) {
@@ -743,50 +744,44 @@ fn run_config_set(
     );
     if matches!(store, ConfigStore::Session) && !args.dry_run && !is_sensitive_key(&key) {
         for scope in &scopes {
-            let mut command = format!(
-                "config set {} {} --permanent",
-                escape_for_shell(&key),
-                args.from_file.as_ref().map_or_else(
-                    || escape_for_shell(&input),
-                    |path| format!("--from-file {}", escape_for_shell(&path.to_string_lossy())),
-                )
-            );
+            let mut options = " --permanent".to_string();
             if let Some(profile) = &scope.profile {
-                command.push_str(&format!(" --profile {}", escape_for_shell(profile)));
+                options.push_str(&format!(" --profile {}", escape_for_shell(profile)));
             } else {
-                command.push_str(" --global");
+                options.push_str(" --global");
             }
             if let Some(terminal) = &scope.terminal {
-                command.push_str(&format!(" --terminal {}", escape_for_shell(terminal)));
+                options.push_str(&format!(" --terminal {}", escape_for_shell(terminal)));
             }
+            let key = escape_for_shell(&key);
+            let command = match &args.from_file {
+                Some(path) => format!(
+                    "config set {key} --from-file {}{options}",
+                    escape_for_shell(&path.to_string_lossy())
+                ),
+                // An option-shaped value must follow `--` to replay literally.
+                None if input.starts_with('-') => {
+                    format!("config set {key}{options} -- {}", escape_for_shell(&input))
+                }
+                None => format!("config set {key} {}{options}", escape_for_shell(&input)),
+            };
             success.push_str(&format!("\nTo save this setting: {command}"));
         }
     }
     messages.success(success);
-    Ok(CliCommandResult {
-        exit_code: 0,
-        messages,
-        output: Some(output),
-        stderr_text: None,
-        failure_report: None,
-    })
+    Ok(CommandOutput { messages, ..output })
 }
 
 fn run_config_unset(
-    context: ConfigCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &mut AppSession,
     args: ConfigUnsetArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let key = args.key.trim().to_ascii_lowercase();
     ConfigSchema::default()
         .validate_writable_key(&key)
         .into_diagnostic()?;
-    let read = context.read();
-    let target = ConfigWriteTarget::from_unset_args(&args).with_default(read);
-    let store = resolve_config_store(read, &target);
-    validate_store_key(store, &key)?;
-    let scopes = resolve_config_scopes(read, &target)
-        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
-    validate_write_scopes(&key, &scopes).into_diagnostic()?;
+    let (store, scopes) = resolve_edit_target(runtime, &key, &args.scope, &args.store)?;
 
     tracing::debug!(
         key = %key,
@@ -796,104 +791,16 @@ fn run_config_unset(
         "config unset"
     );
 
-    let mut rows = Vec::new();
     let mut messages = MessageBuffer::default();
-    let paths = config_write_paths(context.runtime_load, store)?;
-
-    for scope in &scopes {
-        let mut row = RowBuilder::new();
-        row.insert("key", key.clone());
-        row.insert("scope", format_scope(scope));
-        row.insert("store", config_store_name(store));
-        row.insert("dry_run", args.dry_run);
-
-        match store {
-            ConfigStore::Session => {
-                let previous = if args.dry_run {
-                    session_scoped_value(context.config_overrides, &key, scope)
-                } else {
-                    context.config_overrides.remove_scoped(&key, scope)
-                };
-                row.insert("path", serde_json::Value::Null);
-                row.insert("changed", previous.is_some());
-                row.insert(
-                    "previous",
-                    previous
-                        .map(|value| config_value_to_json_for_key(&key, &value))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Config => {
-                let target_path = paths
-                    .as_ref()
-                    .and_then(|paths| paths.config_file.as_deref())
-                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
-                tracing::trace!(
-                    key = %key,
-                    scope = %format_scope(scope),
-                    store = %config_store_name(store),
-                    path = %target_path.display(),
-                    dry_run = args.dry_run,
-                    "persisting config unset"
-                );
-
-                let edit_result = unset_scoped_value_in_toml(
-                    target_path,
-                    &key,
-                    scope,
-                    store_edit_options(ConfigStore::Config, args.dry_run),
-                )
-                .into_diagnostic()
-                .wrap_err_with(|| {
-                    format!(
-                        "failed to persist config unset for key `{key}` at {}",
-                        target_path.display()
-                    )
-                })?;
-
-                row.insert("path", target_path.display().to_string());
-                row.insert("changed", edit_result.previous.is_some());
-                row.insert(
-                    "previous",
-                    edit_result
-                        .previous
-                        .as_ref()
-                        .map(|previous| config_value_to_json_for_key(&key, previous))
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-            ConfigStore::Secrets => {
-                let paths = paths
-                    .as_ref()
-                    .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
-                let secret_store = selected_secret_store(context.config, paths)
-                    .into_diagnostic()
-                    .wrap_err("failed to select secrets backend")?;
-                let edit = secret_store
-                    .unset_scoped(
-                        &key,
-                        scope,
-                        store_edit_options(ConfigStore::Secrets, args.dry_run),
-                    )
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("failed to remove secret `{key}`"))?;
-                row.insert("path", edit.location);
-                row.insert("backend", edit.backend.as_str());
-                row.insert("changed", edit.previous.is_some());
-                row.insert(
-                    "previous",
-                    edit.previous
-                        .map(|previous| {
-                            let previous = previous.into_secret();
-                            config_value_to_json_for_key(&key, &previous)
-                        })
-                        .unwrap_or(serde_json::Value::Null),
-                );
-            }
-        }
-
-        rows.push(row.build());
-    }
+    let rows = apply_scoped_edit(
+        runtime,
+        session,
+        store,
+        &scopes,
+        &key,
+        Edit::Unset,
+        args.dry_run,
+    )?;
 
     let changed = rows
         .iter()
@@ -919,19 +826,169 @@ fn run_config_unset(
         ));
     }
 
-    Ok(CliCommandResult {
-        exit_code: 0,
+    Ok(CommandOutput {
         messages,
-        output: Some(ReplCommandOutput::Output(Box::new(
-            crate::app::StructuredCommandOutput {
-                source_guide: None,
-                output: rows_to_output_result(rows),
-                format_hint: None,
-            },
-        ))),
-        stderr_text: None,
-        failure_report: None,
+        ..CommandOutput::output(rows_to_output_result(rows), None)
     })
+}
+
+#[derive(Clone, Copy)]
+enum Edit<'a> {
+    Set {
+        value: &'a ConfigValue,
+        current: Option<&'a serde_json::Value>,
+    },
+    Unset,
+}
+
+impl Edit<'_> {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Set { .. } => "set",
+            Self::Unset => "unset",
+        }
+    }
+
+    fn changed(self, previous: Option<&ConfigValue>) -> bool {
+        match self {
+            Self::Set { value, .. } => previous != Some(value),
+            Self::Unset => previous.is_some(),
+        }
+    }
+}
+
+fn resolve_edit_target(
+    runtime: &AppRuntime,
+    key: &str,
+    scope: &ConfigScopeArgs,
+    store: &ConfigStoreArgs,
+) -> Result<(ConfigStore, Vec<Scope>)> {
+    let target = ConfigWriteTarget::from_args(scope, store).with_default(runtime);
+    let store = resolve_config_store(runtime, &target);
+    validate_store_key(store, key)?;
+    let scopes = resolve_config_scopes(runtime, &target)
+        .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
+    validate_write_scopes(key, &scopes).into_diagnostic()?;
+    Ok((store, scopes))
+}
+
+fn apply_scoped_edit(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    store: ConfigStore,
+    scopes: &[Scope],
+    key: &str,
+    edit: Edit<'_>,
+    dry_run: bool,
+) -> Result<Vec<Row>> {
+    let paths = config_write_paths(runtime.launch.runtime_load, store)?;
+    let mut rows = Vec::new();
+    for scope in scopes {
+        let mut row = RowBuilder::new();
+        row.insert("key", key);
+        if let Edit::Set { value, .. } = edit {
+            let display_value = if matches!(store, ConfigStore::Secrets) {
+                value.clone().into_secret()
+            } else {
+                value.clone()
+            };
+            row.insert("value", config_value_to_json_for_key(key, &display_value));
+        }
+        row.insert("scope", format_scope(scope));
+        row.insert("store", config_store_name(store));
+        row.insert("dry_run", dry_run);
+
+        if let Edit::Set {
+            current: Some(current),
+            ..
+        } = edit
+        {
+            row.insert("current", current.clone());
+        }
+
+        let previous = match store {
+            ConfigStore::Session => {
+                row.insert("path", serde_json::Value::Null);
+                match edit {
+                    Edit::Set { value, .. } => {
+                        if !dry_run {
+                            session.config_overrides.replace_scoped(
+                                key,
+                                value.clone(),
+                                scope.clone(),
+                            );
+                        }
+                        row.insert("changed", true);
+                        rows.push(row.build());
+                        continue;
+                    }
+                    Edit::Unset if dry_run => {
+                        session_scoped_value(&session.config_overrides, key, scope)
+                    }
+                    Edit::Unset => session.config_overrides.remove_scoped(key, scope),
+                }
+            }
+            ConfigStore::Config => {
+                let target_path = paths
+                    .as_ref()
+                    .and_then(|paths| paths.config_file.as_deref())
+                    .ok_or_else(|| miette!("unable to resolve config path for config"))?;
+                tracing::trace!(
+                    key = %key, scope = %format_scope(scope), store = "config",
+                    path = %target_path.display(), dry_run,
+                    "persisting config {}", edit.name()
+                );
+                let options = store_edit_options(store, dry_run);
+                let result = match edit {
+                    Edit::Set { value, .. } => {
+                        set_scoped_value_in_toml(target_path, key, value, scope, options)
+                    }
+                    Edit::Unset => unset_scoped_value_in_toml(target_path, key, scope, options),
+                }
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "failed to persist config {} for key `{key}` at {}",
+                        edit.name(),
+                        target_path.display()
+                    )
+                })?;
+                row.insert("path", target_path.display().to_string());
+                result.previous
+            }
+            ConfigStore::Secrets => {
+                let result = edit_secret(runtime, scope, key, edit, dry_run)?;
+                row.insert("path", result.location);
+                row.insert("backend", result.backend.as_str());
+                // Compare unwrapped values before marking previous secret data for redaction.
+                row.insert("changed", edit.changed(result.previous.as_ref()));
+                row.insert(
+                    "previous",
+                    result
+                        .previous
+                        .map(|previous| config_value_to_json_for_key(key, &previous.into_secret()))
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                rows.push(row.build());
+                continue;
+            }
+        };
+        row.insert("changed", edit.changed(previous.as_ref()));
+        row.insert(
+            "previous",
+            previous
+                .as_ref()
+                .map(|previous| config_value_to_json_for_key(key, previous))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        rows.push(row.build());
+    }
+    // A session override outranks stored values, so leaving it would make the
+    // stored edit invisible until restart.
+    if !dry_run && store != ConfigStore::Session {
+        clear_session_values(runtime, session, &[key.to_owned()], &mut Vec::new());
+    }
+    Ok(rows)
 }
 
 fn session_scoped_value(
@@ -1011,7 +1068,7 @@ enum ConfigStoreTarget {
 }
 
 impl ConfigWriteTarget {
-    fn with_default(mut self, context: ConfigReadContext<'_>) -> Self {
+    fn with_default(mut self, runtime: &AppRuntime) -> Self {
         if self.store == ConfigStoreTarget::Session {
             return self;
         }
@@ -1021,8 +1078,9 @@ impl ConfigWriteTarget {
             }
             return self;
         }
-        match context
+        match runtime
             .config
+            .resolved()
             .get_string("config.default-target")
             .map(str::trim)
         {
@@ -1046,48 +1104,27 @@ impl ConfigWriteTarget {
         self
     }
 
-    fn from_set_args(args: &ConfigSetArgs) -> Self {
+    fn from_args(scope: &ConfigScopeArgs, store: &ConfigStoreArgs) -> Self {
         Self {
-            scope: resolve_scope_target(
-                args.scope.global,
-                args.scope.profile.clone(),
-                args.scope.profile_all,
-            ),
-            terminal: args.scope.terminal.clone(),
+            scope: resolve_scope_target(scope.global, scope.profile.clone(), scope.profile_all),
+            terminal: scope.terminal.clone(),
             store: resolve_store_target(
-                args.store.session,
-                args.store.config_store,
-                args.store.secrets,
-                args.store.save,
-            ),
-        }
-    }
-
-    fn from_unset_args(args: &ConfigUnsetArgs) -> Self {
-        Self {
-            scope: resolve_scope_target(
-                args.scope.global,
-                args.scope.profile.clone(),
-                args.scope.profile_all,
-            ),
-            terminal: args.scope.terminal.clone(),
-            store: resolve_store_target(
-                args.store.session,
-                args.store.config_store,
-                args.store.secrets,
-                args.store.save,
+                store.session,
+                store.config_store,
+                store.secrets,
+                store.save,
             ),
         }
     }
 }
 
-fn resolve_config_store(context: ConfigReadContext<'_>, args: &ConfigWriteTarget) -> ConfigStore {
+fn resolve_config_store(runtime: &AppRuntime, args: &ConfigWriteTarget) -> ConfigStore {
     match args.store {
         ConfigStoreTarget::Session => ConfigStore::Session,
         ConfigStoreTarget::Config => ConfigStore::Config,
         ConfigStoreTarget::Secrets => ConfigStore::Secrets,
         ConfigStoreTarget::Default => {
-            if matches!(context.context.terminal_kind(), TerminalKind::Repl) {
+            if matches!(runtime.context.terminal_kind(), TerminalKind::Repl) {
                 ConfigStore::Session
             } else {
                 ConfigStore::Config
@@ -1117,22 +1154,20 @@ fn store_edit_options(store: ConfigStore, dry_run: bool) -> TomlStoreEditOptions
     }
 }
 
-fn resolve_config_scopes(
-    context: ConfigReadContext<'_>,
-    args: &ConfigWriteTarget,
-) -> Result<Vec<Scope>> {
+fn resolve_config_scopes(runtime: &AppRuntime, args: &ConfigWriteTarget) -> Result<Vec<Scope>> {
     let terminal = resolve_terminal_selector(
-        context.context.terminal_kind().as_config_terminal(),
+        runtime.context.terminal_kind().as_config_terminal(),
         args.terminal.as_deref(),
     );
 
     match &args.scope {
         ConfigScopeTarget::AllProfiles => {
-            let profiles = if context.config.known_profiles().is_empty() {
-                vec![context.config.active_profile().to_string()]
+            let profiles = if runtime.config.resolved().known_profiles().is_empty() {
+                vec![runtime.config.resolved().active_profile().to_string()]
             } else {
-                context
+                runtime
                     .config
+                    .resolved()
                     .known_profiles()
                     .iter()
                     .cloned()
@@ -1159,7 +1194,7 @@ fn resolve_config_scopes(
             |current| Scope::profile_terminal(profile, current),
         )]),
         ConfigScopeTarget::ActiveProfile => {
-            let profile = context.config.active_profile();
+            let profile = runtime.config.resolved().active_profile();
             Ok(vec![terminal.as_deref().map_or_else(
                 || Scope::profile(profile),
                 |current| Scope::profile_terminal(profile, current),
@@ -1213,6 +1248,58 @@ fn validate_write_scopes(
 
     Ok(())
 }
+
+fn edit_secret(
+    runtime: &AppRuntime,
+    scope: &Scope,
+    key: &str,
+    edit: Edit<'_>,
+    dry_run: bool,
+) -> Result<crate::config::SecretStoreEditResult> {
+    let paths = config_write_paths(runtime.launch.runtime_load, ConfigStore::Secrets)?
+        .ok_or_else(|| miette!("unable to resolve secrets store paths"))?;
+    let secret_store = selected_secret_store(runtime.config.resolved(), &paths)
+        .into_diagnostic()
+        .wrap_err("failed to select secrets backend")?;
+    let options = store_edit_options(ConfigStore::Secrets, dry_run);
+    match edit {
+        Edit::Set { value, .. } => secret_store.set_scoped(key, value, scope, options),
+        Edit::Unset => secret_store.unset_scoped(key, scope, options),
+    }
+    .into_diagnostic()
+    .wrap_err_with(|| match edit {
+        Edit::Set { .. } => format!("failed to persist secret `{key}`"),
+        Edit::Unset => format!("failed to remove secret `{key}`"),
+    })
+}
+
+pub(crate) fn store_secret(runtime: &AppRuntime, key: &str, value: &ConfigValue) -> Result<()> {
+    validate_store_key(ConfigStore::Secrets, key)?;
+    let target = ConfigWriteTarget::from_args(
+        &ConfigScopeArgs::default(),
+        &ConfigStoreArgs {
+            secrets: true,
+            ..Default::default()
+        },
+    );
+    let scopes = resolve_config_scopes(runtime, &target)?;
+    validate_write_scopes(key, &scopes).into_diagnostic()?;
+    for scope in scopes {
+        edit_secret(
+            runtime,
+            &scope,
+            key,
+            Edit::Set {
+                value,
+                current: None,
+            },
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+mod picker;
 
 #[cfg(test)]
 mod tests;

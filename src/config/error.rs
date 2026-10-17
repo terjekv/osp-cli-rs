@@ -1,4 +1,3 @@
-use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 use crate::config::SchemaValueType;
@@ -8,8 +7,9 @@ use miette::{LabeledSpan, NamedSource, SourceSpan};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TomlParseDiagnostic {
     message: String,
-    source_code: Option<NamedSource<String>>,
+    source_code: Option<Box<NamedSource<String>>>,
     span: Option<SourceSpan>,
+    location: Option<(usize, usize)>,
 }
 
 impl TomlParseDiagnostic {
@@ -20,6 +20,7 @@ impl TomlParseDiagnostic {
             message: message.into(),
             source_code: None,
             span: None,
+            location: None,
         }
     }
 
@@ -31,7 +32,9 @@ impl TomlParseDiagnostic {
         source_text: impl Into<String>,
         span: Option<Range<usize>>,
     ) -> Self {
-        self.source_code = Some(NamedSource::new(source_name.into(), source_text.into()));
+        let source_text = source_text.into();
+        self = self.with_location_from_source(&source_text, span.clone());
+        self.source_code = Some(Box::new(NamedSource::new(source_name.into(), source_text)));
         self.span = span.map(|range| (range.start, range.len()).into());
         self
     }
@@ -53,8 +56,13 @@ impl TomlParseDiagnostic {
                 .count()
                 + 1;
             self.message = format!("{} at line {line}, column {column}", self.message);
+            self.location = Some((line, column));
         }
         self
+    }
+
+    pub(crate) fn location(&self) -> Option<(usize, usize)> {
+        self.location
     }
 
     /// Returns the parser message without rendering additional context.
@@ -66,7 +74,7 @@ impl TomlParseDiagnostic {
     /// Returns the attached source text when the parser failure came from a known document.
     #[must_use]
     pub fn source_code(&self) -> Option<&NamedSource<String>> {
-        self.source_code.as_ref()
+        self.source_code.as_deref()
     }
 
     /// Returns a label for the offending TOML span when location data is available.
@@ -80,9 +88,10 @@ impl TomlParseDiagnostic {
 }
 
 /// Error type returned by config parsing, validation, and resolution code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
     /// Reading a config file from disk failed.
+    #[error("failed to read config file {path}: {reason}")]
     FileRead {
         /// Path that could not be read.
         path: String,
@@ -90,6 +99,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// Writing a config file to disk failed.
+    #[error("failed to write config file {path}: {reason}")]
     FileWrite {
         /// Path that could not be written.
         path: String,
@@ -97,13 +107,15 @@ pub enum ConfigError {
         reason: String,
     },
     /// Adds path context while propagating another config error.
+    #[error("{inner} (path: {path})")]
     LayerLoad {
         /// Path of the layer being loaded.
         path: String,
         /// Underlying config error.
-        source: Box<ConfigError>,
+        inner: Box<ConfigError>,
     },
     /// Secrets file permissions are broader than allowed.
+    #[error("insecure permissions on secrets file {path}: mode {mode:o}, expected 600")]
     InsecureSecretsPermissions {
         /// Path of the secrets file.
         path: String,
@@ -111,6 +123,7 @@ pub enum ConfigError {
         mode: u32,
     },
     /// A selected persistent secrets backend failed.
+    #[error("{backend} secrets backend failed: {reason}")]
     SecretBackend {
         /// Stable backend name.
         backend: String,
@@ -118,12 +131,16 @@ pub enum ConfigError {
         reason: String,
     },
     /// TOML parsing failed before semantic validation.
+    #[error("failed to parse TOML: {}", .0.message())]
     TomlParse(TomlParseDiagnostic),
     /// The parsed TOML document root was not a table.
+    #[error("config root must be a TOML table")]
     TomlRootMustBeTable,
     /// Encountered an unsupported top-level section name.
+    #[error("unknown top-level config section: {0}")]
     UnknownTopLevelSection(String),
     /// A named section had the wrong TOML type.
+    #[error("invalid section {section}: expected {expected}")]
     InvalidSection {
         /// Fully qualified section name.
         section: String,
@@ -131,6 +148,7 @@ pub enum ConfigError {
         expected: String,
     },
     /// Encountered a TOML value kind that the config model does not accept.
+    #[error("unsupported TOML value at {path}: {kind}")]
     UnsupportedTomlValue {
         /// Dotted config path at which the value was found.
         path: String,
@@ -138,6 +156,7 @@ pub enum ConfigError {
         kind: String,
     },
     /// An `OSP__...` environment override used invalid syntax or scope.
+    #[error("invalid env override {key}: {reason}")]
     InvalidEnvOverride {
         /// Environment variable name or derived config key.
         key: String,
@@ -145,6 +164,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// A config key failed syntactic or semantic validation.
+    #[error("invalid config key {key}: {reason}")]
     InvalidConfigKey {
         /// Key that failed validation.
         key: String,
@@ -152,6 +172,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// A caller attempted to write a read-only config key.
+    #[error("config key {key} is read-only: {reason}")]
     ReadOnlyConfigKey {
         /// Key that is read-only.
         key: String,
@@ -159,6 +180,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// A bootstrap-only key was used in a disallowed scope.
+    #[error("bootstrap-only key {key} is not allowed in scope {}; allowed scopes: global or terminal-only", bootstrap_scope(.profile, .terminal))]
     InvalidBootstrapScope {
         /// Bootstrap-only key being validated.
         key: String,
@@ -171,8 +193,10 @@ pub enum ConfigError {
     ///
     /// This includes both "no default profile exists" and "the selected
     /// bootstrap profile normalized to empty".
+    #[error("missing profile.default and no fallback profile")]
     MissingDefaultProfile,
     /// A bootstrap-only key failed its value validation rule.
+    #[error("invalid bootstrap value for {key}: {reason}")]
     InvalidBootstrapValue {
         /// Bootstrap-only key being validated.
         key: String,
@@ -180,6 +204,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// Resolution requested a profile that is not known.
+    #[error("Unknown profile '{profile}'. Available: {}.", .known.join(", "))]
     UnknownProfile {
         /// Requested profile name.
         profile: String,
@@ -187,6 +212,7 @@ pub enum ConfigError {
         known: Vec<String>,
     },
     /// Placeholder syntax inside a template string is malformed.
+    #[error("invalid placeholder syntax in key {key}: {template}")]
     InvalidPlaceholderSyntax {
         /// Key containing the invalid template.
         key: String,
@@ -194,6 +220,7 @@ pub enum ConfigError {
         template: String,
     },
     /// Placeholder expansion referenced an unknown key.
+    #[error("unresolved placeholder in key {key}: {placeholder}")]
     UnresolvedPlaceholder {
         /// Key whose template is being resolved.
         key: String,
@@ -201,11 +228,13 @@ pub enum ConfigError {
         placeholder: String,
     },
     /// Placeholder expansion formed a dependency cycle.
+    #[error("placeholder cycle detected: {}", .cycle.join(" -> "))]
     PlaceholderCycle {
         /// Ordered key path describing the detected cycle.
         cycle: Vec<String>,
     },
     /// Placeholder expansion referenced a non-scalar value.
+    #[error("placeholder {placeholder} in key {key} points to a non-scalar value")]
     NonScalarPlaceholder {
         /// Key whose template is being resolved.
         key: String,
@@ -213,16 +242,19 @@ pub enum ConfigError {
         placeholder: String,
     },
     /// One or more config keys are unknown to the schema.
+    #[error("unknown config keys: {}", .keys.join(", "))]
     UnknownConfigKeys {
         /// Unknown canonical keys.
         keys: Vec<String>,
     },
     /// A required runtime-visible key was missing after resolution.
+    #[error("missing required config key: {key}")]
     MissingRequiredKey {
         /// Missing canonical key.
         key: String,
     },
     /// A value could not be adapted to the schema's declared type.
+    #[error("invalid type for key {key}: expected {expected}, got {actual}")]
     InvalidValueType {
         /// Key whose value had the wrong type.
         key: String,
@@ -232,6 +264,7 @@ pub enum ConfigError {
         actual: String,
     },
     /// A typed config value violated a schema-owned value constraint.
+    #[error("invalid value for key {key}: {reason}")]
     InvalidConfigValue {
         /// Key whose value was rejected.
         key: String,
@@ -239,6 +272,7 @@ pub enum ConfigError {
         reason: String,
     },
     /// A string value was outside the schema allow-list.
+    #[error("invalid value for key {key}: {value}. allowed: {}", .allowed.join(", "))]
     InvalidEnumValue {
         /// Key whose value was rejected.
         key: String,
@@ -249,133 +283,14 @@ pub enum ConfigError {
     },
 }
 
-impl Display for ConfigError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::FileRead { path, reason } => {
-                write!(f, "failed to read config file {path}: {reason}")
-            }
-            ConfigError::FileWrite { path, reason } => {
-                write!(f, "failed to write config file {path}: {reason}")
-            }
-            ConfigError::LayerLoad { path, source } => {
-                write!(f, "{source} (path: {path})")
-            }
-            ConfigError::InsecureSecretsPermissions { path, mode } => {
-                write!(
-                    f,
-                    "insecure permissions on secrets file {path}: mode {:o}, expected 600",
-                    mode
-                )
-            }
-            ConfigError::SecretBackend { backend, reason } => {
-                write!(f, "{backend} secrets backend failed: {reason}")
-            }
-            ConfigError::TomlParse(diagnostic) => {
-                write!(f, "failed to parse TOML: {}", diagnostic.message())
-            }
-            ConfigError::TomlRootMustBeTable => {
-                write!(f, "config root must be a TOML table")
-            }
-            ConfigError::UnknownTopLevelSection(section) => {
-                write!(f, "unknown top-level config section: {section}")
-            }
-            ConfigError::InvalidSection { section, expected } => {
-                write!(f, "invalid section {section}: expected {expected}")
-            }
-            ConfigError::UnsupportedTomlValue { path, kind } => {
-                write!(f, "unsupported TOML value at {path}: {kind}")
-            }
-            ConfigError::InvalidEnvOverride { key, reason } => {
-                write!(f, "invalid env override {key}: {reason}")
-            }
-            ConfigError::InvalidConfigKey { key, reason } => {
-                write!(f, "invalid config key {key}: {reason}")
-            }
-            ConfigError::ReadOnlyConfigKey { key, reason } => {
-                write!(f, "config key {key} is read-only: {reason}")
-            }
-            ConfigError::InvalidBootstrapScope {
-                key,
-                profile,
-                terminal,
-            } => {
-                let scope = match (profile.as_deref(), terminal.as_deref()) {
-                    (Some(profile), Some(terminal)) => {
-                        format!("profile={profile}, terminal={terminal}")
-                    }
-                    (Some(profile), None) => format!("profile={profile}"),
-                    (None, Some(terminal)) => format!("terminal={terminal}"),
-                    (None, None) => "global".to_string(),
-                };
-                write!(
-                    f,
-                    "bootstrap-only key {key} is not allowed in scope {scope}; allowed scopes: global or terminal-only"
-                )
-            }
-            ConfigError::MissingDefaultProfile => {
-                write!(f, "missing profile.default and no fallback profile")
-            }
-            ConfigError::InvalidBootstrapValue { key, reason } => {
-                write!(f, "invalid bootstrap value for {key}: {reason}")
-            }
-            ConfigError::UnknownProfile { profile, known } => {
-                write!(
-                    f,
-                    "unknown profile '{profile}'. known profiles: {}",
-                    known.join(",")
-                )
-            }
-            ConfigError::InvalidPlaceholderSyntax { key, template } => {
-                write!(f, "invalid placeholder syntax in key {key}: {template}")
-            }
-            ConfigError::UnresolvedPlaceholder { key, placeholder } => {
-                write!(f, "unresolved placeholder in key {key}: {placeholder}")
-            }
-            ConfigError::PlaceholderCycle { cycle } => {
-                write!(f, "placeholder cycle detected: {}", cycle.join(" -> "))
-            }
-            ConfigError::NonScalarPlaceholder { key, placeholder } => {
-                write!(
-                    f,
-                    "placeholder {placeholder} in key {key} points to a non-scalar value"
-                )
-            }
-            ConfigError::UnknownConfigKeys { keys } => {
-                write!(f, "unknown config keys: {}", keys.join(", "))
-            }
-            ConfigError::MissingRequiredKey { key } => {
-                write!(f, "missing required config key: {key}")
-            }
-            ConfigError::InvalidValueType {
-                key,
-                expected,
-                actual,
-            } => {
-                write!(
-                    f,
-                    "invalid type for key {key}: expected {expected}, got {actual}"
-                )
-            }
-            ConfigError::InvalidConfigValue { key, reason } => {
-                write!(f, "invalid value for key {key}: {reason}")
-            }
-            ConfigError::InvalidEnumValue {
-                key,
-                value,
-                allowed,
-            } => {
-                write!(
-                    f,
-                    "invalid value for key {key}: {value}. allowed: {}",
-                    allowed.join(", ")
-                )
-            }
-        }
+fn bootstrap_scope(profile: &Option<String>, terminal: &Option<String>) -> String {
+    match (profile.as_deref(), terminal.as_deref()) {
+        (Some(profile), Some(terminal)) => format!("profile={profile}, terminal={terminal}"),
+        (Some(profile), None) => format!("profile={profile}"),
+        (None, Some(terminal)) => format!("terminal={terminal}"),
+        (None, None) => "global".to_string(),
     }
 }
-
-impl std::error::Error for ConfigError {}
 
 impl miette::Diagnostic for ConfigError {
     fn source_code(&self) -> Option<&dyn miette::SourceCode> {
@@ -383,7 +298,7 @@ impl miette::Diagnostic for ConfigError {
             ConfigError::TomlParse(diagnostic) => diagnostic
                 .source_code()
                 .map(|source| source as &dyn miette::SourceCode),
-            ConfigError::LayerLoad { source, .. } => source.source_code(),
+            ConfigError::LayerLoad { inner, .. } => inner.source_code(),
             _ => None,
         }
     }
@@ -393,14 +308,14 @@ impl miette::Diagnostic for ConfigError {
             ConfigError::TomlParse(diagnostic) => diagnostic.labels().map(|labels| {
                 Box::new(labels.into_iter()) as Box<dyn Iterator<Item = LabeledSpan>>
             }),
-            ConfigError::LayerLoad { source, .. } => source.labels(),
+            ConfigError::LayerLoad { inner, .. } => inner.labels(),
             _ => None,
         }
     }
 
     fn diagnostic_source(&self) -> Option<&dyn miette::Diagnostic> {
         match self {
-            ConfigError::LayerLoad { source, .. } => Some(source.as_ref()),
+            ConfigError::LayerLoad { inner, .. } => Some(inner.as_ref()),
             _ => None,
         }
     }
@@ -409,7 +324,7 @@ impl miette::Diagnostic for ConfigError {
 pub(crate) fn with_path_context(path: String, error: ConfigError) -> ConfigError {
     ConfigError::LayerLoad {
         path,
-        source: Box::new(error),
+        inner: Box::new(error),
     }
 }
 
@@ -537,7 +452,7 @@ mod tests {
                     profile: "prod".to_string(),
                     known: vec!["default".to_string(), "dev".to_string()],
                 },
-                "unknown profile 'prod'. known profiles: default,dev",
+                "Unknown profile 'prod'. Available: default, dev.",
             ),
             (
                 ConfigError::InvalidPlaceholderSyntax {
@@ -612,9 +527,9 @@ mod tests {
             "failed to parse TOML: bad value (path: /tmp/config.toml)"
         );
 
-        if let ConfigError::LayerLoad { path, source } = wrapped {
+        if let ConfigError::LayerLoad { path, inner } = wrapped {
             assert_eq!(path, "/tmp/config.toml");
-            assert!(matches!(*source, ConfigError::TomlParse(_)));
+            assert!(matches!(*inner, ConfigError::TomlParse(_)));
         }
     }
 

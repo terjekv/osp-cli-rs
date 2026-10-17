@@ -41,14 +41,15 @@
 //! Rendering existing rows without bootstrapping the full host:
 //!
 //! ```
-//! use osp_cli::core::output::OutputFormat;
+//! use osp_cli::core::OutputFormat;
 //! use osp_cli::row;
-//! use osp_cli::ui::{RenderSettings, render_rows};
+//! use osp_cli::ui::{RenderSettings, render};
 //!
-//! let rendered = render_rows(
-//!     &[row! { "uid" => "alice", "mail" => "alice@example.com" }],
-//!     &RenderSettings::test_plain(OutputFormat::Json),
-//! );
+//! let output = osp_cli::core::OutputResult::from_rows(vec![
+//!     row! { "uid" => "alice", "mail" => "alice@example.com" },
+//! ]);
+//! let settings = RenderSettings::test_plain(OutputFormat::Json);
+//! let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 //!
 //! assert!(rendered.contains("\"uid\": \"alice\""));
 //! assert!(rendered.contains("\"mail\": \"alice@example.com\""));
@@ -58,8 +59,7 @@
 //!
 //! - keep site-specific auth, policy, and domain integrations in the wrapper
 //!   crate
-//! - extend the command surface with [`App::with_native_commands`] or
-//!   [`AppBuilder::with_native_commands`]
+//! - Extend the command surface with [`App::with_native_commands`].
 //! - keep runtime config bootstrap aligned with
 //!   [`config::RuntimeDefaults`], [`config::RuntimeConfigPaths`], and
 //!   [`config::build_runtime_pipeline`]
@@ -76,7 +76,7 @@
 //! use osp_cli::app::BufferedUiSink;
 //! use osp_cli::config::ConfigLayer;
 //! use osp_cli::{
-//!     App, AppBuilder, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+//!     App, NativeCommand, NativeCommandContext, NativeCommandOutcome,
 //!     NativeCommandRegistry,
 //! };
 //!
@@ -112,15 +112,15 @@
 //! }
 //!
 //! impl SiteApp {
-//!     fn builder() -> AppBuilder {
-//!         App::builder()
+//!     fn builder() -> App {
+//!         App::new()
 //!             .with_native_commands(site_registry())
 //!             .with_product_defaults(site_defaults())
 //!     }
 //!
 //!     fn new() -> Self {
 //!         Self {
-//!             inner: Self::builder().build(),
+//!             inner: Self::builder(),
 //!         }
 //!     }
 //!
@@ -146,7 +146,7 @@
 //!
 //! - wrapper crate / downstream product →
 //!   [embedding guide](https://github.com/unioslo/osp-cli-rs/blob/main/docs/EMBEDDING.md)
-//!   and [`App::builder`]
+//!   and [`App::new`]
 //! - full in-process host → [`app`]
 //! - rendering / formatting only → [`ui`]
 //!
@@ -162,7 +162,7 @@
 //! - [`repl`] exists to own the interactive shell boundary.
 //! - [`dsl`] exists to transform canonical rows and explicit group metadata.
 //! - [`ui`] exists to lower structured output into terminal-facing text.
-//! - [`plugin`] exists to treat external command providers as part of the same
+//! - `plugin` exists to treat external command providers as part of the same
 //!   command surface.
 //!
 //! At runtime, data flows roughly like this:
@@ -180,7 +180,7 @@
 //! Commands normalize service collections into rows before DSL execution.
 //! Raw response documents are available for unstaged rendering; a staged result
 //! describes the selected rows rather than stale service totals or cursors.
-//! Guide output retains its layout only through stages that preserve its shape.
+//! Document output retains its layout only through stages that preserve its shape.
 //! Group keys and aggregates are explicit metadata, not inferred from row fields.
 //!
 //! Architecture contracts worth keeping stable:
@@ -196,48 +196,32 @@
 //!
 //! Public API shape:
 //!
-//! - semantic payload modules such as [`guide`] and most of [`completion`]
+//! - semantic payloads such as [`core::Document`] and most of [`completion`]
 //!   stay intentionally cheap to compose and inspect
-//! - host machinery such as [`app::App`], [`app::AppBuilder`], and runtime
+//! - host machinery such as [`app::App`] and runtime
 //!   state is guided through constructors/builders/accessors rather than
 //!   compatibility shims or open-ended assembly
 //! - each public concept should have one canonical home; duplicate aliases and
 //!   mirrored module paths are treated as API debt
 //!
-//! Guided construction naming:
-//!
-//! - `Type::new(...)` is the exact constructor when the caller already knows
-//!   the required inputs
-//! - `Type::builder(...)` starts guided construction for heavier host/runtime
-//!   objects and returns a concrete `TypeBuilder`
-//! - builder setters use `with_*` and the terminal step is always `build()`
-//! - `Type::from_*` and `Type::detect()` are reserved for derived/probing
-//!   factories
-//! - semantic DSLs may keep domain verbs such as `arg`, `flag`, or
-//!   `subcommand`; the `with_*` rule is for guided host configuration, not for
-//!   every fluent API
-//! - avoid abstract "factory builder" layers in the public API; callers should
-//!   see concrete type-named builders and factories directly
-//!
 //! For embedders, choose the smallest surface that solves the problem you
 //! actually have:
 //!
 //! - "I want a full `osp`-style binary or custom `main`" →
-//!   [`app::App::builder`], [`app::AppBuilder::build`], or
+//!   [`app::App::new`] or
 //!   [`app::App::run_from`]
 //! - "I want to capture rendered stdout/stderr in tests or another host" →
-//!   [`app::App::with_sink`] or [`app::AppBuilder::build_with_sink`]
+//!   [`app::App::run_with_sink`] or [`app::App::run_process_with_sink`]
 //! - "I already have rows and only want pipeline transforms" →
 //!   [`dsl::apply_pipeline`] or [`dsl::apply_output_pipeline`]
 //! - "I need plugin discovery and catalog/policy integration" →
-//!   [`plugin::PluginManager`] on the host side, or [`core::plugin`] when
-//!   implementing the wire protocol itself
-//! - "I need runtime/session state" → [`app::AppStateBuilder::from_resolved_config`]
-//!   with [`app::LaunchContext`] and session overrides
-//! - "I want to embed the interactive editor loop directly" →
-//!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig::builder`]
+//!   [`App`] owns discovery; use [`app::AccessPolicy`] for product policy and
+//!   [`core::plugin`] for the wire protocol
+//! - "I need the configured host" → [`App::new`]
+//!   and apply launch settings through its `with_*` methods
+//! - "I need interactive native-command hooks" → [`repl`] and [`NativeCommand`]
 //! - "I need semantic payload generation for help/completion surfaces" →
-//!   [`guide::GuideView`] and [`completion::CompletionTreeBuilder`]
+//!   [`core::Document`] and [`completion::CompletionTreeBuilder`]
 //!
 //! The root crate module tree is the only supported code path. Older mirrored
 //! layouts have been removed so rustdoc and the source tree describe the same
@@ -253,23 +237,24 @@ pub mod completion;
 pub mod config;
 /// Shared command, output, row, and protocol primitives.
 pub mod core;
+/// Allowlisted command-local diagnostic events.
+pub mod diagnostics;
 /// Canonical pipeline parsing and execution.
 pub mod dsl;
-/// Structured help/guide view models and conversions.
-pub mod guide;
 /// External plugin discovery, protocol, and dispatch support.
-pub mod plugin;
+pub(crate) mod plugin;
 /// Interactive REPL editor, prompt, history, and completion surface.
 pub mod repl;
+mod startup_trace;
 /// Rendering, theming, and structured output helpers.
 pub mod ui;
 
-pub use crate::app::{App, AppBuilder, AppRunner, run_from, run_process};
-pub use crate::core::command_policy;
+pub use crate::app::{App, run_from, run_process};
 pub use crate::native::{
-    InvocationElevation, NativeCommand, NativeCommandCatalogEntry, NativeCommandContext,
-    NativeCommandOutcome, NativeCommandRegistry, NativePagination, NativeProgressEvent,
-    NativeProgressSink, NativeSessionContext,
+    InvocationElevation, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+    NativeCommandRegistry, NativeEffect, NativePagination, NativeProgressEvent,
+    NativeProgressFrame, NativeProgressSink, NativePromptContextEntry, NativeSessionContext,
+    NativeSessionContextEntry,
 };
 
 mod native;
@@ -277,3 +262,6 @@ mod normalize;
 
 #[cfg(test)]
 mod tests;
+
+/// Declared entity selection shared by commands and plugins.
+pub mod context;

@@ -31,21 +31,21 @@ Start with built-in commands that exist in every upstream install:
 
 ```bash
 osp plugins list
-osp plugins commands
-osp plugins commands --json
+osp help --all
+osp help --all --json
 ```
 
 That gives you three different answers:
 
 - which plugins were discovered
-- which command roots are currently visible
+- which command paths are currently visible
 - what the command catalog looks like in machine-readable form
 
 To inspect the active configuration, run:
 
 ```bash
 osp config show
-osp config explain ui.format
+osp config explain ui.verbosity
 ```
 
 ## 3. Start The REPL
@@ -60,7 +60,7 @@ Then try:
 
 ```text
 plugins list
-plugins commands --format md
+plugins list --format md
 help config
 ```
 
@@ -75,14 +75,14 @@ enters that shell. It is not part of the generic upstream quick start.
 Start with these commands when something goes wrong:
 
 ```bash
-osp plugins doctor
+osp doctor plugins
 osp config explain <key>
 osp -d plugins list
 ```
 
 Use them for:
 
-- missing or unhealthy plugin commands
+- missing, disabled, or shadowed plugin commands
 - unexpected configuration values
 - a quick stderr-side diagnostic pass without changing stored defaults
 

@@ -4,109 +4,53 @@
 //! This module pulls together config, plugin, theme, and recent-failure views
 //! into one operator-facing troubleshooting entrypoint.
 
-use clap::CommandFactory;
 use miette::Result;
 
-use crate::app::session::LastFailureDiagnostics;
-use crate::app::{
-    AppClients, AppRuntime, AppSession, AuthState, ErrorDetail, LastFailure, UiState,
-};
-use crate::app::{
-    CMD_CONFIG, CMD_PLUGINS, CMD_THEME, CliCommandResult, ensure_builtin_visible_for,
-};
+use crate::app::CommandOutput;
+use crate::app::{AppClients, AppRuntime, AppSession, LastFailure, UiState};
 use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{DoctorArgs, DoctorCommands, InlineCommandCli, PluginsArgs, PluginsCommands};
-use crate::core::command_def::CommandDef;
+use crate::cli::{DoctorArgs, DoctorCommands};
+use crate::core::MessageLevel;
 use crate::core::command_policy::CredentialState;
 use crate::core::output::OutputFormat;
-use crate::core::output_model::OutputResult;
 use crate::core::row::Row;
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
 use crate::ui::theme_catalog::ThemeCatalog;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::{config as config_cmd, plugins as plugins_cmd};
 
-#[derive(Clone, Copy)]
-pub(crate) struct DoctorCommandContext<'a> {
-    pub(crate) config: config_cmd::ConfigReadContext<'a>,
-    pub(crate) plugins: plugins_cmd::PluginsCommandContext<'a>,
-    pub(crate) ui: &'a UiState,
-    pub(crate) auth: &'a AuthState,
-    pub(crate) themes: &'a ThemeCatalog,
-    pub(crate) last_failure: Option<&'a LastFailure>,
-    pub(crate) last_failure_diagnostics: Option<&'a LastFailureDiagnostics>,
-}
-
-impl<'a> DoctorCommandContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a AppSession,
-        clients: &'a AppClients,
-        ui: &'a UiState,
-    ) -> Self {
-        Self {
-            config: config_cmd::ConfigReadContext::from_parts(runtime, session, ui),
-            plugins: plugins_cmd::PluginsCommandContext::from_parts(runtime, clients),
-            ui,
-            auth: &runtime.auth,
-            themes: &runtime.themes,
-            last_failure: session.last_failure.as_ref(),
-            last_failure_diagnostics: session.last_failure_diagnostics.as_ref(),
-        }
-    }
-}
-
 pub(crate) fn run_doctor_command(
-    context: DoctorCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &UiState,
     args: DoctorArgs,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     let command = args.command.unwrap_or(DoctorCommands::All);
     match command {
-        DoctorCommands::Config => {
-            ensure_builtin_visible_for(context.auth, CMD_CONFIG)?;
-            Ok(CliCommandResult::output(
-                rows_to_output_result(config_cmd::config_diagnostics_rows(context.config)),
-                None,
-            ))
-        }
-        DoctorCommands::Plugins => {
-            ensure_builtin_visible_for(context.auth, CMD_PLUGINS)?;
-            plugins_cmd::run_plugins_command(
-                context.plugins,
-                PluginsArgs {
-                    command: PluginsCommands::Doctor,
-                },
-            )
-        }
-        DoctorCommands::Last => Ok(render_last_failure_document(
-            context.ui,
-            context.last_failure,
-            context.last_failure_diagnostics,
+        DoctorCommands::Config => Ok(CommandOutput::output(
+            rows_to_output_result(config_cmd::config_diagnostics_rows(runtime, session, ui)),
+            None,
         )),
-        DoctorCommands::Theme => {
-            ensure_builtin_visible_for(context.auth, CMD_THEME)?;
-            Ok(CliCommandResult::output(
-                rows_to_output_result(theme_doctor_rows(context.themes)),
-                None,
-            ))
-        }
-        DoctorCommands::All => run_doctor_all(context),
+        DoctorCommands::Plugins => Ok(CommandOutput::output(
+            rows_to_output_result(plugins_cmd::plugin_rows(clients, true)),
+            None,
+        )),
+        DoctorCommands::Last => Ok(render_last_failure_document(
+            ui,
+            session.last_failure.as_ref(),
+        )),
+        DoctorCommands::Theme => Ok(CommandOutput::output(
+            rows_to_output_result(theme_doctor_rows(&runtime.themes)),
+            None,
+        )),
+        DoctorCommands::All => run_doctor_all(runtime, session, clients, ui),
     }
 }
 
-pub(crate) fn doctor_command_def(sort_key: impl Into<String>) -> Option<CommandDef> {
-    let inline = InlineCommandCli::command();
-    let command = inline
-        .get_subcommands()
-        .find(|command| command.get_name() == "doctor")?
-        .clone();
-    let mut definition = CommandDef::from_clap(command).sort(sort_key);
-    for (offset, subcommand) in definition.subcommands.iter_mut().enumerate() {
-        subcommand.sort_key = Some((offset + 10).to_string());
-    }
-    Some(definition)
+pub(crate) fn doctor_command() -> clap::Command {
+    crate::cli::builtin_command("doctor")
 }
 
 #[derive(Serialize)]
@@ -116,75 +60,163 @@ struct CredentialDiagnostics<'a> {
     state: &'a CredentialState,
 }
 
-impl CredentialDiagnostics<'_> {
-    fn label(&self) -> String {
-        let state = if self.state.valid { "valid" } else { "invalid" };
-        self.state.ttl_seconds.map_or_else(
-            || format!("{}: {state}", self.service),
-            |ttl| format!("{}: {state} ({ttl}s remaining)", self.service),
-        )
-    }
-}
-
-fn run_doctor_all(context: DoctorCommandContext<'_>) -> Result<CliCommandResult> {
-    let credentials = context
-        .auth
-        .policy_context()
+fn run_doctor_all(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &UiState,
+) -> Result<CommandOutput> {
+    let facts = runtime.auth.session_facts();
+    let credentials = facts
         .credentials
         .iter()
         .map(|(service, state)| CredentialDiagnostics { service, state })
         .collect::<Vec<_>>();
-    let mut sections: Vec<(&str, Vec<Row>)> =
-        vec![("session", session_doctor_rows(context.auth, &credentials))];
+    let mut sections: Vec<(&str, Vec<Row>)> = vec![(
+        "session",
+        session_doctor_rows(
+            &facts,
+            runtime.config.resolved().active_profile(),
+            &credentials,
+        ),
+    )];
 
-    if context.auth.is_builtin_visible(CMD_CONFIG) {
-        sections.push((
-            "config",
-            config_cmd::config_diagnostics_rows(context.config),
+    sections.push((
+        "config",
+        config_cmd::config_diagnostics_rows(runtime, session, ui),
+    ));
+
+    sections.push(("plugins", plugins_cmd::plugin_rows(clients, true)));
+
+    sections.push(("theme", theme_doctor_rows(&runtime.themes)));
+
+    let mut checks = runtime.auth.local_checks(runtime.config.resolved());
+    for check in &mut checks {
+        check.url = check.url.as_deref().map(crate::diagnostics::safe_url);
+        check.identity = check.identity.as_deref().map(crate::diagnostics::safe_text);
+        check.profile = check.profile.as_deref().map(crate::diagnostics::safe_text);
+    }
+    let cache = crate::config::default_cache_root_dir().map(|path| {
+        let status = if !path.exists() {
+            "not created yet"
+        } else if std::fs::read_dir(&path).is_ok() {
+            "readable"
+        } else {
+            "not readable"
+        };
+        (
+            crate::diagnostics::safe_text(&path.display().to_string()),
+            status,
+        )
+    });
+    if matches!(ui.render_settings.format, OutputFormat::Json) {
+        let mut report = doctor_report_json_value(&sections);
+        if let Some((path, status)) = &cache {
+            report["cache"] = serde_json::json!({"path": path, "status": status});
+        }
+        report["local"] = serde_json::to_value(checks).unwrap_or_default();
+        return Ok(CommandOutput::json(report));
+    }
+    let mut text = format!(
+        "ok: Config loaded (profile {}).\n",
+        runtime.config.resolved().active_profile()
+    );
+    if checks.is_empty() {
+        for credential in &credentials {
+            let lifetime = credential
+                .state
+                .ttl_seconds
+                .map(|seconds| format!(", {seconds}s remaining"))
+                .unwrap_or_default();
+            text.push_str(&format!(
+                "{}: {} credential is {}{} (not checked against the server).\n",
+                if credential.state.valid {
+                    "ok"
+                } else {
+                    "warning"
+                },
+                credential.service,
+                if credential.state.valid {
+                    "present"
+                } else {
+                    "absent or expired"
+                },
+                lifetime
+            ));
+        }
+    }
+    for check in &checks {
+        text.push_str(&format!("{}: {}\n", check.status, check.message));
+        if let Some(action) = &check.action {
+            text.push_str(&format!("hint: {action}\n"));
+        }
+    }
+    let plugins = plugins_cmd::plugin_rows(clients, false);
+    let count = plugins.len();
+    text.push_str(&format!(
+        "ok: {count} plugin{} found.\n",
+        if count == 1 { "" } else { "s" }
+    ));
+    for plugin in clients.plugins().list() {
+        if plugin.describe.as_ref().is_some_and(|description| {
+            description.flags.contains_key("--verbose") && description.flags.contains_key("-d")
+        }) {
+            text.push_str(&format!("warning: Plugin {} uses osp's own flags --verbose and -d.\nhint: Pass plugin flags after --, or ask the plugin author to rename them.\n", plugin.name));
+        }
+    }
+    if let Some(path) = std::env::var_os("SSL_CERT_FILE") {
+        if std::fs::File::open(path).is_ok() {
+            text.push_str("ok: TLS trust file is readable.\n");
+        } else {
+            text.push_str("warning: TLS trust file is not readable.\n");
+        }
+    }
+    text.push_str("info: doctor checks this machine only; it does not contact services.\n");
+    let mut verbose = String::new();
+    if ui.verbosity >= MessageLevel::Info {
+        if let Some(path) =
+            &crate::config::RuntimeConfigPaths::discover_with(runtime.launch.runtime_load)
+                .config_file
+        {
+            verbose.push_str(&format!("info: Config file: {}.\n", path.display()));
+        }
+        for check in checks {
+            if let Some(detail) = check.detail {
+                verbose.push_str(&format!("info: {detail}\n"));
+            }
+        }
+        if crate::config::RuntimeConfigPaths::discover_with(runtime.launch.runtime_load)
+            .secrets_file
+            .as_ref()
+            .is_none_or(|p| !p.exists())
+        {
+            verbose.push_str("info: Secret store: not created yet.\n");
+        }
+    }
+    if ui.verbosity >= MessageLevel::Trace
+        && let Some((path, status)) = cache
+    {
+        verbose.push_str(&format!(
+            "cache: Local cache directory: {status} ({path}).\n"
         ));
     }
-    if context.auth.is_builtin_visible(CMD_PLUGINS) {
-        let report = context.plugins.plugin_manager.doctor();
-        sections.push(("plugins", plugins_cmd::doctor_rows(&report)));
-    }
-    if context.auth.is_builtin_visible(CMD_THEME) {
-        sections.push(("theme", theme_doctor_rows(context.themes)));
-    }
-
-    if matches!(context.ui.render_settings.format, OutputFormat::Json) {
-        return Ok(CliCommandResult::json(doctor_report_json_value(&sections)));
-    }
-
-    if sections.is_empty() {
-        return Ok(CliCommandResult::text(String::new()));
-    }
-
-    sections[0].1[0].insert(
-        "credentials".to_string(),
-        serde_json::json!(
-            credentials
-                .iter()
-                .map(CredentialDiagnostics::label)
-                .collect::<Vec<_>>()
-        ),
-    );
-
-    Ok(CliCommandResult::guide_with_output(
-        doctor_report_guide(&sections),
-        doctor_report_output(&sections),
-        None,
-    ))
+    let mut output = CommandOutput::text(text);
+    output.stderr_text = verbose;
+    Ok(output)
 }
 
-fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_>]) -> Vec<Row> {
-    let context = auth.policy_context();
+fn session_doctor_rows(
+    context: &crate::core::command_policy::SessionFacts,
+    profile: &str,
+    credentials: &[CredentialDiagnostics<'_>],
+) -> Vec<Row> {
     let invalid_credentials = context
         .credentials
         .values()
         .filter(|credential| !credential.valid)
         .count();
 
-    let mut row = crate::row! {
+    let row = crate::row! {
         "status" => if invalid_credentials > 0 {
             "issue"
         } else if context.authenticated {
@@ -193,36 +225,10 @@ fn session_doctor_rows(auth: &AuthState, credentials: &[CredentialDiagnostics<'_
             "not_authenticated"
         },
         "authenticated" => context.authenticated,
-        "auth_strength" => context.auth_strength.map(|strength| strength.as_label()),
-        "profile" => context.active_profile.clone(),
+        "profile" => profile,
         "credentials" => serde_json::json!(credentials),
-        "capability_count" => context.capabilities.len() as i64,
-        "enabled_features" => context.enabled_features.iter().cloned().collect::<Vec<_>>(),
     };
-    if !context.authenticated {
-        row.insert(
-            "next_step".to_string(),
-            Value::String("osp --login".to_string()),
-        );
-    }
     vec![row]
-}
-
-fn doctor_report_guide(sections: &[(&str, Vec<Row>)]) -> GuideView {
-    GuideView {
-        sections: sections
-            .iter()
-            .map(|(name, rows)| {
-                GuideSection::new(*name, GuideSectionKind::Custom)
-                    .data(doctor_section_view_value(rows))
-            })
-            .collect(),
-        ..GuideView::default()
-    }
-}
-
-fn doctor_report_output(sections: &[(&str, Vec<Row>)]) -> OutputResult {
-    OutputResult::from_rows(vec![doctor_report_row(sections, doctor_section_view_value)])
 }
 
 fn doctor_report_json_value(sections: &[(&str, Vec<Row>)]) -> Value {
@@ -244,14 +250,6 @@ fn doctor_report_row(
         .iter()
         .map(|(name, rows)| ((*name).to_string(), value_for_rows(rows)))
         .collect::<Map<String, Value>>()
-}
-
-fn doctor_section_view_value(rows: &[Row]) -> Value {
-    match rows {
-        [] => Value::Array(Vec::new()),
-        [row] => Value::Object(row.clone()),
-        _ => Value::Array(rows.iter().cloned().map(Value::Object).collect()),
-    }
 }
 
 fn doctor_section_json_value(rows: &[Row]) -> Value {
@@ -284,17 +282,16 @@ fn theme_doctor_rows(themes: &ThemeCatalog) -> Vec<Row> {
 fn render_last_failure_document(
     ui: &UiState,
     last_failure: Option<&LastFailure>,
-    diagnostics: Option<&LastFailureDiagnostics>,
-) -> crate::app::CliCommandResult {
+) -> crate::app::CommandOutput {
     let Some(last) = last_failure else {
         if matches!(ui.render_settings.format, OutputFormat::Json) {
-            return CliCommandResult::json(serde_json::json!({
+            return CommandOutput::json(serde_json::json!({
                 "status": "ok",
                 "failure": null,
                 "message": "No recorded REPL failure in this session.",
             }));
         }
-        return CliCommandResult::text("No recorded REPL failure in this session.\n");
+        return CommandOutput::text("No recorded REPL failure in this session.\n");
     };
 
     let (summary, action) = split_failure_action(&last.summary);
@@ -304,27 +301,28 @@ fn render_last_failure_document(
             "command": last.command_line,
             "summary": summary,
             "action": action,
-            "detail": last.detail,
+            "detail": last.detail(MessageLevel::Info),
         });
-        return CliCommandResult::json(payload);
+        let mut output = CommandOutput::json(payload);
+        if ui.debug_level >= 2
+            && let Some(backtrace) = last.backtrace()
+        {
+            output.stderr_text = format!("{backtrace}\n");
+        }
+        return output;
     }
 
     let mut out = String::new();
-    out.push_str("Last REPL failure:\n");
+    out.push_str("Last command failure:\n");
     out.push_str(&format!("  Command: {}\n", last.command_line));
     out.push_str(&format!("  Error:   {summary}\n"));
     if let Some(action) = action {
         out.push_str(&format!("  Action:  {action}\n"));
     }
-    let detail = match ui.error_detail {
-        ErrorDetail::Terse => None,
-        ErrorDetail::Normal => diagnostics.map(|detail| detail.normal.as_str()),
-        ErrorDetail::Debug => diagnostics.map(|detail| detail.debug.as_str()),
-        ErrorDetail::Forensic => diagnostics.map(|detail| detail.forensic.as_str()),
-    }
-    .unwrap_or(&last.detail);
-    if ui.error_detail != ErrorDetail::Terse
-        && normalized_failure_detail(detail) != normalized_failure_detail(&last.summary)
+    let base_len = out.len();
+    let detail = last.detail(ui.verbosity);
+    if ui.verbosity >= MessageLevel::Info
+        && normalized_failure_detail(&detail) != normalized_failure_detail(&last.summary)
     {
         out.push('\n');
         out.push_str("Detail:\n");
@@ -334,16 +332,22 @@ fn render_last_failure_document(
             out.push('\n');
         }
     }
-    if let Some(command) = next_failure_detail_command(ui.error_detail, &last.summary, diagnostics)
-    {
-        out.push('\n');
-        out.push_str(&format!("More: run `{command}` for more detail.\n"));
+    let mut supplemental = out.split_off(base_len);
+    if ui.verbosity >= MessageLevel::Evidence {
+        supplemental.push_str(&last.command_evidence);
     }
-    CliCommandResult::text(out)
+    let mut output = CommandOutput::text(out);
+    output.stderr_text = supplemental;
+    if ui.debug_level >= 2
+        && let Some(backtrace) = last.backtrace()
+    {
+        output.stderr_text.push_str(&format!("{backtrace}\n"));
+    }
+    output
 }
 
 fn split_failure_action(summary: &str) -> (&str, Option<&str>) {
-    let Some((summary, action)) = summary.split_once("Try:") else {
+    let Some((summary, action)) = summary.split_once("hint:") else {
         return (summary.trim(), None);
     };
     (summary.trim().trim_end_matches('.'), Some(action.trim()))
@@ -353,184 +357,134 @@ fn normalized_failure_detail(detail: &str) -> &str {
     split_failure_action(detail).0.trim()
 }
 
-fn next_failure_detail_command(
-    current: ErrorDetail,
-    summary: &str,
-    diagnostics: Option<&LastFailureDiagnostics>,
-) -> Option<&'static str> {
-    let diagnostics = diagnostics?;
-    let differs = |left: &str, right: &str| {
-        normalized_failure_detail(left) != normalized_failure_detail(right)
-    };
-
-    match current {
-        ErrorDetail::Terse if differs(summary, &diagnostics.normal) => Some("doctor last -v"),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        DoctorCommandContext, LastFailureDiagnostics, doctor_command_def,
-        render_last_failure_document, run_doctor_command, theme_doctor_rows,
+        doctor_command, render_last_failure_document, run_doctor_command, theme_doctor_rows,
     };
-    use crate::app::ReplCommandOutput;
-    use crate::app::{AuthState, ErrorDetail, LastFailure, RuntimeContext, TerminalKind, UiState};
-    use crate::cli::commands::{config as config_cmd, plugins as plugins_cmd};
+    use crate::app::{LastFailure, RuntimeContext, TerminalKind, UiState};
     use crate::cli::{DoctorArgs, DoctorCommands};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeLoadOptions};
+    use crate::core::MessageLevel;
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
-    use crate::ui::messages::MessageLevel;
     use crate::ui::theme_catalog::{ThemeCatalog, ThemeLoadIssue};
     use serde_json::Value;
     use std::path::PathBuf;
 
-    fn ui_state(format: OutputFormat, debug_verbosity: u8) -> UiState {
+    fn ui_state(format: OutputFormat, debug_level: u8) -> UiState {
         UiState::new(
             RenderSettings::test_plain(format),
             MessageLevel::Success,
-            debug_verbosity,
+            debug_level,
         )
     }
 
-    fn doctor_context(
-        format: OutputFormat,
-        builtins: Option<&str>,
-    ) -> DoctorCommandContext<'static> {
+    fn doctor_context(format: OutputFormat, _builtins: Option<&str>) -> crate::app::AppState {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
-        if let Some(builtins) = builtins {
-            defaults.set("auth.visible.builtins", builtins);
-        }
         let mut resolver = ConfigResolver::default();
         resolver.set_defaults(defaults);
-        let resolved = Box::leak(Box::new(
-            resolver
-                .resolve(ResolveOptions::default().with_terminal("cli"))
-                .expect("test config should resolve"),
-        ));
-        let ui = Box::leak(Box::new(ui_state(format, 0)));
-        let themes = Box::leak(Box::new(ThemeCatalog::default()));
-        let auth = Box::leak(Box::new(AuthState::from_resolved(resolved)));
-        let config_overrides = Box::leak(Box::new(ConfigLayer::default()));
-        let product_defaults = Box::leak(Box::new(ConfigLayer::default()));
-        let plugin_manager = Box::leak(Box::new(
-            PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-        ));
-        let context = Box::leak(Box::new(RuntimeContext::new(None, TerminalKind::Cli, None)));
-
-        DoctorCommandContext {
-            config: config_cmd::ConfigReadContext {
-                context,
-                config: resolved,
-                ui,
-                themes,
-                config_overrides,
-                product_defaults,
-                runtime_load: RuntimeLoadOptions::defaults_only(),
-            },
-            plugins: plugins_cmd::PluginsCommandContext {
-                context,
-                config: resolved,
-                config_state: None,
-                auth,
-                clients: None,
-                plugin_manager,
-                product_defaults,
-                runtime_load: RuntimeLoadOptions::defaults_only(),
-            },
-            ui,
-            auth,
-            themes,
-            last_failure: None,
-            last_failure_diagnostics: None,
-        }
+        let resolved = resolver
+            .resolve(ResolveOptions::default().with_terminal("cli"))
+            .expect("test config should resolve");
+        let mut builder = crate::app::AppStateBuilder::new(
+            RuntimeContext::new(None, TerminalKind::Cli, None),
+            resolved,
+            ui_state(format, 0),
+        );
+        builder.themes = Some(ThemeCatalog::default());
+        builder.launch = crate::app::LaunchContext::default()
+            .with_runtime_load(RuntimeLoadOptions::defaults_only());
+        builder
+            .with_plugins(
+                PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            )
+            .build()
     }
 
     #[test]
     fn doctor_last_rendering_covers_empty_text_debug_and_json_modes_unit() {
-        let empty = render_last_failure_document(&ui_state(OutputFormat::Table, 0), None, None);
-        let Some(ReplCommandOutput::Text(empty_text)) = empty.output else {
+        let empty = render_last_failure_document(&ui_state(OutputFormat::Table, 0), None);
+        let crate::app::CommandBody::Text(empty_text) = empty.body else {
             panic!("expected text output");
         };
         assert!(empty_text.contains("No recorded REPL failure"));
 
-        let failure = LastFailure {
-            command_line: "ldap user nope".to_string(),
-            summary: "request failed. Try: authenticate again".to_string(),
-            detail: "request failed\nmissing capability: ldap.user.read".to_string(),
-        };
-        let diagnostics = LastFailureDiagnostics {
-            normal: "missing capability: ldap.user.read".to_string(),
-            debug: "policy gate: ldap user\nmissing capability: ldap.user.read".to_string(),
-            forensic: "policy gate: ldap user\nmissing capability: ldap.user.read\ncause chain"
-                .to_string(),
-        };
+        let mut failure = LastFailure::from_report(
+            "ldap user nope".to_string(),
+            std::sync::Arc::new(
+                miette::miette!("missing capability: ldap.user.read")
+                    .wrap_err("policy gate: ldap user"),
+            ),
+            crate::ui::RenderSettings::test_plain(OutputFormat::Table),
+        );
+        failure.summary = "request failed. hint: authenticate again".to_string();
 
         let verbose = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 1).with_error_detail(ErrorDetail::Normal),
+            &UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Info,
+                0,
+            ),
             Some(&failure),
-            Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(verbose_text)) = verbose.output else {
+        let crate::app::CommandBody::Text(verbose_text) = verbose.body else {
             panic!("expected text output");
         };
-        assert!(verbose_text.contains("Command: ldap user nope"));
+        assert!(verbose_text.contains("Command: ldap …"));
         assert!(verbose_text.contains("Error:   request failed"));
-        assert!(verbose_text.contains("Detail:"));
-        assert!(verbose_text.contains("missing capability: ldap.user.read"));
-
-        let compact = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 0),
-            Some(&failure),
-            Some(&diagnostics),
+        assert!(verbose.stderr_text.contains("Detail:"));
+        assert!(
+            verbose
+                .stderr_text
+                .contains("missing capability: ldap.user.read")
         );
-        let Some(ReplCommandOutput::Text(compact_text)) = compact.output else {
+
+        let compact =
+            render_last_failure_document(&ui_state(OutputFormat::Table, 0), Some(&failure));
+        let crate::app::CommandBody::Text(compact_text) = compact.body else {
             panic!("expected text output");
         };
         assert!(compact_text.contains("Error:   request failed"));
         assert!(compact_text.contains("Action:  authenticate again"));
         assert!(!compact_text.contains("Detail:"));
-        assert!(compact_text.contains("doctor last -v"));
+        assert!(!compact_text.contains("doctor last -v"));
 
         let debug = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 2).with_error_detail(ErrorDetail::Debug),
+            &UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Trace,
+                0,
+            ),
             Some(&failure),
-            Some(&diagnostics),
         );
-        let Some(ReplCommandOutput::Text(debug_text)) = debug.output else {
+        let crate::app::CommandBody::Text(debug_text) = debug.body else {
             panic!("expected text output");
         };
-        assert!(debug_text.contains("policy gate: ldap user"));
-        assert!(!debug_text.contains("cause chain"));
+        assert!(debug.stderr_text.contains("policy gate: ldap user"));
+        assert!(!debug_text.contains("Stack backtrace"));
 
-        let forensic = render_last_failure_document(
-            &ui_state(OutputFormat::Table, 3).with_error_detail(ErrorDetail::Forensic),
-            Some(&failure),
-            Some(&diagnostics),
-        );
-        let Some(ReplCommandOutput::Text(forensic_text)) = forensic.output else {
+        let forensic =
+            render_last_failure_document(&ui_state(OutputFormat::Table, 3), Some(&failure));
+        assert!(forensic.stderr_text.contains("Stack backtrace"));
+        let crate::app::CommandBody::Text(forensic_text) = forensic.body else {
             panic!("expected text output");
         };
-        assert!(forensic_text.contains("cause chain"));
+        assert!(!forensic_text.contains("Stack backtrace"));
 
-        let json_failure = LastFailure {
-            command_line: "plugins refresh".to_string(),
-            summary: "plugin failed".to_string(),
-            detail: "plugin failed".to_string(),
-        };
-        let json_result = render_last_failure_document(
-            &ui_state(OutputFormat::Json, 0),
-            Some(&json_failure),
-            None,
+        let json_failure = LastFailure::new(
+            "plugins refresh".to_string(),
+            "plugin failed".to_string(),
+            "plugin failed".to_string(),
         );
-        let Some(ReplCommandOutput::Json(json)) = json_result.output else {
+        let json_result =
+            render_last_failure_document(&ui_state(OutputFormat::Json, 0), Some(&json_failure));
+        let crate::app::CommandBody::Json(json) = json_result.body else {
             panic!("expected json output");
         };
         assert_eq!(json["status"], Value::String("error".to_string()));
@@ -565,96 +519,61 @@ mod tests {
 
     #[test]
     fn doctor_commands_respect_visibility_output_shapes_and_subcommand_defs_unit() {
+        let state = doctor_context(OutputFormat::Json, Some("config,plugins,theme"));
         let visible = run_doctor_command(
-            doctor_context(OutputFormat::Json, Some("config,plugins,theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::All),
             },
         )
         .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Json(json)) = visible.output else {
+        let crate::app::CommandBody::Json(json) = visible.body else {
             panic!("expected json output");
         };
         assert!(json.get("config").is_some());
         assert!(json.get("plugins").is_some());
         assert!(json.get("theme").is_some());
 
-        let filtered = run_doctor_command(
-            doctor_context(OutputFormat::Json, Some("theme")),
-            DoctorArgs {
-                command: Some(DoctorCommands::All),
-            },
-        )
-        .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Json(json)) = filtered.output else {
-            panic!("expected json output");
-        };
-        assert!(json.get("theme").is_some());
-        assert!(json.get("config").is_none());
-        assert!(json.get("plugins").is_none());
-
+        let state = doctor_context(OutputFormat::Table, Some("theme"));
         let theme = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::Theme),
             },
         )
         .expect("doctor theme should succeed");
-        assert!(theme.output.is_some());
+        assert!(!matches!(theme.body, crate::app::CommandBody::None));
         assert!(theme.messages.is_empty());
 
         let table = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("config,theme")),
+            &state.runtime,
+            &state.session,
+            &state.clients,
+            &state.runtime.ui,
             DoctorArgs {
                 command: Some(DoctorCommands::All),
             },
         )
         .expect("doctor all should succeed");
-        let Some(ReplCommandOutput::Output(guide)) = table.output else {
-            panic!("expected guide output");
+        let crate::app::CommandBody::Text(text) = table.body else {
+            panic!("expected local status rows");
         };
-        assert!(
-            guide
-                .source_guide
-                .expect("expected semantic guide payload")
-                .sections
-                .iter()
-                .all(|section| section.data.is_some())
-        );
-        let rows = guide
-            .output
-            .as_rows()
-            .expect("doctor guide output should keep a structured fallback");
-        assert!(rows[0].get("config").is_some());
-        assert!(rows[0].get("theme").is_some());
+        assert!(text.contains("ok: Config loaded"));
+        assert!(text.contains("doctor checks this machine only"));
 
-        let config_err = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("theme")),
-            DoctorArgs {
-                command: Some(DoctorCommands::Config),
-            },
-        )
-        .expect_err("hidden config builtin should fail");
-        assert!(!config_err.to_string().trim().is_empty());
-
-        let theme_err = run_doctor_command(
-            doctor_context(OutputFormat::Table, Some("config")),
-            DoctorArgs {
-                command: Some(DoctorCommands::Theme),
-            },
-        )
-        .expect_err("hidden theme builtin should fail");
-        assert!(!theme_err.to_string().trim().is_empty());
-
-        let def = doctor_command_def("30").expect("doctor clap grammar should project");
+        let def = doctor_command();
         let names = def
-            .subcommands
-            .iter()
-            .map(|child| child.name.as_str())
+            .get_subcommands()
+            .map(|child| child.get_name())
             .collect::<Vec<_>>();
 
-        assert_eq!(def.name, "doctor");
-        assert_eq!(def.sort_key.as_deref(), Some("30"));
+        assert_eq!(def.get_name(), "doctor");
         assert_eq!(names, vec!["all", "config", "last", "plugins", "theme"]);
     }
 }

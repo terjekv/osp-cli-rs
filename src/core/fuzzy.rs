@@ -21,7 +21,7 @@ use skim::fuzzy_matcher::arinae::ArinaeMatcher;
 /// # Examples
 ///
 /// ```
-/// use osp_cli::core::fuzzy::fold_case;
+/// use osp_cli::core::fold_case;
 ///
 /// assert_eq!(fold_case("LDAP"), "ldap");
 /// assert_eq!(fold_case("ÅSE"), "åse");
@@ -31,7 +31,7 @@ pub fn fold_case(text: &str) -> String {
 }
 
 /// Small fuzzy-matcher contract used by completion and recovery helpers.
-pub trait FuzzyMatcher {
+pub(crate) trait FuzzyMatcher {
     /// Returns a lower-is-better score when `query` fuzzily matches `candidate`.
     fn fuzzy_match(&self, candidate: &str, query: &str) -> Option<i64>;
 
@@ -129,14 +129,14 @@ fn subsequence_match(
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::fuzzy::{FuzzyMatcher, completion_fuzzy_matcher};
 ///
 /// assert!(completion_fuzzy_matcher()
 ///     .fuzzy_match("ldap", "lap")
 ///     .is_some());
 /// ```
-pub fn completion_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
+pub(crate) fn completion_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
     static MATCHER: OnceLock<AppFuzzyMatcher> = OnceLock::new();
     MATCHER.get_or_init(|| {
         #[cfg(not(miri))]
@@ -159,14 +159,14 @@ pub fn completion_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::fuzzy::{FuzzyMatcher, config_fuzzy_matcher};
 ///
 /// assert!(config_fuzzy_matcher()
 ///     .fuzzy_match("ui.format", "ui.formt")
 ///     .is_some());
 /// ```
-pub fn config_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
+pub(crate) fn config_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
     static MATCHER: OnceLock<AppFuzzyMatcher> = OnceLock::new();
     MATCHER.get_or_init(|| {
         #[cfg(not(miri))]
@@ -187,14 +187,14 @@ pub fn config_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::fuzzy::{FuzzyMatcher, search_fuzzy_matcher};
 ///
 /// assert!(search_fuzzy_matcher()
 ///     .fuzzy_match("doctor --mreg", "doctr mreg")
 ///     .is_some());
 /// ```
-pub fn search_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
+pub(crate) fn search_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
     static MATCHER: OnceLock<AppFuzzyMatcher> = OnceLock::new();
     MATCHER.get_or_init(|| {
         #[cfg(not(miri))]
@@ -206,4 +206,55 @@ pub fn search_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
             AppFuzzyMatcher::new(true)
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn miri_fuzzy_fallback_keeps_completion_and_search_contracts() {
+        assert!(
+            completion_fuzzy_matcher()
+                .fuzzy_match("ldap", "lap")
+                .is_some()
+        );
+        assert!(
+            search_fuzzy_matcher()
+                .fuzzy_indices("doctor --mreg", "doctr mreg")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn internal_example_1() {
+        use crate::core::fuzzy::completion_fuzzy_matcher;
+
+        assert!(
+            completion_fuzzy_matcher()
+                .fuzzy_match("ldap", "lap")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::core::fuzzy::config_fuzzy_matcher;
+
+        assert!(
+            config_fuzzy_matcher()
+                .fuzzy_match("ui.format", "ui.formt")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn internal_example_3() {
+        use crate::core::fuzzy::search_fuzzy_matcher;
+
+        assert!(
+            search_fuzzy_matcher()
+                .fuzzy_match("doctor --mreg", "doctr mreg")
+                .is_some()
+        );
+    }
 }

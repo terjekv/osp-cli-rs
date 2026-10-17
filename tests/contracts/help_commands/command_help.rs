@@ -1,6 +1,6 @@
 #[cfg(unix)]
 #[test]
-fn command_help_hides_common_invocation_options_without_verbose_contract() {
+fn command_help_lists_short_invocation_options_by_default_contract() {
     let home = make_temp_dir("osp-cli-help-history-default");
     let config_path = home.join("config.toml");
     fixture_config(&config_path);
@@ -9,7 +9,9 @@ fn command_help_hides_common_invocation_options_without_verbose_contract() {
     let plain = strip_ansi(&output);
 
     assert!(plain.contains("history"));
-    assert!(!plain.contains("Common Invocation Options"));
+    assert!(plain.contains("Common Invocation Options"));
+    for flag in ["-v, --verbose", "-q, --quiet", "-d, --debug"] { assert!(plain.contains(flag)); }
+    assert!(!plain.contains("--plugin-provider"));
     assert_contract_snapshot!("history_help_default", plain);
 }
 
@@ -85,7 +87,7 @@ candidates command osp config g
 candidates flag osp config get --s
 candidates value osp config get --presentation c
 "#;
-    let output = Command::new("bash")
+    let output = crate::test_env::command("bash")
         .env_clear()
         .envs(crate::test_env::isolated_env(home.path()))
         .env("PATH", "/usr/bin:/bin")

@@ -46,8 +46,20 @@ osp theme list
 Inspect one theme:
 
 ```bash
-osp theme show dracula
+osp theme list '|' dracula
 ```
+
+Choose a theme interactively:
+
+```bash
+osp theme preview
+```
+
+Up/Down or Tab/Shift-Tab select a theme and immediately recolour the picker,
+table and sample messages. End focuses `[ Save ]`; Enter saves `theme.name`
+through the config writer with `--permanent`. `[ Exit ]`, Esc and q discard the
+selection. A terminal of at least 60×12 is required. `theme preview NAME` applies
+a theme for the current process or REPL session without saving it.
 
 Switch theme for the current process or REPL session:
 
@@ -143,18 +155,45 @@ theme.path = ["~/.config/osp/themes", "/srv/shared/osp-themes"]
 
 ## Inspecting Custom Theme State
 
-`theme list` shows whether a theme is `builtin` or `custom`, and includes the
-origin path for custom themes.
+`theme list` shows each theme's palette, source type and active/default status.
+Each colour value is painted in its own colour in terminal output. Use
+`theme list --json` for full definitions, including custom origins and bases,
+or `theme list | NAME` in the REPL to narrow the list to one palette.
 
-`theme show` includes:
+## Resetting
 
-- `base`
-- `source`
-- `origin`
-- the current palette values
+`osp theme reset` clears saved `theme.name` and the nine `color.*` keys in
+applicable global/current-profile scopes of the user config file, plus matching
+session overrides. It prints what was cleared, or that nothing needed resetting.
+Custom theme files are retained.
 
-That makes it the first command to run when a theme does not look the way you
-expected.
+The preview picker's `[ Reset ]` button stages the product default theme without
+role overrides. `[ Save ]` applies that reset; `[ Exit ]`, Esc and q discard it.
+The buttons are `[ Save ]  [ Save as theme… ]  [ Reset ]  [ Exit ]`.
+
+## Palette overrides
+
+`color.text`, `color.muted`, `color.accent`, `color.info`, `color.warning`,
+`color.success`, `color.error`, `color.border` and `color.title` override the
+corresponding role in whichever theme is active. They accept the same colour
+names, hex colours and style modifiers as theme palettes:
+
+```bash
+osp config set color.accent '#123123'
+osp config set color.error 'bold #eb6f92'
+osp config unset color.accent
+```
+
+`theme list` applies these global overrides to every row and marks each
+overridden cell with `*`. Its legend appears only when an override is present.
+Data exports retain undecorated values and expose the overridden role names.
+The preview picker also applies the overrides while cycling themes. Choose
+`[ Save as theme… ]` to name a custom theme containing a base-theme reference
+and only the overridden roles. The new file is created in the first configured
+`theme.path` directory (normally `~/.config/osp/themes`). Existing names are
+rejected. Saving selects the new theme and clears the absorbed overrides from
+applicable config/session scopes. Explicit overrides for other profiles are
+retained.
 
 ## If Themes Look Wrong
 
@@ -162,7 +201,7 @@ Start with:
 
 ```bash
 osp theme list
-osp theme show <name>
+osp theme list '|' <name>
 osp doctor theme
 osp config explain theme.name
 ```

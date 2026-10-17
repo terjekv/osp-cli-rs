@@ -140,7 +140,7 @@ extensions.site.token = "fallback-v0"
         scoped_unset,
         read,
     ]);
-    let output = Command::new("python3")
+    let output = crate::test_env::command("python3")
         .env_clear()
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")

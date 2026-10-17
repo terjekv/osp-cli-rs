@@ -14,9 +14,11 @@
 use crate::completion::model::{CommandLine, CursorState, FlagOccurrence, ParsedLine, QuoteStyle};
 use std::collections::BTreeMap;
 
+use crate::core::shell_words::{LexEvent, LexEventKind, LexState, scan_shell};
+
 /// Token value with byte offsets into the original input line.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenSpan {
+pub(crate) struct TokenSpan {
     /// Unescaped token text.
     pub value: String,
     /// Inclusive start byte offset.
@@ -26,87 +28,10 @@ pub struct TokenSpan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexState {
-    Normal,
-    SingleQuote,
-    DoubleQuote,
-    EscapeNormal,
-    EscapeDouble,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LexEventKind {
-    Separator,
-    Pipe,
-    QuoteStart,
-    QuoteEnd,
-    EscapeStart,
-    Text(char),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LexEvent {
-    index: usize,
-    end: usize,
-    state_before: LexState,
-    kind: LexEventKind,
-}
-
-fn scan_shell(input: &str, mut visit: impl FnMut(LexEvent)) -> LexState {
-    let mut state = LexState::Normal;
-    for (index, ch) in input.char_indices() {
-        let state_before = state;
-        let kind = match state {
-            LexState::Normal if ch.is_whitespace() => LexEventKind::Separator,
-            LexState::Normal => match ch {
-                '|' => LexEventKind::Pipe,
-                '\\' => {
-                    state = LexState::EscapeNormal;
-                    LexEventKind::EscapeStart
-                }
-                '\'' => {
-                    state = LexState::SingleQuote;
-                    LexEventKind::QuoteStart
-                }
-                '"' => {
-                    state = LexState::DoubleQuote;
-                    LexEventKind::QuoteStart
-                }
-                _ => LexEventKind::Text(ch),
-            },
-            LexState::SingleQuote if ch == '\'' => {
-                state = LexState::Normal;
-                LexEventKind::QuoteEnd
-            }
-            LexState::SingleQuote => LexEventKind::Text(ch),
-            LexState::DoubleQuote => match ch {
-                '"' => {
-                    state = LexState::Normal;
-                    LexEventKind::QuoteEnd
-                }
-                '\\' => {
-                    state = LexState::EscapeDouble;
-                    LexEventKind::EscapeStart
-                }
-                _ => LexEventKind::Text(ch),
-            },
-            LexState::EscapeNormal => {
-                state = LexState::Normal;
-                LexEventKind::Text(ch)
-            }
-            LexState::EscapeDouble => {
-                state = LexState::DoubleQuote;
-                LexEventKind::Text(ch)
-            }
-        };
-        visit(LexEvent {
-            index,
-            end: index + ch.len_utf8(),
-            state_before,
-            kind,
-        });
-    }
-    state
+pub(crate) enum FlagArity {
+    FlagOnly,
+    SingleValue,
+    MultipleValues,
 }
 
 /// Parsed line assembly after tokenization.
@@ -158,10 +83,11 @@ impl ParseState {
         &mut self,
         first_token: String,
         iter: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
     ) {
-        // Once the parser has seen the first flag-like token, the rest of the
-        // line stays in "tail mode". From that point on we only distinguish
-        // between more flags, their values, `--`, and a pipe into DSL mode.
+        // Once the parser has seen the first flag-like token, it keeps the
+        // remaining command words in the tail. Known flag arity distinguishes
+        // option values from positional words; unknown flags stay permissive.
         let mut current = first_token;
         loop {
             if current == "|" {
@@ -172,6 +98,16 @@ impl ParseState {
             if current == "--" {
                 self.collect_positional_tail(iter);
                 return;
+            }
+
+            if !looks_like_flag_start(&current) {
+                self.tail
+                    .push(crate::completion::model::TailItem::Positional(current));
+                let Some(next) = iter.next().cloned() else {
+                    break;
+                };
+                current = next;
+                continue;
             }
 
             if let Some((flag, value)) = split_inline_flag_value(&current) {
@@ -198,7 +134,12 @@ impl ParseState {
             }
 
             let flag = current;
-            let values = self.consume_flag_values(iter);
+            let value_limit = match flag_arity(&self.head, &flag) {
+                Some(FlagArity::FlagOnly) => Some(0),
+                Some(FlagArity::SingleValue) => Some(1),
+                Some(FlagArity::MultipleValues) | None => None,
+            };
+            let values = self.consume_flag_values(iter, value_limit);
             self.tail
                 .push(crate::completion::model::TailItem::Flag(FlagOccurrence {
                     name: flag.clone(),
@@ -219,10 +160,14 @@ impl ParseState {
     fn consume_flag_values<'a>(
         &mut self,
         iter: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+        limit: Option<usize>,
     ) -> Vec<String> {
         let mut values = Vec::new();
 
         while let Some(next) = iter.peek() {
+            if limit.is_some_and(|limit| values.len() >= limit) {
+                break;
+            }
             if *next == "|" || *next == "--" {
                 break;
             }
@@ -244,7 +189,7 @@ pub struct CommandLineParser;
 
 /// Parsed command-line state for the full line and the cursor position.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedCursorLine {
+pub(crate) struct ParsedCursorLine {
     /// Parsed tokens and command structure.
     pub parsed: ParsedLine,
     /// Cursor-local replacement information.
@@ -255,7 +200,79 @@ pub struct ParsedCursorLine {
 struct CursorTokenization {
     full_tokens: Vec<String>,
     cursor_tokens: Vec<String>,
-    cursor_quote_style: Option<QuoteStyle>,
+    cursor_state: CursorEditState,
+}
+
+#[derive(Debug, Clone)]
+struct CursorEditState {
+    token_stub: String,
+    replace_start: usize,
+    quote_style: Option<QuoteStyle>,
+}
+
+#[derive(Debug, Default)]
+struct ActiveToken {
+    value: String,
+    start: Option<usize>,
+    inline_value_start: Option<usize>,
+    inline_value_offset: Option<usize>,
+    quote_start: Option<usize>,
+}
+
+impl ActiveToken {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn observe(&mut self, event: LexEvent) {
+        match event.kind {
+            LexEventKind::Text(ch) => {
+                self.start.get_or_insert(event.index);
+                if ch == '='
+                    && event.state_before == LexState::Normal
+                    && self.value.starts_with("--")
+                    && self.inline_value_start.is_none()
+                {
+                    self.inline_value_start = Some(event.end);
+                    self.inline_value_offset = Some(self.value.len() + 1);
+                }
+                self.value.push(ch);
+            }
+            LexEventKind::QuoteStart => {
+                self.start.get_or_insert(event.index);
+                self.quote_start = Some(event.end);
+            }
+            LexEventKind::EscapeStart => {
+                self.start.get_or_insert(event.index);
+            }
+            LexEventKind::Separator | LexEventKind::Pipe | LexEventKind::QuoteEnd => {}
+        }
+    }
+
+    fn cursor_state(&self, safe_cursor: usize, state: LexState) -> CursorEditState {
+        let quote_style = quote_style_for_state(state);
+        let token_stub = if self.start.is_some() {
+            self.inline_value_offset
+                .and_then(|offset| self.value.get(offset..))
+                .unwrap_or(&self.value)
+                .to_string()
+        } else {
+            String::new()
+        };
+        let replace_start = self.start.map_or(safe_cursor, |start| {
+            if quote_style.is_some() {
+                self.quote_start.unwrap_or(start)
+            } else {
+                self.inline_value_start.unwrap_or(start)
+            }
+        });
+
+        CursorEditState {
+            token_stub,
+            replace_start,
+            quote_style,
+        }
+    }
 }
 
 impl CommandLineParser {
@@ -288,7 +305,7 @@ impl CommandLineParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::CommandLineParser;
     ///
     /// let spans = CommandLineParser.tokenize_with_spans("ldap user alice");
@@ -297,7 +314,7 @@ impl CommandLineParser {
     /// assert_eq!(spans[1].start, 5);
     /// assert_eq!(spans[2].end, 15);
     /// ```
-    pub fn tokenize_with_spans(&self, line: &str) -> Vec<TokenSpan> {
+    pub(crate) fn tokenize_with_spans(&self, line: &str) -> Vec<TokenSpan> {
         self.tokenize_with_spans_inner(line)
             .or_else(|| self.tokenize_with_spans_fallback(line))
             .unwrap_or_default()
@@ -312,21 +329,21 @@ impl CommandLineParser {
     /// `cursor` is clamped to the input length and to a valid UTF-8 character
     /// boundary before the parser slices the line.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::CommandLineParser;
-    ///
-    /// let parsed = CommandLineParser.analyze("ldap user ali", 13);
-    ///
-    /// assert_eq!(parsed.parsed.cursor_tokens, vec!["ldap", "user", "ali"]);
-    /// assert_eq!(parsed.cursor.token_stub, "ali");
-    /// ```
-    pub fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
+    #[cfg(test)]
+    pub(crate) fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
+        self.analyze_with_flag_arity(line, cursor, |_, _| None)
+    }
+
+    pub(crate) fn analyze_with_flag_arity(
+        &self,
+        line: &str,
+        cursor: usize,
+        flag_arity: impl Fn(&[String], &str) -> Option<FlagArity>,
+    ) -> ParsedCursorLine {
         let safe_cursor = clamp_to_char_boundary(line, cursor.min(line.len()));
         let before_cursor = &line[..safe_cursor];
         let lexical = self.lex_cursor_line(line, before_cursor, safe_cursor);
-        self.assemble_parsed_cursor_line(before_cursor, safe_cursor, lexical)
+        self.assemble_parsed_cursor_line(before_cursor, safe_cursor, lexical, &flag_arity)
     }
 
     fn tokenize_inner(&self, line: &str) -> Option<Vec<String>> {
@@ -341,7 +358,8 @@ impl CommandLineParser {
             }
             LexEventKind::Text(ch) => current.push(ch),
             LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
-        });
+        })
+        .state;
 
         if state == LexState::Normal {
             push_current(&mut out, &mut current);
@@ -376,7 +394,8 @@ impl CommandLineParser {
                 current_start.get_or_insert(event.index);
             }
             LexEventKind::QuoteEnd => {}
-        });
+        })
+        .state;
 
         if state == LexState::Normal {
             push_current_span(&mut out, &mut current, &mut current_start, line.len());
@@ -423,6 +442,14 @@ impl CommandLineParser {
     /// assert!(parsed.has_pipe());
     /// ```
     pub fn parse(&self, tokens: &[String]) -> CommandLine {
+        self.parse_with_flag_arity(tokens, &|_, _| None)
+    }
+
+    pub(crate) fn parse_with_flag_arity(
+        &self,
+        tokens: &[String],
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
+    ) -> CommandLine {
         let mut state = ParseState::default();
         let mut iter = tokens.iter().peekable();
 
@@ -435,8 +462,8 @@ impl CommandLineParser {
                 state.collect_positional_tail(&mut iter);
                 return state.finish();
             }
-            if token.starts_with('-') {
-                state.parse_flag_tail(token.clone(), &mut iter);
+            if looks_like_flag_start(token) {
+                state.parse_flag_tail(token.clone(), &mut iter, flag_arity);
                 return state.finish();
             }
             state.head.push(token.clone());
@@ -449,7 +476,7 @@ impl CommandLineParser {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::completion::CommandLineParser;
     ///
     /// let cursor = CommandLineParser.cursor_state("ldap user ali", 13);
@@ -457,35 +484,41 @@ impl CommandLineParser {
     /// assert_eq!(cursor.token_stub, "ali");
     /// assert_eq!(cursor.replace_range, 10..13);
     /// ```
-    pub fn cursor_state(&self, text_before_cursor: &str, safe_cursor: usize) -> CursorState {
-        let tokens = self.tokenize(text_before_cursor);
-        self.build_cursor_state(
+    pub(crate) fn cursor_state(&self, text_before_cursor: &str, safe_cursor: usize) -> CursorState {
+        let safe_cursor = clamp_to_char_boundary(
             text_before_cursor,
-            safe_cursor,
-            &tokens,
-            self.compute_stub_quote(text_before_cursor),
-        )
+            safe_cursor.min(text_before_cursor.len()),
+        );
+        let prefix = text_before_cursor.get(..safe_cursor).unwrap_or("");
+        let mut active = ActiveToken::default();
+        let state = scan_shell(prefix, |event| match event.kind {
+            LexEventKind::Separator | LexEventKind::Pipe => active.reset(),
+            LexEventKind::Text(_)
+            | LexEventKind::QuoteStart
+            | LexEventKind::QuoteEnd
+            | LexEventKind::EscapeStart => active.observe(event),
+        })
+        .state;
+        self.build_cursor_state(prefix, safe_cursor, active.cursor_state(safe_cursor, state))
     }
 
     fn build_cursor_state(
         &self,
         text_before_cursor: &str,
         safe_cursor: usize,
-        tokens: &[String],
-        quote_style: Option<QuoteStyle>,
+        cursor_state: CursorEditState,
     ) -> CursorState {
-        let token_stub = self.compute_stub(text_before_cursor, tokens);
-        let replace_start = token_replace_start(text_before_cursor, safe_cursor, quote_style);
+        let replace_start = cursor_state.replace_start;
         let raw_stub = text_before_cursor
             .get(replace_start..safe_cursor)
             .unwrap_or("")
             .to_string();
 
         CursorState::new(
-            token_stub,
+            cursor_state.token_stub,
             raw_stub,
             replace_start..safe_cursor,
-            quote_style,
+            cursor_state.quote_style,
         )
     }
 
@@ -495,73 +528,56 @@ impl CommandLineParser {
         safe_cursor: usize,
     ) -> Option<CursorTokenization> {
         let mut out = Vec::new();
-        let mut current = String::new();
+        let mut active = ActiveToken::default();
         let mut cursor_tokens = None;
-        let mut cursor_quote_style = None;
+        let mut cursor_state = None;
 
         let state = scan_shell(line, |event| {
             if event.index == safe_cursor && cursor_tokens.is_none() {
-                cursor_tokens = Some(snapshot_tokens(&out, &current));
-                cursor_quote_style = Some(quote_style_for_state(event.state_before));
+                cursor_tokens = Some(snapshot_tokens(&out, &active.value));
+                cursor_state = Some(active.cursor_state(safe_cursor, event.state_before));
             }
 
             match event.kind {
-                LexEventKind::Separator => push_current(&mut out, &mut current),
-                LexEventKind::Pipe => {
-                    push_current(&mut out, &mut current);
-                    out.push("|".to_string());
+                LexEventKind::Separator => {
+                    push_current(&mut out, &mut active.value);
+                    active.reset();
                 }
-                LexEventKind::Text(ch) => current.push(ch),
-                LexEventKind::QuoteStart | LexEventKind::QuoteEnd | LexEventKind::EscapeStart => {}
+                LexEventKind::Pipe => {
+                    push_current(&mut out, &mut active.value);
+                    out.push("|".to_string());
+                    active.reset();
+                }
+                LexEventKind::Text(_)
+                | LexEventKind::QuoteStart
+                | LexEventKind::QuoteEnd
+                | LexEventKind::EscapeStart => active.observe(event),
             }
-        });
+        })
+        .state;
 
         if safe_cursor == line.len() && cursor_tokens.is_none() {
-            cursor_tokens = Some(snapshot_tokens(&out, &current));
-            cursor_quote_style = Some(quote_style_for_state(state));
+            cursor_tokens = Some(snapshot_tokens(&out, &active.value));
+            cursor_state = Some(active.cursor_state(safe_cursor, state));
         }
 
         match state {
             LexState::Normal => {
-                push_current(&mut out, &mut current);
+                push_current(&mut out, &mut active.value);
                 Some(CursorTokenization {
                     full_tokens: out,
-                    cursor_tokens: cursor_tokens.unwrap_or_default(),
-                    cursor_quote_style: cursor_quote_style.unwrap_or(None),
+                    cursor_tokens: cursor_tokens?,
+                    cursor_state: cursor_state?,
                 })
             }
             _ => None,
         }
     }
 
-    fn compute_stub(&self, text_before_cursor: &str, tokens: &[String]) -> String {
-        if text_before_cursor.is_empty() || text_before_cursor.ends_with(' ') {
-            return String::new();
-        }
-        let Some(last) = tokens.last() else {
-            return String::new();
-        };
-
-        if last.starts_with("--") && last.ends_with('=') && last.contains('=') {
-            return String::new();
-        }
-
-        last.clone()
-    }
-
     /// Returns the active quote style for the token being edited, if any.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::completion::{CommandLineParser, QuoteStyle};
-    ///
-    /// assert_eq!(
-    ///     CommandLineParser.compute_stub_quote(r#"ldap user "ali"#),
-    ///     Some(QuoteStyle::Double)
-    /// );
-    /// ```
-    pub fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
+    #[cfg(test)]
+    pub(crate) fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }
 
@@ -585,22 +601,22 @@ impl CommandLineParser {
         before_cursor: &str,
         safe_cursor: usize,
         lexical: CursorLexicalState,
+        flag_arity: &impl Fn(&[String], &str) -> Option<FlagArity>,
     ) -> ParsedCursorLine {
         match lexical {
             CursorLexicalState::Structured(tokenized) => {
-                let full_cmd = self.parse(&tokenized.full_tokens);
-                let cursor_cmd = self.parse(&tokenized.cursor_tokens);
-                let cursor = self.build_cursor_state(
-                    before_cursor,
-                    safe_cursor,
-                    &tokenized.cursor_tokens,
-                    tokenized.cursor_quote_style,
-                );
+                let full_cmd = self.parse_with_flag_arity(&tokenized.full_tokens, flag_arity);
+                let cursor_cmd = self.parse_with_flag_arity(&tokenized.cursor_tokens, flag_arity);
+                let cursor =
+                    self.build_cursor_state(before_cursor, safe_cursor, tokenized.cursor_state);
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
+                        #[cfg(test)]
                         safe_cursor,
+                        #[cfg(test)]
                         full_tokens: tokenized.full_tokens,
+                        #[cfg(test)]
                         cursor_tokens: tokenized.cursor_tokens,
                         full_cmd,
                         cursor_cmd,
@@ -612,14 +628,17 @@ impl CommandLineParser {
                 full_tokens,
                 cursor_tokens,
             } => {
-                let full_cmd = self.parse(&full_tokens);
-                let cursor_cmd = self.parse(&cursor_tokens);
+                let full_cmd = self.parse_with_flag_arity(&full_tokens, flag_arity);
+                let cursor_cmd = self.parse_with_flag_arity(&cursor_tokens, flag_arity);
                 let cursor = self.cursor_state(before_cursor, safe_cursor);
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
+                        #[cfg(test)]
                         safe_cursor,
+                        #[cfg(test)]
                         full_tokens,
+                        #[cfg(test)]
                         cursor_tokens,
                         full_cmd,
                         cursor_cmd,
@@ -708,49 +727,35 @@ fn is_number(text: &str) -> bool {
     text.parse::<f64>().is_ok()
 }
 
+#[cfg(test)]
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
-    quote_style_for_state(scan_shell(text, |_| {}))
-}
-
-fn token_replace_start(
-    text_before_cursor: &str,
-    safe_cursor: usize,
-    quote_style: Option<QuoteStyle>,
-) -> usize {
-    if text_before_cursor.is_empty() || text_before_cursor.ends_with(' ') {
-        return safe_cursor;
-    }
-
-    let mut token_start = 0usize;
-    let mut token_active = false;
-    let mut quote_start = None;
-
-    scan_shell(text_before_cursor, |event| {
-        if event.kind == LexEventKind::Separator {
-            token_active = false;
-            token_start = event.end;
-            quote_start = None;
-            return;
-        }
-
-        if !token_active {
-            token_active = true;
-            token_start = event.index;
-        }
-
-        if event.kind == LexEventKind::QuoteStart {
-            quote_start = Some(event.end);
-        }
-    });
-
-    match quote_style {
-        Some(_) => quote_start.unwrap_or(token_start),
-        None => token_start,
-    }
+    quote_style_for_state(scan_shell(text, |_| {}).state)
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::completion::CommandLineParser;
+
+        let spans = CommandLineParser.tokenize_with_spans("ldap user alice");
+
+        assert_eq!(spans[0].value, "ldap");
+        assert_eq!(spans[1].start, 5);
+        assert_eq!(spans[2].end, 15);
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::completion::CommandLineParser;
+
+        let cursor = CommandLineParser.cursor_state("ldap user ali", 13);
+
+        assert_eq!(cursor.token_stub, "ali");
+        assert_eq!(cursor.replace_range, 10..13);
+    }
+
     use crate::completion::model::{FlagOccurrence, QuoteStyle};
 
     use super::CommandLineParser;

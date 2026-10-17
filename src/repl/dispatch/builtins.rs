@@ -1,23 +1,27 @@
 use std::path::PathBuf;
 
-use crate::repl::{ReplLineResult, SharedHistory, expand_history};
+use crate::repl::history_store::split_bang_request;
+pub(super) use crate::repl::history_store::{BangCommand, parse_bang_command};
+use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, WrapErr, miette};
 
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession};
+use crate::app::{AppRuntime, AppSession};
 use crate::app::{CMD_HELP, EXIT_CODE_WAITING_APPROVAL};
-use crate::repl::engine::expand_home;
+use crate::normalize::expand_home;
 
 use super::shell::{handle_repl_exit_request, render_repl_help_for_scope};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ReplBuiltin {
     Help,
+    HelpAll,
+    Recording(Option<crate::repl::recording::RecordingCommand>),
     Exit,
     Last,
     Pagination(PaginationDirection),
     Source(SourceCommand),
-    Bang(BangCommand),
+    Each(EachCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,43 +37,64 @@ pub(super) struct SourceCommand {
     help: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum BangCommand {
-    Last,
-    Relative(usize),
-    Absolute { id: usize, suffix: Option<String> },
-    Prefix(String),
-    Contains(String),
-}
-
 pub(super) fn execute_repl_builtin(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     raw: &str,
     builtin: ReplBuiltin,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     match builtin {
-        ReplBuiltin::Help => Ok(ReplLineResult::Continue(render_repl_help_for_scope(
-            runtime,
-            session,
-            clients,
-            &super::base_repl_invocation(runtime),
-            raw,
-            &[],
-            sink,
-        )?)),
-        ReplBuiltin::Exit => Ok(handle_repl_exit_request(session)),
-        ReplBuiltin::Last => execute_last_result_builtin(runtime, session, raw),
+        ReplBuiltin::Recording(command) => {
+            use clap::CommandFactory;
+            Ok(ReplResult::Print(match command {
+                Some(command) => command.run(&state.session.recording)?,
+                None => crate::repl::recording::RecordingCommand::command()
+                    .render_long_help()
+                    .to_string(),
+            }))
+        }
+        ReplBuiltin::HelpAll => {
+            let parsed =
+                crate::repl::input::ReplParsedLine::parse(raw, state.runtime.config.resolved())?;
+            let scanned = crate::cli::invocation::scan_command_tokens(&parsed.dispatch_tokens)?;
+            let invocation = crate::app::resolve_invocation_ui(
+                state.runtime.config.resolved(),
+                &state.runtime.ui,
+                &scanned.invocation,
+            );
+            let output = crate::app::help::help_all_output(state);
+            Ok(ReplResult::Print(
+                super::command::render_repl_command_output(
+                    &state.runtime,
+                    &mut state.session,
+                    raw,
+                    &parsed.stages,
+                    output,
+                    &invocation,
+                    sink,
+                )?,
+            ))
+        }
+        ReplBuiltin::Help => {
+            let invocation = super::base_repl_invocation(&state.runtime);
+            Ok(ReplResult::Print(render_repl_help_for_scope(
+                state,
+                &invocation,
+                raw,
+                &[],
+                sink,
+            )?))
+        }
+        ReplBuiltin::Exit => Ok(handle_repl_exit_request(&mut state.session)),
+        ReplBuiltin::Last => {
+            execute_last_result_builtin(&mut state.runtime, &mut state.session, raw, sink)
+        }
         ReplBuiltin::Pagination(direction) => {
-            execute_pagination_builtin(runtime, session, clients, history, direction, sink)
+            execute_pagination_builtin(state, history, direction, sink)
         }
-        ReplBuiltin::Source(command) => {
-            execute_source_command(runtime, session, clients, history, command, sink)
-        }
-        ReplBuiltin::Bang(command) => execute_bang_command(session, history, raw, command),
+        ReplBuiltin::Each(command) => execute_each_command(state, history, command, sink),
+        ReplBuiltin::Source(command) => execute_source_command(state, history, command, sink),
     }
 }
 
@@ -93,13 +118,148 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
     if raw.split_whitespace().next() == Some("last") {
         return Ok(Some(ReplBuiltin::Last));
     }
+    if raw.split_whitespace().next() == Some("recording") {
+        use clap::Parser;
+        let words =
+            shell_words::split(raw).map_err(|err| miette!("invalid recording command: {err}"))?;
+        return match crate::repl::recording::RecordingCommand::try_parse_from(words) {
+            Ok(command) => Ok(Some(ReplBuiltin::Recording(Some(command)))),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    clap::error::ErrorKind::DisplayHelp
+                        | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                ) =>
+            {
+                Ok(Some(ReplBuiltin::Recording(None)))
+            }
+            Err(err) => Err(miette!(err.to_string())),
+        };
+    }
+    if raw.split_whitespace().next() == Some("each") {
+        use clap::Parser;
+        let words =
+            shell_words::split(raw).map_err(|err| miette!("invalid each command: {err}"))?;
+        return match EachCommand::try_parse_from(words) {
+            Ok(command) => Ok(Some(ReplBuiltin::Each(command))),
+            Err(err) if err.kind() == clap::error::ErrorKind::DisplayHelp => {
+                Ok(Some(ReplBuiltin::Each(EachCommand::default())))
+            }
+            Err(err) => Err(miette!(err.to_string())),
+        };
+    }
     if let Some(command) = parse_source_builtin(raw)? {
         return Ok(Some(ReplBuiltin::Source(command)));
     }
-    if let Some(command) = parse_bang_command(raw)? {
-        return Ok(Some(ReplBuiltin::Bang(command)));
-    }
     Ok(None)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, clap::Parser)]
+#[command(
+    name = "each",
+    about = "Run a command for every value of the saved result"
+)]
+pub(crate) struct EachCommand {
+    /// Command template containing {}.
+    template: Option<String>,
+    /// Allow more than 50 values and commands that change data.
+    #[arg(long)]
+    yes: bool,
+    /// Acknowledge exactly this many writes.
+    #[arg(long)]
+    count: Option<usize>,
+    /// Continue after command errors.
+    #[arg(long)]
+    ignore_errors: bool,
+}
+
+fn execute_each_command(
+    state: &mut crate::app::AppState,
+    history: &SharedHistory,
+    command: EachCommand,
+    sink: &mut dyn UiSink,
+) -> Result<ReplResult> {
+    use clap::CommandFactory;
+    let Some(template) = command.template else {
+        return Ok(ReplResult::Print(
+            EachCommand::command().render_long_help().to_string(),
+        ));
+    };
+    if !template.contains("{}") {
+        return Err(miette!("each requires a template containing {{}}"));
+    }
+    let parsed =
+        crate::repl::input::ReplParsedLine::parse(&template, state.runtime.config.resolved())?;
+    let tokens = parsed.prefixed_tokens(&state.session.scope);
+    // Unclassified templates may expand into writes, so require acknowledgement.
+    let writes = state
+        .clients
+        .native_commands()
+        .writes(&tokens)
+        .unwrap_or(true);
+    if writes && !command.yes {
+        return Err(miette!("each requires --yes for commands that change data"));
+    }
+    let last = state
+        .session
+        .last_success()
+        .ok_or_else(|| miette!("No recorded successful REPL result in this session."))?;
+    let mut stages = last.stages.clone();
+    stages.push("VALUE".to_string());
+    let mut ui = state.runtime.ui.clone();
+    ui.render_settings.format = crate::core::output::OutputFormat::Json;
+    ui.render_settings.format_explicit = true;
+    let rendered = crate::app::render_saved_repl_output(
+        state.runtime.config.resolved(),
+        &ui,
+        &last.output,
+        &stages,
+        None,
+    )?;
+    let values: serde_json::Value =
+        serde_json::from_str(&rendered).map_err(|err| miette!("each: {err}"))?;
+    let rows = crate::core::output_model::rows_from_value(values);
+    if rows.len() > 50 && !command.yes {
+        return Err(miette!("each requires --yes for more than 50 values"));
+    }
+    if writes && command.count != Some(rows.len()) {
+        return Err(miette!(
+            "each will run {} writes; acknowledge with --count {}",
+            rows.len(),
+            rows.len()
+        ));
+    }
+    let (mut ok, mut failed) = (0, 0);
+    let mut result = Ok(ReplResult::Continue);
+    for row in rows {
+        let value = row.get("value").unwrap_or(&serde_json::Value::Null);
+        let text = value
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| value.to_string());
+        let line = template.replace("{}", &shell_words::quote(&text));
+        match execute_source_line(state, history, &line, "each", sink) {
+            Ok(None) => ok += 1,
+            Ok(Some(stop)) => {
+                ok += 1;
+                result = Ok(stop);
+                break;
+            }
+            Err(err) => {
+                failed += 1;
+                if !command.ignore_errors {
+                    result = Err(err);
+                    break;
+                }
+                sink.write_stderr(&format!("each: {err}\n"));
+            }
+        }
+    }
+    sink.write_stderr(&format!("{ok} ok, {failed} failed\n"));
+    if failed > 0 && result.is_ok() {
+        return Err(miette!("each: {failed} commands failed"));
+    }
+    result
 }
 
 fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
@@ -123,7 +283,11 @@ fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
                     source_help()
                 ));
             }
-            _ => paths.push(PathBuf::from(expand_home(&word))),
+            _ => paths.push(PathBuf::from(
+                expand_home(&word)
+                    .map(|path| path.display().to_string())
+                    .unwrap_or(word),
+            )),
         }
     }
     if !help && paths.is_empty() {
@@ -137,15 +301,13 @@ fn parse_source_builtin(raw: &str) -> Result<Option<SourceCommand>> {
 }
 
 fn execute_source_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     command: SourceCommand,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     if command.help {
-        return Ok(ReplLineResult::Continue(source_help()));
+        return Ok(ReplResult::Print(source_help()));
     }
 
     for path in command.paths {
@@ -166,7 +328,7 @@ fn execute_source_command(
                 continue;
             }
             let location = format!("{}:{}", path.display(), index + 1);
-            match execute_source_line(runtime, session, clients, history, line, &location, sink) {
+            match execute_source_line(state, history, line, &location, sink) {
                 Ok(None) => {}
                 Ok(Some(stop)) => return Ok(stop),
                 Err(err) if command.ignore_errors => {
@@ -178,43 +340,45 @@ fn execute_source_command(
             }
         }
     }
-    Ok(ReplLineResult::Continue(String::new()))
+    Ok(ReplResult::Continue)
 }
 
 /// Runs one sourced line, returning the result that stops the batch, if any.
 fn execute_source_line(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     line: &str,
     location: &str,
     sink: &mut dyn UiSink,
-) -> Result<Option<ReplLineResult>> {
+) -> Result<Option<ReplResult>> {
     if shell_words::split(line)
         .ok()
         .and_then(|words| words.into_iter().next())
         .as_deref()
-        == Some("source")
+        .is_some_and(|word| matches!(word, "source" | "each"))
     {
-        return Err(miette!("nested `source` commands are not supported"));
+        return Err(miette!(
+            "nested `source` or `each` commands are not supported"
+        ));
     }
-    let executed =
-        super::execute_repl_plugin_line_with_sink(runtime, session, clients, history, line, sink)?;
+    let executed = crate::ui::prompt::replay(|| {
+        super::execute_repl_plugin_line(state, history, line, Some(sink))
+    })?;
     match executed.result {
-        ReplLineResult::Continue(rendered) => sink.write_stdout(&rendered),
-        ReplLineResult::Restart { output, reload } => {
+        ReplResult::Continue => {}
+        ReplResult::Print(rendered) => sink.write_stdout(&rendered),
+        ReplResult::Restart { output, reload } => {
             sink.write_stdout(&output);
             sink.write_stderr(&format!(
                 "{location}: command requires a REPL restart; remaining source lines were not run\n"
             ));
-            return Ok(Some(ReplLineResult::Restart {
+            return Ok(Some(ReplResult::Restart {
                 output: String::new(),
                 reload,
             }));
         }
-        ReplLineResult::Exit(code) => return Ok(Some(ReplLineResult::Exit(code))),
-        ReplLineResult::ReplaceInput(_) => {
+        ReplResult::Exit(code) => return Ok(Some(ReplResult::Exit(code))),
+        ReplResult::ReplaceInput(_) => {
             return Err(miette!(
                 "history expansion is not supported in sourced files"
             ));
@@ -227,26 +391,24 @@ fn execute_source_line(
 }
 
 fn execute_pagination_builtin(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     direction: PaginationDirection,
     sink: &mut dyn UiSink,
-) -> Result<ReplLineResult> {
-    if session.native_context.pagination().is_none() {
-        return Ok(ReplLineResult::Continue(
+) -> Result<ReplResult> {
+    if state.session.native_context.pagination().is_none() {
+        return Ok(ReplResult::Print(
             "No paginated result to continue. Run a paginated list command first.\n".to_string(),
         ));
     }
     let forward = matches!(direction, PaginationDirection::Next);
-    let Some(command) = session.native_context.step_page(forward) else {
+    let Some(command) = state.session.native_context.step_page(forward) else {
         let message = if forward {
             "Already at the last page.\n"
         } else {
             "Already at the first page.\n"
         };
-        return Ok(ReplLineResult::Continue(message.to_string()));
+        return Ok(ReplResult::Print(message.to_string()));
     };
 
     // NativePagination stores tokenized argv. Re-encode it only at the REPL
@@ -257,9 +419,8 @@ fn execute_pagination_builtin(
         .map(|argument| crate::core::shell_words::escape_for_shell(argument))
         .collect::<Vec<_>>()
         .join(" ");
-    let executed =
-        super::execute_repl_plugin_line_with_sink(runtime, session, clients, history, &line, sink);
-    session.native_context.finish_page_step();
+    let executed = super::execute_repl_plugin_line(state, history, &line, Some(sink));
+    state.session.native_context.finish_page_step();
     Ok(executed?.result)
 }
 
@@ -268,125 +429,34 @@ fn source_help() -> String {
         .to_string()
 }
 
-pub(super) fn parse_bang_command(raw: &str) -> Result<Option<BangCommand>> {
-    let Some((_, raw)) = split_bang_request(raw) else {
-        return Ok(None);
-    };
-    if raw == "!" {
-        return Ok(Some(BangCommand::Prefix(String::new())));
-    }
-    if raw == "!!" {
-        return Ok(Some(BangCommand::Last));
-    }
-    if let Some(rest) = raw.strip_prefix("!?") {
-        let term = rest.trim();
-        if term.is_empty() {
-            return Err(miette!("`!?` expects search text"));
-        }
-        return Ok(Some(BangCommand::Contains(term.to_string())));
-    }
-    if let Some(rest) = raw.strip_prefix("!-") {
-        let offset = rest
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| miette!("`!-N` expects a positive integer"))?;
-        if offset == 0 {
-            return Err(miette!("`!-N` expects N >= 1"));
-        }
-        return Ok(Some(BangCommand::Relative(offset)));
-    }
-    let rest = raw.trim_start_matches('!').trim();
-    if rest.is_empty() {
-        return Ok(Some(BangCommand::Prefix(String::new())));
-    }
-    let digit_len = rest.bytes().take_while(u8::is_ascii_digit).count();
-    let (id, suffix) = rest.split_at(digit_len);
-    if !id.is_empty() && (suffix.is_empty() || suffix.starts_with(char::is_whitespace)) {
-        let id = id
-            .parse::<usize>()
-            .map_err(|_| miette!("`!N` expects a positive integer"))?;
-        if id == 0 {
-            return Err(miette!("`!N` expects N >= 1"));
-        }
-        return Ok(Some(BangCommand::Absolute {
-            id,
-            suffix: (!suffix.trim_start().is_empty()).then(|| suffix.trim_start().to_string()),
-        }));
-    }
-    Ok(Some(BangCommand::Prefix(rest.to_string())))
-}
-
 pub(super) fn execute_bang_command(
     session: &mut AppSession,
     history: &SharedHistory,
     raw: &str,
     command: BangCommand,
-) -> Result<ReplLineResult> {
+) -> Result<ReplResult> {
     let elevated = split_bang_request(raw).is_some_and(|(elevated, _)| elevated);
     let scope = current_history_scope(session);
-    let recent = history.recent_commands_for(scope.as_deref());
-    let expanded = match command {
-        BangCommand::Last => history.expand_last_command(raw),
-        BangCommand::Relative(offset) => {
-            expand_history(&format!("!-{offset}"), &recent, scope.as_deref(), true)
-        }
-        BangCommand::Absolute { id, suffix } => {
-            expand_history(&format!("!{id}"), &recent, scope.as_deref(), true).map(|expanded| {
-                match suffix {
-                    Some(suffix) => format!("{expanded} {suffix}"),
-                    None => expanded,
-                }
-            })
-        }
-        BangCommand::Prefix(prefix) => {
-            if prefix.is_empty() {
-                return Ok(ReplLineResult::Continue(render_bang_help()));
-            }
-            expand_history(&format!("!{prefix}"), &recent, scope.as_deref(), true)
-        }
-        BangCommand::Contains(term) => {
-            let mut found = None;
-            for full in recent.iter().rev() {
-                let visible = strip_history_scope(full, scope.as_deref());
-                if visible.contains(&term) {
-                    found = Some(visible);
-                    break;
-                }
-            }
-            found
-        }
-    };
+    if matches!(&command, BangCommand::Prefix(prefix) if prefix.is_empty()) {
+        return Ok(ReplResult::Print(render_bang_help()));
+    }
+    let expanded = history
+        .with(|store| store.expand(&command, scope.as_deref(), elevated))
+        .ok()
+        .flatten();
 
     let Some(expanded) = expanded else {
-        return Ok(ReplLineResult::Continue(format!(
-            "No history match for: {raw}\n"
-        )));
+        return match command {
+            BangCommand::Absolute { id, .. } => Err(miette!("no history entry {id}")),
+            _ => Err(miette!("no history match for: {raw}")),
+        };
     };
 
-    Ok(ReplLineResult::ReplaceInput(if elevated {
-        if expanded.split_whitespace().next() == Some("sudo") {
-            expanded
-        } else {
-            format!("sudo {expanded}")
-        }
-    } else {
-        expanded
-    }))
+    Ok(ReplResult::ReplaceInput(expanded))
 }
 
 pub(super) fn current_history_scope(session: &AppSession) -> Option<String> {
     session.scope.history_scope_prefix()
-}
-
-pub(super) fn strip_history_scope(command: &str, scope: Option<&str>) -> String {
-    let trimmed = command.trim();
-    match scope {
-        Some(prefix) => trimmed
-            .strip_prefix(prefix)
-            .map(|rest| rest.trim_start().to_string())
-            .unwrap_or_else(|| trimmed.to_string()),
-        None => trimmed.to_string(),
-    }
 }
 
 fn render_bang_help() -> String {
@@ -395,7 +465,7 @@ fn render_bang_help() -> String {
     out.push_str("  last     replay the last successful result\n");
     out.push_str("  last --raw  show the pre-pipeline result\n\n");
     out.push_str("Bang history shortcuts:\n");
-    out.push_str("  !!       repeat the last command\n");
+    out.push_str("  !! [args] repeat the last command, appending arguments\n");
     out.push_str("  !-N      Nth previous visible command\n");
     out.push_str("  !N [args]  visible history entry by id, with optional appended arguments\n");
     out.push_str("  !prefix  latest visible command starting with prefix\n");
@@ -407,7 +477,8 @@ fn execute_last_result_builtin(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     line: &str,
-) -> Result<ReplLineResult> {
+    sink: &mut dyn UiSink,
+) -> Result<ReplResult> {
     let parsed = crate::repl::input::ReplParsedLine::parse(line, runtime.config.resolved())?;
     let scanned = crate::cli::invocation::scan_command_tokens(&parsed.dispatch_tokens)?;
     let command = clap::Command::new("last")
@@ -418,16 +489,16 @@ fn execute_last_result_builtin(
                 .action(clap::ArgAction::SetTrue)
                 .help("Start from the saved result before its original pipeline"),
         )
-        .after_help(crate::cli::invocation::INVOCATION_HELP_SECTION);
+        .after_help(crate::cli::invocation::invocation_help_text());
     let matches = match command.try_get_matches_from(scanned.tokens) {
         Ok(matches) => matches,
         Err(error) if error.kind() == clap::error::ErrorKind::DisplayHelp => {
-            return Ok(ReplLineResult::Continue(error.to_string()));
+            return Ok(ReplResult::Print(error.to_string()));
         }
         Err(error) => return Err(miette!(error.to_string())),
     };
     let Some(last) = session.last_success() else {
-        return Ok(ReplLineResult::Continue(
+        return Ok(ReplResult::Print(
             "No recorded successful REPL result in this session.\n".to_string(),
         ));
     };
@@ -444,44 +515,29 @@ fn execute_last_result_builtin(
         last.stages.clone()
     };
     stages.extend(parsed.stages);
-    let rendered = crate::app::render_saved_repl_output_with_runtime(
-        &crate::app::CommandRenderRuntime::new(runtime.config.resolved(), &invocation.ui),
+    let rendered = crate::app::render_saved_repl_output(
+        runtime.config.resolved(),
+        &invocation.ui,
         &last.output,
         &stages,
+        Some(sink),
     )?;
-    Ok(ReplLineResult::Continue(rendered))
+    Ok(ReplResult::Print(rendered))
 }
 
 pub(super) fn is_repl_bang_request(raw: &str) -> bool {
     split_bang_request(raw).is_some()
 }
 
-fn split_bang_request(raw: &str) -> Option<(bool, &str)> {
-    let raw = raw.trim();
-    if raw.starts_with('!') {
-        return Some((false, raw));
-    }
-
-    let rest = raw.strip_prefix("sudo")?;
-    if !rest.chars().next().is_some_and(char::is_whitespace) {
-        return None;
-    }
-    let bang = rest.trim_start();
-    bang.starts_with('!').then_some((true, bang))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{BangCommand, PaginationDirection, execute_repl_builtin, parse_repl_builtin};
-    use crate::app::{
-        AppState, AppStateInit, LaunchContext, ReplCommandOutput, RuntimeContext,
-        StructuredCommandOutput, TerminalKind,
-    };
+    use super::{PaginationDirection, execute_repl_builtin, parse_repl_builtin};
+    use crate::app::{AppState, CommandOutput, LaunchContext, RuntimeContext, TerminalKind};
     use crate::cli::rows::output::rows_to_output_result;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::native::{NativeCommand, NativeCommandContext, NativeCommandOutcome};
-    use crate::repl::{HistoryConfig, ReplLineResult, SharedHistory};
+    use crate::repl::{HistoryConfig, ReplResult, SharedHistory};
     use crate::ui::RenderSettings;
     use crate::ui::messages::MessageLevel;
     use clap::Command;
@@ -501,32 +557,36 @@ mod tests {
             .resolve(ResolveOptions::default().with_terminal("repl"))
             .expect("test config should resolve");
 
-        AppState::new(AppStateInit {
+        crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config,
-            render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            message_verbosity: MessageLevel::Success,
-            error_detail: crate::app::ErrorDetail::Terse,
-            debug_verbosity: 0,
-            plugins: crate::plugin::PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands,
-            themes: crate::ui::theme_catalog::ThemeCatalog::default(),
             launch: LaunchContext::default(),
-        })
+            native_commands,
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Json),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                crate::plugin::PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build()
     }
 
     fn history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_max_entries(20)
-                .with_enabled(true)
-                .with_dedupe(true)
-                .with_profile_scoped(false)
-                .with_shell_context(Default::default())
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            max_entries: 20,
+            enabled: true,
+            dedupe: true,
+            shell_context: Default::default(),
+            ..HistoryConfig::default()
+        })
     }
 
     struct PageCommand;
@@ -549,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_repl_builtin_covers_none_help_exit_and_bang_unit() {
+    fn parse_repl_builtin_covers_none_help_exit_and_pagination_unit() {
         assert_eq!(parse_repl_builtin("   ").expect("blank"), None);
         assert!(matches!(
             parse_repl_builtin("--help").expect("help"),
@@ -577,10 +637,6 @@ mod tests {
                 PaginationDirection::Previous
             ))
         ));
-        assert!(matches!(
-            parse_repl_builtin("!!").expect("bang"),
-            Some(super::ReplBuiltin::Bang(BangCommand::Last))
-        ));
     }
 
     #[test]
@@ -596,9 +652,7 @@ mod tests {
 
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "exit",
                 parse_repl_builtin("exit")
@@ -607,16 +661,14 @@ mod tests {
                 &mut sink,
             )
             .expect("exit should succeed"),
-            ReplLineResult::Exit(0)
+            ReplResult::Exit(0)
         ));
 
         let mut state = app_state();
         let mut sink = crate::app::sink::BufferedUiSink::default();
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "help",
                 parse_repl_builtin("help")
@@ -625,19 +677,17 @@ mod tests {
                 &mut sink,
             )
             .expect("help should succeed"),
-            ReplLineResult::Continue(text) if text.contains("help") || text.contains("config")
+            ReplResult::Print(text) if text.contains("help") || text.contains("config")
         ));
 
         state.session.record_success_output(
             "config show",
-            &ReplCommandOutput::Text("visible\n".to_string()),
+            CommandOutput::text("visible\n".to_string()),
             &[],
         );
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last",
                 parse_repl_builtin("last")
@@ -646,26 +696,23 @@ mod tests {
                 &mut sink,
             )
             .expect("last should succeed"),
-            ReplLineResult::Continue(text) if text == "visible\n"
+            ReplResult::Print(text) if text == "visible\n"
         ));
 
         state.session.record_success_output(
             "ldap user alice | P name",
-            &ReplCommandOutput::Output(Box::new(StructuredCommandOutput {
-                source_guide: None,
-                output: rows_to_output_result(vec![crate::row! {
+            CommandOutput::output(
+                rows_to_output_result(vec![crate::row! {
                     "name" => "alice",
                     "role" => "admin"
                 }]),
-                format_hint: None,
-            })),
+                None,
+            ),
             &["P name".to_string()],
         );
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last",
                 parse_repl_builtin("last")
@@ -674,13 +721,11 @@ mod tests {
                 &mut sink,
             )
             .expect("last should succeed"),
-            ReplLineResult::Continue(text) if text.contains("alice") && !text.contains("admin")
+            ReplResult::Print(text) if text.contains("alice") && !text.contains("admin")
         ));
         assert!(matches!(
             execute_repl_builtin(
-                &mut state.runtime,
-                &mut state.session,
-                &state.clients,
+                &mut state,
                 &history,
                 "last --raw",
                 parse_repl_builtin("last --raw")
@@ -689,7 +734,7 @@ mod tests {
                 &mut sink,
             )
             .expect("last raw should succeed"),
-            ReplLineResult::Continue(text) if text.contains("alice") && text.contains("admin")
+            ReplResult::Print(text) if text.contains("alice") && text.contains("admin")
         ));
     }
 
@@ -700,9 +745,7 @@ mod tests {
         let mut sink = crate::app::sink::BufferedUiSink::default();
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")
@@ -713,7 +756,7 @@ mod tests {
         .expect("missing pagination should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Run a paginated list command first")
+            ReplResult::Print(text) if text.contains("Run a paginated list command first")
         ));
 
         state
@@ -724,9 +767,7 @@ mod tests {
                 next: None,
             });
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "prev",
             parse_repl_builtin("prev")
@@ -737,13 +778,11 @@ mod tests {
         .expect("first-page boundary should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Already at the first page")
+            ReplResult::Print(text) if text.contains("Already at the first page")
         ));
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")
@@ -754,7 +793,7 @@ mod tests {
         .expect("last-page boundary should be handled");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("Already at the last page")
+            ReplResult::Print(text) if text.contains("Already at the last page")
         ));
     }
 
@@ -774,9 +813,7 @@ mod tests {
             });
 
         let result = execute_repl_builtin(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
             "next",
             parse_repl_builtin("next")
@@ -787,7 +824,7 @@ mod tests {
         .expect("trusted continuation should dispatch");
         assert!(matches!(
             result,
-            ReplLineResult::Continue(text) if text.contains("page command received: next page")
+            ReplResult::Print(text) if text.contains("page command received: next page")
         ));
         assert_eq!(state.session.native_context.pagination(), None);
     }

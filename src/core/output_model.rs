@@ -5,8 +5,8 @@
 //!
 //! High-level flow:
 //!
-//! - commands produce [`crate::core::output_model::OutputResult`]
-//! - the DSL transforms its [`crate::core::output_model::OutputItems`] and
+//! - commands produce [`crate::core::OutputResult`]
+//! - the DSL transforms its [`crate::core::OutputItems`] and
 //!   optional semantic document
 //! - the UI later lowers the result into rendered documents and terminal text
 //!
@@ -16,16 +16,93 @@
 //! - semantic sidecar documents should stay canonical here instead of leaking
 //!   format-specific assumptions into the DSL or UI
 
+use crate::core::document::Document;
 use crate::core::output::OutputFormat;
 use crate::core::row::Row;
 use serde_json::Value;
 use std::collections::HashSet;
 
 /// Producer-declared human display changes. Conditions use original row values;
-/// rules never change canonical data or DSL field values.
+/// rules never change canonical data or DSL field values. Field selectors accept
+/// literal top-level keys, dotted paths, or JSON Pointers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Sum inclusive IP ranges without adding an aggregate to canonical JSON.
+    AddressRangeTotal {
+        /// Canonical array of range records.
+        ranges: String,
+        /// Start-address field within each range.
+        start: String,
+        /// End-address field within each range.
+        end: String,
+        /// Human-only total field to insert.
+        field: String,
+    },
+    /// Derive remaining address capacity from a CIDR and an exact used count.
+    AddressCountRemaining {
+        /// Canonical CIDR field.
+        network: String,
+        /// Canonical used-address integer field.
+        used: String,
+        /// Human-only field to insert.
+        field: String,
+    },
+    /// Substitute a human label for null without changing the payload.
+    NullText {
+        /// Canonical field selector.
+        field: String,
+        /// Text displayed only for null values.
+        text: String,
+    },
+    /// Format an ISO date or datetime using a chrono strftime pattern.
+    Date {
+        /// Canonical ISO date or datetime field selector.
+        field: String,
+        /// Chrono strftime pattern for human output.
+        pattern: String,
+    },
+    /// Display a number with a fixed decimal precision.
+    Decimal {
+        /// Canonical numeric field selector.
+        field: String,
+        /// Fractional digits, capped at 4096 by the renderer.
+        precision: usize,
+    },
+    /// Limit a non-null value's displayed character count.
+    TextLimit {
+        /// Canonical field selector.
+        field: String,
+        /// Maximum displayed Unicode character count.
+        length: usize,
+    },
+    /// Display an object or array as fields interspersed with literal wording.
+    /// Selectors in parts are relative to that collection, after scalar rules.
+    Compose {
+        /// Canonical object or array field selector.
+        field: String,
+        /// Ordered literal and field spans in the displayed value.
+        parts: Vec<DisplayPart>,
+    },
+    /// Paint a colour/style specification using its own style in terminal cells.
+    ValueStyle {
+        /// Canonical string field containing a validated style specification.
+        field: String,
+        /// Emphasize the value in addition to its declared style.
+        bold: bool,
+    },
+    /// Link an HTTP(S) URL value in rich terminal output only.
+    Hyperlink {
+        /// Canonical string field containing the URL and visible link text.
+        field: String,
+    },
+    /// Hide array members marked by a boolean field in human output only.
+    HideArrayItemsWhenTrue {
+        /// Canonical array field path to project.
+        field: String,
+        /// Boolean path within each array member.
+        when: String,
+    },
     /// Append a literal suffix to a string when a boolean field is true.
     SuffixWhenTrue {
         /// Canonical field path to decorate.
@@ -50,6 +127,22 @@ pub enum DisplayRule {
     /// Format an RFC3339 or Unix-seconds timestamp relative to the current time.
     RelativeTimestamp {
         /// Canonical timestamp field path to format.
+        field: String,
+    },
+}
+
+/// Inline content references data; producers never interpolate field values.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DisplayPart {
+    /// Literal punctuation or wording surrounding a value.
+    Literal {
+        /// Wording that contains no interpolated response data.
+        text: String,
+    },
+    /// A typed value within the composed object.
+    Field {
+        /// Selector relative to the composed object.
         field: String,
     },
 }
@@ -82,13 +175,19 @@ pub struct Group {
 /// Output identity and rendering metadata attached to an [`OutputResult`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OutputMeta {
+    /// Human-only notes after the displayed result; absent from data exports.
+    pub display_notes: Vec<String>,
+    /// Remembered arguments used by the producing command.
+    pub context: std::collections::BTreeMap<String, String>,
     /// Stable first-seen column order for row rendering.
     pub key_index: Vec<String>,
     /// Optional curated field paths for human display, in priority order.
+    /// Dotted paths and JSON Pointers both support human field selection.
     pub display_columns: Option<Vec<String>>,
     /// Optional human labels aligned positionally with `display_columns`.
     pub display_column_labels: Option<Vec<String>>,
     /// Producer-declared numeric timestamp paths, measured in Unix seconds.
+    /// Uses the same selectors as `display_columns`.
     pub unix_timestamp_columns: Vec<String>,
     /// Human-only conditional field formatting, evaluated against raw rows.
     pub display_rules: Vec<DisplayRule>,
@@ -100,15 +199,14 @@ pub struct OutputMeta {
     /// a semantic document. Pipeline continuations preserve this identity;
     /// service field names alone must never set it.
     pub grouped: bool,
+    /// Rows explicitly produced by a semantic document, with section context.
+    pub document_rows: bool,
+    /// Optional minimum gap after aligned document entry names.
+    pub document_entry_gap: Option<usize>,
+    /// Use clap long-help entry layout for builtin option descriptions.
+    pub document_long_help: bool,
     /// Preferred renderer for this result, when known.
     pub render_recommendation: Option<RenderRecommendation>,
-    /// Human-only complete lines supplied by a producer for presentation.
-    /// Pipeline stages clear this override before rendering transformed rows.
-    pub presentation_lines: Vec<String>,
-    /// Human-only progress lines used when a progress block is appended.
-    pub progress_append: Vec<String>,
-    /// Whether a transient progress block should replace the previous block.
-    pub progress_replace: bool,
     /// Human-only cap on rows shown; pipeline stages clear it because they
     /// work on, and show, every row.
     pub display_limit: Option<usize>,
@@ -119,44 +217,34 @@ pub struct OutputMeta {
 pub enum RenderRecommendation {
     /// Render using the specified output format.
     Format(OutputFormat),
-    /// Render as structured guide/help content.
-    Guide,
+    /// Render as semantic document content.
+    Document,
 }
 
-/// Stable identity for a semantic payload carried through the output pipeline.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputDocumentKind {
-    /// Structured guide/help/intro payload.
-    Guide,
-    /// Canonical JSON document supplied by a command implementation.
-    Json,
-}
-
-/// Optional semantic document attached to rendered output.
+/// Unstaged semantic content or an original service JSON envelope.
 #[derive(Clone, Debug, PartialEq)]
-pub struct OutputDocument {
-    /// Semantic payload identity.
-    pub kind: OutputDocumentKind,
-    /// Canonical JSON substrate for the payload.
-    pub value: Value,
+pub enum OutputDocument {
+    /// Ordered semantic blocks for direct human rendering.
+    Semantic(Document),
+    /// Canonical JSON supplied by a command, before row projection.
+    Json(Value),
 }
 
 impl OutputDocument {
-    /// Builds a semantic payload from its identity and canonical JSON value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind};
-    /// use serde_json::json;
-    ///
-    /// let document = OutputDocument::new(OutputDocumentKind::Guide, json!({"title": "Help"}));
-    ///
-    /// assert_eq!(document.kind, OutputDocumentKind::Guide);
-    /// assert_eq!(document.value["title"], "Help");
-    /// ```
-    pub fn new(kind: OutputDocumentKind, value: Value) -> Self {
-        Self { kind, value }
+    /// Returns the semantic document when this payload contains one.
+    pub fn semantic(&self) -> Option<&Document> {
+        match self {
+            Self::Semantic(document) => Some(document),
+            Self::Json(_) => None,
+        }
+    }
+
+    /// Serializes semantic content only at the JSON output boundary.
+    pub fn json_value(&self) -> Value {
+        match self {
+            Self::Semantic(document) => serde_json::json!(document),
+            Self::Json(value) => value.clone(),
+        }
     }
 }
 
@@ -174,7 +262,10 @@ pub enum OutputItems {
 pub struct OutputResult {
     /// Primary payload to render or further transform.
     pub items: OutputItems,
-    /// Optional semantic sidecar document.
+    /// Unstaged semantic view or original service JSON envelope. Pipeline stages
+    /// discard it before transforming `items`. Semantic views serialize as
+    /// documents only when `meta.document_rows` marks their row projection;
+    /// presentation annotations keep canonical row JSON instead.
     pub document: Option<OutputDocument>,
     /// Rendering metadata derived during result construction.
     pub meta: OutputMeta,
@@ -186,7 +277,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let output = OutputResult::from_rows(vec![
@@ -203,18 +294,7 @@ impl OutputResult {
             document: None,
             meta: OutputMeta {
                 key_index,
-                unix_timestamp_columns: Vec::new(),
-                display_rules: Vec::new(),
-                display_columns: None,
-                display_column_labels: None,
-                column_align: Vec::new(),
-                wants_copy: false,
-                grouped: false,
-                render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
-                display_limit: None,
+                ..OutputMeta::default()
             },
         }
     }
@@ -224,22 +304,18 @@ impl OutputResult {
     /// Replaces existing payload rows with rows derived from the document and
     /// rebuilds the key index. This is a payload replacement, not an annotation.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::core::output_model::{OutputDocument, OutputDocumentKind, OutputResult};
-    /// use serde_json::json;
-    ///
-    /// let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-    ///     OutputDocumentKind::Guide,
-    ///     json!({"title": "Help"}),
-    /// ));
-    ///
-    /// assert!(output.document.is_some());
-    /// ```
     #[must_use]
     pub fn with_document(mut self, document: OutputDocument) -> Self {
-        self.items = OutputItems::Rows(rows_from_value(document.value.clone()));
+        self.meta.document_rows = matches!(document, OutputDocument::Semantic(_));
+        if self.meta.document_rows {
+            self.meta.render_recommendation = Some(RenderRecommendation::Document);
+        } else if self.meta.render_recommendation == Some(RenderRecommendation::Document) {
+            self.meta.render_recommendation = None;
+        }
+        self.items = OutputItems::Rows(match &document {
+            OutputDocument::Semantic(document) => document.rows(),
+            OutputDocument::Json(value) => rows_from_value(value.clone()),
+        });
         self.meta.key_index = compute_key_index(self.as_rows().unwrap_or_default());
         self.document = Some(document);
         self
@@ -250,7 +326,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]);
@@ -269,7 +345,7 @@ impl OutputResult {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output_model::OutputResult;
+    /// use osp_cli::core::OutputResult;
     /// use osp_cli::row;
     ///
     /// let rows = OutputResult::from_rows(vec![row! { "uid" => "alice" }])
@@ -307,20 +383,13 @@ pub(crate) fn group_rows(group: &Group) -> Vec<Row> {
 
 pub(crate) fn group_header_row(group: &Group) -> Row {
     let mut row = group.groups.clone();
-    for (key, value) in &group.aggregates {
-        row.insert(key.clone(), value.clone());
-    }
+    row.extend(group.aggregates.clone());
     row
 }
 
 pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
-    let mut merged = group.groups.clone();
-    for (key, value) in &group.aggregates {
-        merged.insert(key.clone(), value.clone());
-    }
-    for (key, value) in row {
-        merged.insert(key.clone(), value.clone());
-    }
+    let mut merged = group_header_row(group);
+    merged.extend(row.clone());
     merged
 }
 
@@ -328,7 +397,7 @@ pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::compute_key_index;
 /// use osp_cli::row;
 ///
@@ -339,7 +408,7 @@ pub(crate) fn group_member_row(group: &Group, row: &Row) -> Row {
 ///
 /// assert_eq!(compute_key_index(&rows), vec!["uid", "mail", "cn"]);
 /// ```
-pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
+pub(crate) fn compute_key_index(rows: &[Row]) -> Vec<String> {
     let mut key_index = Vec::new();
     let mut seen = HashSet::new();
 
@@ -358,7 +427,7 @@ pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::{OutputItems, output_items_to_value};
 /// use osp_cli::row;
 ///
@@ -366,16 +435,13 @@ pub fn compute_key_index(rows: &[Row]) -> Vec<String> {
 ///
 /// assert_eq!(value["uid"], "alice");
 /// ```
-pub fn output_items_to_value(items: &OutputItems) -> Value {
+#[cfg(test)]
+pub(crate) fn output_items_to_value(items: &OutputItems) -> Value {
     match items {
-        OutputItems::Rows(rows) if rows.len() == 1 => rows
-            .first()
-            .cloned()
-            .map(Value::Object)
-            .unwrap_or_else(|| Value::Array(Vec::new())),
-        OutputItems::Rows(rows) => {
-            Value::Array(rows.iter().cloned().map(Value::Object).collect::<Vec<_>>())
-        }
+        OutputItems::Rows(rows) => match rows.as_slice() {
+            [row] => Value::Object(row.clone()),
+            _ => Value::Array(rows.iter().cloned().map(Value::Object).collect()),
+        },
         OutputItems::Groups(groups) => Value::Array(
             groups
                 .iter()
@@ -413,7 +479,7 @@ pub fn output_items_to_value(items: &OutputItems) -> Value {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::output_model::{OutputItems, output_items_from_value};
 /// use serde_json::json;
 ///
@@ -424,42 +490,32 @@ pub fn output_items_to_value(items: &OutputItems) -> Value {
 ///     OutputItems::Rows(vec![json!({"uid": "alice"}).as_object().cloned().unwrap()])
 /// );
 /// ```
-pub fn output_items_from_value(value: Value) -> OutputItems {
-    match value {
-        Value::Array(items) => {
-            if items.is_empty() {
-                OutputItems::Rows(Vec::new())
-            } else if let Some(groups) = groups_from_values(&items) {
-                OutputItems::Groups(groups)
-            } else {
-                OutputItems::Rows(
-                    items
-                        .into_iter()
-                        .flat_map(row_items_from_value)
-                        .collect::<Vec<_>>(),
-                )
-            }
-        }
-        Value::Object(map) => OutputItems::Rows(vec![map]),
-        scalar => OutputItems::Rows(vec![row_with_value(scalar)]),
+#[cfg(test)]
+pub(crate) fn output_items_from_value(value: Value) -> OutputItems {
+    if let Value::Array(items) = &value
+        && !items.is_empty()
+        && let Some(groups) = groups_from_values(items)
+    {
+        return OutputItems::Groups(groups);
     }
+    OutputItems::Rows(rows_from_value(value))
 }
 
 /// Projects any JSON value into a row stream for pipeline-oriented processing.
 ///
 /// Arrays expand into one row per item. Objects become single rows directly.
 /// Scalars become a single row under the canonical `value` column.
-pub fn rows_from_value(value: Value) -> Vec<Row> {
+pub(crate) fn rows_from_value(value: Value) -> Vec<Row> {
     match value {
-        Value::Array(values) => values.into_iter().flat_map(row_items_from_value).collect(),
-        other => row_items_from_value(other),
+        Value::Array(values) => values.into_iter().map(row_from_value).collect(),
+        other => vec![row_from_value(other)],
     }
 }
 
-fn row_items_from_value(value: Value) -> Vec<Row> {
+fn row_from_value(value: Value) -> Row {
     match value {
-        Value::Object(map) => vec![map],
-        other => vec![row_with_value(other)],
+        Value::Object(map) => map,
+        other => row_with_value(other),
     }
 }
 
@@ -469,10 +525,12 @@ fn row_with_value(value: Value) -> Row {
     row
 }
 
+#[cfg(test)]
 fn groups_from_values(values: &[Value]) -> Option<Vec<Group>> {
     values.iter().map(group_from_value).collect()
 }
 
+#[cfg(test)]
 fn group_from_value(value: &Value) -> Option<Group> {
     let Value::Object(map) = value else {
         return None;
@@ -501,9 +559,46 @@ fn group_from_value(value: &Value) -> Option<Group> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::core::output_model::compute_key_index;
+        use crate::row;
+
+        let rows = vec![
+            row! { "uid" => "alice", "mail" => "a@example.com" },
+            row! { "uid" => "bob", "cn" => "Bob" },
+        ];
+
+        assert_eq!(compute_key_index(&rows), vec!["uid", "mail", "cn"]);
+    }
+
+    #[test]
+    fn internal_example_2() {
+        use crate::core::output_model::{OutputItems, output_items_to_value};
+        use crate::row;
+
+        let value = output_items_to_value(&OutputItems::Rows(vec![row! { "uid" => "alice" }]));
+
+        assert_eq!(value["uid"], "alice");
+    }
+
+    #[test]
+    fn internal_example_3() {
+        use crate::core::output_model::{OutputItems, output_items_from_value};
+        use serde_json::json;
+
+        let items = output_items_from_value(json!({"uid": "alice"}));
+
+        assert_eq!(
+            items,
+            OutputItems::Rows(vec![json!({"uid": "alice"}).as_object().cloned().unwrap()])
+        );
+    }
+
     use super::{
-        Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta, OutputResult,
-        output_items_from_value, output_items_to_rows, output_items_to_value,
+        Group, OutputDocument, OutputItems, OutputMeta, OutputResult, output_items_from_value,
+        output_items_to_rows, output_items_to_value,
     };
     use serde_json::Value;
     use serde_json::json;
@@ -547,16 +642,17 @@ mod tests {
         assert_eq!(grouped_output.as_rows(), None);
         assert_eq!(grouped_output.into_rows(), None);
 
-        let document_output = OutputResult::from_rows(Vec::new()).with_document(
-            OutputDocument::new(OutputDocumentKind::Guide, json!({"usage": ["osp"]})),
-        );
+        let document_output =
+            OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Semantic(
+                serde_json::from_value(
+                    json!({"blocks": [{"section": "Usage", "blocks": [{"text": "osp"}]}]}),
+                )
+                .expect("semantic document"),
+            ));
 
         assert!(matches!(
             document_output.document,
-            Some(OutputDocument {
-                kind: OutputDocumentKind::Guide,
-                value: Value::Object(_),
-            })
+            Some(OutputDocument::Semantic(_))
         ));
     }
 

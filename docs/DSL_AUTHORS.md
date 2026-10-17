@@ -12,9 +12,11 @@ parallel implementations of verbs.
   hints never rename, remove or convert canonical values. A raw document can
   survive unstaged JSON rendering, but no staged service result retains its
   stale pagination/total envelope.
-- `GuideView` owns guide-to-row normalization and reconstruction. Explicitly
-  declared guides expose entries/text as rows and keep section/layout metadata
-  outside execution. Ordinary service fields never implicitly identify guides.
+- `core::Document` supplies flat rows once, before key validation.
+  Entries carry `section`, `name`, and `description`; text carries `section` and
+  `text`. Output metadata declares document intent. Preserve the current row
+  stream and never reconstruct sections by value equality. Existing stage
+  behavior flags clear the marker when row identity changes.
 - `dsl/engine.rs` compiles and dispatches each stage once over `RowSet`.
 - Verbs own algorithms over rows/partitions. Group keys and aggregates are
   deliberately metadata, not duplicate fields inserted into members.
@@ -29,6 +31,21 @@ parallel implementations of verbs.
   `ui::format_relative_timestamp` helpers. Conditions always read the original
   row; missing target fields are not synthesized. JSON rendering preserves raw
   values, and filters use canonical values before these display changes.
+
+`DisplayRule::Hyperlink { field }` marks a string field whose value is an
+HTTP(S) URL. The renderer emits OSC 8 only for rich TTY output. Plain output,
+JSON, Markdown, CSV/TSV, pipelines and `last` replay keep the plain URL; product
+text remains sanitized. The marker never changes canonical values.
+
+`NullText`, `Date`, `Decimal`, and `TextLimit` format scalar fields only at
+the human rendering boundary. `Compose` joins ordered literal and relative
+field spans from a typed object or array into one displayed value. Apply scalar rules
+before composition. These rules accept the same field selectors as curated
+columns, never replace the JSON document, and never interpolate values in the
+command adapter. A shape-changing stage clears them; synthesized fields also
+lose any formatting attached to the overwritten input field. Table output
+with declared columns retains its headings for an empty collection without
+manufacturing a result row.
 
 A stage that changes shape clears curated columns, alignment, numeric timestamp
 hints, conditional display rules and renderer recommendations. Guide layout

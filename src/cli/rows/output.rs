@@ -5,8 +5,8 @@
 //! metadata" conversions.
 
 use crate::core::output_model::{
-    ColumnAlignment, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta, OutputResult,
-    compute_key_index, output_items_to_rows, rows_from_value,
+    ColumnAlignment, OutputDocument, OutputItems, OutputMeta, OutputResult, compute_key_index,
+    rows_from_value,
 };
 use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
 use crate::core::row::Row;
@@ -15,30 +15,27 @@ pub(crate) fn rows_to_output_result(rows: Vec<Row>) -> OutputResult {
     OutputResult::from_rows(rows)
 }
 
-pub(crate) fn output_to_rows(output: &OutputResult) -> Vec<Row> {
-    output_items_to_rows(&output.items)
-}
-
 pub(crate) fn plugin_data_to_output_result(
     data: serde_json::Value,
     meta: Option<&ResponseMetaV1>,
 ) -> OutputResult {
     let document = meta
         .is_some_and(|meta| meta.preserve_json_document || meta.row_path.is_some())
-        .then(|| OutputDocument::new(OutputDocumentKind::Json, data.clone()));
+        .then(|| OutputDocument::Json(data.clone()));
     let row_data = meta
         .and_then(|meta| meta.row_path.as_deref())
         .and_then(|row_path| data.get(row_path))
         .cloned()
         .unwrap_or(data);
     // Service JSON has no implicit knowledge of the engine's group envelope.
-    let items = OutputItems::Rows(rows_from_value(row_data));
-    let rows = output_items_to_rows(&items);
+    let rows = rows_from_value(row_data);
     let key_index = compute_key_index(&rows);
     OutputResult {
-        items,
+        items: OutputItems::Rows(rows),
         document,
         meta: OutputMeta {
+            display_notes: Vec::new(),
+            context: meta.map(|m| m.context.clone()).unwrap_or_default(),
             key_index,
             display_columns: meta.and_then(|meta| meta.columns.clone()),
             display_column_labels: meta.and_then(|meta| {
@@ -62,14 +59,10 @@ pub(crate) fn plugin_data_to_output_result(
                 .unwrap_or_default(),
             wants_copy: false,
             grouped: false,
+            document_rows: false,
+            document_entry_gap: None,
+            document_long_help: false,
             render_recommendation: None,
-            presentation_lines: meta
-                .map(|meta| meta.presentation_lines.clone())
-                .unwrap_or_default(),
-            progress_append: meta
-                .map(|meta| meta.progress_append.clone())
-                .unwrap_or_default(),
-            progress_replace: meta.is_some_and(|meta| meta.progress_replace),
             display_limit: meta.and_then(|meta| meta.display_limit),
         },
     }
@@ -86,14 +79,14 @@ fn column_alignment_from_plugin(value: ColumnAlignmentV1) -> ColumnAlignment {
 
 #[cfg(test)]
 mod tests {
-    use super::{output_to_rows, plugin_data_to_output_result, rows_to_output_result};
+    use super::{plugin_data_to_output_result, rows_to_output_result};
     use crate::core::output::OutputFormat;
     use crate::core::output_model::{
-        ColumnAlignment, Group, OutputItems, OutputMeta, OutputResult,
+        ColumnAlignment, Group, OutputItems, OutputMeta, OutputResult, output_items_to_rows,
     };
     use crate::core::plugin::{ColumnAlignmentV1, ResponseMetaV1};
     use crate::dsl::apply_output_pipeline;
-    use crate::ui::{RenderSettings, render_output};
+    use crate::ui::{RenderSettings, render};
     use serde_json::Value;
     use serde_json::json;
 
@@ -102,6 +95,9 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2 }]),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["name".to_string(), "count".to_string()]),
                 column_align: vec![ColumnAlignmentV1::Left, ColumnAlignmentV1::Right],
@@ -110,8 +106,6 @@ mod tests {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -130,6 +124,9 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2, "status": "ok", "notes": "ready" }]),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),
@@ -148,8 +145,6 @@ mod tests {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -172,10 +167,10 @@ mod tests {
         let scalar_array = plugin_data_to_output_result(json!(["alice", "bob"]), None);
         let empty_array = plugin_data_to_output_result(json!([]), None);
 
-        let scalar_rows = output_to_rows(&scalar);
-        let object_rows = output_to_rows(&object);
-        let scalar_array_rows = output_to_rows(&scalar_array);
-        let empty_array_rows = output_to_rows(&empty_array);
+        let scalar_rows = output_items_to_rows(&scalar.items);
+        let object_rows = output_items_to_rows(&object.items);
+        let scalar_array_rows = output_items_to_rows(&scalar_array.items);
+        let empty_array_rows = output_items_to_rows(&empty_array.items);
 
         assert_eq!(scalar_rows, vec![crate::row! { "value" => "hello" }]);
         assert_eq!(
@@ -183,9 +178,9 @@ mod tests {
             vec![crate::row! { "uid" => "alice", "count" => 2 }]
         );
         assert_eq!(
-            render_output(
+            render(
                 &empty_object,
-                &RenderSettings::test_plain(OutputFormat::Mreg)
+                &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Mreg))
             ),
             "No results.\n"
         );
@@ -198,9 +193,9 @@ mod tests {
         );
         assert!(empty_array_rows.is_empty());
         assert_eq!(
-            render_output(
+            render(
                 &empty_array,
-                &RenderSettings::test_plain(OutputFormat::Table)
+                &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table))
             ),
             "No results.\n"
         );
@@ -215,6 +210,8 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: true,
@@ -223,8 +220,11 @@ mod tests {
         );
 
         assert_eq!(
-            output.document.as_ref().map(|document| &document.value),
-            Some(&data)
+            output
+                .document
+                .as_ref()
+                .map(|document| document.json_value()),
+            Some(data.clone())
         );
     }
 
@@ -241,13 +241,18 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec!["name".to_string(), "provider".to_string()]),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
             }),
         );
 
-        let table = render_output(&output, &RenderSettings::test_plain(OutputFormat::Table));
+        let table = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table)),
+        );
         assert!(table.contains("db01.uio.no"));
         assert!(table.contains("api01.uio.no"));
         assert!(!table.contains("next_cursor"));
@@ -255,7 +260,7 @@ mod tests {
 
         let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
         json_settings.format_explicit = true;
-        let rendered_json = render_output(&output, &json_settings);
+        let rendered_json = render(&output, &crate::ui::RenderRequest::new(&json_settings));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&rendered_json)
                 .expect("rendered output should be JSON"),
@@ -275,6 +280,8 @@ mod tests {
                 }]
             }),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec![
                     "name".to_string(),
                     "provider.name".to_string(),
@@ -293,7 +300,7 @@ mod tests {
         );
 
         assert_eq!(
-            output_to_rows(&output),
+            output_items_to_rows(&output.items),
             vec![crate::row! {
                 "name" => "db01.uio.no",
                 "provider" => json!({"name": "vmware"}),
@@ -301,7 +308,10 @@ mod tests {
                 "error_code" => Value::Null
             }]
         );
-        let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Table));
+        let rendered = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Table)),
+        );
         assert!(rendered.contains("NAME"));
         assert!(rendered.contains("PROVIDER"));
         assert!(rendered.contains("COMPUTE"));
@@ -321,6 +331,8 @@ mod tests {
         let output = plugin_data_to_output_result(
             data.clone(),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 columns: Some(vec![
                     "task_id".to_string(),
                     "action".to_string(),
@@ -343,14 +355,20 @@ mod tests {
         );
 
         assert_eq!(
-            output_to_rows(&output),
+            output_items_to_rows(&output.items),
             vec![data.as_object().unwrap().clone()]
         );
         assert_eq!(
-            output.document.as_ref().map(|document| &document.value),
-            Some(&data)
+            output
+                .document
+                .as_ref()
+                .map(|document| document.json_value()),
+            Some(data.clone())
         );
-        let rendered = render_output(&output, &RenderSettings::test_plain(OutputFormat::Mreg));
+        let rendered = render(
+            &output,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Mreg)),
+        );
         assert!(rendered.contains("Task:"));
         assert!(rendered.contains("1855"));
         assert!(rendered.contains("Target:"));
@@ -368,6 +386,8 @@ mod tests {
                 "page": {"next_cursor": "cursor-2"}
             }),
             Some(&ResponseMetaV1 {
+                context_not_found: false,
+                context: Default::default(),
                 row_path: Some("items".to_string()),
                 ..ResponseMetaV1::default()
             }),
@@ -376,7 +396,7 @@ mod tests {
         let projected = apply_output_pipeline(output, &["P name".to_string()])
             .expect("pipeline should see canonical collection rows");
         assert_eq!(
-            output_to_rows(&projected),
+            output_items_to_rows(&projected.items),
             vec![crate::row! {"name" => "db01.uio.no"}]
         );
 
@@ -384,7 +404,7 @@ mod tests {
             projected
                 .document
                 .as_ref()
-                .map(|document| document.value.clone()),
+                .map(|document| document.json_value()),
             None
         );
     }
@@ -398,7 +418,7 @@ mod tests {
 
         let output = rows_to_output_result(rows.clone());
 
-        assert_eq!(output_to_rows(&output), rows);
+        assert_eq!(output_items_to_rows(&output.items), rows);
         assert_eq!(
             output.meta.key_index,
             vec!["uid".to_string(), "count".to_string()]
@@ -422,6 +442,8 @@ mod tests {
             ]),
             document: None,
             meta: OutputMeta {
+                display_notes: Vec::new(),
+                context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "user".to_string()],
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
@@ -430,15 +452,15 @@ mod tests {
                 column_align: Vec::new(),
                 wants_copy: false,
                 grouped: true,
+                document_rows: false,
+                document_entry_gap: None,
+                document_long_help: false,
                 render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
                 display_limit: None,
             },
         };
 
-        let rows = output_to_rows(&output);
+        let rows = output_items_to_rows(&output.items);
 
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[0]["team"], Value::String("ops".to_string()));

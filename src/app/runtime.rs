@@ -23,31 +23,53 @@
 //! - callers usually receive [`AppRuntime`] and [`AppClients`] from host
 //!   bootstrap rather than assembling them field-by-field
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::access_recovery::CommandAccessRecovery;
-use super::host::ErrorDetail;
+use super::access::{AccessPolicy, Visibility};
 use crate::config::{ConfigLayer, ResolvedConfig, RuntimeLoadOptions};
 use crate::core::command_policy::{
-    AccessReason, CommandAccess, CommandPath, CommandPolicy, CommandPolicyContext,
-    CommandPolicyRegistry, VisibilityMode,
+    AccessReason, CommandAccess, CommandPath, SessionFacts, evaluate_auth,
 };
+use crate::core::plugin::DescribeCommandAuthV1;
 use crate::native::NativeCommandRegistry;
 use crate::plugin::PluginManager;
-use crate::plugin::config::{PluginConfigEntry, PluginConfigEnv, PluginConfigEnvCache};
 use crate::ui::RenderSettings;
 use crate::ui::messages::MessageLevel;
 use crate::ui::theme_catalog::ThemeCatalog;
+
+pub(crate) fn visible_native_commands<'a>(
+    auth: &'a AuthState,
+    clients: &'a AppClients,
+) -> impl Iterator<
+    Item = (
+        crate::plugin::CommandCatalogEntry,
+        &'a Arc<dyn crate::NativeCommand>,
+    ),
+> + 'a {
+    clients
+        .native_commands()
+        .catalog()
+        .into_iter()
+        .filter_map(|entry| {
+            if !auth.external_command_access(&entry.name).is_visible() {
+                return None;
+            }
+            clients
+                .native_commands()
+                .command(&entry.name)
+                .map(|command| (entry, command))
+        })
+}
 
 /// Identifies which top-level host surface is currently active.
 ///
 /// This lets config selection and runtime behavior distinguish between
 /// one-shot CLI execution and the long-lived REPL host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalKind {
+pub(crate) enum TerminalKind {
     /// One-shot command execution.
     Cli,
     /// Interactive REPL execution.
@@ -59,7 +81,7 @@ impl TerminalKind {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::TerminalKind;
     ///
     /// assert_eq!(TerminalKind::Cli.as_config_terminal(), "cli");
@@ -78,11 +100,13 @@ impl TerminalKind {
 /// This keeps the profile override and terminal identity together so later
 /// runtime rebuilds can resolve config against the same host context.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeContext {
+pub(crate) struct RuntimeContext {
     profile_override: Option<String>,
     terminal_kind: TerminalKind,
+    pub(crate) repl_start: bool,
     terminal_env: Option<String>,
     authenticated_subject: Option<String>,
+    display_name: Option<String>,
 }
 
 impl RuntimeContext {
@@ -90,7 +114,7 @@ impl RuntimeContext {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{RuntimeContext, TerminalKind};
     ///
     /// let ctx = RuntimeContext::new(
@@ -113,9 +137,15 @@ impl RuntimeContext {
                 .map(|value| value.trim().to_ascii_lowercase())
                 .filter(|value| !value.is_empty()),
             terminal_kind,
+            repl_start: terminal_kind == TerminalKind::Repl,
             terminal_env,
             authenticated_subject: None,
+            display_name: None,
         }
+    }
+
+    pub(crate) fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
     }
 
     /// Returns the normalized profile override, if one was supplied.
@@ -126,6 +156,12 @@ impl RuntimeContext {
     /// Returns the active terminal mode.
     pub fn terminal_kind(&self) -> TerminalKind {
         self.terminal_kind
+    }
+
+    /// Whether this process starts the interactive shell, rather than a one-shot
+    /// command that merely uses REPL-scoped presentation configuration.
+    pub fn is_repl(&self) -> bool {
+        self.repl_start
     }
 
     /// Returns the detected terminal environment string, if available.
@@ -144,8 +180,9 @@ impl RuntimeContext {
 ///
 /// The revision gives caches and rebuild logic a cheap way to notice when the
 /// effective config actually changed.
-pub struct ConfigState {
+pub(crate) struct ConfigState {
     resolved: ResolvedConfig,
+    #[cfg(test)]
     revision: u64,
 }
 
@@ -154,7 +191,7 @@ impl ConfigState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ConfigState;
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
@@ -174,6 +211,7 @@ impl ConfigState {
     pub fn new(resolved: ResolvedConfig) -> Self {
         Self {
             resolved,
+            #[cfg(test)]
             revision: 1,
         }
     }
@@ -184,11 +222,13 @@ impl ConfigState {
     }
 
     /// Returns the current configuration revision.
+    #[cfg(test)]
     pub fn revision(&self) -> u64 {
         self.revision
     }
 
     /// Replaces the resolved configuration and bumps the revision when it changes.
+    #[cfg(test)]
     pub fn replace_resolved(&mut self, next: ResolvedConfig) -> bool {
         if self.resolved == next {
             return false;
@@ -200,6 +240,7 @@ impl ConfigState {
     }
 
     /// Applies a configuration transform atomically against the current snapshot.
+    #[cfg(test)]
     pub fn transaction<F, E>(&mut self, mutator: F) -> Result<bool, E>
     where
         F: FnOnce(&ResolvedConfig) -> Result<ResolvedConfig, E>,
@@ -218,15 +259,13 @@ impl ConfigState {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use]
-pub struct UiState {
+pub(crate) struct UiState {
     /// Render settings derived from the current config snapshot.
     pub render_settings: RenderSettings,
     /// Default message verbosity derived from the current runtime config.
-    pub message_verbosity: MessageLevel,
-    /// Process-facing error detail used for failure rendering.
-    pub error_detail: ErrorDetail,
+    pub verbosity: MessageLevel,
     /// Numeric debug verbosity used for trace-style host output.
-    pub debug_verbosity: u8,
+    pub debug_level: u8,
 }
 
 impl UiState {
@@ -234,14 +273,14 @@ impl UiState {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{RuntimeContext, TerminalKind, UiState};
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
     /// let mut defaults = ConfigLayer::default();
     /// defaults.set("profile.default", "default");
     /// defaults.set("theme.path", Vec::<String>::new());
-    /// defaults.set("ui.message.verbosity", "info");
+    /// defaults.set("ui.verbosity", "info");
     ///
     /// let mut resolver = ConfigResolver::default();
     /// resolver.set_defaults(defaults);
@@ -253,32 +292,32 @@ impl UiState {
     /// )
     /// .unwrap();
     ///
-    /// assert_eq!(ui.message_verbosity.as_env_str(), "info");
+    /// assert_eq!(ui.verbosity.as_str(), "info");
     /// assert_eq!(ui.render_settings.runtime.terminal.as_deref(), Some("xterm-256color"));
     /// ```
     pub fn from_resolved_config(
         context: &RuntimeContext,
         config: &ResolvedConfig,
     ) -> miette::Result<Self> {
-        let themes = crate::ui::theme_catalog::load_theme_catalog(config);
-        crate::app::assembly::derive_ui_state(
+        super::assembly::build_host(super::assembly::HostBuildRequest::Presentation {
             context,
-            config,
-            &themes,
-            crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-            None,
-        )
+            config: Some(config),
+            seed: super::assembly::RenderSettingsSeed::DefaultAuto,
+            theme: None,
+            tolerant: false,
+        })
+        .map(|built| built.presentation().0)
     }
 
     /// Creates the UI state snapshot used for one resolved config revision.
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::UiState;
     /// use osp_cli::ui::RenderSettings;
-    /// use osp_cli::ui::messages::MessageLevel;
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::MessageLevel;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// let ui = UiState::new(
     ///     RenderSettings::test_plain(OutputFormat::Json),
@@ -286,27 +325,16 @@ impl UiState {
     ///     2,
     /// );
     ///
-    /// assert_eq!(ui.message_verbosity, MessageLevel::Success);
-    /// assert_eq!(ui.error_detail, osp_cli::app::ErrorDetail::Terse);
-    /// assert_eq!(ui.debug_verbosity, 2);
+    /// assert_eq!(ui.verbosity, MessageLevel::Success);
+    /// assert_eq!(ui.debug_level, 2);
     /// ```
-    pub fn new(
-        render_settings: RenderSettings,
-        message_verbosity: MessageLevel,
-        debug_verbosity: u8,
-    ) -> Self {
+    pub fn new(render_settings: RenderSettings, verbosity: MessageLevel, debug_level: u8) -> Self {
         Self {
             render_settings,
-            message_verbosity,
-            error_detail: ErrorDetail::Terse,
-            debug_verbosity,
-        }
-    }
+            verbosity,
 
-    /// Replaces the process-facing error detail ladder for this UI state.
-    pub fn with_error_detail(mut self, error_detail: ErrorDetail) -> Self {
-        self.error_detail = error_detail;
-        self
+            debug_level,
+        }
     }
 }
 
@@ -318,7 +346,7 @@ impl UiState {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 #[must_use]
-pub struct LaunchContext {
+pub(crate) struct LaunchContext {
     /// Explicit plugin directories requested by the caller at launch time.
     pub plugin_dirs: Vec<PathBuf>,
     /// Optional config-root override for runtime config discovery.
@@ -349,6 +377,7 @@ impl LaunchContext {
     }
 
     /// Appends one explicit plugin directory.
+    #[cfg(test)]
     pub fn with_plugin_dir(mut self, plugin_dir: impl Into<PathBuf>) -> Self {
         self.plugin_dirs.push(plugin_dir.into());
         self
@@ -361,12 +390,14 @@ impl LaunchContext {
     }
 
     /// Sets the config root override.
+    #[cfg(test)]
     pub fn with_config_root(mut self, config_root: Option<PathBuf>) -> Self {
         self.config_root = config_root;
         self
     }
 
     /// Sets the cache root override.
+    #[cfg(test)]
     pub fn with_cache_root(mut self, cache_root: Option<PathBuf>) -> Self {
         self.cache_root = cache_root;
         self
@@ -401,44 +432,30 @@ impl Default for LaunchContext {
 /// machinery without breaking callers.
 #[non_exhaustive]
 #[must_use]
-pub struct AppClients {
+pub(crate) struct AppClients {
     /// Plugin manager used for discovery, dispatch, and provider metadata.
     plugins: PluginManager,
     /// In-process registry of native commands.
     native_commands: NativeCommandRegistry,
-    plugin_config_env: PluginConfigEnvCache,
 }
 
 impl AppClients {
     /// Creates the shared client registry used by the application.
-    pub fn new(plugins: PluginManager, native_commands: NativeCommandRegistry) -> Self {
+    pub(crate) fn new(plugins: PluginManager, native_commands: NativeCommandRegistry) -> Self {
         Self {
             plugins,
             native_commands,
-            plugin_config_env: PluginConfigEnvCache::default(),
         }
     }
 
     /// Returns the shared plugin manager.
-    pub fn plugins(&self) -> &PluginManager {
+    pub(crate) fn plugins(&self) -> &PluginManager {
         &self.plugins
     }
 
     /// Returns the shared registry of native commands.
     pub fn native_commands(&self) -> &NativeCommandRegistry {
         &self.native_commands
-    }
-
-    pub(crate) fn plugin_config_env(&self, config: &ConfigState) -> PluginConfigEnv {
-        self.plugin_config_env.collect(config)
-    }
-
-    pub(crate) fn plugin_config_entries(
-        &self,
-        config: &ConfigState,
-        plugin_id: &str,
-    ) -> Vec<PluginConfigEntry> {
-        self.plugin_config_env(config).effective_entries(plugin_id)
     }
 }
 
@@ -464,11 +481,44 @@ pub struct AppRuntime {
     pub(crate) themes: ThemeCatalog,
     /// Launch-time inputs used to assemble caches and external services.
     pub(crate) launch: LaunchContext,
-    product_defaults: ConfigLayer,
-    access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
+    pub(crate) definition: Arc<super::AppDefinition>,
+    pub(crate) config_reload_requested: bool,
 }
 
 impl AppRuntime {
+    /// Returns the active resolved configuration.
+    pub fn config(&self) -> &ResolvedConfig {
+        self.config.resolved()
+    }
+
+    /// Persists a secret in the active profile through `config set --secrets`.
+    /// The host reloads configuration after the access hook, before dispatch.
+    pub fn store_secret(&mut self, key: &str, value: &str) -> miette::Result<()> {
+        crate::cli::commands::store_secret(
+            self,
+            key,
+            &crate::config::ConfigValue::String(value.into()),
+        )?;
+        self.config_reload_requested = true;
+        Ok(())
+    }
+
+    /// Returns whether this runtime hosts the interactive REPL.
+    pub fn is_repl(&self) -> bool {
+        self.context.is_repl()
+    }
+
+    /// Whether this invocation reads replayed commands or redirected stdin.
+    /// Access hooks must not acquire interactive input in this context.
+    pub fn input_is_replay(&self) -> bool {
+        crate::ui::prompt::input_is_replay()
+    }
+
+    /// Returns the active command execution scope.
+    pub fn command_scope(&self) -> &crate::core::CommandScope {
+        &self.ui.render_settings.runtime.command_scope
+    }
+
     /// Creates the runtime snapshot shared across CLI and REPL execution.
     pub(crate) fn new(
         context: RuntimeContext,
@@ -485,36 +535,32 @@ impl AppRuntime {
             auth,
             themes,
             launch,
-            product_defaults: ConfigLayer::default(),
-            access_recovery: None,
+            definition: Arc::default(),
+            config_reload_requested: false,
         }
     }
 
     /// Returns the runtime context used for config selection and rebuilds.
-    pub fn context(&self) -> &RuntimeContext {
+    #[cfg(test)]
+    pub(crate) fn context(&self) -> &RuntimeContext {
         &self.context
     }
 
     /// Returns the authoritative resolved-config state.
-    pub fn config_state(&self) -> &ConfigState {
+    #[cfg(test)]
+    pub(crate) fn config_state(&self) -> &ConfigState {
         &self.config
     }
 
     /// Returns the UI state derived from the current config snapshot.
-    pub fn ui(&self) -> &UiState {
+    #[cfg(test)]
+    pub(crate) fn ui(&self) -> &UiState {
         &self.ui
     }
 
     /// Returns the command-visibility/auth state.
-    pub fn auth(&self) -> &AuthState {
+    pub(crate) fn auth(&self) -> &AuthState {
         &self.auth
-    }
-
-    /// Updates product-owned authentication facts after session acquisition.
-    /// Profile identity remains owned by the resolved host configuration.
-    pub fn set_policy_context(&mut self, context: CommandPolicyContext) {
-        self.auth
-            .set_policy_context(policy_context_for_resolved(context, self.config.resolved()));
     }
 
     /// Projects the authenticated subject into the host context used by
@@ -526,291 +572,338 @@ impl AppRuntime {
             .map(ToOwned::to_owned);
     }
 
+    /// Sets the product-resolved name used by the REPL greeting.
+    pub fn set_display_name(&mut self, name: Option<&str>) {
+        self.context.display_name = name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToOwned::to_owned);
+    }
+
     /// Returns the launch-time provenance used to assemble the runtime.
-    pub fn launch(&self) -> &LaunchContext {
+    #[cfg(test)]
+    pub(crate) fn launch(&self) -> &LaunchContext {
         &self.launch
     }
 
     pub(crate) fn product_defaults(&self) -> &ConfigLayer {
-        &self.product_defaults
+        &self.definition.product_defaults
     }
 
-    pub(crate) fn set_product_defaults(&mut self, product_defaults: ConfigLayer) {
-        self.product_defaults = product_defaults;
+    pub(crate) fn access_policy(&self) -> Option<Arc<dyn AccessPolicy>> {
+        self.auth.access_policy.clone()
     }
 
-    pub(crate) fn access_recovery(&self) -> Option<Arc<dyn CommandAccessRecovery>> {
-        self.access_recovery.clone()
-    }
-
-    pub(crate) fn set_access_recovery(
-        &mut self,
-        access_recovery: Option<Arc<dyn CommandAccessRecovery>>,
-    ) {
-        self.access_recovery = access_recovery;
+    pub(crate) fn set_access_policy(&mut self, policy: Option<Arc<dyn AccessPolicy>>) {
+        Arc::make_mut(&mut self.definition).access_policy = policy.clone();
+        self.auth
+            .set_access_policy(policy, Some(self.config.resolved()));
+        if self.auth.access_policy.is_some() && !self.auth.session_facts().authenticated {
+            self.set_authenticated_subject(None);
+        }
     }
 }
 
-/// Authorization and command-visibility state derived from configuration.
-pub struct AuthState {
-    builtins_allowlist: Option<HashSet<String>>,
-    external_allowlist: Option<HashSet<String>>,
-    policy_context: CommandPolicyContext,
-    builtin_policy: CommandPolicyRegistry,
-    external_policy: CommandPolicyRegistry,
+/// Declared external authentication and the shared product access hook.
+#[derive(Default)]
+pub(crate) struct AuthState {
+    access_policy: Option<Arc<dyn AccessPolicy>>,
+    command_auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,
 }
 
 impl AuthState {
-    /// Builds authorization state from the resolved configuration.
-    pub fn from_resolved(config: &ResolvedConfig) -> Self {
-        Self {
-            builtins_allowlist: parse_allowlist(config.get_string("auth.visible.builtins")),
-            // Non-builtin top-level commands currently still use the historical
-            // `auth.visible.plugins` key. That surface now covers both external
-            // plugins and native registered integrations dispatched via the
-            // generic external command path.
-            external_allowlist: parse_allowlist(config.get_string("auth.visible.plugins")),
-            policy_context: policy_context_for_resolved(CommandPolicyContext::default(), config),
-            builtin_policy: CommandPolicyRegistry::default(),
-            external_policy: CommandPolicyRegistry::default(),
-        }
-    }
-
-    /// Builds authorization state and external policy from the current config
-    /// and active command registries.
-    pub(crate) fn from_resolved_with_external_policies(
-        config: &ResolvedConfig,
-        plugins: &PluginManager,
-        native_commands: &NativeCommandRegistry,
+    pub(crate) fn for_policy(
+        policy: Option<Arc<dyn AccessPolicy>>,
+        config: Option<&ResolvedConfig>,
     ) -> Self {
-        let mut auth = Self::from_resolved(config);
-        let plugin_policy = plugins.command_policy_registry();
-        let external_policy =
-            merge_policy_registries(plugin_policy, native_commands.command_policy_registry());
-        auth.replace_external_policy(external_policy);
+        let mut auth = Self::default();
+        auth.set_access_policy(policy, config);
         auth
     }
 
-    /// Returns the context used when evaluating command policies.
-    pub fn policy_context(&self) -> &CommandPolicyContext {
-        &self.policy_context
+    fn set_access_policy(
+        &mut self,
+        policy: Option<Arc<dyn AccessPolicy>>,
+        config: Option<&ResolvedConfig>,
+    ) {
+        if let (Some(policy), Some(config)) = (&policy, config) {
+            policy.configure(config);
+        }
+        // Help can outlive a config load failure; only attach configured policies.
+        self.access_policy = policy.filter(|_| config.is_some());
     }
 
-    /// Replaces the context used when evaluating command policies.
-    pub fn set_policy_context(&mut self, context: CommandPolicyContext) {
-        self.policy_context = context;
+    pub(crate) fn from_commands(
+        plugins: &PluginManager,
+        native_commands: &NativeCommandRegistry,
+    ) -> Self {
+        let builtins = crate::cli::builtin_command_names();
+        let mut command_auth = plugins.command_auth();
+        command_auth.retain(|path, _| {
+            path.as_slice().first().is_none_or(|root| {
+                !builtins.contains(root) && native_commands.command(root).is_none()
+            })
+        });
+        command_auth.extend(native_commands.command_auth());
+        Self {
+            command_auth,
+            access_policy: None,
+        }
     }
 
-    /// Returns the policy registry for built-in commands.
-    pub fn builtin_policy(&self) -> &CommandPolicyRegistry {
-        &self.builtin_policy
+    pub(crate) fn local_checks(
+        &self,
+        config: &ResolvedConfig,
+    ) -> Vec<crate::diagnostics::LocalCheck> {
+        self.access_policy
+            .as_ref()
+            .map(|policy| policy.local_checks(config))
+            .unwrap_or_default()
     }
 
-    /// Returns the mutable policy registry for built-in commands.
-    pub fn builtin_policy_mut(&mut self) -> &mut CommandPolicyRegistry {
-        &mut self.builtin_policy
+    /// Reads live product facts without acquiring credentials.
+    pub fn session_facts(&self) -> SessionFacts {
+        self.access_policy
+            .as_ref()
+            .map(|policy| policy.session_facts())
+            .unwrap_or_default()
+    }
+    pub(crate) fn refresh_native_auth(
+        &mut self,
+        description: &crate::core::plugin::DescribeCommandV1,
+    ) {
+        let root = description.name.trim().to_ascii_lowercase();
+        self.command_auth
+            .retain(|path, _| path.as_slice().first() != Some(&root));
+        crate::plugin::catalog::collect_command_auth(&mut self.command_auth, description, &[]);
     }
 
-    /// Replaces the policy registry for built-in commands.
-    pub fn replace_builtin_policy(&mut self, registry: CommandPolicyRegistry) {
-        self.builtin_policy = registry;
-    }
-
-    /// Returns the policy registry for externally dispatched commands.
-    pub fn external_policy(&self) -> &CommandPolicyRegistry {
-        &self.external_policy
-    }
-
-    /// Returns the mutable policy registry for externally dispatched commands.
-    pub fn external_policy_mut(&mut self) -> &mut CommandPolicyRegistry {
-        &mut self.external_policy
-    }
-
-    /// Replaces the policy registry for externally dispatched commands.
-    pub fn replace_external_policy(&mut self, registry: CommandPolicyRegistry) {
-        self.external_policy = registry;
-    }
-
-    /// Evaluates access for a built-in command.
-    pub fn builtin_access(&self, command: &str) -> CommandAccess {
-        command_access_for(
-            command,
-            &self.builtins_allowlist,
-            &self.builtin_policy,
-            &self.policy_context,
-        )
-    }
-
-    /// Evaluates access for an external command.
+    /// Evaluates an external command root.
     pub fn external_command_access(&self, command: &str) -> CommandAccess {
-        command_access_for(
-            command,
-            &self.external_allowlist,
-            &self.external_policy,
-            &self.policy_context,
-        )
+        self.external_command_path_access(&CommandPath::new([command]))
     }
 
-    /// Evaluates access for an external command path.
+    /// Combines product visibility with declared command auth for all readers.
     pub fn external_command_path_access(&self, path: &CommandPath) -> CommandAccess {
-        command_access_for_path(
-            path,
-            &self.external_allowlist,
-            &self.external_policy,
-            &self.policy_context,
-        )
+        self.external_command_access_with_auth(path, self.command_auth.get(path))
     }
 
-    pub(crate) fn external_command_path_access_with_policy(
+    pub(crate) fn external_command_access_with_auth(
         &self,
         path: &CommandPath,
-        policy: &CommandPolicyRegistry,
+        auth: Option<&DescribeCommandAuthV1>,
     ) -> CommandAccess {
-        command_access_for_path(path, &self.external_allowlist, policy, &self.policy_context)
+        // A hidden parent hides its descendants, including direct dispatch.
+        if let Some(policy) = &self.access_policy {
+            for end in 1..=path.as_slice().len() {
+                if let Visibility::Hidden(message) = policy.visibility(&path.as_slice()[..end]) {
+                    return CommandAccess::Hidden(AccessReason::HiddenByProduct(message));
+                }
+            }
+        }
+        evaluate_auth(auth, &self.session_facts())
     }
 
-    /// Returns whether a built-in command should be shown to the user.
-    pub fn is_builtin_visible(&self, command: &str) -> bool {
-        self.builtin_access(command).is_visible()
+    pub(crate) fn filter_help_document(
+        &self,
+        document: &mut crate::core::document::Document,
+        path: &[String],
+    ) {
+        fn filter(
+            auth: &AuthState,
+            blocks: &mut [crate::core::document::DocBlock],
+            path: &[String],
+            commands: bool,
+        ) {
+            use crate::core::document::DocBlock;
+            for block in blocks {
+                match block {
+                    DocBlock::Section { title, blocks, .. } => {
+                        filter(auth, blocks, path, title.eq_ignore_ascii_case("commands"))
+                    }
+                    DocBlock::Entries { entries } if commands => entries.retain(|entry| {
+                        let Some(name) = entry.name.split_whitespace().next() else {
+                            return true;
+                        };
+                        let child = CommandPath::new(
+                            path.iter()
+                                .cloned()
+                                .chain(std::iter::once(name.to_string())),
+                        );
+                        auth.external_command_path_access(&child).is_visible()
+                    }),
+                    _ => {}
+                }
+            }
+        }
+        filter(self, &mut document.blocks, path, false);
     }
 
-    /// Returns whether an external command should be shown to the user.
+    pub(crate) fn visible_help_command(
+        &self,
+        command: clap::Command,
+        prefix: &[String],
+    ) -> clap::Command {
+        let mut path = prefix.to_vec();
+        path.push(command.get_name().to_string());
+        command.mut_subcommands(|child| {
+            let child_path = CommandPath::new(
+                path.iter()
+                    .cloned()
+                    .chain(std::iter::once(child.get_name().to_string())),
+            );
+            let hidden =
+                child.is_hide_set() || !self.external_command_path_access(&child_path).is_visible();
+            self.visible_help_command(child, &path).hide(hidden)
+        })
+    }
+
+    pub(crate) fn filter_command_spec(
+        &self,
+        command: &mut crate::completion::CompletionNode,
+        prefix: &[String],
+    ) {
+        let mut path = prefix.to_vec();
+        path.push(command.name.clone());
+        command.children.retain(|_, child| {
+            let path = CommandPath::new(
+                path.iter()
+                    .cloned()
+                    .chain(std::iter::once(child.name.clone())),
+            );
+            self.external_command_path_access(&path).is_visible()
+        });
+        for child in command.children.values_mut() {
+            self.filter_command_spec(child, &path);
+        }
+    }
+
+    /// Whether an external root is offered by the combined access decision.
     pub fn is_external_command_visible(&self, command: &str) -> bool {
         self.external_command_access(command).is_visible()
     }
 }
 
-pub(crate) fn policy_context_for_resolved(
-    context: CommandPolicyContext,
-    config: &ResolvedConfig,
-) -> CommandPolicyContext {
-    context.with_profile(config.active_profile())
-}
-
-fn parse_allowlist(raw: Option<&str>) -> Option<HashSet<String>> {
-    let raw = raw.map(str::trim).filter(|value| !value.is_empty())?;
-
-    if raw == "*" {
-        return None;
-    }
-
-    let values = raw
-        .split([',', ' '])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase())
-        .collect::<HashSet<String>>();
-    if values.is_empty() {
-        None
-    } else {
-        Some(values)
-    }
-}
-
-fn is_visible_in_allowlist(allowlist: &Option<HashSet<String>>, command: &str) -> bool {
-    match allowlist {
-        None => true,
-        Some(values) => values.contains(&command.to_ascii_lowercase()),
-    }
-}
-
-fn command_access_for(
-    command: &str,
-    allowlist: &Option<HashSet<String>>,
-    registry: &CommandPolicyRegistry,
-    context: &CommandPolicyContext,
-) -> CommandAccess {
-    let normalized = command.trim().to_ascii_lowercase();
-    command_access_for_path(
-        &CommandPath::new([normalized]),
-        allowlist,
-        registry,
-        context,
-    )
-}
-
-fn command_access_for_path(
-    path: &CommandPath,
-    allowlist: &Option<HashSet<String>>,
-    registry: &CommandPolicyRegistry,
-    context: &CommandPolicyContext,
-) -> CommandAccess {
-    let default_policy = CommandPolicy::new(path.clone()).visibility(VisibilityMode::Public);
-    let mut access = registry
-        .evaluate(path, context)
-        .unwrap_or_else(|| crate::core::command_policy::evaluate_policy(&default_policy, context));
-
-    if let Some(root) = path.as_slice().first()
-        && !is_visible_in_allowlist(allowlist, root)
-    {
-        access = CommandAccess::hidden(AccessReason::HiddenByPolicy);
-    }
-
-    access
-}
-
-fn merge_policy_registries(
-    mut left: CommandPolicyRegistry,
-    right: CommandPolicyRegistry,
-) -> CommandPolicyRegistry {
-    for policy in right.entries() {
-        left.register(policy.clone());
-    }
-    left
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
 
+    #[test]
+    fn host_state_example_1() {
+        use crate::app::TerminalKind;
+
+        assert_eq!(TerminalKind::Cli.as_config_terminal(), "cli");
+        assert_eq!(TerminalKind::Repl.as_config_terminal(), "repl");
+    }
+
+    #[test]
+    fn host_state_example_2() {
+        use crate::app::{RuntimeContext, TerminalKind};
+
+        let ctx = RuntimeContext::new(
+            Some("  Work  ".to_string()),
+            TerminalKind::Repl,
+            Some("xterm-256color".to_string()),
+        );
+
+        assert_eq!(ctx.profile_override(), Some("work"));
+        assert_eq!(ctx.terminal_kind(), TerminalKind::Repl);
+        assert_eq!(ctx.terminal_env(), Some("xterm-256color"));
+    }
+
+    #[test]
+    fn host_state_example_3() {
+        use crate::app::ConfigState;
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("theme.path", Vec::<String>::new());
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
+
+        let mut state = ConfigState::new(resolved.clone());
+        assert_eq!(state.revision(), 1);
+        assert!(!state.replace_resolved(resolved));
+        assert_eq!(state.revision(), 1);
+    }
+
+    #[test]
+    fn host_state_example_4() {
+        use crate::app::{RuntimeContext, TerminalKind, UiState};
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("theme.path", Vec::<String>::new());
+        defaults.set("ui.verbosity", "info");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(ResolveOptions::new().with_terminal("cli"))
+            .unwrap();
+
+        let ui = UiState::from_resolved_config(
+            &RuntimeContext::new(None, TerminalKind::Cli, Some("xterm-256color".to_string())),
+            &config,
+        )
+        .unwrap();
+
+        assert_eq!(ui.verbosity.as_str(), "info");
+        assert_eq!(
+            ui.render_settings.runtime.terminal.as_deref(),
+            Some("xterm-256color")
+        );
+    }
+
+    #[test]
+    fn host_state_example_5() {
+        use crate::app::UiState;
+        use crate::core::MessageLevel;
+        use crate::core::OutputFormat;
+        use crate::ui::RenderSettings;
+
+        let ui = UiState::new(
+            RenderSettings::test_plain(OutputFormat::Json),
+            MessageLevel::Success,
+            2,
+        );
+
+        assert_eq!(ui.verbosity, MessageLevel::Success);
+        assert_eq!(ui.debug_level, 2);
+    }
+
+    use super::ConfigState;
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
-    use crate::core::command_policy::{
-        AccessReason, CommandPath, CommandPolicy, CommandPolicyContext, CommandPolicyRegistry,
-        VisibilityMode,
-    };
-
-    use super::{
-        AuthState, ConfigState, RuntimeContext, TerminalKind, command_access_for,
-        is_visible_in_allowlist, parse_allowlist,
-    };
-
     fn resolved_with(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
         let mut file = ConfigLayer::default();
         for (key, value) in entries {
             file.set(*key, (*value).to_string());
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            file,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                file,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }
 
     #[test]
-    fn runtime_context_and_allowlists_normalize_inputs() {
-        let context = RuntimeContext::new(
+    fn runtime_context_normalizes_inputs() {
+        let context = super::RuntimeContext::new(
             Some("  Dev  ".to_string()),
-            TerminalKind::Repl,
+            super::TerminalKind::Repl,
             Some("xterm-256color".to_string()),
         );
         assert_eq!(context.profile_override(), Some("dev"));
-        assert_eq!(context.terminal_kind(), TerminalKind::Repl);
+        assert_eq!(context.terminal_kind(), super::TerminalKind::Repl);
         assert_eq!(context.terminal_env(), Some("xterm-256color"));
-
-        assert_eq!(parse_allowlist(None), None);
-        assert_eq!(parse_allowlist(Some("   ")), None);
-        assert_eq!(parse_allowlist(Some("*")), None);
-        assert_eq!(
-            parse_allowlist(Some(" LDAP, mreg ldap ")),
-            Some(HashSet::from(["ldap".to_string(), "mreg".to_string()]))
-        );
-
-        let allowlist = Some(HashSet::from(["ldap".to_string()]));
-        assert!(is_visible_in_allowlist(&allowlist, "LDAP"));
-        assert!(!is_visible_in_allowlist(&allowlist, "orch"));
     }
-
     #[test]
     fn config_state_tracks_noops_changes_and_transaction_errors() {
         let resolved = resolved_with(&[]);
@@ -837,77 +930,5 @@ mod tests {
             .expect_err("transaction error should propagate");
         assert_eq!(err, "boom");
         assert_eq!(state.revision(), 3);
-    }
-
-    #[test]
-    fn auth_state_and_command_access_layer_policy_overrides_on_allowlists() {
-        let resolved = resolved_with(&[
-            ("auth.visible.builtins", "config"),
-            ("auth.visible.plugins", "ldap"),
-        ]);
-        let mut auth = AuthState::from_resolved(&resolved);
-        auth.set_policy_context(
-            CommandPolicyContext::default()
-                .authenticated(true)
-                .with_capabilities(["orch.approval.decide"]),
-        );
-        assert!(auth.policy_context().authenticated);
-
-        auth.builtin_policy_mut().register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-        assert!(auth.builtin_access("config").is_runnable());
-        assert!(auth.is_builtin_visible("config"));
-        assert!(!auth.is_builtin_visible("theme"));
-
-        let mut plugin_registry = CommandPolicyRegistry::new();
-        plugin_registry.register(
-            CommandPolicy::new(CommandPath::new(["ldap"]))
-                .visibility(VisibilityMode::CapabilityGated)
-                .require_capability("orch.approval.decide"),
-        );
-        plugin_registry.register(
-            CommandPolicy::new(CommandPath::new(["orch"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-        auth.replace_external_policy(plugin_registry);
-
-        assert!(auth.external_policy().contains(&CommandPath::new(["ldap"])));
-        assert!(
-            auth.external_policy_mut()
-                .contains(&CommandPath::new(["ldap"]))
-        );
-        assert!(auth.external_command_access("ldap").is_runnable());
-        assert!(auth.is_external_command_visible("ldap"));
-
-        let hidden = auth.external_command_access("orch");
-        assert_eq!(hidden.reasons, vec![AccessReason::HiddenByPolicy]);
-        assert!(!hidden.is_visible());
-    }
-
-    #[test]
-    fn command_access_for_uses_registry_when_present_and_public_default_otherwise() {
-        let context = CommandPolicyContext::default();
-        let allowlist = Some(HashSet::from(["config".to_string()]));
-        let mut registry = CommandPolicyRegistry::new();
-        registry.register(
-            CommandPolicy::new(CommandPath::new(["config"]))
-                .visibility(VisibilityMode::Authenticated),
-        );
-
-        let denied = command_access_for("config", &allowlist, &registry, &context);
-        assert_eq!(denied.reasons, vec![AccessReason::Unauthenticated]);
-        assert!(denied.is_visible());
-        assert!(!denied.is_runnable());
-
-        let hidden = command_access_for("theme", &allowlist, &registry, &context);
-        assert_eq!(hidden.reasons, vec![AccessReason::HiddenByPolicy]);
-        assert!(!hidden.is_visible());
-
-        let fallback =
-            command_access_for("config", &None, &CommandPolicyRegistry::default(), &context);
-        assert!(fallback.is_visible());
-        assert!(fallback.is_runnable());
     }
 }

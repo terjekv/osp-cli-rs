@@ -9,13 +9,12 @@
 use miette::{Result, miette};
 
 use super::{
-    AppClients, AppRuntime, AppSession, CMD_CONFIG, CMD_DOCTOR, CMD_HISTORY, CMD_PLUGINS,
-    CMD_THEME, CliCommandResult, ResolvedInvocation, UiSink, UiState, ensure_builtin_access,
-    ensure_command_supports_dsl, run_cli_command_with_ui,
+    AppClients, AppRuntime, AppSession, CommandOutput, ResolvedInvocation, UiSink, UiState,
+    run_cli_command,
 };
 use crate::cli::commands::{
-    config as config_cmd, doctor as doctor_cmd, history as history_cmd, intro as intro_cmd,
-    plugins as plugins_cmd, theme as theme_cmd,
+    config as config_cmd, context as context_cmd, doctor as doctor_cmd, history as history_cmd,
+    intro as intro_cmd, plugins as plugins_cmd, theme as theme_cmd,
 };
 use crate::cli::{Commands, IntroArgs, ReplArgs};
 use crate::repl::{self, SharedHistory};
@@ -29,12 +28,12 @@ pub(crate) fn run_cli_builtin_command_parts(
     stages: &[String],
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
-    ensure_command_supports_dsl(&repl::repl_command_spec(&command), stages)?;
+    super::command_plan::validate_command_pipeline(&command, stages)?;
     let result = BuiltinExecutor::new(runtime, session, clients)
         .dispatch(BuiltinSurface::Cli(&invocation.ui), command)?
         .ok_or_else(|| miette!("expected builtin command"))?;
     let result = super::command_output::apply_stages_to_cli_result(result, stages)?;
-    run_cli_command_with_ui(runtime.config.resolved(), &invocation.ui, result, sink)
+    run_cli_command(runtime.config.resolved(), &invocation.ui, &result, sink)
 }
 
 pub(crate) fn run_inline_builtin_command(
@@ -44,13 +43,12 @@ pub(crate) fn run_inline_builtin_command(
     invocation: Option<&ResolvedInvocation>,
     command: Commands,
     stages: &[String],
-) -> Result<Option<CliCommandResult>> {
+) -> Result<Option<CommandOutput>> {
     if matches!(command, Commands::External(_)) {
         return Ok(None);
     }
 
-    let spec = repl::repl_command_spec(&command);
-    ensure_command_supports_dsl(&spec, stages)?;
+    super::command_plan::validate_command_pipeline(&command, stages)?;
     let ui = invocation
         .map(|invocation| invocation.ui.clone())
         .unwrap_or_else(|| runtime.ui.clone());
@@ -65,7 +63,7 @@ pub(crate) fn run_repl_builtin_command(
     history: &SharedHistory,
     invocation: &ResolvedInvocation,
     command: Commands,
-) -> Result<CliCommandResult> {
+) -> Result<CommandOutput> {
     BuiltinExecutor::new(runtime, session, clients)
         .dispatch(
             BuiltinSurface::Repl {
@@ -100,69 +98,44 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         command: Commands,
-    ) -> Result<Option<CliCommandResult>> {
+    ) -> Result<Option<CommandOutput>> {
+        command.validate_dispatch_surface(matches!(surface, BuiltinSurface::Repl { .. }))?;
         match command {
             Commands::Plugins(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_PLUGINS)?;
-                plugins_cmd::run_plugins_command(
-                    plugins_cmd::PluginsCommandContext::from_parts(self.runtime, self.clients),
-                    args,
-                )
-                .map(Some)
+                plugins_cmd::run_plugins_command(self.runtime, self.clients, args).map(Some)
             }
-            Commands::Doctor(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_DOCTOR)?;
-                doctor_cmd::run_doctor_command(
-                    doctor_cmd::DoctorCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        self.clients,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
-            }
+            Commands::Doctor(args) => doctor_cmd::run_doctor_command(
+                self.runtime,
+                self.session,
+                self.clients,
+                surface.ui(),
+                args,
+            )
+            .map(Some),
             Commands::Theme(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_THEME)?;
-                theme_cmd::run_theme_command(
-                    &mut self.session.config_overrides,
-                    theme_cmd::ThemeCommandContext::from_parts(self.runtime, surface.ui()),
-                    args,
-                )
-                .map(Some)
+                theme_cmd::run_theme_command(self.session, self.runtime, surface.ui(), args)
+                    .map(Some)
             }
             Commands::Config(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_CONFIG)?;
-                config_cmd::run_config_command(
-                    config_cmd::ConfigCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
+                config_cmd::run_config_command(self.runtime, self.session, surface.ui(), args)
+                    .map(Some)
             }
             Commands::Alias(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_CONFIG)?;
-                config_cmd::run_alias_command(
-                    config_cmd::ConfigCommandContext::from_parts(
-                        self.runtime,
-                        self.session,
-                        surface.ui(),
-                    ),
-                    args,
-                )
-                .map(Some)
+                config_cmd::run_alias_command(self.runtime, self.session, surface.ui(), args)
+                    .map(Some)
             }
-            Commands::History(args) => {
-                ensure_builtin_access(self.runtime, self.session, CMD_HISTORY)?;
-                self.run_history_command(surface, args).map(Some)
+            Commands::Notifications(_) => {
+                crate::repl::notices::request_foreground_bell(
+                    self.runtime.config.resolved(),
+                    surface.ui().render_settings.format,
+                );
+                Ok(Some(CommandOutput::exit(0)))
             }
-            Commands::Completions(_) => Err(miette!(
-                "`completions` is available only as a one-shot CLI command"
-            )),
+            Commands::History(args) => self.run_history_command(surface, args).map(Some),
+            Commands::Context(args) => {
+                context_cmd::run_context_command(self.session, self.runtime, args).map(Some)
+            }
+            Commands::Completions(_) => unreachable!("validated dispatch surface"),
             Commands::Intro(args) => self.run_intro_command(surface, args).map(Some),
             Commands::Repl(args) => self.run_repl_debug_command(surface, args).map(Some),
             Commands::External(_) => Ok(None),
@@ -173,7 +146,7 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         args: crate::cli::HistoryArgs,
-    ) -> Result<CliCommandResult> {
+    ) -> Result<CommandOutput> {
         match surface {
             BuiltinSurface::Repl { history, .. } => {
                 history_cmd::run_history_repl_command(self.session, args, history)
@@ -191,23 +164,15 @@ impl<'a> BuiltinExecutor<'a> {
         &mut self,
         surface: BuiltinSurface<'_>,
         args: IntroArgs,
-    ) -> Result<CliCommandResult> {
-        intro_cmd::run_intro_command(
-            intro_cmd::IntroCommandContext::from_parts(
-                self.runtime,
-                self.session,
-                self.clients,
-                surface.ui(),
-            ),
-            args,
-        )
+    ) -> Result<CommandOutput> {
+        intro_cmd::run_intro_command(self.runtime, self.session, self.clients, surface.ui(), args)
     }
 
     fn run_repl_debug_command(
         &mut self,
         surface: BuiltinSurface<'_>,
         args: ReplArgs,
-    ) -> Result<CliCommandResult> {
+    ) -> Result<CommandOutput> {
         match surface {
             BuiltinSurface::Repl { .. } => {
                 Err(miette!("`repl` debug commands are not available in REPL"))

@@ -1,8 +1,106 @@
-//! Small shell-quoting helpers for display and reuse.
+//! Shared shell syntax scanning and quoting for command-entry surfaces.
 //!
-//! These helpers exist for output surfaces such as history, completion, and
-//! debug displays that need shell-safe text without depending on a full shell
-//! parser.
+//! Completion and the DSL share quote, escape, whitespace, and pipe events with
+//! byte spans. Callers own word assembly, incomplete-input recovery, and DSL
+//! operators. POSIX command-word decoding stays with `shell-words`: comments,
+//! line continuations, whitespace, and double-quote escapes differ there.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LexState {
+    Normal,
+    SingleQuote,
+    DoubleQuote,
+    EscapeNormal,
+    EscapeDouble,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LexEventKind {
+    Separator,
+    Pipe,
+    QuoteStart,
+    QuoteEnd,
+    EscapeStart,
+    Text(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LexEvent {
+    pub(crate) index: usize,
+    pub(crate) end: usize,
+    pub(crate) state_before: LexState,
+    pub(crate) kind: LexEventKind,
+    pub(crate) ch: char,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LexEnd {
+    pub(crate) state: LexState,
+    pub(crate) quote_start: usize,
+}
+
+/// Visits shell syntax without deciding how callers assemble or recover words.
+pub(crate) fn scan_shell(input: &str, mut visit: impl FnMut(LexEvent)) -> LexEnd {
+    let mut state = LexState::Normal;
+    let mut quote_start = 0;
+    for (index, ch) in input.char_indices() {
+        let state_before = state;
+        let kind = match state {
+            LexState::Normal if ch.is_whitespace() => LexEventKind::Separator,
+            LexState::Normal => match ch {
+                '|' => LexEventKind::Pipe,
+                '\\' => {
+                    state = LexState::EscapeNormal;
+                    LexEventKind::EscapeStart
+                }
+                '\'' => {
+                    state = LexState::SingleQuote;
+                    LexEventKind::QuoteStart
+                }
+                '"' => {
+                    state = LexState::DoubleQuote;
+                    LexEventKind::QuoteStart
+                }
+                _ => LexEventKind::Text(ch),
+            },
+            LexState::SingleQuote if ch == '\'' => {
+                state = LexState::Normal;
+                LexEventKind::QuoteEnd
+            }
+            LexState::SingleQuote => LexEventKind::Text(ch),
+            LexState::DoubleQuote => match ch {
+                '"' => {
+                    state = LexState::Normal;
+                    LexEventKind::QuoteEnd
+                }
+                '\\' => {
+                    state = LexState::EscapeDouble;
+                    LexEventKind::EscapeStart
+                }
+                _ => LexEventKind::Text(ch),
+            },
+            LexState::EscapeNormal => {
+                state = LexState::Normal;
+                LexEventKind::Text(ch)
+            }
+            LexState::EscapeDouble => {
+                state = LexState::DoubleQuote;
+                LexEventKind::Text(ch)
+            }
+        };
+        if kind == LexEventKind::QuoteStart {
+            quote_start = index;
+        }
+        visit(LexEvent {
+            index,
+            end: index + ch.len_utf8(),
+            state_before,
+            kind,
+            ch,
+        });
+    }
+    LexEnd { state, quote_start }
+}
 
 /// Quoting style to use when formatting a shell argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,20 +119,21 @@ pub enum QuoteStyle {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::core::shell_words::{QuoteStyle, quote_for_shell};
 ///
 /// assert_eq!(quote_for_shell("O'Brien", QuoteStyle::Single), "'O'\\''Brien'");
 /// assert_eq!(quote_for_shell("hello world", QuoteStyle::Double), "\"hello world\"");
 /// ```
-pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
+pub(crate) fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
     match style {
-        QuoteStyle::Single => quote_single(value),
+        QuoteStyle::Single => quote_single(value, "'\\''"),
         QuoteStyle::Double => quote_double(value),
     }
 }
 
-/// Escapes shell-sensitive characters without adding surrounding quotes.
+/// Escapes shell-sensitive characters, using single quotes when needed to
+/// preserve empty arguments or line breaks.
 ///
 /// This is useful for tab-completion and history displays where adding full
 /// quotes would be noisier than backslash-escaping.
@@ -42,7 +141,7 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
 /// # Examples
 ///
 /// ```
-/// use osp_cli::core::shell_words::escape_for_shell;
+/// use osp_cli::core::escape_for_shell;
 ///
 /// assert_eq!(
 ///     escape_for_shell("team docs/file name.txt"),
@@ -50,6 +149,10 @@ pub fn quote_for_shell(value: &str, style: QuoteStyle) -> String {
 /// );
 /// ```
 pub fn escape_for_shell(value: &str) -> String {
+    if value.is_empty() || value.contains('\n') || value.contains('\r') {
+        return quote_single(value, "'\\''");
+    }
+
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
         if is_unquoted_safe(ch) {
@@ -62,11 +165,31 @@ pub fn escape_for_shell(value: &str) -> String {
     out
 }
 
-fn quote_single(value: &str) -> String {
+/// Quotes a DSL word while leaving operators live unless shell quoting is needed.
+pub(crate) fn quote_for_dsl(token: &str) -> String {
+    // Only protect characters the DSL lexer itself would re-interpret when
+    // the token is joined back into a stage string: whitespace (token
+    // boundary), quotes and backslash (lexer quoting/escapes), and the pipe
+    // (stage separator). Everything else — `>`, `<`, `!`, `?`, `*`, parens,
+    // brackets — is live DSL operator syntax; quoting it here silently turns
+    // `F vlan>100` into a literal term that matches nothing.
+    let needs_quotes = token.is_empty()
+        || token
+            .chars()
+            .any(|ch| ch.is_whitespace() || matches!(ch, '\'' | '"' | '\\' | '|'));
+    if !needs_quotes {
+        return token.to_string();
+    }
+
+    // Preserve the apostrophe spelling emitted in expanded alias text.
+    quote_single(token, "'\"'\"'")
+}
+
+fn quote_single(value: &str, apostrophe_escape: &str) -> String {
     let mut out = String::from("'");
     for ch in value.chars() {
         if ch == '\'' {
-            out.push_str("'\\''");
+            out.push_str(apostrophe_escape);
         } else {
             out.push(ch);
         }
@@ -96,6 +219,21 @@ fn is_unquoted_safe(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn internal_example_1() {
+        use crate::core::shell_words::{QuoteStyle, quote_for_shell};
+
+        assert_eq!(
+            quote_for_shell("O'Brien", QuoteStyle::Single),
+            "'O'\\''Brien'"
+        );
+        assert_eq!(
+            quote_for_shell("hello world", QuoteStyle::Double),
+            "\"hello world\""
+        );
+    }
+
     use super::{QuoteStyle, escape_for_shell, quote_for_shell};
 
     #[test]

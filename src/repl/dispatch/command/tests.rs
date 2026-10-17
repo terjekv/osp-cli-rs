@@ -1,9 +1,6 @@
 use super::{ParsedReplDispatch, parse_repl_invocation, render_repl_command_output};
 use crate::app::sink::BufferedUiSink;
-use crate::app::{
-    AppState, AppStateInit, CliCommandResult, LaunchContext, ReplCommandOutput, RuntimeContext,
-    TerminalKind,
-};
+use crate::app::{AppState, CommandOutput, LaunchContext, RuntimeContext, TerminalKind};
 use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 use crate::core::output::OutputFormat;
 use crate::repl::input::ReplParsedLine;
@@ -29,20 +26,26 @@ fn make_state() -> AppState {
         .resolve(ResolveOptions::default().with_terminal("repl"))
         .expect("test config should resolve");
 
-    AppState::new(AppStateInit {
+    crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
-        render_settings: RenderSettings::test_plain(OutputFormat::Json),
-        message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
-        debug_verbosity: 0,
-        plugins: crate::plugin::PluginManager::new(Vec::new())
-            .with_bundled_roots(false)
-            .with_default_roots(false),
-        native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
         launch: LaunchContext::default(),
-    })
+        native_commands: crate::native::NativeCommandRegistry::default(),
+        ui: crate::app::UiState::new(
+            RenderSettings::test_plain(OutputFormat::Json),
+            MessageLevel::Success,
+            0,
+        ),
+        plugins: Some(
+            crate::plugin::PluginManager::new(Vec::new())
+                .with_bundled_roots(false)
+                .with_default_roots(false),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build()
 }
 
 #[test]
@@ -109,8 +112,13 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         Ok(_) => panic!("unknown argument should be reported as a syntax error"),
         Err(err) => err,
     };
-    assert!(err.to_string().contains("--wat"));
-    assert!(err.to_string().contains("Usage: config show"));
+    let detail = crate::app::render_report_message(
+        &err,
+        crate::core::MessageLevel::Info,
+        &state.runtime.ui.render_settings,
+    );
+    assert!(detail.contains("--wat"));
+    assert!(detail.contains("Usage: config show"));
     let mut sink = BufferedUiSink::default();
 
     let parsed = ReplParsedLine::parse("theme", state.runtime.config.resolved())
@@ -132,7 +140,7 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         &mut sink,
     )
     .expect("bare theme help should render");
-    assert!(rendered.contains("Inspect and change output themes"));
+    assert!(rendered.contains("Inspect and apply themes"));
     assert!(rendered.contains("Usage"));
     assert!(!rendered.contains("Try:"));
 
@@ -145,7 +153,14 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         Ok(_) => panic!("staged inline help parse errors should fail"),
         Err(err) => err,
     };
-    assert!(err.to_string().contains("--wat"));
+    assert!(
+        crate::app::render_report_message(
+            &err,
+            MessageLevel::Info,
+            &state.runtime.ui.render_settings
+        )
+        .contains("--wat")
+    );
 }
 
 #[test]
@@ -154,14 +169,12 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
     let invocation = base_invocation(&state);
     let mut sink = BufferedUiSink::default();
 
-    let json_result = CliCommandResult {
+    let json_result = CommandOutput {
         exit_code: 0,
         messages: Default::default(),
-        output: Some(ReplCommandOutput::Json(serde_json::json!([
-            "alpha", "beta"
-        ]))),
-        stderr_text: None,
+        stderr_text: String::new(),
         failure_report: None,
+        ..CommandOutput::json(serde_json::json!(["alpha", "beta"]))
     };
     let json_rendered = render_repl_command_output(
         &state.runtime,
@@ -175,12 +188,12 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
     .expect("json pipeline should render");
     assert_eq!(json_rendered.trim(), "beta");
 
-    let text_result = CliCommandResult {
+    let text_result = CommandOutput {
         exit_code: 0,
         messages: Default::default(),
-        output: Some(ReplCommandOutput::Text("alpha\nbeta\n".to_string())),
-        stderr_text: None,
+        stderr_text: String::new(),
         failure_report: None,
+        ..CommandOutput::text("alpha\nbeta\n".to_string())
     };
     let text_rendered = render_repl_command_output(
         &state.runtime,
@@ -200,17 +213,18 @@ fn structured_command_failures_are_not_mislabeled_as_render_failures() {
     let mut state = make_state();
     let invocation = base_invocation(&state);
     let mut sink = BufferedUiSink::default();
-    let result = CliCommandResult {
+    let result = CommandOutput {
         exit_code: 1,
         messages: Default::default(),
-        output: None,
-        stderr_text: None,
+        body: crate::app::CommandBody::None,
+        stderr_text: String::new(),
         failure_report: Some(miette::miette!(
             "resource_not_found: No visible resource matched"
         )),
+        ..CommandOutput::exit(0)
     };
 
-    let err = render_repl_command_output(
+    let rendered = render_repl_command_output(
         &state.runtime,
         &mut state.session,
         "orch vm info missing",
@@ -219,10 +233,15 @@ fn structured_command_failures_are_not_mislabeled_as_render_failures() {
         &invocation,
         &mut sink,
     )
-    .expect_err("backend problem should remain a command failure");
+    .expect("backend failure should render through the sink");
 
+    assert!(rendered.is_empty());
+    let envelope: serde_json::Value =
+        serde_json::from_str(&sink.stdout).expect("failure should be JSON");
+    assert_eq!(envelope["ok"], false);
     assert_eq!(
-        err.to_string(),
+        envelope["error"]["message"],
         "resource_not_found: No visible resource matched"
     );
+    assert!(state.session.last_failure.is_some());
 }

@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Display};
+use std::fmt::Display;
 
 #[cfg(test)]
 use crate::core::output_model::OutputItems;
@@ -7,10 +7,15 @@ use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::dsl::{
-    eval::resolve::{resolve_values, resolve_values_truthy},
+    eval::{
+        numeric::integer_value,
+        resolve::{resolve_values, resolve_values_truthy},
+    },
     parse::key_spec::KeySpec,
     verbs::common::{parse_alias_after_as, parse_stage_words},
 };
+
+use super::sort::compare_auto;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AggregateFn {
@@ -31,6 +36,12 @@ struct AggregateSpec {
 #[derive(Debug, Clone)]
 pub(crate) struct AggregatePlan {
     spec: AggregateSpec,
+}
+
+impl AggregatePlan {
+    pub(crate) fn output_field(&self) -> &str {
+        &self.spec.alias
+    }
 }
 
 pub(crate) fn compile(spec: &str) -> Result<AggregatePlan> {
@@ -117,20 +128,13 @@ fn parse_aggregate_spec(spec: &str) -> Result<AggregateSpec> {
     let (function, mut column_raw, from_parenthesized) = parse_function_and_column(&words[0])?;
     let mut index = 1usize;
 
-    if column_raw.is_none() && index < words.len() {
-        if function == AggregateFn::Count && words.len() == 2 {
-        } else if !words[index].eq_ignore_ascii_case("AS") {
-            column_raw = Some(words[index].clone());
-            index += 1;
-        }
+    if column_raw.is_none() && index < words.len() && !words[index].eq_ignore_ascii_case("AS") {
+        column_raw = Some(words[index].clone());
+        index += 1;
     }
 
     let alias = if let Some(alias) = parse_alias_after_as(&words, index, "A")? {
         index += 2;
-        alias
-    } else if index < words.len() {
-        let alias = words[index].clone();
-        index += 1;
         alias
     } else if let Some(column) = &column_raw {
         if from_parenthesized {
@@ -181,7 +185,7 @@ fn aggregate_rows(rows: &[Row], spec: &AggregateSpec) -> Value {
 
     match spec.function {
         AggregateFn::Count => Value::from(count_values(&values) as i64),
-        AggregateFn::Sum => Value::from(sum_values(&values)),
+        AggregateFn::Sum => sum_values(&values),
         AggregateFn::Avg => {
             let numbers = numeric_values(&values);
             if numbers.is_empty() {
@@ -228,27 +232,46 @@ fn count_values(values: &[Value]) -> usize {
     values.iter().filter(|value| !value.is_null()).count()
 }
 
-fn sum_values(values: &[Value]) -> f64 {
-    numeric_values(values).iter().sum()
+fn sum_values(values: &[Value]) -> Value {
+    let mut integer_sum = Some(0i128);
+    let mut sum = 0.0;
+    for value in values {
+        let Some(number) = numeric_value(value) else {
+            continue;
+        };
+        sum += number;
+        integer_sum = integer_sum
+            .zip(integer_value(value))
+            .and_then(|(total, integer)| total.checked_add(integer));
+    }
+    integer_sum
+        .and_then(|total| {
+            i64::try_from(total)
+                .map(Value::from)
+                .or_else(|_| u64::try_from(total).map(Value::from))
+                .ok()
+        })
+        .unwrap_or_else(|| Value::from(sum))
 }
 
 fn numeric_values(values: &[Value]) -> Vec<f64> {
-    values
-        .iter()
-        .filter_map(|value| match value {
-            Value::Number(number) => number.as_f64(),
-            Value::String(text) => text.parse::<f64>().ok(),
-            Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
-            _ => None,
-        })
-        .collect()
+    values.iter().filter_map(numeric_value).collect()
+}
+
+fn numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.parse::<f64>().ok(),
+        Value::Bool(flag) => Some(if *flag { 1.0 } else { 0.0 }),
+        _ => None,
+    }
 }
 
 fn min_value(values: &[Value]) -> Option<Value> {
     values
         .iter()
         .filter(|value| !value.is_null())
-        .min_by(|left, right| compare_values(left, right))
+        .min_by(|left, right| compare_auto(left, right))
         .cloned()
 }
 
@@ -256,26 +279,8 @@ fn max_value(values: &[Value]) -> Option<Value> {
     values
         .iter()
         .filter(|value| !value.is_null())
-        .max_by(|left, right| compare_values(left, right))
+        .max_by(|left, right| compare_auto(left, right))
         .cloned()
-}
-
-fn compare_values(left: &Value, right: &Value) -> Ordering {
-    match (left, right) {
-        (Value::Number(a), Value::Number(b)) => a
-            .as_f64()
-            .partial_cmp(&b.as_f64())
-            .unwrap_or(Ordering::Equal),
-        (Value::String(a), Value::String(b)) => a.cmp(b),
-        _ => value_to_string(left).cmp(&value_to_string(right)),
-    }
-}
-
-fn value_to_string(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
 }
 
 impl AggregateFn {

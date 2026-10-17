@@ -16,18 +16,16 @@
 //! - steady-state command execution belongs in `app::dispatch` and `repl`
 //! - config precedence still belongs to `crate::config`, not to this module
 
-use std::time::Instant;
-
 use crate::config::{
-    ConfigError, ConfigExplain, ConfigLayer, ConfigValue, LoaderPipeline, ResolveOptions,
+    ConfigError, ConfigExplain, ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions,
     ResolvedConfig, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
     build_runtime_pipeline,
 };
 use crate::ui::messages::MessageLevel;
-use miette::{Result, WrapErr};
+use miette::Result;
 
 use crate::app::logging::{DeveloperLoggingConfig, FileLoggingConfig, parse_level_filter};
-use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
+use crate::app::{RuntimeContext, TerminalKind};
 use crate::cli::Cli;
 use crate::ui::build_presentation_defaults_layer;
 
@@ -71,24 +69,18 @@ impl RuntimeConfigRequest {
 }
 
 pub(crate) struct PreparedRuntimeConfig {
-    pipeline: LoaderPipeline,
+    resolver: ConfigResolver,
     options: ResolveOptions,
-}
-
-pub(crate) struct PreparedStartupHost {
-    pub(crate) runtime_context: RuntimeContext,
-    pub(crate) launch_context: LaunchContext,
-    pub(crate) config: ResolvedConfig,
-    pub(crate) host_inputs: crate::app::assembly::ResolvedHostInputs,
 }
 
 impl PreparedRuntimeConfig {
     pub(crate) fn resolve(self) -> std::result::Result<ResolvedConfig, ConfigError> {
-        self.pipeline.resolve(self.options)
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
+        self.resolver.resolve(self.options)
     }
 
     pub(crate) fn explain_key(self, key: &str) -> std::result::Result<ConfigExplain, ConfigError> {
-        self.pipeline.resolver()?.explain_key(key, self.options)
+        self.resolver.explain_key(key, self.options)
     }
 }
 
@@ -109,32 +101,44 @@ fn runtime_resolve_options(request: &RuntimeConfigRequest) -> ResolveOptions {
         .with_terminal_override(request.terminal.clone())
 }
 
-fn runtime_pipeline_for_request(
-    request: &RuntimeConfigRequest,
-    paths: &RuntimeConfigPaths,
-    presentation_layer: Option<ConfigLayer>,
-) -> LoaderPipeline {
-    build_runtime_pipeline(
-        runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
-        presentation_layer,
-        paths,
-        request.runtime_load,
-        None,
-        request.session_layer.clone(),
-    )
-}
-
 pub(crate) fn prepare_runtime_config(
     request: RuntimeConfigRequest,
+    raw: bool,
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
-    let paths = RuntimeConfigPaths::discover_with(request.runtime_load);
+    let paths = {
+        let _phase = tracing::info_span!(target: "osp_startup", "config path discovery").entered();
+        RuntimeConfigPaths::discover_with(request.runtime_load)
+    };
     let options = runtime_resolve_options(&request);
-    let base_resolved =
-        runtime_pipeline_for_request(&request, &paths, None).resolve(options.clone())?;
-    let presentation_layer = build_presentation_defaults_layer(&base_resolved);
-    let pipeline = runtime_pipeline_for_request(&request, &paths, Some(presentation_layer));
+    let (mut layers, base_resolved) = {
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
+        let layers = build_runtime_pipeline(
+            runtime_defaults_layer_with_load(request.runtime_load, &request.product_defaults),
+            None,
+            &paths,
+            request.runtime_load,
+            None,
+            request.session_layer,
+        )
+        .load_layers()?;
+        let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        );
+        let base_resolved = if raw {
+            resolver.resolve_raw(options.clone())?
+        } else {
+            resolver.resolve(options.clone())?
+        };
+        (layers, base_resolved)
+    };
+    layers.presentation = build_presentation_defaults_layer(&base_resolved);
+    let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
+        layers,
+        crate::config::ConfigSchema::default(),
+    );
 
-    Ok(PreparedRuntimeConfig { pipeline, options })
+    Ok(PreparedRuntimeConfig { resolver, options })
 }
 
 pub(crate) fn build_cli_session_layer(cli: &Cli) -> Option<ConfigLayer> {
@@ -158,58 +162,21 @@ pub(crate) fn build_runtime_context(
     RuntimeContext::new(profile_override, terminal_kind, std::env::var("TERM").ok())
 }
 
-pub(crate) fn prepare_startup_host(
-    cli: &Cli,
-    profile_override: Option<String>,
-    terminal_kind: TerminalKind,
-    run_started: Instant,
-    product_defaults: &ConfigLayer,
-) -> Result<PreparedStartupHost> {
-    let runtime_load = cli.runtime_load_options();
-    let runtime_context = build_runtime_context(profile_override, terminal_kind);
-    let session_layer = build_cli_session_layer(cli);
-    let launch_context = LaunchContext::default()
-        .with_plugin_dirs(cli.plugin_dirs.clone())
-        .with_runtime_load(runtime_load)
-        .with_startup_started_at(run_started);
-    let config = resolve_runtime_config(
-        RuntimeConfigRequest::new(
-            runtime_context.profile_override().map(ToOwned::to_owned),
-            Some(runtime_context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(launch_context.runtime_load)
-        .with_product_defaults(product_defaults.clone())
-        .with_session_layer(session_layer.clone()),
-    )
-    .wrap_err("failed to resolve config with session layer")?;
-    let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
-        &runtime_context,
-        &config,
-        &launch_context,
-        crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-        None,
-        None,
-        session_layer,
-    )
-    .wrap_err("failed to derive host runtime inputs for startup")?;
-
-    Ok(PreparedStartupHost {
-        runtime_context,
-        launch_context,
-        config,
-        host_inputs,
-    })
+pub(crate) fn resolve_raw_runtime_config(request: RuntimeConfigRequest) -> Result<ResolvedConfig> {
+    prepare_runtime_config(request, true)
+        .and_then(|prepared| prepared.resolver.resolve_raw(prepared.options))
+        .map_err(|err| report_std_error_with_context(err, super::host::ErrorContext::Config))
 }
 
 pub(crate) fn build_logging_config(
     config: &ResolvedConfig,
-    debug_verbosity: u8,
+    debug_level: u8,
 ) -> DeveloperLoggingConfig {
     let file = if config.get_bool("log.file.enabled").unwrap_or(false) {
         let level = config
             .get_string("log.file.level")
             .and_then(parse_level_filter)
-            .or_else(|| parse_level_filter("warn"))
+            .or_else(|| parse_level_filter("info"))
             .unwrap_or(tracing_subscriber::filter::LevelFilter::WARN);
         let path = config
             .get_string("log.file.path")
@@ -221,17 +188,17 @@ pub(crate) fn build_logging_config(
         None
     };
 
-    DeveloperLoggingConfig::new(debug_verbosity).with_file(file)
+    DeveloperLoggingConfig::new(debug_level).with_file(file)
 }
 
-pub(crate) fn message_verbosity_from_config(config: &ResolvedConfig) -> MessageLevel {
+pub(crate) fn verbosity_from_config(config: &ResolvedConfig) -> MessageLevel {
     config
-        .get_string("ui.message.verbosity")
-        .and_then(parse_message_level)
+        .get_string("ui.verbosity")
+        .and_then(MessageLevel::parse)
         .unwrap_or(MessageLevel::Success)
 }
 
-pub(crate) fn debug_verbosity_from_config(config: &ResolvedConfig) -> u8 {
+pub(crate) fn debug_level_from_config(config: &ResolvedConfig) -> u8 {
     match config.get("debug.level").map(ConfigValue::reveal) {
         Some(ConfigValue::Integer(level)) => (*level).clamp(0, 3) as u8,
         Some(ConfigValue::String(raw)) => raw.trim().parse::<u8>().map_or(0, |level| level.min(3)),
@@ -240,6 +207,7 @@ pub(crate) fn debug_verbosity_from_config(config: &ResolvedConfig) -> u8 {
 }
 
 pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<ResolvedConfig> {
+    let _phase = tracing::info_span!(target: "osp_startup", "runtime config resolution").entered();
     let has_session_layer = request.session_layer.is_some();
     tracing::debug!(
         profile_override = ?request.profile_override,
@@ -248,9 +216,11 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
         bootstrap_mode = ?request.runtime_load.bootstrap_mode,
         "resolving runtime config"
     );
-    let resolved = prepare_runtime_config(request)
+    let resolved = prepare_runtime_config(request, false)
         .and_then(PreparedRuntimeConfig::resolve)
-        .map_err(|err| report_std_error_with_context(err, "config resolution failed"))?;
+        .map_err(|err| {
+            report_std_error_with_context(err, crate::app::host::ErrorContext::Config)
+        })?;
 
     tracing::debug!(
         active_profile = %resolved.active_profile(),
@@ -262,23 +232,9 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
     Ok(resolved)
 }
 
-fn parse_message_level(value: &str) -> Option<MessageLevel> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "error" => Some(MessageLevel::Error),
-        "warning" | "warn" => Some(MessageLevel::Warning),
-        "success" => Some(MessageLevel::Success),
-        "info" => Some(MessageLevel::Info),
-        "trace" => Some(MessageLevel::Trace),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_logging_config, debug_verbosity_from_config, message_verbosity_from_config,
-        parse_message_level,
-    };
+    use super::{build_logging_config, debug_level_from_config, verbosity_from_config};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::ui::messages::MessageLevel;
 
@@ -299,18 +255,18 @@ mod tests {
 
     #[test]
     fn parse_message_level_accepts_warn_alias_and_rejects_unknown_values_unit() {
-        assert_eq!(parse_message_level(" warn "), Some(MessageLevel::Warning));
-        assert_eq!(parse_message_level("TRACE"), Some(MessageLevel::Trace));
-        assert_eq!(parse_message_level("loud"), None);
+        assert_eq!(MessageLevel::parse(" warn "), Some(MessageLevel::Warning));
+        assert_eq!(MessageLevel::parse("TRACE"), Some(MessageLevel::Trace));
+        assert_eq!(MessageLevel::parse("loud"), None);
     }
 
     #[test]
-    fn debug_verbosity_from_config_clamps_string_and_integer_inputs_unit() {
+    fn debug_level_from_config_clamps_string_and_integer_inputs_unit() {
         let string_config = resolved(&[("debug.level", "9")]);
         let integer_config = resolved(&[("debug.level", "-2")]);
 
-        assert_eq!(debug_verbosity_from_config(&string_config), 3);
-        assert_eq!(debug_verbosity_from_config(&integer_config), 0);
+        assert_eq!(debug_level_from_config(&string_config), 3);
+        assert_eq!(debug_level_from_config(&integer_config), 0);
     }
 
     #[test]
@@ -319,15 +275,12 @@ mod tests {
             ("log.file.enabled", "true"),
             ("log.file.level", "debug"),
             ("log.file.path", "   "),
-            ("ui.message.verbosity", "warning"),
+            ("ui.verbosity", "warning"),
         ]);
 
         let logging = build_logging_config(&config, 2);
         assert!(logging.file.is_none());
-        assert_eq!(
-            message_verbosity_from_config(&config),
-            MessageLevel::Warning
-        );
-        assert_eq!(logging.debug_count, 2);
+        assert_eq!(verbosity_from_config(&config), MessageLevel::Warning);
+        assert_eq!(logging.debug_level, 2);
     }
 }

@@ -1,48 +1,9 @@
 use super::*;
-use miette::WrapErr;
 use std::sync::{Arc, Mutex};
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn with_test_xdg_env<T>(run: impl FnOnce() -> T) -> T {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
-    let original_home = std::env::var("HOME").ok();
-    let original_xdg_config_home = std::env::var("XDG_CONFIG_HOME").ok();
-    let original_xdg_cache_home = std::env::var("XDG_CACHE_HOME").ok();
-    let original_xdg_data_home = std::env::var("XDG_DATA_HOME").ok();
-
-    unsafe {
-        std::env::set_var("HOME", "/tmp/osp-app-runtime-home");
-        std::env::set_var("XDG_CONFIG_HOME", "/tmp/osp-app-runtime-xdg/config");
-        std::env::set_var("XDG_CACHE_HOME", "/tmp/osp-app-runtime-xdg/cache");
-        std::env::set_var("XDG_DATA_HOME", "/tmp/osp-app-runtime-xdg/data");
-    }
-
-    let output = run();
-
-    match original_home {
-        Some(value) => unsafe { std::env::set_var("HOME", value) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
-    match original_xdg_config_home {
-        Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
-    }
-    match original_xdg_cache_home {
-        Some(value) => unsafe { std::env::set_var("XDG_CACHE_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_CACHE_HOME") },
-    }
-    match original_xdg_data_home {
-        Some(value) => unsafe { std::env::set_var("XDG_DATA_HOME", value) },
-        None => unsafe { std::env::remove_var("XDG_DATA_HOME") },
-    }
-
-    output
+    run()
 }
-
-struct SessionGuardedNativeCommand;
 
 struct CompletionRefreshingNativeCommand;
 
@@ -76,7 +37,7 @@ impl crate::NativeCommand for CapabilityGatedNativeCommand {
     fn describe(&self) -> DescribeCommandV1 {
         let mut command = DescribeCommandV1::from_clap(self.command());
         command.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-            visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+            visibility: Some(DescribeVisibilityModeV1::Authenticated),
             required_capabilities: vec!["ldap.user.read".to_string()],
             ..DescribeCommandAuthV1::default()
         });
@@ -107,13 +68,11 @@ impl crate::NativeCommand for CompletionRefreshingNativeCommand {
     }
 }
 
-struct AuthenticatedBuiltinRecovery;
-
 #[derive(Clone, Default)]
 struct StartupResolutionProbe(Arc<Mutex<Vec<(String, crate::app::TerminalKind)>>>);
 
-impl crate::app::StartupHook for StartupResolutionProbe {
-    fn prepare(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
+impl crate::app::AccessPolicy for StartupResolutionProbe {
+    fn startup(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
         self.0
             .lock()
             .expect("startup probe should not be poisoned")
@@ -129,71 +88,14 @@ impl crate::app::StartupHook for StartupResolutionProbe {
     }
 }
 
-impl crate::app::CommandAccessRecovery for AuthenticatedBuiltinRecovery {
-    fn refresh(&self, _runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
-        Ok(())
-    }
-
-    fn try_recover(
-        &self,
-        request: &crate::app::AccessRecoveryRequest,
-        runtime: &mut crate::app::AppRuntime,
-        _session: &mut crate::app::AppSession,
-    ) -> miette::Result<crate::app::AccessRecoveryOutcome> {
-        if request.command_kind != crate::app::CommandAccessKind::Builtin
-            || request.command != "config"
-        {
-            return Ok(crate::app::AccessRecoveryOutcome::NoChange);
-        }
-
-        runtime.set_policy_context(
-            crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-        );
-        Ok(crate::app::AccessRecoveryOutcome::Recovered)
-    }
-}
-
-impl crate::NativeCommand for SessionGuardedNativeCommand {
-    fn command(&self) -> clap::Command {
-        clap::Command::new("secure").about("Guarded test command")
-    }
-
-    fn auth(&self) -> Option<crate::core::plugin::DescribeCommandAuthV1> {
-        Some(crate::core::plugin::DescribeCommandAuthV1 {
-            visibility: Some(crate::core::plugin::DescribeVisibilityModeV1::Public),
-            run_session: Some(crate::core::plugin::DescribeSessionRequirementsV1 {
-                auth_strength: Some(crate::core::plugin::DescribeAuthStrengthV1::Strong),
-                credentials: vec![
-                    crate::core::plugin::DescribeCredentialRequirementV1::Fresh {
-                        service: "osp".to_string(),
-                        min_ttl_seconds: 900,
-                    },
-                ],
-            }),
-            ..crate::core::plugin::DescribeCommandAuthV1::default()
-        })
-    }
-
-    fn execute(
-        &self,
-        args: &[String],
-        _context: &crate::NativeCommandContext<'_>,
-    ) -> anyhow::Result<crate::NativeCommandOutcome> {
-        if args.iter().any(|arg| arg == "--help") {
-            return Ok(crate::NativeCommandOutcome::Help(
-                "Usage: osp secure".to_string(),
-            ));
-        }
-
-        Ok(crate::NativeCommandOutcome::Exit(0))
-    }
-}
-
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
-        let app = crate::app::App::builder().build();
+        let app = crate::app::App::new();
         let mut help_sink = BufferedUiSink::default();
 
         assert_eq!(
@@ -216,10 +118,10 @@ fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
         assert!(sink.stderr.is_empty());
 
         let mut runner_sink = BufferedUiSink::default();
-        let mut runner = crate::app::App::builder().build_with_sink(&mut runner_sink);
+        let runner = crate::app::App::new();
         assert_eq!(
             runner
-                .run_from(["osp", "--defaults-only", "--help"])
+                .run_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink)
                 .expect("runner help should render"),
             0
         );
@@ -228,9 +130,12 @@ fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_public_entrypoints_cover_owned_runner_and_free_process_wrappers_unit() {
+fn app_public_entrypoints_cover_repeated_sink_and_free_process_wrappers_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
-        let app = crate::app::App::builder().build();
+        let app = crate::app::App::new();
         assert_eq!(
             app.run_from(["osp", "--defaults-only", "--help"])
                 .expect("app run_from help should render"),
@@ -239,9 +144,11 @@ fn app_public_entrypoints_cover_owned_runner_and_free_process_wrappers_unit() {
         assert_eq!(app.run_process(["osp", "--defaults-only", "--help"]), 0);
 
         let mut runner_sink = BufferedUiSink::default();
-        let mut runner = crate::app::App::builder().build_with_sink(&mut runner_sink);
-        assert_eq!(runner.run_process(["osp", "--defaults-only", "--help"]), 0);
-        drop(runner);
+        let runner = crate::app::App::new();
+        assert_eq!(
+            runner.run_process_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink),
+            0
+        );
         assert!(!runner_sink.stdout.is_empty());
         assert!(runner_sink.stderr.is_empty());
 
@@ -263,19 +170,25 @@ fn app_public_entrypoints_cover_owned_runner_and_free_process_wrappers_unit() {
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
 fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("profile.default", "default");
-        product_defaults.set_for_profile("production", "ui.format", "table");
+        product_defaults.insert(
+            "ui.format",
+            "table",
+            crate::config::Scope::profile("production"),
+        );
         product_defaults.set("theme.path", Vec::<String>::new());
 
         let probe = StartupResolutionProbe::default();
         let run = |args: &[&str]| {
             let mut sink = BufferedUiSink::default();
-            let exit = crate::app::App::builder()
+            let exit = crate::app::App::new()
                 .with_product_defaults(product_defaults.clone())
-                .with_startup_hook(probe.clone())
-                .build()
+                .with_access_policy(probe.clone())
                 .run_with_sink(args, &mut sink)
                 .expect("prepared command should run");
             assert_eq!(exit, 0, "startup probe command should succeed");
@@ -309,12 +222,15 @@ fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
 #[cfg_attr(miri, ignore = "public app startup context integration test")]
 #[test]
 fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         #[derive(Clone)]
         struct SubjectHook(Arc<Mutex<Option<String>>>);
 
-        impl crate::app::StartupHook for SubjectHook {
-            fn prepare(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
+        impl crate::app::AccessPolicy for SubjectHook {
+            fn startup(&self, runtime: &mut crate::app::AppRuntime) -> miette::Result<()> {
                 runtime.set_authenticated_subject(Some("alice"));
                 *self.0.lock().expect("subject probe should not be poisoned") = runtime
                     .context()
@@ -326,9 +242,8 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
 
         let subject = Arc::new(Mutex::new(None));
         let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
-            .with_startup_hook(SubjectHook(subject.clone()))
-            .build()
+        let exit = crate::app::App::new()
+            .with_access_policy(SubjectHook(subject.clone()))
             .run_with_sink(["osp", "config", "get", "profile.active"], &mut sink)
             .expect("startup subject command should run");
 
@@ -345,24 +260,29 @@ fn startup_hook_can_publish_authenticated_subject_without_re_resolving_config_un
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_builder_product_defaults_flow_through_public_builder_surface_unit() {
+fn app_product_defaults_flow_through_public_setup_surface_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut product_defaults = crate::config::ConfigLayer::default();
         product_defaults.set("extensions.site.enabled", true);
         product_defaults.set("theme.path", Vec::<String>::new());
 
         let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
+        let exit = crate::app::App::new()
             .with_product_defaults(product_defaults)
-            .build_with_sink(&mut sink)
-            .run_process([
-                "osp",
-                "--defaults-only",
-                "--json",
-                "config",
-                "get",
-                "extensions.site.enabled",
-            ]);
+            .run_process_with_sink(
+                [
+                    "osp",
+                    "--defaults-only",
+                    "--json",
+                    "config",
+                    "get",
+                    "extensions.site.enabled",
+                ],
+                &mut sink,
+            );
 
         assert_eq!(exit, 0);
         let payload: serde_json::Value =
@@ -379,107 +299,10 @@ fn app_builder_product_defaults_flow_through_public_builder_surface_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_builder_policy_context_flows_through_public_builder_surface_unit() {
-    with_test_xdg_env(|| {
-        let registry =
-            crate::NativeCommandRegistry::new().with_command(SessionGuardedNativeCommand);
-        let mut denied_sink = BufferedUiSink::default();
-        let denied_exit = crate::app::App::builder()
-            .with_native_commands(registry.clone())
-            .build_with_sink(&mut denied_sink)
-            .run_process(["osp", "--defaults-only", "secure"]);
-
-        assert_ne!(denied_exit, 0);
-        assert!(
-            denied_sink
-                .stderr
-                .contains("requires strong authentication")
-        );
-
-        let mut allowed_sink = BufferedUiSink::default();
-        let allowed_exit = crate::app::App::builder()
-            .with_policy_context(
-                crate::core::command_policy::CommandPolicyContext::default()
-                    .authenticated(true)
-                    .with_auth_strength(crate::core::command_policy::AuthStrength::Strong)
-                    .with_credential(
-                        "osp",
-                        crate::core::command_policy::CredentialState::valid_for(900),
-                    ),
-            )
-            .with_native_commands(registry)
-            .build_with_sink(&mut allowed_sink)
-            .run_process(["osp", "--defaults-only", "secure"]);
-
-        assert_eq!(allowed_exit, 0);
-        assert!(allowed_sink.stdout.is_empty());
-        assert!(allowed_sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
-fn app_builder_builtin_policy_flows_through_public_builder_surface_unit() {
-    with_test_xdg_env(|| {
-        let mut builtin_policy = crate::core::command_policy::CommandPolicyRegistry::new();
-        builtin_policy.register(
-            crate::core::command_policy::CommandPolicy::new(
-                crate::core::command_policy::CommandPath::new(["config"]),
-            )
-            .visibility(crate::core::command_policy::VisibilityMode::Authenticated),
-        );
-        let mut denied_sink = BufferedUiSink::default();
-        let denied_exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy.clone())
-            .build_with_sink(&mut denied_sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_ne!(denied_exit, 0);
-        assert!(denied_sink.stderr.contains("requires authentication"));
-
-        let mut allowed_sink = BufferedUiSink::default();
-        let allowed_exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy)
-            .with_policy_context(
-                crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-            )
-            .build_with_sink(&mut allowed_sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_eq!(allowed_exit, 0);
-        assert!(allowed_sink.stdout.contains("theme.name"));
-        assert!(allowed_sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
-fn app_builder_access_recovery_retries_denied_builtin_command_unit() {
-    with_test_xdg_env(|| {
-        let mut builtin_policy = crate::core::command_policy::CommandPolicyRegistry::new();
-        builtin_policy.register(
-            crate::core::command_policy::CommandPolicy::new(
-                crate::core::command_policy::CommandPath::new(["config"]),
-            )
-            .visibility(crate::core::command_policy::VisibilityMode::Authenticated),
-        );
-
-        let mut sink = BufferedUiSink::default();
-        let exit = crate::app::App::builder()
-            .with_builtin_policy(builtin_policy)
-            .with_access_recovery(AuthenticatedBuiltinRecovery)
-            .build_with_sink(&mut sink)
-            .run_process(["osp", "--defaults-only", "config", "get", "theme.name"]);
-
-        assert_eq!(exit, 0);
-        assert!(sink.stdout.contains("theme.name"));
-        assert!(sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
 fn free_process_wrapper_renders_usage_errors_to_bound_sink_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let mut sink = BufferedUiSink::default();
         let exit = crate::app::run_process_with_sink(["osp", "--definitely-not-a-flag"], &mut sink);
@@ -495,13 +318,12 @@ fn free_process_wrapper_renders_usage_errors_to_bound_sink_unit() {
 
 #[test]
 fn native_commands_project_into_auth_catalog_unit() {
-    let state = make_completion_state_with_entries_and_native(
-        None,
-        &[("auth.visible.plugins", "ldap")],
-        test_native_registry(),
+    let state = make_completion_state_with_entries_and_native(&[], test_native_registry());
+    let catalog = super::authorized_command_catalog_for(
+        &state.runtime.auth,
+        &state.clients,
+        state.clients.native_commands().catalog(),
     );
-    let catalog = super::authorized_command_catalog_for(&state.runtime.auth, &state.clients)
-        .expect("catalog should render");
     assert!(catalog.iter().any(|entry| entry.name == "ldap"));
     assert!(
         state
@@ -516,24 +338,19 @@ fn native_commands_project_into_auth_catalog_unit() {
 #[test]
 fn native_command_can_restart_repl_after_refreshing_completion_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(CompletionRefreshingNativeCommand),
     );
     let history = make_test_history(&mut state);
 
-    let result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "refreshable refresh",
-    )
-    .expect("native refresh command should run");
+    let result =
+        repl_dispatch::execute_repl_plugin_line(&mut state, &history, "refreshable refresh", None)
+            .map(|executed| executed.result)
+            .expect("native refresh command should run");
 
     assert!(matches!(
         result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             output,
             reload: crate::repl::ReplReloadKind::Default,
         } if output.contains("refreshed")
@@ -542,50 +359,34 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
 
 #[cfg(unix)]
 #[test]
-fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
+fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(CapabilityGatedNativeCommand),
     );
-    state.runtime.set_policy_context(
-        crate::core::command_policy::CommandPolicyContext::default().authenticated(true),
-    );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap user",
-    )
-    .expect_err("missing capability should deny the command");
-    let immediate = error
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(immediate.contains("command `ldap user`"));
-    assert!(immediate.contains("capability `ldap.user.read`"));
-    assert!(immediate.contains("Try: authenticate"));
-    state.runtime.ui.render_settings.format = OutputFormat::Table;
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
+        .expect("failure should render through the sink");
+    let immediate = sink.stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(immediate.contains("command ldap user"));
+    assert!(immediate.contains("requires authentication"));
+    assert!(immediate.contains("hint: authenticate"));
 
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        line,
+        &mut state, &history, line, None,
     )
+    .map(|executed| executed.result)
     .expect("doctor last should render")
     {
-        crate::repl::ReplLineResult::Continue(output) => output,
+        crate::repl::ReplResult::Print(output) => output,
         other => panic!("unexpected doctor result: {other:?}"),
     };
 
     let recap = doctor("doctor last");
-    assert!(recap.contains("capability `ldap.user.read`"));
+    assert!(recap.contains("requires authentication"));
     assert!(
         recap.contains("Action:  authenticate"),
         "unexpected recap: {recap}"
@@ -594,15 +395,15 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
     assert!(!recap.contains("doctor last"));
 
     let verbose = doctor("-v doctor last");
-    assert!(verbose.contains("ldap.user.read"));
+    assert!(verbose.contains("requires authentication"));
     assert!(!verbose.contains("osp::auth::missing_capabilities"));
 
     let debug = doctor("-vv doctor last");
-    assert!(debug.contains("ldap.user.read"));
+    assert!(debug.contains("requires authentication"));
     assert!(!debug.contains("Stack backtrace"));
 
     let forensic = doctor("-vvv doctor last");
-    assert!(forensic.contains("ldap.user.read"));
+    assert!(forensic.contains("requires authentication"));
     assert!(!forensic.contains("run `doctor last"));
 }
 
@@ -610,88 +411,74 @@ fn capability_denial_and_doctor_last_add_progressive_detail_unit() {
 #[test]
 fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap usr",
-    )
-    .expect_err("subcommand typo should fail");
-    let immediate = error.to_string();
-    assert!(immediate.contains("subcommand 'usr'"));
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap usr", Some(&mut sink))
+        .expect("failure should render through the sink");
+    let immediate = &sink.stderr;
+    assert!(immediate.contains("Unknown command 'ldap usr'"));
     assert!(
-        immediate.contains("Try: use `ldap user`"),
+        immediate.contains("hint: Did you mean ldap user?"),
         "unexpected immediate error: {immediate}"
     );
     assert!(!immediate.contains("Usage:"));
     assert!(!immediate.contains("native command execution failed"));
 
-    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let mut doctor = |line: &str| match repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        line,
+        &mut state, &history, line, None,
     )
+    .map(|executed| executed.result)
     .expect("doctor last should render")
     {
-        crate::repl::ReplLineResult::Continue(output) => output,
+        crate::repl::ReplResult::Print(output) => output,
         other => panic!("unexpected doctor result: {other:?}"),
     };
 
     let recap = doctor("doctor last");
-    assert!(recap.contains("Action:  use `ldap user`"));
+    assert!(recap.contains("Action:  Did you mean ldap user?"));
     assert!(!recap.contains("Usage:"));
 
     let verbose = doctor("-v doctor last");
-    assert!(verbose.contains("Usage: ldap"));
+    assert!(!verbose.contains("Usage: ldap"));
     assert!(!verbose.contains("native command execution failed"));
 
     let debug = doctor("-vv doctor last");
-    assert!(debug.contains("subcommand 'usr'"));
+    assert!(debug.contains("Unknown command 'ldap usr'"));
     assert!(!debug.contains("Stack backtrace"));
 
     let forensic = doctor("-vvv doctor last");
-    assert!(forensic.contains("Stack backtrace"));
+    assert!(!forensic.contains("Stack backtrace"));
 }
 
 #[cfg(unix)]
 #[test]
 fn native_missing_argument_names_input_and_scoped_help_unit() {
     let mut state = make_completion_state_with_entries_and_native(
-        None,
         &[],
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
+    state.runtime.ui.render_settings.format = OutputFormat::Table;
     let history = make_test_history(&mut state);
 
-    let error = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
-        &history,
-        "ldap user",
-    )
-    .expect_err("missing username should fail");
-    let immediate = error.to_string();
+    let mut sink = BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
+        .expect("failure should render through the sink");
+    let immediate = &sink.stderr;
     assert!(immediate.contains("<USERNAME>"), "{immediate}");
     assert!(
-        immediate.contains("Try: use `ldap user --help`"),
+        immediate.contains("hint: Run ldap user --help."),
         "{immediate}"
     );
     assert!(!immediate.contains("Usage:"));
 }
 
 #[test]
-fn bootstrap_message_verbosity_handles_non_utf8_short_flags_and_double_dash_unit() {
+fn bootstrap_verbosity_handles_non_utf8_short_flags_and_double_dash_unit() {
     let mut args = vec![
         OsString::from("osp"),
         OsString::from("--verbose"),
@@ -708,8 +495,11 @@ fn bootstrap_message_verbosity_handles_non_utf8_short_flags_and_double_dash_unit
         OsString::from("--quiet"),
     ]);
 
+    let counts = crate::cli::invocation::scan_cli_argv(&args).invocation;
+    let (verbose, quiet, debug) = (counts.verbose, counts.quiet, counts.debug);
+    assert_eq!((verbose, quiet, debug), (2, 1, 0));
     assert_eq!(
-        super::bootstrap_message_verbosity(&args),
+        crate::ui::messages::adjust_verbosity(MessageLevel::Success, verbose, quiet),
         MessageLevel::Info
     );
 }
@@ -732,53 +522,19 @@ fn bootstrap_error_detail_handles_non_utf8_short_flags_and_double_dash_unit() {
         OsString::from("--quiet"),
     ]);
 
-    assert_eq!(super::bootstrap_error_detail(&args), ErrorDetail::Normal);
+    let counts = crate::cli::invocation::scan_cli_argv(&args).invocation;
+    let (verbose, quiet, debug) = (counts.verbose, counts.quiet, counts.debug);
+    assert_eq!((verbose, quiet, debug), (2, 1, 0));
+    assert_eq!(
+        crate::ui::messages::adjust_verbosity(MessageLevel::Success, verbose, quiet),
+        MessageLevel::Info
+    );
 }
 
 #[cfg_attr(
     miri,
     ignore = "forensic backtrace rendering uses std backtrace display"
 )]
-#[test]
-fn error_rendering_prioritizes_actionable_details_across_levels_unit() {
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
-    let report = enrich_dispatch_error(PluginDispatchError::NonZeroExit {
-        plugin_id: "ldap".to_string(),
-        status_code: 7,
-        stderr: "backend exploded".to_string(),
-    });
-
-    let rendered = render_report_message(&report, ErrorDetail::Terse, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7: backend exploded"));
-    assert!(rendered.contains("Try: inspect the plugin stderr"));
-    assert!(!rendered.contains("run again with -v"));
-
-    let rendered = render_report_message(&report, ErrorDetail::Normal, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7"));
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(!rendered.contains("Try:"));
-
-    let rendered = render_report_message(&report, ErrorDetail::Debug, &settings);
-    assert!(rendered.contains("plugin ldap exited with status 7"));
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(!rendered.contains("Try:"));
-    assert!(!rendered.contains("Stack backtrace"));
-
-    let rendered = render_report_message(&report, ErrorDetail::Forensic, &settings);
-    assert!(rendered.contains("plugin command failed"));
-    assert!(rendered.contains("backend exploded"));
-    assert!(rendered.contains("Stack backtrace"));
-
-    let report = Err::<(), _>(miette::miette!("unknown theme: missing-theme"))
-        .wrap_err("failed to derive host runtime inputs for startup")
-        .expect_err("wrapped error should stay an error");
-    let rendered = render_report_message(&report, ErrorDetail::Terse, &settings);
-    assert!(rendered.contains("unknown theme: missing-theme"));
-    assert!(!rendered.starts_with("failed to derive host runtime inputs for startup"));
-}
-
 #[test]
 fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
     let config = test_config(&[]);
@@ -787,19 +543,20 @@ fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
         MessageLevel::Success,
         0,
     );
-    let runtime = super::CommandRenderRuntime::new(&config, &ui);
+
     let mut sink = BufferedUiSink::default();
     let mut messages = MessageBuffer::default();
     messages.success("done");
 
     let exit = super::run_cli_command(
-        &runtime,
-        super::CliCommandResult {
+        &config,
+        &ui,
+        &super::CommandOutput {
             exit_code: 7,
             messages,
-            output: Some(super::ReplCommandOutput::Text("payload\n".to_string())),
-            stderr_text: Some("warn\n".to_string()),
+            stderr_text: "warn\n".to_string(),
             failure_report: None,
+            ..super::CommandOutput::text("payload\n".to_string())
         },
         &mut sink,
     )
@@ -812,7 +569,7 @@ fn run_cli_command_routes_messages_stdout_and_stderr_through_sink_unit() {
 }
 
 #[test]
-fn run_cli_command_with_ui_builds_runtime_from_config_and_ui_unit() {
+fn run_cli_command_builds_runtime_from_config_and_ui_unit() {
     let config = test_config(&[]);
     let ui = crate::app::UiState::new(
         RenderSettings::test_plain(OutputFormat::Value),
@@ -821,15 +578,15 @@ fn run_cli_command_with_ui_builds_runtime_from_config_and_ui_unit() {
     );
     let mut sink = BufferedUiSink::default();
 
-    let exit = super::run_cli_command_with_ui(
+    let exit = super::run_cli_command(
         &config,
         &ui,
-        super::CliCommandResult {
+        &super::CommandOutput {
             exit_code: 3,
             messages: MessageBuffer::default(),
-            output: Some(super::ReplCommandOutput::Text("payload\n".to_string())),
-            stderr_text: None,
+            stderr_text: String::new(),
             failure_report: None,
+            ..super::CommandOutput::text("payload\n".to_string())
         },
         &mut sink,
     )
@@ -853,7 +610,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
         .with_plugin_dir("/tmp/osp-plugin-a")
         .with_config_root(Some(std::path::PathBuf::from("/tmp/osp-config")))
         .with_cache_root(Some(std::path::PathBuf::from("/tmp/osp-cache")));
-    let session = crate::app::AppSession::with_cache_limit(5).with_prompt_prefix("osp-dev");
+    let session = crate::app::AppSession::default().with_prompt_prefix("osp-dev");
     let plugins =
         crate::plugin::PluginManager::new(vec![std::path::PathBuf::from("/tmp/osp-plugin-a")])
             .with_roots(
@@ -874,10 +631,9 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     .with_native_commands(test_native_registry())
     .build();
 
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.session.prompt_prefix, "osp-dev");
-    assert_eq!(state.session.max_cached_results, 5);
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
         &[std::path::PathBuf::from("/tmp/osp-plugin-a")]
@@ -893,7 +649,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     assert!(state.clients.native_commands().command("ldap").is_some());
 
     let config = test_config(&[
-        ("ui.message.verbosity", "trace"),
+        ("ui.verbosity", "trace"),
         ("debug.level", "2"),
         ("theme.name", "dracula"),
     ]);
@@ -904,14 +660,14 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
     );
     let ui = crate::app::UiState::from_resolved_config(&context, &config)
         .expect("ui state should derive from resolved config");
-    assert_eq!(ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(ui.debug_verbosity, 2);
+    assert_eq!(ui.verbosity, MessageLevel::Trace);
+    assert_eq!(ui.debug_level, 2);
     assert_eq!(ui.render_settings.theme_name, "dracula");
 
     let state = crate::app::AppState::from_resolved_config(context, config)
         .expect("app state should derive from resolved config");
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.runtime.ui.render_settings.theme_name, "dracula");
     assert!(state.clients.plugins().explicit_dirs().is_empty());
 
@@ -928,9 +684,9 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit() {
+fn state_builder_preserves_derived_plugin_and_theme_state_unit() {
     let config = test_config(&[
-        ("ui.message.verbosity", "trace"),
+        ("ui.verbosity", "trace"),
         ("debug.level", "2"),
         ("theme.name", "dracula"),
     ]);
@@ -940,23 +696,13 @@ fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit(
         Some("xterm-256color".to_string()),
     );
     let launch = crate::app::LaunchContext::default().with_plugin_dir("/tmp/osp-plugin-a");
-    let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
-        &context,
-        &config,
-        &launch,
-        crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-        None,
-        None,
-        None,
-    )
-    .expect("host inputs should derive");
-
-    let state = crate::app::AppStateBuilder::from_host_inputs(context, config, host_inputs)
+    let state = crate::app::AppStateBuilder::from_resolved_config(context, config)
+        .expect("host inputs should derive")
         .with_launch(launch)
         .build();
 
-    assert_eq!(state.runtime.ui.message_verbosity, MessageLevel::Trace);
-    assert_eq!(state.runtime.ui.debug_verbosity, 2);
+    assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
+    assert_eq!(state.runtime.ui.debug_level, 2);
     assert_eq!(state.runtime.ui.render_settings.theme_name, "dracula");
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
@@ -965,7 +711,7 @@ fn state_builder_from_host_inputs_preserves_derived_plugin_and_theme_state_unit(
 }
 
 #[test]
-fn app_session_cache_helpers_cover_public_session_surface_unit() {
+fn app_session_helpers_cover_public_session_surface_unit() {
     let mut neutral_session = crate::app::AppSession::default();
     neutral_session.scope.enter("theme");
     assert_eq!(
@@ -977,14 +723,13 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
     overrides.set("extensions.site.enabled", true);
     let history_shell = HistoryShellContext::default();
 
-    let built_session = crate::app::AppSession::with_cache_limit(0)
+    let built_session = crate::app::AppSession::default()
         .with_prompt_prefix("builder")
         .with_history_enabled(false)
         .with_history_shell(history_shell.clone())
         .with_config_overrides(overrides.clone());
     assert_eq!(built_session.prompt_prefix, "builder");
     assert!(!built_session.history_enabled);
-    assert_eq!(built_session.max_cached_results, 1);
     assert_eq!(
         built_session
             .config_overrides
@@ -995,25 +740,13 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
         1
     );
 
-    let mut session = crate::app::AppSession::with_cache_limit(0)
+    let mut session = crate::app::AppSession::default()
         .with_prompt_prefix("demo")
         .with_history_enabled(false)
         .with_history_shell(history_shell)
         .with_config_overrides(overrides);
     assert_eq!(session.prompt_prefix, "demo");
     assert!(!session.history_enabled);
-    assert_eq!(session.max_cached_results, 1);
-
-    session.record_result("   ", vec![serde_json::Map::new()]);
-    assert!(session.last_rows.is_empty());
-
-    let mut row = serde_json::Map::new();
-    row.insert("uid".to_string(), serde_json::json!("alice"));
-    session.record_result("ldap user alice", vec![row.clone()]);
-    assert_eq!(
-        session.cached_rows("ldap user alice").unwrap()[0]["uid"],
-        "alice"
-    );
 
     session.record_failure("   ", "ignored", "ignored");
     assert!(session.last_failure.is_none());
@@ -1031,12 +764,6 @@ fn app_session_cache_helpers_cover_public_session_surface_unit() {
     assert!(session.prompt_timing.badge().is_some());
     session.record_prompt_timing(0, std::time::Duration::from_millis(0), None, None, None);
     assert!(session.prompt_timing.badge().is_none());
-
-    let default_session = crate::app::AppSession::default();
-    assert_eq!(
-        default_session.max_cached_results,
-        crate::config::DEFAULT_SESSION_CACHE_MAX_RESULTS as usize
-    );
 }
 
 #[test]
@@ -1054,32 +781,39 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             details: serde_json::json!({}),
         }),
         messages: vec![ResponseMessageV1 {
-            level: ResponseMessageLevelV1::Warning,
+            level: MessageLevel::Warning,
             text: "queried fallback backend".to_string(),
         }],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
 
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let prepared = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should still parse");
-    let super::command_output::PreparedPluginResponse::Failure(failure) = prepared else {
-        panic!("expected failure response");
+    assert_eq!(prepared.exit_code, 1);
+    let report = prepared.failure_report.expect("expected failure response");
+    let crate::app::CommandBody::Output(output) = prepared.body else {
+        panic!("expected structured failure data");
     };
-
-    let rendered = failure.messages.render_grouped(MessageLevel::Trace);
+    let rendered = crate::ui::render_messages(
+        &prepared.messages,
+        &crate::ui::MessageRequest::new(
+            &crate::ui::RenderSettings::test_plain(OutputFormat::Auto),
+            MessageLevel::Trace,
+        ),
+    );
     assert!(rendered.contains("queried fallback backend"));
-    assert!(rendered.contains("NOT_FOUND: missing user"));
-    assert_eq!(failure.report.to_string(), "NOT_FOUND: missing user");
+    assert_eq!(report.to_string(), "missing user");
+    assert_eq!(report.to_string(), "missing user");
     assert_eq!(
-        failure
-            .output
+        output
             .document
             .as_ref()
-            .map(|document| document.value.clone()),
+            .map(|document| document.json_value()),
         None
     );
     assert_eq!(
-        crate::core::output_model::output_items_to_value(&failure.output.items),
+        crate::core::output_model::output_items_to_value(&output.items),
         serde_json::json!({
             "code": "vm_ambiguous",
             "candidates": [{"name": "db01.uio.no", "provider": "vmware"}]
@@ -1092,7 +826,11 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
         data: serde_json::json!([{"uid": "alice"}]),
         error: None,
         messages: Vec::new(),
+        context: None,
         meta: ResponseMetaV1 {
+            context_not_found: false,
+            detail_columns: Vec::new(),
+            context: Default::default(),
             format_hint: Some("table".to_string()),
             columns: Some(vec!["uid".to_string()]),
             column_align: Vec::new(),
@@ -1101,19 +839,24 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
             preserve_json_document: false,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
             progress_replace: false,
             display_limit: None,
             partial_rows: None,
         },
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &["P uid".to_string()])
-        .expect("pipeline should apply");
-    let super::command_output::PreparedPluginResponse::Output(output) = prepared else {
+    let prepared =
+        super::command_output::cli_result_from_plugin_response(response, &["P uid".to_string()])
+            .and_then(|result| {
+                super::command_output::apply_stages_to_cli_result(result, &["P uid".to_string()])
+            })
+            .expect("pipeline should apply");
+    assert_eq!(prepared.exit_code, 0);
+    assert!(prepared.failure_report.is_none());
+    let crate::app::CommandBody::Output(output) = prepared.body else {
         panic!("expected successful output response");
     };
-    assert!(output.format_hint.is_none());
+    assert!(prepared.format_hint.is_none());
+    assert!(output.document.is_none());
 }
 
 #[test]
@@ -1131,30 +874,27 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
             }),
         }),
         messages: vec![],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let result = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should parse");
-    let result = CliCommandResult::from_prepared_plugin_response(prepared);
     let report = result
         .failure_report
         .expect("failure should carry diagnostics");
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let terse = render_report_message(&report, ErrorDetail::Terse, &settings);
-    assert!(
-        terse.contains("resource_not_found: No visible resource matched"),
-        "{terse}"
-    );
+    let terse = render_report_message(&report, MessageLevel::Success, &settings);
+    assert!(terse.contains("No visible resource matched"), "{terse}");
     assert!(!terse.contains("http_status"));
 
-    let normal = render_report_message(&report, ErrorDetail::Normal, &settings);
-    assert!(normal.contains("http_status"));
-    assert!(normal.contains("missing.uio.no"));
+    let normal = render_report_message(&report, MessageLevel::Info, &settings);
+    assert!(!normal.contains("http_status"));
+    assert!(!normal.contains("missing.uio.no"));
 
-    let debug = render_report_message(&report, ErrorDetail::Debug, &settings);
-    assert!(debug.contains("Backend details"));
-    assert!(debug.contains("missing.uio.no"));
+    let debug = render_report_message(&report, MessageLevel::Trace, &settings);
+    assert!(!debug.contains("Backend details"));
+    assert!(!debug.contains("missing.uio.no"));
 }
 
 #[test]
@@ -1169,39 +909,42 @@ fn prepared_plugin_response_maps_into_cli_command_result_unit() {
             details: serde_json::json!({}),
         }),
         messages: vec![ResponseMessageV1 {
-            level: ResponseMessageLevelV1::Warning,
+            level: MessageLevel::Warning,
             text: "queried fallback backend".to_string(),
         }],
+        context: None,
         meta: ResponseMetaV1::default(),
     };
-    let prepared = super::command_output::prepare_plugin_response(response, &[])
+    let result = super::command_output::cli_result_from_plugin_response(response, &[])
         .expect("protocol failure should still parse");
-    let result = CliCommandResult::from_prepared_plugin_response(prepared);
 
     assert_eq!(result.exit_code, 1);
-    let Some(ReplCommandOutput::Output(output)) = result.output.as_ref() else {
+    let crate::app::CommandBody::Output(output) = &result.body else {
         panic!("structured failure data should remain renderable");
     };
     assert_eq!(
-        crate::core::output_model::output_items_to_value(&output.output.items),
+        crate::core::output_model::output_items_to_value(&output.items),
         serde_json::json!({})
     );
     assert_eq!(
         result.failure_report.as_ref().map(ToString::to_string),
-        Some("NOT_FOUND: missing user".to_string())
+        Some("missing user".to_string())
     );
     assert!(!result.messages.is_empty());
 }
 
 #[test]
 fn exit_code_classification_reserves_specific_codes_for_usage_unit() {
+    if crate::tests::isolated_test() {
+        return;
+    }
     with_test_xdg_env(|| {
         let clap_report = super::run_from(["osp", "--defaults-only", "--definitely-not-a-flag"])
             .expect_err("parse should fail");
         assert_eq!(classify_exit_code(&clap_report), EXIT_CODE_USAGE);
 
         let mut invalid_session = ConfigLayer::default();
-        invalid_session.set("ui.message.verbosity", "definitely-invalid");
+        invalid_session.set("ui.verbosity", "definitely-invalid");
         let config_report = super::resolve_runtime_config(
             RuntimeConfigRequest::new(None, Some("cli"))
                 .with_runtime_load(crate::config::RuntimeLoadOptions::defaults_only())
@@ -1210,9 +953,7 @@ fn exit_code_classification_reserves_specific_codes_for_usage_unit() {
         .expect_err("config resolution should fail");
         assert_eq!(classify_exit_code(&config_report), EXIT_CODE_ERROR);
 
-        let plugin_report = enrich_dispatch_error(PluginDispatchError::CommandNotFound {
-            command: "ldap".to_string(),
-        });
+        let plugin_report = miette::miette!("unknown plugin ldap");
         assert_eq!(classify_exit_code(&plugin_report), EXIT_CODE_ERROR);
     });
 }

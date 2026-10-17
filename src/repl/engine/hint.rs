@@ -4,6 +4,9 @@
 //! hinter carries both pieces: muted text that would complete the line
 //! (accepted with Right or End, one word with Alt-Right) and, on the line
 //! below, what the word at the cursor means or what is wrong with the line.
+//! While a command's positional usage is shown, its description takes one more
+//! line above the usage, whatever the terminal width, so the hint height stays
+//! stable while the arguments are typed.
 //! reedline hides hints while a menu is open and when a line is submitted, so
 //! neither reaches the scrollback.
 //!
@@ -13,12 +16,33 @@
 use nu_ansi_term::Style;
 use reedline::{Completer, Hinter, History, SearchQuery, Suggestion};
 use std::ops::Range;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 
 use super::adapter::ReplCompleter;
 use super::editor::PaintedLine;
 use crate::completion::CompletionRequest;
 use crate::repl::highlight::{LineProblem, LineProblemKind, ReplHighlighter};
+
+/// The hint lines below the input.
+struct Status {
+    /// The command's description, on its own line above `text`.
+    description: Option<String>,
+    text: String,
+    problem: bool,
+    /// Byte range of `text` naming the slot at the cursor.
+    active: Option<Range<usize>>,
+}
+
+impl Status {
+    fn line(text: String) -> Self {
+        Self {
+            description: None,
+            text,
+            problem: false,
+            active: None,
+        }
+    }
+}
 
 pub(crate) struct ReplHinter {
     completer: ReplCompleter,
@@ -26,7 +50,7 @@ pub(crate) struct ReplHinter {
     painted: PaintedLine,
     // `None` turns the inline suggestion off; unstyled it would look typed.
     style: Option<Style>,
-    error_style: Style,
+    error_style: Option<Style>,
     inline: String,
 }
 
@@ -36,7 +60,7 @@ impl ReplHinter {
         highlighter: ReplHighlighter,
         painted: PaintedLine,
         style: Option<Style>,
-        error_style: Style,
+        error_style: Option<Style>,
     ) -> Self {
         Self {
             completer,
@@ -74,18 +98,20 @@ impl ReplHinter {
         }
     }
 
-    /// One line about the cursor position; `true` marks a problem.
-    fn status(
-        &mut self,
-        line: &str,
-        pos: usize,
-        candidates: &[Suggestion],
-    ) -> Option<(String, bool, Option<Range<usize>>)> {
+    /// One line about the cursor position, below the command's description
+    /// while its positional usage is shown.
+    fn status(&mut self, line: &str, pos: usize, candidates: &[Suggestion]) -> Option<Status> {
         if line.trim().is_empty() {
             return None;
         }
+        if let Some(expanded) = self.completer.expand_bang_request(line) {
+            return Some(Status::line(expanded));
+        }
         if let Some(problem) = self.highlighter.problem(line, pos) {
-            return Some((self.describe_problem(line, &problem), true, None));
+            return Some(Status {
+                problem: true,
+                ..Status::line(self.describe_problem(line, &problem))
+            });
         }
 
         let analysis = self.completer.analyze(line, pos);
@@ -93,13 +119,21 @@ impl ReplHinter {
         if !matches!(analysis.request, CompletionRequest::FlagValues { .. })
             && let Some((usage, active)) = engine.positional_usage(&analysis)
         {
-            return Some((usage, false, active));
+            let description = engine
+                .node_at(&analysis.context.matched_path)
+                .and_then(|node| node.tooltip.clone())
+                .filter(|tooltip| !tooltip.trim().is_empty());
+            return Some(Status {
+                description,
+                active,
+                ..Status::line(usage)
+            });
         }
         if !analysis.cursor.token_stub.is_empty()
             && let Some(candidate) = only_candidate(line, candidates)
             && let Some(description) = candidate.description.as_deref()
         {
-            return Some((format!("{}  {description}", candidate.value), false, None));
+            return Some(Status::line(format!("{}  {description}", candidate.value)));
         }
         if let CompletionRequest::FlagValues {
             flag_scope_path,
@@ -110,7 +144,7 @@ impl ReplHinter {
                 .node_at(flag_scope_path)
                 .and_then(|node| node.flags.get(flag))
                 .and_then(|meta| meta.tooltip.as_deref())?;
-            return Some((format!("{flag}  {tooltip}"), false, None));
+            return Some(Status::line(format!("{flag}  {tooltip}")));
         }
 
         let path = &analysis.context.matched_path;
@@ -130,7 +164,7 @@ impl ReplHinter {
             status.push_str(" · needs ");
             status.push_str(&missing.join(", "));
         }
-        Some((status, false, None))
+        Some(Status::line(status))
     }
 
     fn describe_problem(&mut self, line: &str, problem: &LineProblem) -> String {
@@ -138,6 +172,19 @@ impl ReplHinter {
         let mut message = match &problem.kind {
             LineProblemKind::UnknownCommand { parent } if parent.is_empty() => {
                 format!("unknown command '{word}'")
+            }
+            LineProblemKind::UnknownCommand { parent }
+                if self.completer.engine().node_at(parent).is_some_and(|node| {
+                    node.children
+                        .values()
+                        .any(|child| child.value_key || child.value_leaf)
+                }) =>
+            {
+                if parent.first().is_some_and(|command| command == "config") {
+                    format!("unknown config key '{word}'")
+                } else {
+                    format!("unknown value '{word}' for '{}'", parent.join(" "))
+                }
             }
             LineProblemKind::UnknownCommand { parent } => {
                 format!("unknown command '{word}' for '{}'", parent.join(" "))
@@ -155,8 +202,9 @@ impl ReplHinter {
         if let Some(closest) = self
             .completer
             .complete(prefix, prefix.len())
-            .into_iter()
-            .map(|suggestion| suggestion.value)
+            .suggestions()
+            .iter()
+            .map(|suggestion| suggestion.value.clone())
             .find(|value| value != flag_name)
         {
             message.push_str(&format!("; did you mean '{closest}'?"));
@@ -178,7 +226,7 @@ impl Hinter for ReplHinter {
         let candidates = if line.trim().is_empty() {
             Vec::new()
         } else {
-            self.completer.complete(line, pos)
+            self.completer.complete(line, pos).suggestions().to_vec()
         };
         self.inline = if use_ansi_coloring
             && self.style.is_some()
@@ -195,13 +243,23 @@ impl Hinter for ReplHinter {
             _ => text.to_string(),
         };
         let mut out = paint(&self.inline, self.style);
-        if let Some((status, is_problem, active)) = self.status(line, pos, &candidates) {
-            let style = if is_problem {
-                Some(self.error_style)
+        if let Some(Status {
+            description,
+            text: status,
+            problem,
+            active,
+        }) = self.status(line, pos, &candidates)
+        {
+            let style = if problem {
+                self.error_style
             } else {
                 self.style
             };
             // Reedline's CRLF normalization drops the text after a leading LF.
+            if let Some(description) = description {
+                out.push_str("\r\n");
+                out.push_str(&paint(&fit_terminal_width(&description), style));
+            }
             out.push_str("\r\n");
             let status = fit_terminal_width(&status);
             if let Some(active) = active
@@ -263,21 +321,23 @@ fn only_extension(line: &str, candidates: &[Suggestion]) -> Option<String> {
     Some(candidate.value[typed..].to_string())
 }
 
-/// Keeps the status on one terminal row; a wrapped status would push the
-/// prompt around as it changes length.
+/// Keeps each hint line on one terminal row, marking a cut with `…`; a
+/// wrapped line would push the prompt around as it changes length.
 fn fit_terminal_width(text: &str) -> String {
     let width = terminal_size::terminal_size()
         .map(|(width, _)| usize::from(width.0))
         .unwrap_or(80)
         .saturating_sub(1);
-    let mut used = 0;
-    text.chars()
+    let text = text
+        .chars()
         .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .take_while(|ch| {
-            used += ch.width().unwrap_or(0);
-            used <= width
-        })
-        .collect()
+        .collect::<String>();
+    if text.width() <= width {
+        return text;
+    }
+    let mut cut = crate::repl::menu_core::truncate_to_width(&text, width.saturating_sub(1));
+    cut.push('…');
+    cut
 }
 
 #[cfg(test)]
@@ -330,7 +390,7 @@ mod tests {
             ReplHighlighter::new(tree(), Color::Green, Color::Red, None),
             PaintedLine::default(),
             Some(Style::new()),
-            Style::new(),
+            Some(Style::new()),
         )
     }
 
@@ -349,17 +409,17 @@ mod tests {
         for (line, expected, slot) in [
             (
                 "orch vm power ",
-                "\r\norch vm power <HOSTNAME> [OPERATION] [EXTRA]… · Control VM power",
+                "\r\nControl VM power\r\norch vm power <HOSTNAME> [OPERATION] [EXTRA]…",
                 "<HOSTNAME>",
             ),
             (
                 "orch vm power web01 ",
-                "\r\norch vm power HOSTNAME [OPERATION] [EXTRA]… · on | off",
+                "\r\nControl VM power\r\norch vm power HOSTNAME [OPERATION] [EXTRA]… · on | off",
                 "[OPERATION]",
             ),
             (
                 "orch vm power web01 on ",
-                "\r\norch vm power HOSTNAME OPERATION [EXTRA]… · Control VM power",
+                "\r\nControl VM power\r\norch vm power HOSTNAME OPERATION [EXTRA]…",
                 "[EXTRA]…",
             ),
         ] {

@@ -2,8 +2,7 @@
 name = "osp-cli"
 version = "1.5.1"
 edition = "2024"
-# Note: `skim` as a library needs Rust 1.91+ in local compatibility checks.
-rust-version = "1.94"
+rust-version = "1.99"
 description = "CLI and REPL for querying and managing OSP infrastructure data"
 license-file = "LICENSE"
 readme = "README.md"
@@ -32,29 +31,30 @@ path = "src/bin/osp.rs"
 
 [dependencies]
 chrono = "0.4"
+crossterm = "0.29"
 anyhow = "1.0"
-clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage"] }
+clap = { version = "4.5", default-features = false, features = ["color", "derive", "error-context", "help", "std", "suggestions", "usage", "unstable-ext", "string"] }
 clap_complete = "4.5"
 directories = "6.0.0"
-keyring = { version = "=4.1.4", default-features = false, features = ["v1"] }
-jaq-core = "3.0.0-gamma"
-jaq-json = { version = "2.0.0-gamma", features = ["serde"] }
-jaq-std = "3.0.0-gamma"
+keyring = { version = "=4.2.0", default-features = false, features = ["v1"] }
+jaq-core = "3.1"
+jaq-json = { version = "2.0", features = ["serde"] }
+jaq-std = "3.0"
 libc = "0.2"
 miette = { version = "7.4", default-features = false, features = ["derive", "fancy"] }
 nu-ansi-term = "0.50"
 pulldown-cmark = "0.13"
-reedline = { version = "0.33", features = ["external_printer"] }
+reedline = { version = "0.52", features = ["external_printer"] }
+rpassword = "7.5"
 regex = "1.11"
-semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-sha2 = "0.10"
 shell-words = "1.1"
 strsim = "0.11"
 terminal_size = "0.4"
 thiserror = "2.0"
-toml = "0.8"
+toml = "1.1"
+toml_edit = { version = "0.25", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 unicode-width = "0.2"
@@ -65,7 +65,7 @@ skim = { version = "5.0.0", default-features = false }
 [dev-dependencies]
 assert_cmd = "2.0"
 insta = "1.43"
-portable-pty = "0.8"
+portable-pty = "0.9"
 predicates = "3.1"
 proptest = "1.6"
 tempfile = "3"

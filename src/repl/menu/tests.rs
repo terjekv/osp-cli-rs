@@ -1,7 +1,9 @@
 use super::{OspCompletionMenu, needs_space_prefix};
 use nu_ansi_term::{Color, Style};
-use reedline::{Completer, Editor, Menu, MenuEvent, Span, Suggestion, UndoBehavior};
-use std::sync::{Arc, Mutex};
+use reedline::{
+    Completer, CompletionResult, Editor, Menu, MenuEvent, Span, Suggestion, UndoBehavior,
+};
+use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone)]
@@ -10,8 +12,8 @@ struct FixedCompleter {
 }
 
 impl Completer for FixedCompleter {
-    fn complete(&mut self, _line: &str, _pos: usize) -> Vec<Suggestion> {
-        self.suggestions.clone()
+    fn complete(&mut self, _line: &str, _pos: usize) -> CompletionResult {
+        CompletionResult::fresh(self.suggestions.clone())
     }
 }
 
@@ -19,7 +21,7 @@ impl Completer for FixedCompleter {
 struct DynamicSpanCompleter;
 
 impl Completer for DynamicSpanCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         let start = line
             .get(..pos)
             .unwrap_or("")
@@ -27,7 +29,7 @@ impl Completer for DynamicSpanCompleter {
             .map(|idx| idx + 1)
             .unwrap_or(0);
         let span = Span { start, end: pos };
-        vec![suggestion("config", span), suggestion("doctor", span)]
+        CompletionResult::fresh(vec![suggestion("config", span), suggestion("doctor", span)])
     }
 }
 
@@ -35,39 +37,41 @@ impl Completer for DynamicSpanCompleter {
 struct ScopedConfigCompleter;
 
 impl Completer for ScopedConfigCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        let input = line.get(..pos).unwrap_or(line);
-        if let Some(rest) = input.strip_prefix("config ") {
-            if let Some(flag_stub) = rest.strip_prefix("show ") {
-                let span = Span {
-                    start: pos.saturating_sub(flag_stub.len()),
-                    end: pos,
-                };
-                let all_flags = ["--sources", "--raw"];
-                let exact_flag = all_flags.contains(&flag_stub);
-                return ["--sources", "--raw"]
-                    .into_iter()
-                    .filter(|flag| {
-                        flag_stub.is_empty() || exact_flag || flag.starts_with(flag_stub)
-                    })
-                    .map(|flag| suggestion(flag, span))
-                    .collect();
-            }
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+        CompletionResult::fresh(scoped_config_suggestions(line, pos))
+    }
+}
 
-            if !rest.contains(' ') {
-                let span = Span { start: 7, end: pos };
-                let all_commands = ["show", "get", "explain"];
-                let exact_command = all_commands.contains(&rest);
-                return ["show", "get", "explain"]
-                    .into_iter()
-                    .filter(|command| rest.is_empty() || exact_command || command.starts_with(rest))
-                    .map(|command| suggestion(command, span))
-                    .collect();
-            }
+fn scoped_config_suggestions(line: &str, pos: usize) -> Vec<Suggestion> {
+    let input = line.get(..pos).unwrap_or(line);
+    if let Some(rest) = input.strip_prefix("config ") {
+        if let Some(flag_stub) = rest.strip_prefix("show ") {
+            let span = Span {
+                start: pos.saturating_sub(flag_stub.len()),
+                end: pos,
+            };
+            let all_flags = ["--sources", "--raw"];
+            let exact_flag = all_flags.contains(&flag_stub);
+            return ["--sources", "--raw"]
+                .into_iter()
+                .filter(|flag| flag_stub.is_empty() || exact_flag || flag.starts_with(flag_stub))
+                .map(|flag| suggestion(flag, span))
+                .collect();
         }
 
-        Vec::new()
+        if !rest.contains(' ') {
+            let span = Span { start: 7, end: pos };
+            let all_commands = ["show", "get", "explain"];
+            let exact_command = all_commands.contains(&rest);
+            return ["show", "get", "explain"]
+                .into_iter()
+                .filter(|command| rest.is_empty() || exact_command || command.starts_with(rest))
+                .map(|command| suggestion(command, span))
+                .collect();
+        }
     }
+
+    Vec::new()
 }
 
 fn set_buffer(editor: &mut Editor, buffer: &str) {
@@ -98,10 +102,6 @@ fn dispatch_tab_like_reedline(menu: &mut OspCompletionMenu, editor: &mut Editor)
     }
 }
 
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
 fn make_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
     crate::tests::make_temp_dir(prefix)
 }
@@ -115,7 +115,7 @@ fn restore_env(key: &str, value: Option<String>) {
 }
 
 fn set_env_var_for_test(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // Test-only environment mutation is process-global on Rust 2024.
+    // Only the isolated child test reaches this environment mutation.
     unsafe {
         std::env::set_var(key, value);
     }
@@ -139,7 +139,7 @@ fn tab_cycles_selection_replaces_buffer() {
     menu.update_for_test(&mut editor, &mut completer, 80);
 
     let debug = super::debug_snapshot(&mut menu, &editor, 80, 5, false);
-    assert_eq!(debug.selected_index, 0);
+    assert_eq!(debug.selected_index, -1);
     assert_eq!(editor.line_buffer().get_buffer(), "co");
 
     menu.navigate(MenuEvent::NextElement, &mut editor);
@@ -453,7 +453,7 @@ fn menu_state_and_builder_variants_cover_debug_partial_completion_and_reactivati
             debug.styles.selected_match.foreground.as_deref(),
             Some("magenta")
         );
-        assert_eq!(debug.selected_index, 0);
+        assert_eq!(debug.selected_index, -1);
         assert_eq!(debug.selected_row, 0);
         assert_eq!(debug.selected_col, 0);
     }
@@ -859,7 +859,10 @@ fn contract_root_menu_refresh_keeps_the_inserted_command_visible_and_selected_un
 #[cfg_attr(miri, ignore = "completion trace filesystem integration test")]
 #[test]
 fn trace_paths_record_complete_cycle_and_accept_events() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let trace_dir = make_temp_dir("osp-menu-trace");
     let trace_path = trace_dir.join("trace.jsonl");
     let previous_enabled = std::env::var("OSP_REPL_TRACE_COMPLETION").ok();

@@ -16,12 +16,14 @@ new default.
 
 Canonical form:
 
-- `--format {auto,guide,json,table,mreg,value,md}`
+- `--format {auto,guide,json,csv,tsv,table,md,mreg,value}`
 
 Convenience aliases:
 
 - `--guide`
 - `--json`
+- `--csv`
+- `--tsv`
 - `--table`
 - `--value`
 - `--md`
@@ -30,19 +32,23 @@ Convenience aliases:
 Examples:
 
 ```bash
-osp plugins commands --format table
-osp plugins commands --json
-osp help --guide
+osp plugins list --format table
+osp plugins list --json
+osp help --format auto
 ```
 
 ```text
-plugins commands --format table
-plugins commands --json
-help --guide
+plugins list --format table
+plugins list --json
+help --format auto
 ```
 
 Format guide:
 
+- `guide`
+  - human documents
+- `csv` / `tsv`
+  - comma-separated / tab-separated rows
 - `json`
   - machine-readable payload
 - `table`
@@ -53,7 +59,6 @@ Format guide:
   - extract one compact field/value surface
 - `md`
   - markdown-friendly output
-- `guide`
   - semantic help/intro/reference output
 - `auto`
   - let `osp` choose from the result shape
@@ -95,47 +100,15 @@ These are also invocation-local:
 - `-q/-qq`
 - `-d/-dd/-ddd`
 
-`-v/-q` control process-facing error detail and message verbosity. `-d`
-controls developer debug logs and timing on `stderr`.
-
-Error ladder:
-
-- default
-  - concise summary
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic output, including labeled snippets when the error is
-    source-shaped
-- `-vvv`
-  - rich diagnostic output plus stack backtrace
-
-This is separate from `-d`. `-d` does not change the command result and does
-not replace the error-detail ladder.
-
-Normal operator flow:
-
-1. run the command normally
-2. if it fails, rerun with `-v`, `-vv`, or `-vvv`
-3. in the REPL, `doctor last -v/-vv/-vvv` lets you inspect the recorded
-   failure again without retyping the command
-4. in the REPL, `last` replays the last successful result and `last --raw`
-   shows the pre-pipeline payload
-
-Examples:
+See [LOGGING.md](LOGGING.md) for command evidence, error wording and debug levels.
 
 ```bash
-osp plugins commands -v
-osp config get ui.format -vv
-osp config get ui.format -vvv
-osp plugins commands -dd
-osp plugins commands --json -q
+osp plugins list -v
+osp config get ui.verbosity -vv
+osp config get ui.verbosity -v -dd
+osp plugins list -dd
+osp plugins list --json -q
 ```
-
-## Provider Selection
-
-Use `--plugin-provider <plugin-id>` when multiple plugins provide the same
-command and you want to choose the provider for one invocation.
 
 ## Placement Rules
 
@@ -144,9 +117,9 @@ Invocation flags may appear anywhere before `--`.
 These are all valid:
 
 ```bash
-osp plugins commands --json
-osp --json plugins commands
-osp plugins --json commands
+osp plugins list --json
+osp --json plugins list
+osp plugins --json list
 ```
 
 After `--`, remaining tokens are passed through literally.
@@ -167,7 +140,7 @@ osp config set ui.format json --save
 That sets the default. It is different from:
 
 ```bash
-osp plugins commands --json
+osp plugins list --json
 ```
 
 Which only affects that invocation.
@@ -177,23 +150,41 @@ Which only affects that invocation.
 Force plain JSON for shell scripts:
 
 ```bash
-osp --format json --render-mode plain plugins commands
+osp --format json --render-mode plain plugins list
 ```
 
 Keep the normal format but suppress color:
 
 ```bash
-osp --no-color plugins commands
+osp --no-color plugins list
 ```
 
-Ask for help/guide output in guide form:
+Render help as a document rather than rows:
 
 ```bash
-osp help --guide
+osp help --format auto
 ```
 
 ## Stream Separation
 
-Machine-readable output stays on `stdout`.
+Machine-readable output stays on `stdout`, including failures when JSON output
+is in effect. Failures use one envelope:
+
+```json
+{"ok":false,"error":{"code":"command_failed","message":"...","details":null},"exit_code":1,"messages":[],"data":null}
+```
+
+`error.code` is a stable machine code: `usage_error` for invalid syntax,
+`command_error` for process/dispatch errors, or `command_failed` for command
+results without a backend code. Backend codes and structured `details` are
+preserved. `exit_code` is the process status, `messages` contains visible
+command messages, and `data` contains any failure payload. Unavailable details
+and data are `null`; absent messages are an empty array.
 
 Messages, warnings, and debug logs stay on `stderr`.
+
+Use `--csv` or `--tsv` for delimited records, with CRLF record endings and
+RFC 4180 quoting (double embedded quotes; quote delimiters and newlines).
+The header follows column order after `| P`; nested arrays and objects are
+compact JSON, and null/missing cells are empty. These formats emit no ANSI
+escapes and never use a pager.

@@ -14,7 +14,7 @@
 use crate::core::row::Row;
 
 use anyhow::Result;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::dsl::verbs::common::parse_terms;
 
@@ -23,14 +23,6 @@ use super::selector;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ValuesPlan {
     selectors: Vec<selector::CompiledSelector>,
-}
-
-fn extract_all_row_values(row: &Row) -> Vec<Row> {
-    let mut out = Vec::new();
-    for value in row.values() {
-        emit_value_rows(&mut out, value);
-    }
-    out
 }
 
 pub(crate) fn compile(spec: &str) -> Result<ValuesPlan> {
@@ -57,54 +49,31 @@ pub fn apply(rows: Vec<Row>, spec: &str) -> Result<Vec<Row>> {
 }
 
 pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &ValuesPlan) -> Result<Vec<Row>> {
-    if !plan.selectors.is_empty() {
+    let mut out = Vec::new();
+    if plan.selectors.is_empty() {
+        for row in rows {
+            for value in row.into_values() {
+                emit_value_rows(&mut out, value);
+            }
+        }
+    } else {
         let root = Value::Array(rows.into_iter().map(Value::Object).collect());
-        return Ok(crate::core::output_model::rows_from_value(
-            extract_semantic_values(&root, plan),
-        ));
+        for entry in selector::collect_compiled_matches(&root, &plan.selectors) {
+            emit_value_rows(&mut out, entry.value);
+        }
     }
-    let mut out: Vec<Row> = Vec::new();
-
-    for row in rows {
-        out.extend(extract_all_row_values(&row));
-    }
-
     Ok(out)
 }
 
-fn emit_value_rows(out: &mut Vec<Row>, value: &Value) {
+fn emit_value_rows(out: &mut Vec<Row>, value: Value) {
     match value {
         Value::Array(values) => {
-            for item in values {
-                let mut row = Map::new();
-                row.insert("value".to_string(), item.clone());
-                out.push(row);
+            for value in values {
+                out.push(crate::row! { "value" => value });
             }
         }
-        _ => {
-            let mut row = Map::new();
-            row.insert("value".to_string(), value.clone());
-            out.push(row);
-        }
+        value => out.push(crate::row! { "value" => value }),
     }
-}
-
-fn extract_semantic_values(root: &Value, plan: &ValuesPlan) -> Value {
-    let matches = selector::collect_compiled_matches(root, plan.selectors.iter());
-    let mut rows = Vec::new();
-    for entry in matches {
-        match entry.value {
-            Value::Array(items) => rows.extend(items.iter().map(wrap_value_row)),
-            scalar => rows.push(wrap_value_row(&scalar)),
-        }
-    }
-    Value::Array(rows)
-}
-
-fn wrap_value_row(value: &Value) -> Value {
-    let mut row = Map::new();
-    row.insert("value".to_string(), value.clone());
-    Value::Object(row)
 }
 
 #[cfg(test)]

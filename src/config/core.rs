@@ -238,7 +238,7 @@ impl Display for SchemaValueType {
 
 /// Bootstrap stage in which a key must be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapPhase {
+pub(crate) enum BootstrapPhase {
     /// The key is needed before path-dependent config can be loaded.
     Path,
     /// The key is needed before the active profile can be finalized.
@@ -247,7 +247,7 @@ pub enum BootstrapPhase {
 
 /// Scope restriction for bootstrap-only keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapScopeRule {
+pub(crate) enum BootstrapScopeRule {
     /// The key is valid only in the global scope.
     GlobalOnly,
     /// The key is valid globally or in a terminal-only scope.
@@ -256,14 +256,14 @@ pub enum BootstrapScopeRule {
 
 /// Additional validation rule for bootstrap values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BootstrapValueRule {
+pub(crate) enum BootstrapValueRule {
     /// The value must be a string containing at least one non-whitespace character.
     NonEmptyString,
 }
 
 /// Bootstrap metadata derived from a schema entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootstrapKeySpec {
+pub(crate) struct BootstrapKeySpec {
     /// Canonical dotted config key.
     pub key: &'static str,
     /// Bootstrap phase in which the key is consulted.
@@ -286,7 +286,7 @@ impl BootstrapKeySpec {
 /// Schema definition for a single config key.
 #[derive(Debug, Clone)]
 #[must_use]
-pub struct SchemaEntry {
+pub(crate) struct SchemaEntry {
     canonical_key: Option<&'static str>,
     doc: Option<&'static str>,
     value_type: SchemaValueType,
@@ -294,7 +294,6 @@ pub struct SchemaEntry {
     writable: bool,
     allowed_values: Option<Vec<String>>,
     positive_integer: bool,
-    non_negative_integer: bool,
     runtime_visible: bool,
     bootstrap_phase: Option<BootstrapPhase>,
     bootstrap_scope_rule: Option<BootstrapScopeRule>,
@@ -306,7 +305,7 @@ impl SchemaEntry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{SchemaEntry, SchemaValueType};
     ///
     /// let entry = SchemaEntry::string().required();
@@ -322,7 +321,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -340,7 +338,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -358,7 +355,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -367,6 +363,7 @@ impl SchemaEntry {
     }
 
     /// Starts a schema entry for floating-point values.
+    #[cfg(test)]
     pub fn float() -> Self {
         Self {
             canonical_key: None,
@@ -376,7 +373,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -394,7 +390,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -463,13 +458,6 @@ impl SchemaEntry {
         entry
     }
 
-    /// Starts a schema entry for integer values greater than or equal to zero.
-    pub fn non_negative_integer() -> Self {
-        let mut entry = Self::integer();
-        entry.non_negative_integer = true;
-        entry
-    }
-
     /// Returns the declared schema type for the key.
     pub fn value_type(&self) -> SchemaValueType {
         self.value_type
@@ -527,18 +515,38 @@ impl SchemaEntry {
     }
 }
 
+// Retired keys stay recognizable only so existing files remain loadable.
+const REMOVED_KEYS: &[&str] = &[
+    "plugins.*.provider",
+    "plugins.*.state",
+    "extensions.plugins.discovery.path",
+    "repl.history.profile_scoped",
+    "session.cache.max_results",
+    "ui.prompt",
+    "ui.prompt.secrets",
+    "base.dir",
+    "ui.help.table_chrome",
+    "ui.help.entry_indent",
+    "ui.help.entry_gap",
+    "ui.help.section_spacing",
+    "ui.medium_list_max",
+    "ui.indent",
+    "repl.prompt_right",
+    "auth.visible.builtins",
+    "auth.visible.plugins",
+    "ui.message.verbosity",
+];
+
 /// Config schema used for validation, parsing, and runtime filtering.
 #[derive(Debug, Clone)]
-pub struct ConfigSchema {
+pub(crate) struct ConfigSchema {
     entries: BTreeMap<String, SchemaEntry>,
-    allow_extensions_namespace: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DynamicSchemaKeyKind {
-    PluginCommandState,
-    PluginCommandProvider,
     UserDisplayName,
+    ReplBinding,
 }
 
 impl Default for ConfigSchema {
@@ -551,451 +559,13 @@ impl ConfigSchema {
     fn builtin() -> Self {
         let mut schema = Self {
             entries: BTreeMap::new(),
-            allow_extensions_namespace: true,
         };
-        insert_identity_schema_keys(&mut schema);
-        insert_ui_schema_keys(&mut schema);
-        insert_repl_schema_keys(&mut schema);
-        insert_misc_schema_keys(&mut schema);
+        for builtin in super::builtin::builtin_keys() {
+            schema.insert(builtin.key, builtin.schema.clone());
+        }
 
         schema
     }
-}
-
-fn insert_builtin_schema_key(
-    schema: &mut ConfigSchema,
-    key: &'static str,
-    entry: SchemaEntry,
-    doc: &'static str,
-) {
-    schema.insert(key, entry.with_doc(doc));
-}
-
-fn insert_identity_schema_keys(schema: &mut ConfigSchema) {
-    insert_builtin_schema_key(
-        schema,
-        "secrets.backend",
-        SchemaEntry::string()
-            .with_allowed_values(["toml", "keyring"])
-            .bootstrap(BootstrapPhase::Path, BootstrapScopeRule::GlobalOnly),
-        "Persistent secrets backend selected before secret values are loaded",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "profile.default",
-        SchemaEntry::string()
-            .bootstrap_only(
-                BootstrapPhase::Profile,
-                BootstrapScopeRule::GlobalOrTerminal,
-            )
-            .with_bootstrap_value_rule(BootstrapValueRule::NonEmptyString),
-        "Default profile selected when no override is provided",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "profile.active",
-        SchemaEntry::string().required().read_only(),
-        "Active profile derived during resolution",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "theme.name",
-        SchemaEntry::string(),
-        "Name of the active color theme",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "theme.path",
-        SchemaEntry::string_list(),
-        "Extra theme search paths",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "user.name",
-        SchemaEntry::string(),
-        "Short user name used in prompts and interpolation",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "domain",
-        SchemaEntry::string(),
-        "Default domain name used in prompts and interpolation",
-    );
-}
-
-fn insert_ui_schema_keys(schema: &mut ConfigSchema) {
-    insert_builtin_schema_key(
-        schema,
-        "ui.format",
-        SchemaEntry::string()
-            .with_allowed_values(["auto", "guide", "json", "table", "md", "mreg", "value"]),
-        "Default output format",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.mode",
-        SchemaEntry::string().with_allowed_values(["auto", "plain", "rich"]),
-        "Preferred render mode",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.presentation",
-        SchemaEntry::string().with_allowed_values([
-            "expressive",
-            "compact",
-            "austere",
-            "gammel-og-bitter",
-        ]),
-        "UI presentation preset",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.pager",
-        SchemaEntry::string().with_allowed_values(["auto", "never"]),
-        "Paging policy for tall one-shot terminal output",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.color.mode",
-        SchemaEntry::string().with_allowed_values(["auto", "always", "never"]),
-        "Color rendering policy",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.unicode.mode",
-        SchemaEntry::string().with_allowed_values(["auto", "always", "never"]),
-        "Unicode rendering policy",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.width",
-        SchemaEntry::positive_integer(),
-        "Default render width hint",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.width-max",
-        SchemaEntry::integer(),
-        "Maximum render width; -1 disables the maximum",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "config.default-target",
-        SchemaEntry::string(),
-        "Default config write destination: session, global, or a profile name",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.margin",
-        SchemaEntry::integer(),
-        "Left margin used when rendering output",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.indent",
-        SchemaEntry::positive_integer(),
-        "Indent width for nested output",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.help.level",
-        SchemaEntry::string().with_allowed_values(["inherit", "none", "tiny", "normal", "verbose"]),
-        "Help detail level or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.guide.default_format",
-        SchemaEntry::string().with_allowed_values(["guide", "inherit", "none"]),
-        "Guide rendering format used by help-like output",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.messages.layout",
-        SchemaEntry::string().with_allowed_values([
-            "full", "compact", "austere", "plain", "none", "grouped", "minimal",
-        ]),
-        "Message layout style",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.chrome.frame",
-        SchemaEntry::string().with_allowed_values([
-            "none",
-            "top",
-            "bottom",
-            "top-bottom",
-            "square",
-            "round",
-        ]),
-        "Section chrome frame style",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.chrome.rule_policy",
-        SchemaEntry::string().with_allowed_values([
-            "per-section",
-            "independent",
-            "separate",
-            "shared",
-            "stacked",
-            "list",
-        ]),
-        "How sibling section rules are shared",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.table.overflow",
-        SchemaEntry::string().with_allowed_values([
-            "clip", "hidden", "crop", "ellipsis", "truncate", "wrap", "none", "visible",
-        ]),
-        "Table overflow behavior",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.table.border",
-        SchemaEntry::string().with_allowed_values(["none", "square", "round"]),
-        "Table border style",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.table.nested_border",
-        SchemaEntry::string().with_allowed_values(["inherit", "none", "square", "round"]),
-        "Border style for tables nested inside a record, or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.help.table_chrome",
-        SchemaEntry::string().with_allowed_values(["inherit", "none", "square", "round"]),
-        "Help table chrome style or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.help.entry_indent",
-        SchemaEntry::string(),
-        "Help entry indent override or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.help.entry_gap",
-        SchemaEntry::string(),
-        "Help entry gap override or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.help.section_spacing",
-        SchemaEntry::string(),
-        "Help section spacing override or inherit",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.medium_list_max",
-        SchemaEntry::positive_integer(),
-        "Maximum items rendered as a medium list",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.message.verbosity",
-        SchemaEntry::string().with_allowed_values(["error", "warning", "success", "info", "trace"]),
-        "Default message verbosity level",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.prompt",
-        SchemaEntry::string(),
-        "Prompt template used by the UI",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "ui.prompt.secrets",
-        SchemaEntry::boolean(),
-        "Whether prompts may reveal secret values",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "extensions.plugins.timeout_ms",
-        SchemaEntry::positive_integer(),
-        "Plugin process timeout in milliseconds",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "extensions.plugins.discovery.path",
-        SchemaEntry::boolean(),
-        "Whether plugin discovery should scan PATH",
-    );
-}
-
-fn insert_repl_schema_keys(schema: &mut ConfigSchema) {
-    insert_builtin_schema_key(
-        schema,
-        "repl.prompt",
-        SchemaEntry::string(),
-        "Prompt template used by the REPL",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.prompt_right",
-        SchemaEntry::string(),
-        "Right-hand prompt template used by the REPL",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.exit_message",
-        SchemaEntry::string(),
-        "Message printed when leaving the root REPL; empty disables it",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.input_mode",
-        SchemaEntry::string().with_allowed_values(["auto", "interactive", "basic"]),
-        "REPL input mode",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.tab_mode",
-        SchemaEntry::string(),
-        "When typing opens the REPL completion menu: tab, always, or after_<n>_letters",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.simple_prompt",
-        SchemaEntry::boolean(),
-        "Whether the REPL should use the simple prompt",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.shell_indicator",
-        SchemaEntry::string(),
-        "Template for the current shell indicator",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.shellable_commands",
-        SchemaEntry::string_list(),
-        "Product-owned commands that support REPL subshell entry",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.intro",
-        SchemaEntry::string().with_allowed_values(["none", "minimal", "compact", "full"]),
-        "REPL intro detail level",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.intro_template.minimal",
-        SchemaEntry::string(),
-        "Template for the minimal REPL intro",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.intro_template.compact",
-        SchemaEntry::string(),
-        "Template for the compact REPL intro",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.intro_template.full",
-        SchemaEntry::string(),
-        "Template for the full REPL intro",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.intro_tips",
-        SchemaEntry::string_list(),
-        "Tips for the intro's {{tip}} placeholder; one is shown per day",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.path",
-        SchemaEntry::string(),
-        "Path to the persistent REPL history file",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.max_entries",
-        SchemaEntry::positive_integer(),
-        "Maximum number of persisted REPL history entries",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.enabled",
-        SchemaEntry::boolean(),
-        "Whether persistent REPL history is enabled",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.dedupe",
-        SchemaEntry::boolean(),
-        "Whether duplicate history entries are collapsed",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.profile_scoped",
-        SchemaEntry::boolean(),
-        "Whether history files are scoped by profile",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.menu_rows",
-        SchemaEntry::positive_integer(),
-        "Maximum rows shown in the history menu",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "repl.history.exclude",
-        SchemaEntry::string_list(),
-        "Commands excluded from persisted history",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "session.cache.max_results",
-        SchemaEntry::positive_integer(),
-        "Maximum cached session results",
-    );
-}
-
-fn insert_misc_schema_keys(schema: &mut ConfigSchema) {
-    insert_builtin_schema_key(
-        schema,
-        "auth.visible.builtins",
-        SchemaEntry::string(),
-        "Visible builtin auth command allow-list",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "auth.visible.plugins",
-        SchemaEntry::string(),
-        "Visible plugin auth command allow-list",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "debug.level",
-        SchemaEntry::integer(),
-        "Developer debug verbosity",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "log.file.enabled",
-        SchemaEntry::boolean(),
-        "Whether file logging is enabled",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "log.file.path",
-        SchemaEntry::string(),
-        "Path to the runtime log file",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "log.file.level",
-        SchemaEntry::string().with_allowed_values(["error", "warn", "info", "debug", "trace"]),
-        "Minimum log level written to the log file",
-    );
-    insert_builtin_schema_key(
-        schema,
-        "base.dir",
-        SchemaEntry::string(),
-        "Base directory available for interpolation and tooling",
-    );
 }
 
 impl ConfigSchema {
@@ -1005,9 +575,17 @@ impl ConfigSchema {
             .insert(key.to_string(), entry.with_canonical_key(key));
     }
 
-    /// Enables or disables the `extensions.*` namespace shortcut.
-    pub fn set_allow_extensions_namespace(&mut self, value: bool) {
-        self.allow_extensions_namespace = value;
+    pub(crate) fn is_removed_key(&self, key: &str) -> bool {
+        !self.entries.contains_key(key)
+            && REMOVED_KEYS.iter().any(|pattern| {
+                if let Some((prefix, suffix)) = pattern.split_once('*') {
+                    key.strip_prefix(prefix)
+                        .and_then(|rest| rest.strip_suffix(suffix))
+                        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+                } else {
+                    key == *pattern
+                }
+            })
     }
 
     /// Returns whether the key is recognized by the schema.
@@ -1029,7 +607,7 @@ impl ConfigSchema {
 
     /// Rejects read-only keys for user-supplied config input.
     pub fn validate_writable_key(&self, key: &str) -> Result<(), ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         validate_plugin_config_key(&normalized)?;
         if let Some(entry) = self.entries.get(&normalized)
             && !entry.writable()
@@ -1054,7 +632,7 @@ impl ConfigSchema {
         key: &str,
         value: &ConfigValue,
     ) -> Result<ConfigValue, ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         if !self.is_known_key(&normalized) {
             return Err(ConfigError::UnknownConfigKeys {
                 keys: vec![normalized],
@@ -1069,10 +647,24 @@ impl ConfigSchema {
 
     /// Returns bootstrap metadata for the key, if it has bootstrap semantics.
     pub fn bootstrap_key_spec(&self, key: &str) -> Option<BootstrapKeySpec> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         self.entries
             .get(&normalized)
             .and_then(SchemaEntry::bootstrap_spec)
+    }
+
+    /// Product Boolean defaults also define the type of their extension writes.
+    pub(crate) fn with_product_defaults(mut self, defaults: &ConfigLayer) -> Self {
+        for entry in defaults.entries() {
+            if entry.key.starts_with("extensions.")
+                && matches!(entry.value.reveal(), ConfigValue::Bool(_))
+            {
+                self.entries
+                    .entry(entry.key.clone())
+                    .or_insert_with(SchemaEntry::boolean);
+            }
+        }
+        self
     }
 
     /// Iterates over canonical schema entries.
@@ -1084,16 +676,8 @@ impl ConfigSchema {
 
     /// Returns the schema-owned description for a key, if one exists.
     pub fn doc_for_key(&self, key: &str) -> Option<&'static str> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         self.entries.get(&normalized).and_then(SchemaEntry::doc)
-    }
-
-    /// Returns the expected runtime type for a key.
-    pub fn expected_type(&self, key: &str) -> Option<SchemaValueType> {
-        self.entries
-            .get(key)
-            .map(|entry| entry.value_type)
-            .or_else(|| dynamic_schema_key_kind(key).map(|_| SchemaValueType::String))
     }
 
     /// Parses a raw string into the schema's typed config representation.
@@ -1104,7 +688,7 @@ impl ConfigSchema {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{ConfigSchema, ConfigValue};
     ///
     /// let schema = ConfigSchema::default();
@@ -1178,7 +762,13 @@ impl ConfigSchema {
     }
 
     fn is_extension_key(&self, key: &str) -> bool {
-        self.allow_extensions_namespace && key.starts_with("extensions.")
+        if let Some(rest) = key.strip_prefix("extensions.plugins.") {
+            return rest.starts_with("env.")
+                || rest
+                    .split_once(".env.")
+                    .is_some_and(|(name, value)| !name.is_empty() && !value.is_empty());
+        }
+        key.starts_with("extensions.")
     }
 
     fn is_alias_key(&self, key: &str) -> bool {
@@ -1207,7 +797,7 @@ impl ConfigSchema {
         key: &str,
         value: &ConfigValue,
     ) -> Result<(), ConfigError> {
-        let normalized = key.trim().to_ascii_lowercase();
+        let normalized = normalize_identifier(key);
         let Some(entry) = self.entries.get(&normalized) else {
             return Ok(());
         };
@@ -1412,38 +1002,6 @@ impl ConfigLayer {
         self.insert(key, value, Scope::global());
     }
 
-    /// Inserts an entry scoped to a profile.
-    pub fn set_for_profile<K, V>(&mut self, profile: &str, key: K, value: V)
-    where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::profile(profile));
-    }
-
-    /// Inserts an entry scoped to a terminal.
-    pub fn set_for_terminal<K, V>(&mut self, terminal: &str, key: K, value: V)
-    where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::terminal(terminal));
-    }
-
-    /// Inserts an entry scoped to both profile and terminal.
-    pub fn set_for_profile_terminal<K, V>(
-        &mut self,
-        profile: &str,
-        terminal: &str,
-        key: K,
-        value: V,
-    ) where
-        K: Into<String>,
-        V: Into<ConfigValue>,
-    {
-        self.insert(key, value, Scope::profile_terminal(profile, terminal));
-    }
-
     /// Inserts an entry with an explicit scope.
     pub fn insert<K, V>(&mut self, key: K, value: V, scope: Scope)
     where
@@ -1456,6 +1014,13 @@ impl ConfigLayer {
             scope: normalize_scope(scope),
             origin: None,
         });
+    }
+
+    pub(crate) fn replace_scoped(&mut self, key: &str, value: ConfigValue, scope: Scope) {
+        let scope = normalize_scope(scope);
+        self.entries
+            .retain(|entry| entry.key != key || entry.scope != scope);
+        self.insert(key, value, scope);
     }
 
     /// Inserts an entry and records its external origin.
@@ -1531,7 +1096,7 @@ impl ConfigLayer {
     }
 
     fn from_toml_str_with_source(raw: &str, include_source: bool) -> Result<Self, ConfigError> {
-        let parsed = raw.parse::<toml::Value>().map_err(|err| {
+        let parsed = toml::from_str::<toml::Value>(raw).map_err(|err| {
             let diagnostic = crate::config::TomlParseDiagnostic::new(err.message());
             ConfigError::TomlParse(if include_source {
                 diagnostic.with_source("config layer", raw.to_string(), err.span())
@@ -1763,7 +1328,7 @@ pub struct ResolvedValue {
 
 /// Candidate entry considered while explaining a key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainCandidate {
+pub(crate) struct ExplainCandidate {
     /// Zero-based index of the entry within its layer.
     pub entry_index: usize,
     /// Candidate value before final selection.
@@ -1780,7 +1345,7 @@ pub struct ExplainCandidate {
 
 /// Per-layer explanation for a resolved or bootstrap key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainLayer {
+pub(crate) struct ExplainLayer {
     /// Source represented by this explanation layer.
     pub source: ConfigSource,
     /// Index of the selected candidate within `candidates`, if any.
@@ -1791,7 +1356,7 @@ pub struct ExplainLayer {
 
 /// Single placeholder expansion step captured by `config explain`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainInterpolationStep {
+pub(crate) struct ExplainInterpolationStep {
     /// Placeholder name referenced by the template.
     pub placeholder: String,
     /// Placeholder value before schema adaptation or interpolation.
@@ -1808,7 +1373,7 @@ pub struct ExplainInterpolationStep {
 
 /// Interpolation trace for a resolved string value.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExplainInterpolation {
+pub(crate) struct ExplainInterpolation {
     /// Original string template before placeholder substitution.
     pub template: ConfigValue,
     /// Placeholder expansion steps applied to the template.
@@ -1817,7 +1382,7 @@ pub struct ExplainInterpolation {
 
 /// Source used to determine the active profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActiveProfileSource {
+pub(crate) enum ActiveProfileSource {
     /// The active profile came from an explicit override.
     Override,
     /// The active profile came from `profile.default`.
@@ -1836,7 +1401,7 @@ impl ActiveProfileSource {
 
 /// Human-readable explanation of runtime resolution for a single key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConfigExplain {
+pub(crate) struct ConfigExplain {
     /// Canonical key being explained.
     pub key: String,
     /// Profile used during resolution.
@@ -1857,7 +1422,7 @@ pub struct ConfigExplain {
 
 /// Human-readable explanation of bootstrap resolution for a single key.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BootstrapConfigExplain {
+pub(crate) struct BootstrapConfigExplain {
     /// Canonical key being explained.
     pub key: String,
     /// Profile used during bootstrap resolution.
@@ -1888,9 +1453,20 @@ pub struct ResolvedConfig {
     pub(crate) known_profiles: BTreeSet<String>,
     pub(crate) values: BTreeMap<String, ResolvedValue>,
     pub(crate) aliases: BTreeMap<String, ResolvedValue>,
+    pub(crate) ignored_keys: Vec<String>,
 }
 
 impl ResolvedConfig {
+    pub(crate) fn ignored_keys_warning(&self) -> String {
+        if self.ignored_keys.is_empty() {
+            return String::new();
+        }
+        format!(
+            "warning: Ignoring config keys no longer used: {}.\nhint: Remove them with osp config unset KEY.\n",
+            self.ignored_keys.join(", ")
+        )
+    }
+
     /// Returns the profile selected for resolution.
     pub fn active_profile(&self) -> &str {
         &self.active_profile
@@ -2038,10 +1614,11 @@ impl ResolvedConfig {
 
     /// Returns the resolved alias entry for a key.
     pub fn get_alias_entry(&self, key: &str) -> Option<&ResolvedValue> {
-        let normalized = if key.trim().to_ascii_lowercase().starts_with("alias.") {
-            key.trim().to_ascii_lowercase()
+        let normalized = normalize_identifier(key);
+        let normalized = if normalized.starts_with("alias.") {
+            normalized
         } else {
-            format!("alias.{}", key.trim().to_ascii_lowercase())
+            format!("alias.{normalized}")
         };
         self.aliases.get(&normalized)
     }
@@ -2086,13 +1663,13 @@ fn flatten_key_value(
 }
 
 /// Looks up bootstrap-time metadata for a canonical config key.
-pub fn bootstrap_key_spec(key: &str) -> Option<BootstrapKeySpec> {
+pub(crate) fn bootstrap_key_spec(key: &str) -> Option<BootstrapKeySpec> {
     builtin_config_schema().bootstrap_key_spec(key)
 }
 
 /// Reports whether `key` is consumed during bootstrap but not exposed as a
 /// normal runtime-resolved config key.
-pub fn is_bootstrap_only_key(key: &str) -> bool {
+pub(crate) fn is_bootstrap_only_key(key: &str) -> bool {
     bootstrap_key_spec(key).is_some_and(|spec| !spec.runtime_visible)
 }
 
@@ -2100,31 +1677,33 @@ pub fn is_bootstrap_only_key(key: &str) -> bool {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::config::is_alias_key;
 ///
 /// assert!(is_alias_key("alias.prod"));
 /// assert!(is_alias_key(" Alias.User "));
 /// assert!(!is_alias_key("ui.format"));
 /// ```
-pub fn is_alias_key(key: &str) -> bool {
-    key.trim().to_ascii_lowercase().starts_with("alias.")
+pub(crate) fn is_alias_key(key: &str) -> bool {
+    normalize_identifier(key).starts_with("alias.")
 }
 
 /// Validates that a key can be written in the provided scope.
-pub fn validate_key_scope(key: &str, scope: &Scope) -> Result<(), ConfigError> {
+pub(crate) fn validate_key_scope(key: &str, scope: &Scope) -> Result<(), ConfigError> {
     builtin_config_schema().validate_key_scope(key, scope)
 }
 
 /// Validates bootstrap-only value constraints for a key.
-pub fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), ConfigError> {
+pub(crate) fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result<(), ConfigError> {
     builtin_config_schema().validate_bootstrap_value(key, value)
 }
 
-/// Returns whether a config key is conventionally sensitive.
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
+/// Returns whether a config, environment or error-detail name is sensitive.
+pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase();
     normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("credential")
         || normalized.contains("token")
         || normalized.contains("secret")
         || normalized.contains("apikey")
@@ -2135,6 +1714,11 @@ pub(crate) fn is_sensitive_key(key: &str) -> bool {
         || normalized.contains("client_secret")
         || normalized.contains("bearer")
         || normalized.contains("jwt")
+        || normalized.contains("cookie")
+        || normalized.contains("authorization")
+        // A bare `key` field names something (`config get` prints `key: theme.name`);
+        // `api_key`, `ssh_key` and `foo.key` hold key material.
+        || (normalized != "key" && normalized.split('_').any(|part| part == "key"))
         || normalized.ends_with(".key")
 }
 
@@ -2147,6 +1731,19 @@ fn adapt_value_for_schema(
         ConfigValue::Secret(secret) => (true, secret.expose()),
         other => (false, other),
     };
+
+    if key == "debug.level"
+        && let ConfigValue::String(value) = value
+        && value.trim().parse::<i64>().is_err()
+    {
+        return Err(ConfigError::InvalidConfigValue {
+            key: key.to_owned(),
+            reason: format!(
+                "must be 0, 1, 2 or 3; got '{}'",
+                crate::diagnostics::safe_text(value)
+            ),
+        });
+    }
 
     let adapted = match schema.value_type {
         SchemaValueType::String => match value {
@@ -2298,6 +1895,21 @@ fn adapt_value_for_schema(
         }
     }
 
+    if crate::core::style::ColorRole::ALL
+        .iter()
+        .any(|role| role.key() == key)
+        && let ConfigValue::String(value) = adapted.reveal()
+        && (!crate::core::style::is_valid_style_spec(value)
+            || crate::core::style::parse_style_spec(value)
+                .and_then(|style| style.foreground)
+                .is_none())
+    {
+        return Err(ConfigError::InvalidConfigValue {
+            key: key.to_owned(),
+            reason: "expected a colour name or hex value, optionally prefixed by a style (for example 'bold #eb6f92')".into(),
+        });
+    }
+
     validate_value_constraints(key, &adapted, schema)?;
 
     Ok(adapted)
@@ -2316,14 +1928,7 @@ fn validate_value_constraints(
             reason: "expected a positive integer".to_string(),
         });
     }
-    if schema.non_negative_integer
-        && !matches!(value.reveal(), ConfigValue::Integer(current) if *current >= 0)
-    {
-        return Err(ConfigError::InvalidConfigValue {
-            key: key.to_string(),
-            reason: "expected a non-negative integer".to_string(),
-        });
-    }
+
     Ok(())
 }
 
@@ -2333,17 +1938,32 @@ fn adapt_dynamic_value_for_schema(
     kind: DynamicSchemaKeyKind,
 ) -> Result<ConfigValue, ConfigError> {
     let adapted = match kind {
-        DynamicSchemaKeyKind::PluginCommandState
-        | DynamicSchemaKeyKind::PluginCommandProvider
-        | DynamicSchemaKeyKind::UserDisplayName => {
+        DynamicSchemaKeyKind::UserDisplayName | DynamicSchemaKeyKind::ReplBinding => {
             adapt_value_for_schema(key, value, &SchemaEntry::string())?
         }
     };
 
-    if matches!(kind, DynamicSchemaKeyKind::PluginCommandState) {
-        validate_allowed_values(key, &adapted, Some(&["enabled", "disabled"]))?;
+    if matches!(kind, DynamicSchemaKeyKind::ReplBinding) {
+        validate_allowed_values(
+            key,
+            &adapted,
+            Some(&[
+                "none",
+                "alt+enter",
+                "f2",
+                "f3",
+                "f4",
+                "f5",
+                "f6",
+                "f7",
+                "f8",
+                "f9",
+                "f10",
+                "f11",
+                "f12",
+            ]),
+        )?;
     }
-
     Ok(adapted)
 }
 
@@ -2369,22 +1989,16 @@ fn validate_allowed_values(
 }
 
 fn dynamic_schema_key_kind(key: &str) -> Option<DynamicSchemaKeyKind> {
-    let normalized = key.trim().to_ascii_lowercase();
+    let normalized = normalize_identifier(key);
+    if let Some(action) = normalized.strip_prefix("repl.bindings.") {
+        return (!action.is_empty()).then_some(DynamicSchemaKeyKind::ReplBinding);
+    }
     // `user.display_names.<user>`: the name shown for one `-u` user.
     if let Some(user) = normalized.strip_prefix("user.display_names.") {
         return (!user.trim().is_empty() && !user.contains('.'))
             .then_some(DynamicSchemaKeyKind::UserDisplayName);
     }
-    let remainder = normalized.strip_prefix("plugins.")?;
-    let (command, field) = remainder.rsplit_once('.')?;
-    if command.trim().is_empty() {
-        return None;
-    }
-    match field {
-        "state" => Some(DynamicSchemaKeyKind::PluginCommandState),
-        "provider" => Some(DynamicSchemaKeyKind::PluginCommandProvider),
-        _ => None,
-    }
+    None
 }
 
 fn validate_plugin_config_key(key: &str) -> Result<(), ConfigError> {
@@ -2392,16 +2006,15 @@ fn validate_plugin_config_key(key: &str) -> Result<(), ConfigError> {
         return Ok(());
     };
 
-    // `env` is the shared-config namespace. It is intentionally not a valid
-    // plugin id, so this first segment can never mean two different things.
+    // Shared values use `env.*`; command values use `<name>.env.*`.
     if remainder.starts_with("env.") {
         return Ok(());
     }
 
-    let Some((plugin_id, env_name)) = remainder.split_once(".env.") else {
+    let Some((command, env_name)) = remainder.split_once(".env.") else {
         return Ok(());
     };
-    crate::core::plugin::canonical_plugin_id(plugin_id).map_err(|reason| {
+    crate::core::plugin::canonical_plugin_command_name(command).map_err(|reason| {
         ConfigError::InvalidConfigKey {
             key: key.to_string(),
             reason,

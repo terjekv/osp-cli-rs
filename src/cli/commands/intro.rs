@@ -5,67 +5,47 @@
 
 use miette::Result;
 
-use crate::app::CliCommandResult;
+use crate::app::CommandOutput;
 use crate::app::{AppClients, AppRuntime, AppSession, authorized_command_catalog_for};
 use crate::cli::IntroArgs;
 use crate::repl::ReplViewContext;
-use crate::repl::presentation::build_repl_intro_payload;
+use crate::repl::presentation::{build_repl_intro_payload, repl_document_output};
 use crate::repl::surface::ReplSurface;
 
-pub(crate) struct IntroCommandContext<'a> {
-    pub(crate) view: ReplViewContext<'a>,
-    pub(crate) surface: ReplSurface,
-}
-
-impl<'a> IntroCommandContext<'a> {
-    pub(crate) fn from_parts(
-        runtime: &'a AppRuntime,
-        session: &'a AppSession,
-        clients: &'a AppClients,
-        ui: &'a crate::app::UiState,
-    ) -> Self {
-        let view = ReplViewContext {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            ui,
-            auth: &runtime.auth,
-            themes: &runtime.themes,
-            scope: &session.scope,
-            native_context: &session.native_context,
-            history_enabled: session.history_enabled,
-        };
-        let surface = authorized_command_catalog_for(&runtime.auth, clients)
-            .ok()
-            .map(|catalog| crate::repl::surface::build_repl_surface(view, &catalog))
-            .unwrap_or_else(|| crate::repl::surface::ReplSurface {
-                root_words: Vec::new(),
-                intro_commands: Vec::new(),
-                specs: Vec::new(),
-                aliases: Vec::new(),
-                overview_entries: Vec::new(),
-            });
-
-        Self { view, surface }
-    }
+fn intro_surface<'a>(
+    runtime: &'a AppRuntime,
+    session: &'a AppSession,
+    clients: &AppClients,
+    ui: &'a crate::app::UiState,
+) -> (ReplViewContext<'a>, ReplSurface) {
+    let view = ReplViewContext {
+        ui,
+        ..ReplViewContext::from_parts(runtime, session)
+    };
+    let catalog =
+        authorized_command_catalog_for(&runtime.auth, clients, clients.native_commands().catalog());
+    let surface = crate::repl::surface::build_repl_surface(view, &catalog);
+    (view, surface)
 }
 
 pub(crate) fn run_intro_command(
-    context: IntroCommandContext<'_>,
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+    ui: &crate::app::UiState,
     _args: IntroArgs,
-) -> Result<CliCommandResult> {
-    Ok(CliCommandResult::guide(build_repl_intro_payload(
-        context.view,
-        &context.surface,
+) -> Result<CommandOutput> {
+    let (view, surface) = intro_surface(runtime, session, clients, ui);
+    Ok(CommandOutput::output(
+        repl_document_output(&build_repl_intro_payload(view, &surface, None)),
         None,
-    )))
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{
-        AppState, AppStateInit, LaunchContext, ReplCommandOutput, RuntimeContext, TerminalKind,
-    };
+    use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::native::NativeCommandRegistry;
@@ -81,58 +61,70 @@ mod tests {
         defaults.set("repl.history.path", "/tmp/osp-intro-history.jsonl");
         defaults.set("theme.path", Vec::<String>::new());
 
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
 
         let options = ResolveOptions::default().with_terminal("repl");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base REPL config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("presentation-seeded REPL config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base REPL config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("presentation-seeded REPL config should resolve")
     }
 
     fn intro_state() -> AppState {
-        AppState::new(AppStateInit {
+        crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config: resolved_repl_config(),
-            render_settings: RenderSettings::test_plain(OutputFormat::Json),
-            message_verbosity: MessageLevel::Success,
-            error_detail: crate::app::ErrorDetail::Terse,
-            debug_verbosity: 0,
-            plugins: PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands: NativeCommandRegistry::default(),
-            themes: ThemeCatalog::default(),
             launch: LaunchContext::default(),
-        })
+            native_commands: NativeCommandRegistry::default(),
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Json),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build()
     }
 
     #[test]
     fn intro_context_projects_visible_surface_for_repl_intro_unit() {
         let state = intro_state();
 
-        let context = IntroCommandContext::from_parts(
+        let (_, surface) = intro_surface(
             &state.runtime,
             &state.session,
             &state.clients,
             state.runtime.ui(),
         );
 
-        assert!(context.surface.root_words.iter().any(|word| word == "help"));
+        assert!(surface.root_words.iter().any(|word| word == "help"));
         assert!(
-            context
-                .surface
+            surface
                 .intro_commands
                 .iter()
                 .all(|word| word != "exit" && word != "quit")
         );
         assert!(
-            context
-                .surface
+            surface
                 .overview_entries
                 .iter()
                 .any(|entry| entry.name == "help")
@@ -142,23 +134,19 @@ mod tests {
     #[test]
     fn intro_command_returns_structured_guide_output_unit() {
         let state = intro_state();
-        let context = IntroCommandContext::from_parts(
+        let result = run_intro_command(
             &state.runtime,
             &state.session,
             &state.clients,
             state.runtime.ui(),
-        );
-
-        let result =
-            run_intro_command(context, IntroArgs::default()).expect("intro command should succeed");
+            IntroArgs::default(),
+        )
+        .expect("intro command should succeed");
 
         assert_eq!(result.exit_code, 0);
-        let ReplCommandOutput::Output(structured) = result
-            .output
-            .expect("intro command should emit structured output")
-        else {
-            panic!("intro command should return guide output");
+        let crate::app::CommandBody::Output(structured) = result.body else {
+            panic!("intro command should emit structured output");
         };
-        assert!(structured.source_guide.is_some());
+        assert!(structured.meta.document_rows);
     }
 }

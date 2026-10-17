@@ -4,7 +4,7 @@ use osp_cli::app::BufferedUiSink;
 use crate::app::support::parse_json_output;
 
 fn debug_complete_payload(line: &str, steps: &[&str]) -> serde_json::Value {
-    let app = App::builder().build();
+    let app = App::new();
     let mut sink = BufferedUiSink::default();
     let mut args = vec![
         "osp".to_string(),
@@ -77,9 +77,37 @@ fn repl_completion_flow_tracks_committed_scope_and_consumed_flags() {
     assert!(!committed_flag.contains(&"--raw".to_string()));
     assert!(committed_flag.contains(&"--sources".to_string()));
 
+    for (line, accepted) in [
+        (
+            "config set --yes ui.format j",
+            "config set --yes ui.format json ",
+        ),
+        (
+            "config set --profile default ui.format j",
+            "config set --profile default ui.format json ",
+        ),
+    ] {
+        assert_eq!(tab_completed_line(line).as_deref(), Some(accepted));
+    }
+    let values = match_labels(&debug_complete_payload("config set --yes ui.format ", &[]));
+    assert!(values.contains(&"json".to_string()));
+    assert!(!values.contains(&"ui.format".to_string()));
+
     let pipeline = match_labels(&debug_complete_payload("config show | ", &[]));
     for verb in ["F", "P", "S", "G"] {
         assert!(pipeline.contains(&verb.to_string()), "{pipeline:?}");
+    }
+
+    let pipe_cursor = debug_complete_payload("config show|", &[]);
+    assert_eq!(pipe_cursor["stub"], "");
+    assert_eq!(pipe_cursor["replace_range"], serde_json::json!([12, 12]));
+    assert!(match_labels(&pipe_cursor).contains(&"F".to_string()));
+
+    for (line, accepted) in [
+        ("config show|F", "config show|F "),
+        ("config show |F", "config show |F "),
+    ] {
+        assert_eq!(tab_completed_line(line).as_deref(), Some(accepted));
     }
 }
 
@@ -98,4 +126,20 @@ fn repl_completion_flow_first_tab_returns_matches_for_current_slot() {
             .iter()
             .any(|item| item["label"] == "show")
     );
+
+    let inline_value = debug_complete_payload("config show --format=j", &[]);
+    assert_eq!(inline_value["stub"], "j");
+    assert_eq!(inline_value["replace_range"], serde_json::json!([21, 22]));
+    assert_eq!(
+        tab_completed_line("config show --format=j").as_deref(),
+        Some("config show --format=json ")
+    );
+}
+
+/// The line after one Tab, which completes a unique match like the editor.
+fn tab_completed_line(line: &str) -> Option<String> {
+    let payload = debug_complete_payload(line, &["tab"]);
+    payload.as_array()?.last()?["state"]["line"]
+        .as_str()
+        .map(str::to_string)
 }

@@ -1,62 +1,48 @@
-use super::command_output::{
-    CommandRenderRuntime, apply_output_stages, parse_output_format_hint, run_cli_command,
-};
+use super::command_output::{apply_output_stages, run_cli_command};
 use super::help::parse_help_render_overrides;
 use super::{
-    CliCommandResult, ErrorDetail, authorized_command_catalog_for, bootstrap_error_detail,
-    bootstrap_message_verbosity, command_output, plugin_dispatch_context_for_runtime,
-    resolve_runtime_config, run_cli_command_with_ui, run_from, run_from_with_sink,
+    CommandOutput, EXIT_CODE_ERROR, EXIT_CODE_USAGE, RunAction, RuntimeConfigRequest,
+    build_cli_session_layer, build_dispatch_plan, classify_exit_code, is_sensitive_key,
+    render_report_message, resolve_invocation_ui, resolve_render_settings_with_hint,
+    run_inline_builtin_command,
 };
 use super::{
-    EXIT_CODE_ERROR, EXIT_CODE_USAGE, PluginConfigEntry, PluginConfigScope, ReplCommandOutput,
-    RunAction, RuntimeConfigRequest, build_cli_session_layer, build_dispatch_plan,
-    classify_exit_code, collect_plugin_config_env, config_value_to_plugin_env,
-    enrich_dispatch_error, is_sensitive_key, plugin_config_env_name, plugin_path_discovery_enabled,
-    plugin_process_timeout, render_report_message, resolve_invocation_ui,
-    resolve_render_settings_with_hint, run_inline_builtin_command,
+    authorized_command_catalog_for, command_output, resolve_runtime_config, run_from,
+    run_from_with_sink,
 };
 use crate::app::sink::BufferedUiSink;
-use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
 use crate::cli::commands::doctor as doctor_cmd;
 use crate::cli::invocation::{InvocationOptions, scan_cli_argv};
 use crate::cli::{Cli, Commands, ConfigCommands, PluginsCommands, ThemeCommands};
 use crate::config::{ConfigLayer, ConfigResolver, ConfigValue, ResolveOptions, RuntimeLoadOptions};
-use crate::core::command_policy::{CommandPath, VisibilityMode};
+use crate::core::document::Document;
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
-    ResponseErrorV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
+    ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
-use crate::guide::GuideView;
-use crate::plugin::{
-    CommandCatalogEntry, DEFAULT_PLUGIN_PROCESS_TIMEOUT_MS, PluginDispatchError, PluginManager,
-    PluginSource,
-};
+use crate::plugin::{CommandCatalogEntry, PluginManager, PluginSource};
 use crate::repl;
 use crate::repl::{HistoryConfig, HistoryShellContext, SharedHistory};
 use crate::repl::{completion, dispatch as repl_dispatch, help as repl_help, surface};
 use crate::ui::build_presentation_defaults_layer;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
-use crate::ui::{RenderSettings, render_output};
+use crate::ui::{RenderSettings, render};
 use crate::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry};
 use clap::Command;
 use clap::Parser;
 use serde_json::json;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 mod app_runtime;
 mod cli_dispatch;
 mod command_surfaces;
-mod plugin_config;
 mod presentation;
 mod repl_completion;
 #[cfg(unix)]
 mod repl_runtime;
-
-fn profiles(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|name| name.to_string()).collect()
-}
 
 fn repl_view<'a>(
     runtime: &'a crate::app::AppRuntime,
@@ -65,35 +51,20 @@ fn repl_view<'a>(
     repl::ReplViewContext::from_parts(runtime, session)
 }
 
-fn make_completion_state(auth_visible_builtins: Option<&str>) -> AppState {
-    make_completion_state_with_entries_and_native(
-        auth_visible_builtins,
-        &[],
-        NativeCommandRegistry::default(),
-    )
+fn make_completion_state() -> AppState {
+    make_completion_state_with_entries_and_native(&[], NativeCommandRegistry::default())
 }
 
-fn make_completion_state_with_entries(
-    auth_visible_builtins: Option<&str>,
-    entries: &[(&str, &str)],
-) -> AppState {
-    make_completion_state_with_entries_and_native(
-        auth_visible_builtins,
-        entries,
-        NativeCommandRegistry::default(),
-    )
+fn make_completion_state_with_entries(entries: &[(&str, &str)]) -> AppState {
+    make_completion_state_with_entries_and_native(entries, NativeCommandRegistry::default())
 }
 
 fn make_completion_state_with_entries_and_native(
-    auth_visible_builtins: Option<&str>,
     entries: &[(&str, &str)],
     native_commands: NativeCommandRegistry,
 ) -> AppState {
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "default");
-    if let Some(allowlist) = auth_visible_builtins {
-        defaults.set("auth.visible.builtins", allowlist);
-    }
     defaults.set("repl.history.path", "/tmp/osp-test-repl.history");
     defaults.set(
         "repl.shellable_commands",
@@ -105,33 +76,43 @@ fn make_completion_state_with_entries_and_native(
     for (key, value) in entries {
         defaults.set(*key, *value);
     }
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
     let options = ResolveOptions::default().with_terminal("repl");
-    let base = resolver
-        .resolve(options.clone())
-        .expect("base test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    let config = resolver
-        .resolve(options)
-        .expect("test config should resolve");
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options.clone())
+    .expect("base test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options)
+    .expect("test config should resolve");
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 
-    let mut state = AppState::new(AppStateInit {
+    let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
-        render_settings: settings,
-        message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
-        debug_verbosity: 0,
-        plugins: PluginManager::new(Vec::new())
-            .with_bundled_roots(false)
-            .with_default_roots(false),
-        native_commands,
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
         launch: LaunchContext::default(),
-    });
+        native_commands,
+        ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+        plugins: Some(
+            PluginManager::new(Vec::new())
+                .with_bundled_roots(false)
+                .with_default_roots(false),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build();
     state
         .session
         .config_overrides
@@ -161,7 +142,7 @@ impl NativeCommand for TestNativeCommand {
         let mut describe = DescribeCommandV1::from_clap(self.command());
         describe.auth = self.auth();
         describe.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-            visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+            visibility: Some(DescribeVisibilityModeV1::Authenticated),
             required_capabilities: vec!["ldap.user.read".to_string()],
             feature_flags: Vec::new(),
             ..DescribeCommandAuthV1::default()
@@ -186,7 +167,11 @@ impl NativeCommand for TestNativeCommand {
             data: json!([{ "command": "ldap", "args": args }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["command".to_string(), "args".to_string()]),
                 column_align: Vec::new(),
@@ -195,8 +180,6 @@ impl NativeCommand for TestNativeCommand {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -217,20 +200,28 @@ fn test_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
         defaults.set(*key, *value);
     }
 
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
+    let mut layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
     let options = ResolveOptions::default().with_terminal("cli");
-    let base = resolver
-        .resolve(options.clone())
-        .expect("base test config should resolve");
-    resolver.set_presentation(build_presentation_defaults_layer(&base));
-    resolver
-        .resolve(options)
-        .expect("test config should resolve")
+    let base = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options.clone())
+    .expect("base test config should resolve");
+    layers.presentation = build_presentation_defaults_layer(&base);
+    ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(options)
+    .expect("test config should resolve")
 }
 
 fn render_prompt_snapshot(entries: &[(&str, &str)]) -> String {
-    let state = make_completion_state_with_entries(None, entries);
+    let state = make_completion_state_with_entries(entries);
     crate::repl::presentation::build_repl_prompt(repl_view(&state.runtime, &state.session)).left
 }
 
@@ -240,35 +231,34 @@ fn sample_catalog() -> Vec<CommandCatalogEntry> {
         about: "Provision orchestrator resources".to_string(),
         auth: None,
         subcommands: vec!["provision".to_string(), "status".to_string()],
-        completion: crate::completion::CommandSpec {
+        completion: crate::completion::CompletionNode {
             name: "orch".to_string(),
             tooltip: Some("Provision orchestrator resources".to_string()),
-            subcommands: vec![
-                crate::completion::CommandSpec::new("provision"),
-                crate::completion::CommandSpec::new("status"),
-            ],
-            ..crate::completion::CommandSpec::default()
+            children: vec![
+                crate::completion::CompletionNode::new("provision"),
+                crate::completion::CompletionNode::new("status"),
+            ]
+            .into_iter()
+            .map(|child| (child.name.clone(), child))
+            .collect(),
+            ..crate::completion::CompletionNode::default()
         },
-        provider: Some("mock-provider".to_string()),
-        providers: vec!["mock-provider (explicit)".to_string()],
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: Some(PluginSource::Explicit),
+
+        source: crate::plugin::CommandSource::Plugin(PluginSource::Explicit),
     }]
 }
 
 fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
-    vec![CommandCatalogEntry {
+    let mut catalog = vec![CommandCatalogEntry {
         name: "orch".to_string(),
         about: "Provision orchestrator resources".to_string(),
         auth: None,
         subcommands: vec!["provision".to_string(), "status".to_string()],
-        completion: crate::completion::CommandSpec {
+        completion: crate::completion::CompletionNode {
             name: "orch".to_string(),
             tooltip: Some("Provision orchestrator resources".to_string()),
-            subcommands: vec![
-                crate::completion::CommandSpec::new("provision")
+            children: vec![
+                crate::completion::CompletionNode::new("provision")
                     .arg(
                         crate::completion::ArgNode::named("guest")
                             .tooltip("Guest name for the provision request"),
@@ -295,55 +285,44 @@ fn sample_catalog_with_provision_context() -> Vec<CommandCatalogEntry> {
                                 crate::completion::SuggestionEntry::from("red"),
                                 crate::completion::SuggestionEntry::from("blue"),
                             ],
-                            suggestions_by_provider: BTreeMap::from([
-                                (
-                                    "alpha".to_string(),
-                                    vec![crate::completion::SuggestionEntry::from("red")],
-                                ),
-                                (
-                                    "beta".to_string(),
-                                    vec![crate::completion::SuggestionEntry::from("blue")],
-                                ),
-                            ]),
                             ..crate::completion::FlagNode::default()
                         },
                     ),
-                crate::completion::CommandSpec::new("status"),
+                crate::completion::CompletionNode::new("status"),
+            ]
+            .into_iter()
+            .map(|child| (child.name.clone(), child))
+            .collect(),
+            ..crate::completion::CompletionNode::default()
+        },
+
+        source: crate::plugin::CommandSource::Plugin(PluginSource::Explicit),
+    }];
+    catalog[0]
+        .completion
+        .children
+        .get_mut("provision")
+        .unwrap()
+        .dynamic = Some(crate::completion::DynamicCompletion::new(|cmd| {
+        let values = match cmd
+            .flag_values("--provider")
+            .and_then(|values| values.first())
+            .map(String::as_str)
+        {
+            Some("alpha") => vec![crate::completion::SuggestionEntry::from("red")],
+            Some("beta") => vec![crate::completion::SuggestionEntry::from("blue")],
+            _ => vec![
+                crate::completion::SuggestionEntry::from("red"),
+                crate::completion::SuggestionEntry::from("blue"),
             ],
-            ..crate::completion::CommandSpec::default()
-        },
-        provider: Some("mock-provider".to_string()),
-        providers: vec!["mock-provider (explicit)".to_string()],
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: Some(PluginSource::Explicit),
-    }]
+        };
+        crate::completion::FlagCompletions {
+            values: BTreeMap::from([("--image".into(), values)]),
+            ..Default::default()
+        }
+    }));
+    catalog
 }
-
-fn sample_conflicted_catalog() -> Vec<CommandCatalogEntry> {
-    vec![CommandCatalogEntry {
-        name: "hello".to_string(),
-        about: "hello plugin".to_string(),
-        auth: None,
-        subcommands: Vec::new(),
-        completion: crate::completion::CommandSpec {
-            name: "hello".to_string(),
-            tooltip: Some("hello plugin".to_string()),
-            ..crate::completion::CommandSpec::default()
-        },
-        provider: None,
-        providers: vec![
-            "alpha-provider (env)".to_string(),
-            "beta-provider (user)".to_string(),
-        ],
-        conflicted: true,
-        requires_selection: true,
-        selected_explicitly: false,
-        source: None,
-    }]
-}
-
 fn layer_value<'a>(layer: &'a ConfigLayer, key: &str) -> Option<&'a ConfigValue> {
     layer
         .entries()
@@ -358,21 +337,12 @@ fn make_test_history(state: &mut AppState) -> SharedHistory {
     state.sync_history_shell_context();
 
     let history_config = HistoryConfig {
+        legacy_path: None,
         path: miri_history_path(),
         max_entries: 128,
         enabled: true,
         dedupe: true,
-        profile_scoped: true,
         exclude_patterns: Vec::new(),
-        profile: Some(state.runtime.config.resolved().active_profile().to_string()),
-        terminal: Some(
-            state
-                .runtime
-                .context
-                .terminal_kind()
-                .as_config_terminal()
-                .to_string(),
-        ),
         shell_context: history_shell,
     }
     .normalized();
@@ -389,11 +359,16 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
         "/tmp/osp-repl-runtime-tests-history.jsonl",
     );
     defaults.set("theme.path", Vec::<String>::new());
-    let mut resolver = ConfigResolver::default();
-    resolver.set_defaults(defaults);
-    let config = resolver
-        .resolve(ResolveOptions::default().with_terminal("repl"))
-        .expect("test config should resolve");
+    let layers = crate::config::LoadedLayers {
+        defaults,
+        ..crate::config::LoadedLayers::default()
+    };
+    let config = ConfigResolver::from_loaded_layers_with_schema(
+        layers.clone(),
+        crate::config::ConfigSchema::default(),
+    )
+    .resolve(ResolveOptions::default().with_terminal("repl"))
+    .expect("test config should resolve");
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 
@@ -409,21 +384,23 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
             RuntimeLoadOptions::default()
         });
 
-    let mut state = AppState::new(AppStateInit {
+    let mut state = crate::app::AppStateBuilder {
         context: RuntimeContext::new(None, TerminalKind::Repl, None),
         config,
-        render_settings: settings,
-        message_verbosity: MessageLevel::Success,
-        error_detail: crate::app::ErrorDetail::Terse,
-        debug_verbosity: 0,
-        plugins: PluginManager::new(plugin_dirs)
-            .with_roots(config_root, cache_root)
-            .with_bundled_roots(!cfg!(miri))
-            .with_default_roots(!cfg!(miri)),
-        native_commands: crate::native::NativeCommandRegistry::default(),
-        themes: crate::ui::theme_catalog::ThemeCatalog::default(),
         launch,
-    });
+        native_commands: crate::native::NativeCommandRegistry::default(),
+        ui: crate::app::UiState::new(settings, MessageLevel::Success, 0),
+        plugins: Some(
+            PluginManager::new(plugin_dirs)
+                .with_roots(config_root, cache_root)
+                .with_bundled_roots(!cfg!(miri))
+                .with_default_roots(!cfg!(miri)),
+        ),
+        themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
+        session: None,
+        definition: Default::default(),
+    }
+    .build();
     state
         .session
         .config_overrides
@@ -451,9 +428,6 @@ fn miri_root_dir(prefix: &str) -> Option<std::path::PathBuf> {
 
 #[cfg(unix)]
 fn with_temp_config_paths<T>(callback: impl FnOnce() -> T) -> T {
-    let _guard = crate::tests::env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = make_temp_dir("osp-cli-test-config-paths");
     let config_path = root.join("config.toml");
     let secrets_path = root.join("secrets.toml");
@@ -487,9 +461,9 @@ fn write_pipeline_test_plugin(dir: &std::path::Path) -> std::path::PathBuf {
             &plugin_path,
             r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"hello","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"hello","about":"hello plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"hello plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi
@@ -507,75 +481,25 @@ JSON
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
     plugin_path
 }
-
-#[cfg(unix)]
-fn write_auth_pipeline_test_plugin(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let plugin_path = dir.join("osp-orch");
-    std::fs::write(
-        &plugin_path,
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{"protocol_version":1,"plugin_id":"orch","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"orch","about":"orch plugin","auth":{"visibility":"authenticated"},"args":[],"flags":{},"subcommands":[{"name":"approval","about":"approval","args":[],"flags":{},"subcommands":[{"name":"decide","about":"decide","auth":{"visibility":"capability_gated","required_capabilities":["orch.approval.decide"]},"args":[],"flags":{},"subcommands":[]}]}]}]}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{"protocol_version":1,"ok":true,"data":{"message":"ok"},"error":null,"meta":{"format_hint":"table","columns":["message"]}}
-JSON
-"#,
-    )
-    .expect("plugin script should be written");
-    let mut perms = std::fs::metadata(&plugin_path)
-        .expect("metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
-    plugin_path
-}
-
-#[cfg(unix)]
-fn write_provider_test_plugin(
-    dir: &std::path::Path,
-    plugin_id: &str,
-    command_name: &str,
-    message: &str,
-) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"message":"{message}-from-plugin"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
-JSON
-"#,
-        plugin_id = plugin_id,
-        command_name = command_name,
-        message = message,
-    );
-    std::fs::write(&plugin_path, script).expect("plugin script should be written");
-    let mut perms = std::fs::metadata(&plugin_path)
-        .expect("metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
-    plugin_path
-}
-
 #[cfg(unix)]
 fn make_temp_dir(prefix: &str) -> crate::tests::TestTempDir {
     crate::tests::make_temp_dir(prefix)
+}
+
+mod launch;
+
+#[cfg(unix)]
+#[path = "../../tests/support/plugin.rs"]
+mod plugin_support;
+
+#[test]
+fn sink_internal_example_1() {
+    use crate::app::{BufferedUiSink, run_process_with_sink};
+
+    let mut sink = BufferedUiSink::default();
+    let exit = run_process_with_sink(["osp", "--help"], &mut sink);
+
+    assert_eq!(exit, 0);
+    assert!(!sink.stdout.is_empty());
+    assert!(sink.stderr.is_empty());
 }

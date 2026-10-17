@@ -1,25 +1,17 @@
-use std::borrow::Cow;
 use std::time::Instant;
 
-use crate::repl::{ReplLineResult, ReplReloadKind, SharedHistory};
+use crate::repl::{ReplReloadKind, ReplResult, SharedHistory};
 use miette::{Result, miette};
 
 use crate::app;
 use crate::app::sink::UiSink;
-use crate::app::{AppClients, AppRuntime, AppSession};
-use crate::app::{
-    CMD_CONFIG, CMD_DOCTOR, CMD_HELP, CMD_HISTORY, CMD_INTRO, CMD_PLUGINS, ReplCommandSpec,
-    ResolvedInvocation,
-};
+use crate::app::{AppRuntime, AppSession};
+use crate::app::{CMD_HELP, ResolvedInvocation};
 use crate::cli::invocation::{extend_with_invocation_help, scan_command_tokens};
-use crate::cli::{
-    Commands, ConfigCommands, DoctorCommands, HistoryCommands, PluginCommandClearArgs,
-    PluginCommandStateArgs, PluginProviderClearArgs, PluginProviderSelectArgs, PluginsCommands,
-    ThemeCommands, parse_inline_command_tokens,
-};
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+use crate::cli::{Commands, ConfigCommands, ParsedCommandLine, PluginsCommands, ThemeCommands};
+use crate::core::document::{DocBlock, Document};
 
-use crate::repl::{completion, input};
+use crate::repl::input;
 
 pub(super) struct ParsedReplInvocation {
     pub(super) command: Commands,
@@ -30,43 +22,11 @@ pub(super) struct ParsedReplInvocation {
 
 pub(super) enum ParsedReplDispatch {
     Help {
-        result: Box<crate::app::CliCommandResult>,
+        result: Box<crate::app::CommandOutput>,
         effective: Box<ResolvedInvocation>,
         stages: Vec<String>,
     },
     Invocation(Box<ParsedReplInvocation>),
-}
-
-pub(super) struct ExecutedReplCommand {
-    pub(super) result: ReplLineResult,
-    pub(super) exit_code: i32,
-    pub(super) debug_verbosity: u8,
-    pub(super) execute_finished: Option<Instant>,
-}
-
-impl ExecutedReplCommand {
-    fn parse_only(result: ReplLineResult, debug_verbosity: u8) -> Self {
-        Self {
-            result,
-            exit_code: 0,
-            debug_verbosity,
-            execute_finished: None,
-        }
-    }
-
-    fn invocation(
-        result: ReplLineResult,
-        exit_code: i32,
-        debug_verbosity: u8,
-        execute_finished: Instant,
-    ) -> Self {
-        Self {
-            result,
-            exit_code,
-            debug_verbosity,
-            execute_finished: Some(execute_finished),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -79,13 +39,6 @@ pub(super) struct CommandSideEffects {
 pub(super) struct ParsedClapHelp<'a> {
     pub(super) summary: Option<&'a str>,
     pub(super) body: &'a str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ReplCommandBehavior<'a> {
-    name: Cow<'a, str>,
-    supports_dsl: bool,
-    side_effects: CommandSideEffects,
 }
 
 pub(super) fn parse_repl_invocation(
@@ -106,7 +59,7 @@ pub(super) fn parse_repl_invocation(
     });
     // Elevation wraps the resolved command; it must not discard shell scope.
     // Keep bare sudo untouched so the ordinary missing-command error applies.
-    let scoped = !absolute_command && !(elevated && command_tokens.is_empty());
+    let scoped = !(absolute_command || elevated && command_tokens.is_empty());
     if scoped {
         let prefixed = session.scope.prefixed_tokens(command_tokens);
         scanned.tokens.splice(prefix_len.., prefixed);
@@ -130,7 +83,7 @@ pub(super) fn parse_repl_invocation(
         return Ok(repl_help_dispatch(
             parsed,
             &effective,
-            crate::app::CliCommandResult::guide(
+            crate::app::CommandOutput::document(
                 render_invalid_help_alias(input::help_alias_target_at(
                     &scanned.tokens,
                     command_index,
@@ -143,37 +96,31 @@ pub(super) fn parse_repl_invocation(
     // clap parsing so the rest of dispatch only has to reason about one shape.
     let scoped_tokens = input::rewrite_help_alias_tokens_at(&scanned.tokens, command_index)
         .unwrap_or_else(|| scanned.tokens.clone());
-    let command = match parse_inline_command_tokens(&scoped_tokens) {
-        Ok(Some(command)) => command,
-        Ok(None) => return Err(miette!("missing command")),
-        Err(err) => {
-            if renders_repl_inline_help(err.kind()) {
-                if !parsed.stages.is_empty() {
-                    return Err(crate::app::report_std_error_with_context(
-                        err,
-                        "failed to parse REPL command",
-                    ));
-                }
-                return Ok(repl_help_dispatch(
-                    parsed,
-                    &effective,
-                    crate::app::CliCommandResult::guide(render_repl_parse_help(
-                        effective.help_level,
-                        &err.to_string(),
-                    )),
-                ));
-            }
-            return Err(crate::app::report_std_error_with_context(
-                err,
-                "failed to parse REPL command",
+    let command = match app::command_plan::parse_inline_command(
+        &scoped_tokens,
+        app::command_plan::CommandSurface::Repl,
+    )? {
+        app::command_plan::InlineCommandPlan::Command(Some(command)) => command,
+        app::command_plan::InlineCommandPlan::Command(None) => {
+            return Err(miette!("missing command"));
+        }
+        app::command_plan::InlineCommandPlan::Help(err) => {
+            let (document, long_help) = render_repl_parse_help(
+                effective.help_level,
+                &scoped_tokens,
+                &err.to_string(),
+                &effective.ui.render_settings.runtime.command_scope,
+            );
+            let mut output = document.to_output_result();
+            output.meta.document_long_help = long_help;
+            return Ok(repl_help_dispatch(
+                parsed,
+                &effective,
+                crate::app::CommandOutput::output(output, None),
             ));
         }
     };
-    let spec = repl_command_spec(&command);
-    app::ensure_command_supports_dsl(&spec, &parsed.stages)?;
-    if !parsed.stages.is_empty() {
-        completion::validate_dsl_stages(&parsed.stages)?;
-    }
+    app::command_plan::validate_command_pipeline(&command, &parsed.stages)?;
 
     Ok(ParsedReplDispatch::Invocation(Box::new(
         ParsedReplInvocation {
@@ -188,7 +135,7 @@ pub(super) fn parse_repl_invocation(
 fn repl_help_dispatch(
     parsed: &input::ReplParsedLine,
     effective: &ResolvedInvocation,
-    result: crate::app::CliCommandResult,
+    result: crate::app::CommandOutput,
 ) -> ParsedReplDispatch {
     ParsedReplDispatch::Help {
         result: Box::new(result),
@@ -197,47 +144,38 @@ fn repl_help_dispatch(
     }
 }
 
-fn render_invalid_help_alias(target: Option<&str>) -> GuideView {
+fn render_invalid_help_alias(target: Option<&str>) -> Document {
     let detail = match target {
         Some(target) => format!("invalid help target: {target}"),
         None => "help expects a command target".to_string(),
     };
-    GuideView {
-        preamble: vec![detail],
-        usage: Vec::new(),
-        commands: Vec::new(),
-        arguments: Vec::new(),
-        options: Vec::new(),
-        common_invocation_options: Vec::new(),
-        notes: Vec::new(),
-        sections: vec![
-            GuideSection::new("Usage", GuideSectionKind::Usage).paragraph("help <command>"),
-            GuideSection::new("Notes", GuideSectionKind::Notes)
-                .paragraph("  Use bare help for the REPL overview.")
-                .paragraph("  help help and help --help are not valid.")
-                .paragraph("  Add -v to include common invocation options."),
-        ],
-        epilogue: Vec::new(),
-    }
+    Document { blocks: vec![DocBlock::Paragraph { text: detail },
+        DocBlock::section("Usage", vec![DocBlock::Paragraph { text: "help <command>".into() }]),
+        DocBlock::section("Notes", vec![DocBlock::Paragraph { text:
+            "Use bare help for the REPL overview.\nhelp help and help --help are not valid.\nAdd -v to include common invocation options.".into() }]),
+    ] }
 }
 
-pub(super) fn renders_repl_inline_help(kind: clap::error::ErrorKind) -> bool {
-    matches!(
-        kind,
-        clap::error::ErrorKind::DisplayHelp
-            | clap::error::ErrorKind::DisplayVersion
-            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-    )
-}
-
-fn render_repl_parse_help(help_level: crate::guide::HelpLevel, error_text: &str) -> GuideView {
+fn render_repl_parse_help(
+    help_level: crate::core::document::HelpLevel,
+    tokens: &[String],
+    error_text: &str,
+    scope: &crate::core::CommandScope,
+) -> (Document, bool) {
     let parsed = parse_clap_help(error_text);
-    let mut view = GuideView::from_text(parsed.body);
+    let (mut view, long_help) = crate::cli::inline_help_document(tokens, scope);
     extend_with_invocation_help(&mut view, help_level);
-    if let Some(summary) = parsed.summary {
-        view.preamble.insert(0, summary.to_string());
+    if error_text.starts_with("error:")
+        && let Some(summary) = parsed.summary
+    {
+        view.blocks.insert(
+            0,
+            DocBlock::Paragraph {
+                text: summary.into(),
+            },
+        );
     }
-    view.filtered_for_help_level(help_level)
+    (view.filtered_for_help_level(help_level), long_help)
 }
 
 pub(super) fn parse_clap_help(error_text: &str) -> ParsedClapHelp<'_> {
@@ -296,7 +234,54 @@ fn line_end_offset(lines: &[&str], line_count: usize) -> usize {
 }
 
 pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
-    repl_command_behavior(command).side_effects
+    let show_intro_on_reload = match command {
+        Commands::Config(args) => match &args.command {
+            ConfigCommands::Edit(_) => false,
+            ConfigCommands::Set(set) if !set.dry_run => config_key_change_requires_intro(&set.key),
+            ConfigCommands::Unset(unset) if !unset.dry_run => {
+                config_key_change_requires_intro(&unset.key)
+            }
+            _ => return CommandSideEffects::default(),
+        },
+        Commands::Plugins(args)
+            if matches!(
+                args.command,
+                PluginsCommands::Enable { .. }
+                    | PluginsCommands::Disable { .. }
+                    | PluginsCommands::Refresh
+            ) =>
+        {
+            false
+        }
+        Commands::Alias(args)
+            if matches!(
+                args.command,
+                crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs { dry_run: false, .. })
+                    | crate::cli::AliasCommands::Remove(crate::cli::AliasRemoveArgs {
+                        dry_run: false,
+                        ..
+                    })
+            ) =>
+        {
+            false
+        }
+        Commands::Theme(crate::cli::ThemeArgs {
+            command: ThemeCommands::Reset,
+        }) => false,
+        Commands::Theme(args)
+            if matches!(
+                args.command,
+                ThemeCommands::Use(_) | ThemeCommands::Preview(_)
+            ) =>
+        {
+            true
+        }
+        _ => return CommandSideEffects::default(),
+    };
+    CommandSideEffects {
+        restart_repl: true,
+        show_intro_on_reload,
+    }
 }
 
 pub(super) fn config_key_change_requires_intro(key: &str) -> bool {
@@ -309,17 +294,13 @@ pub(super) fn render_repl_command_output(
     session: &mut AppSession,
     line: &str,
     stages: &[String],
-    mut result: crate::app::CliCommandResult,
+    result: crate::app::CommandOutput,
     invocation: &ResolvedInvocation,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    if result.exit_code != 0
-        && let Some(report) = result.failure_report.take()
-    {
-        return Err(report);
-    }
-    app::render_repl_command_with_runtime(
-        &app::CommandRenderRuntime::new(runtime.config.resolved(), &invocation.ui),
+    app::render_repl_command(
+        runtime.config.resolved(),
+        &invocation.ui,
         session,
         line,
         stages,
@@ -327,42 +308,25 @@ pub(super) fn render_repl_command_output(
         sink,
     )
     .map_err(|err| {
-        crate::app::report_report_with_context(err, "failed to render REPL command output")
+        crate::app::report_report_with_context(
+            err,
+            crate::app::host::ErrorContext::Operation("failed to render REPL command output"),
+        )
     })
 }
 
 pub(super) fn execute_repl_command_dispatch(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: Option<&SharedHistory>,
+    ctx: super::ReplExecutionContext<'_, '_>,
     line: &str,
     dispatch: ParsedReplDispatch,
-    sink: &mut dyn UiSink,
-) -> Result<ExecutedReplCommand> {
-    let mut accepted = false;
-    execute_repl_command_dispatch_with_acceptance(
-        runtime,
-        session,
-        clients,
+    parse_finished: Instant,
+) -> Result<super::ExecutedReplLine> {
+    let super::ReplExecutionContext {
+        state,
         history,
-        line,
-        dispatch,
         sink,
-        &mut accepted,
-    )
-}
-
-pub(super) fn execute_repl_command_dispatch_with_acceptance(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    history: Option<&SharedHistory>,
-    line: &str,
-    dispatch: ParsedReplDispatch,
-    sink: &mut dyn UiSink,
-    accepted: &mut bool,
-) -> Result<ExecutedReplCommand> {
+        accepted,
+    } = ctx;
     match dispatch {
         ParsedReplDispatch::Help {
             result,
@@ -371,11 +335,17 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
         } => {
             *accepted = true;
             let rendered = render_repl_command_output(
-                runtime, session, line, &stages, *result, &effective, sink,
+                &state.runtime,
+                &mut state.session,
+                line,
+                &stages,
+                *result,
+                &effective,
+                sink,
             )?;
-            Ok(ExecutedReplCommand::parse_only(
-                ReplLineResult::Continue(rendered),
-                effective.ui.debug_verbosity,
+            Ok(super::ExecutedReplLine::parse_only(
+                ReplResult::Print(rendered),
+                effective.ui.debug_level,
             ))
         }
         ParsedReplDispatch::Invocation(invocation) => {
@@ -385,35 +355,43 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
                 stages,
                 side_effects,
             } = *invocation;
-            let history = history.ok_or_else(|| {
-                miette!("REPL command execution requires history when running an invocation")
-            })?;
+            let picker = matches!(
+                &command,
+                Commands::Theme(crate::cli::ThemeArgs {
+                    command: ThemeCommands::Preview(crate::cli::ThemePreviewArgs { name: None })
+                }) | Commands::Config(crate::cli::ConfigArgs {
+                    command: ConfigCommands::Edit(_)
+                })
+            );
             let output = run_repl_command_with_progress(
-                runtime,
-                session,
-                clients,
+                state,
                 history,
                 ReplRunInput {
                     command,
                     invocation: &effective,
+                    stages: &stages,
                     progress_sink: Some(sink),
                     accepted,
                 },
             )?;
             let execute_finished = Instant::now();
+            let restart_repl = side_effects.restart_repl
+                && (!picker || !matches!(output.body, crate::app::CommandBody::None));
             let exit_code = output.exit_code;
             let rendered = render_repl_command_output(
-                runtime, session, line, &stages, output, &effective, sink,
+                &state.runtime,
+                &mut state.session,
+                line,
+                &stages,
+                output,
+                &effective,
+                sink,
             )?;
-            let refresh_completion = session.native_context.take_completion_refresh_request();
-            Ok(ExecutedReplCommand::invocation(
-                finalize_repl_command(
-                    rendered,
-                    side_effects.restart_repl || refresh_completion,
-                    side_effects.show_intro_on_reload,
-                ),
+            Ok(super::ExecutedReplLine::invocation(
+                finalize_repl_command(rendered, restart_repl, side_effects.show_intro_on_reload),
                 exit_code,
-                effective.ui.debug_verbosity,
+                effective.ui.debug_level,
+                parse_finished,
                 execute_finished,
             ))
         }
@@ -423,23 +401,23 @@ pub(super) fn execute_repl_command_dispatch_with_acceptance(
 struct ReplRunInput<'invocation, 'sink, 'accepted> {
     command: Commands,
     invocation: &'invocation ResolvedInvocation,
+    stages: &'invocation [String],
     progress_sink: Option<&'sink mut dyn UiSink>,
     accepted: &'accepted mut bool,
 }
 
 fn run_repl_command_with_progress(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     history: &SharedHistory,
     input: ReplRunInput<'_, '_, '_>,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     let result = match input.command {
         Commands::External(tokens) => run_repl_external_command_with_progress(
-            runtime,
-            clients,
-            session,
-            tokens,
+            state,
+            ParsedCommandLine {
+                tokens,
+                stages: input.stages.to_vec(),
+            },
             input.invocation,
             input.progress_sink,
             input.accepted,
@@ -447,9 +425,9 @@ fn run_repl_command_with_progress(
         builtin => {
             *input.accepted = true;
             app::run_repl_builtin_command(
-                runtime,
-                session,
-                clients,
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
                 history,
                 input.invocation,
                 builtin,
@@ -464,13 +442,13 @@ pub(super) fn finalize_repl_command(
     rendered: String,
     restart_repl: bool,
     show_intro_on_reload: bool,
-) -> ReplLineResult {
+) -> ReplResult {
     if restart_repl {
         tracing::debug!(
             show_intro = show_intro_on_reload,
             "REPL restart requested (config/theme change)"
         );
-        ReplLineResult::Restart {
+        ReplResult::Restart {
             output: rendered,
             reload: if show_intro_on_reload {
                 ReplReloadKind::WithIntro
@@ -479,7 +457,7 @@ pub(super) fn finalize_repl_command(
             },
         }
     } else {
-        ReplLineResult::Continue(rendered)
+        ReplResult::Print(rendered)
     }
 }
 
@@ -488,22 +466,19 @@ mod tests;
 
 #[cfg(test)]
 pub(super) fn run_repl_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: Commands,
     invocation: &ResolvedInvocation,
     history: &SharedHistory,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     let mut accepted = false;
     run_repl_command_with_progress(
-        runtime,
-        session,
-        clients,
+        state,
         history,
         ReplRunInput {
             command,
             invocation,
+            stages: &[],
             progress_sink: None,
             accepted: &mut accepted,
         },
@@ -511,167 +486,32 @@ pub(super) fn run_repl_command(
 }
 
 pub(super) fn run_repl_external_command(
-    runtime: &mut AppRuntime,
-    clients: &AppClients,
-    session: &mut AppSession,
+    state: &mut crate::app::AppState,
     tokens: Vec<String>,
     invocation: &ResolvedInvocation,
-) -> Result<crate::app::CliCommandResult> {
+) -> Result<crate::app::CommandOutput> {
     app::run_external_command_with_help_renderer(
-        runtime,
-        session,
-        clients,
+        state,
         &tokens,
         invocation,
-        GuideView::from_text,
+        Document::from_help_text,
+        None,
     )
 }
 
 fn run_repl_external_command_with_progress(
-    runtime: &mut AppRuntime,
-    clients: &AppClients,
-    session: &mut AppSession,
-    tokens: Vec<String>,
+    state: &mut crate::app::AppState,
+    command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
-) -> Result<crate::app::CliCommandResult> {
-    app::external::run_external_command_with_help_renderer_and_progress_for_repl(
-        runtime,
-        session,
-        clients,
-        &tokens,
+) -> Result<crate::app::CommandOutput> {
+    app::external::run_external_command_for_repl(
+        state,
+        command,
         invocation,
-        GuideView::from_text,
+        Document::from_help_text,
         progress_sink,
         accepted,
     )
-}
-
-pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
-    let behavior = repl_command_behavior(command);
-    ReplCommandSpec {
-        name: Cow::Owned(behavior.name.into_owned()),
-        supports_dsl: behavior.supports_dsl,
-    }
-}
-
-fn repl_command_behavior(command: &Commands) -> ReplCommandBehavior<'_> {
-    match command {
-        Commands::External(tokens) => ReplCommandBehavior {
-            name: Cow::Owned(
-                tokens
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "external".to_string()),
-            ),
-            supports_dsl: true,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Plugins(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_PLUGINS),
-            supports_dsl: matches!(
-                args.command,
-                PluginsCommands::List
-                    | PluginsCommands::Commands
-                    | PluginsCommands::Doctor
-                    | PluginsCommands::Config(_)
-            ),
-            side_effects: if matches!(
-                args.command,
-                PluginsCommands::Enable(PluginCommandStateArgs { .. })
-                    | PluginsCommands::Disable(PluginCommandStateArgs { .. })
-                    | PluginsCommands::ClearState(PluginCommandClearArgs { .. })
-                    | PluginsCommands::Refresh
-                    | PluginsCommands::SelectProvider(PluginProviderSelectArgs { .. })
-                    | PluginsCommands::ClearProvider(PluginProviderClearArgs { .. })
-            ) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: false,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Doctor(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_DOCTOR),
-            supports_dsl: matches!(
-                args.command,
-                Some(DoctorCommands::Config)
-                    | Some(DoctorCommands::Plugins)
-                    | Some(DoctorCommands::Theme)
-            ),
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::History(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_HISTORY),
-            supports_dsl: matches!(args.command, HistoryCommands::List(_)),
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Completions(_) => ReplCommandBehavior {
-            name: Cow::Borrowed("completions"),
-            supports_dsl: false,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Config(args) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_CONFIG),
-            supports_dsl: matches!(
-                args.command,
-                ConfigCommands::Show(_) | ConfigCommands::Get(_) | ConfigCommands::Doctor
-            ),
-            side_effects: match &args.command {
-                ConfigCommands::Set(set) if !set.dry_run => CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: config_key_change_requires_intro(&set.key),
-                },
-                ConfigCommands::Unset(unset) if !unset.dry_run => CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: config_key_change_requires_intro(&unset.key),
-                },
-                _ => CommandSideEffects::default(),
-            },
-        },
-        Commands::Alias(args) => ReplCommandBehavior {
-            name: Cow::Borrowed("alias"),
-            supports_dsl: matches!(args.command, crate::cli::AliasCommands::List(_)),
-            side_effects: if matches!(
-                args.command,
-                crate::cli::AliasCommands::Add(crate::cli::AliasAddArgs { dry_run: false, .. })
-                    | crate::cli::AliasCommands::Remove(crate::cli::AliasRemoveArgs {
-                        dry_run: false,
-                        ..
-                    })
-            ) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: false,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Theme(args) => ReplCommandBehavior {
-            name: Cow::Borrowed("theme"),
-            supports_dsl: matches!(args.command, ThemeCommands::List | ThemeCommands::Show(_)),
-            side_effects: if matches!(args.command, ThemeCommands::Use(_)) {
-                CommandSideEffects {
-                    restart_repl: true,
-                    show_intro_on_reload: true,
-                }
-            } else {
-                CommandSideEffects::default()
-            },
-        },
-        Commands::Intro(_) => ReplCommandBehavior {
-            name: Cow::Borrowed(CMD_INTRO),
-            supports_dsl: true,
-            side_effects: CommandSideEffects::default(),
-        },
-        Commands::Repl(_) => ReplCommandBehavior {
-            name: Cow::Borrowed("repl"),
-            supports_dsl: false,
-            side_effects: CommandSideEffects::default(),
-        },
-    }
 }

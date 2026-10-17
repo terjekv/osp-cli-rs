@@ -5,21 +5,18 @@
 //! editor-facing mechanics such as reedline suggestions, path enumeration,
 //! menu styling, and trace payloads.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 
 use crate::completion::{CompletionAnalysis, CompletionEngine, CompletionTree, SuggestionOutput};
-use crate::core::fuzzy::fold_case;
 use crate::core::shell_words::{QuoteStyle, escape_for_shell, quote_for_shell};
 use crate::dsl::registered_verbs;
 use crate::repl::highlight::ReplHighlighter;
 use nu_ansi_term::{Color, Style};
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 use serde::Serialize;
 
-use super::config::DEFAULT_HISTORY_MENU_ROWS;
-use super::{HistoryEntry, LineProjection, LineProjector, ReplAppearance, SharedHistory};
+use super::{LineProjection, LineProjector, ReplAppearance, SharedHistory};
 
 pub(crate) struct ReplCompleter {
     engine: CompletionEngine,
@@ -43,6 +40,14 @@ impl ReplCompleter {
         self
     }
 
+    pub(crate) fn expand_bang_request(&self, line: &str) -> Option<String> {
+        self.history
+            .as_ref()?
+            .with(|store| store.expand_bang_request(line))
+            .ok()
+            .flatten()
+    }
+
     pub(crate) fn engine(&self) -> &CompletionEngine {
         &self.engine
     }
@@ -59,24 +64,21 @@ impl ReplCompleter {
 }
 
 impl Completer for ReplCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         debug_assert!(
             pos <= line.len(),
             "completer received pos {pos} beyond line length {}",
             line.len()
         );
         if pos == line.len()
-            && let Some(expanded) = self
-                .history
-                .as_ref()
-                .and_then(|history| history.expand_last_command(line))
+            && let Some(expanded) = self.expand_bang_request(line)
         {
-            return vec![Suggestion {
+            return CompletionResult::fresh(vec![Suggestion {
                 value: expanded,
                 span: Span { start: 0, end: pos },
                 append_whitespace: false,
                 ..Suggestion::default()
-            }];
+            }]);
         }
         let projected = self
             .line_projector
@@ -109,6 +111,13 @@ impl Completer for ReplCompleter {
             hidden_suggestions
                 .retain(|value| !value.eq_ignore_ascii_case(cursor_state.token_stub.as_str()));
         }
+        if cursor_state.token_stub.starts_with("--") {
+            hidden_suggestions.retain(|value| {
+                !ranked
+                    .iter()
+                    .any(|item| item.text.eq_ignore_ascii_case(value))
+            });
+        }
 
         let mut suggestions = ranked
             .into_iter()
@@ -126,91 +135,31 @@ impl Completer for ReplCompleter {
         if has_path_sentinel {
             // The pure completion engine reports that this slot expects a path;
             // filesystem enumeration happens here at the editor boundary.
+            let closing_quote = match cursor_state.quote_style {
+                Some(QuoteStyle::Single) => Some('\''),
+                Some(QuoteStyle::Double) => Some('"'),
+                None => None,
+            };
+            let path_span = if closing_quote.is_some_and(|quote| {
+                line.get(pos..)
+                    .is_some_and(|suffix| suffix.starts_with(quote))
+            }) {
+                Span {
+                    end: span.end + 1,
+                    ..span
+                }
+            } else {
+                span
+            };
             suggestions.extend(path_suggestions(
                 &cursor_state.raw_stub,
                 &cursor_state.token_stub,
                 cursor_state.quote_style,
-                span,
+                path_span,
             ));
         }
 
-        suggestions
-    }
-}
-
-pub(crate) struct ReplHistoryCompleter {
-    history: SharedHistory,
-}
-
-impl ReplHistoryCompleter {
-    pub(crate) fn new(history: SharedHistory) -> Self {
-        Self { history }
-    }
-}
-
-impl Completer for ReplHistoryCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        let query = line
-            .get(..pos.min(line.len()))
-            .unwrap_or(line)
-            .trim()
-            .to_string();
-        let query_folded = fold_case(&query);
-        let replace_span = Span {
-            start: 0,
-            end: line.len(),
-        };
-
-        let mut seen = BTreeSet::new();
-        let mut exact = Vec::new();
-        let mut prefix = Vec::new();
-        let mut substring = Vec::new();
-        let mut recent = Vec::new();
-
-        for entry in self.history.list_entries().into_iter().rev() {
-            if !seen.insert(entry.command.clone()) {
-                continue;
-            }
-
-            if query_folded.is_empty() {
-                recent.push(history_suggestion(entry, replace_span));
-                if recent.len() >= DEFAULT_HISTORY_MENU_ROWS as usize {
-                    break;
-                }
-                continue;
-            }
-
-            let command_folded = fold_case(&entry.command);
-            let suggestion = history_suggestion(entry.clone(), replace_span);
-            if command_folded == query_folded {
-                exact.push(suggestion);
-            } else if command_folded.starts_with(&query_folded) {
-                prefix.push(suggestion);
-            } else if command_folded.contains(&query_folded) {
-                substring.push(suggestion);
-            }
-        }
-
-        if query_folded.is_empty() {
-            return recent;
-        }
-
-        exact
-            .into_iter()
-            .chain(prefix)
-            .chain(substring)
-            .take(DEFAULT_HISTORY_MENU_ROWS as usize)
-            .collect()
-    }
-}
-
-fn history_suggestion(entry: HistoryEntry, span: Span) -> Suggestion {
-    Suggestion {
-        value: entry.command.clone(),
-        extra: Some(vec![format!("{}  {}", entry.id, entry.command)]),
-        span,
-        append_whitespace: false,
-        ..Suggestion::default()
+        CompletionResult::fresh(suggestions)
     }
 }
 
@@ -262,7 +211,7 @@ pub(crate) fn style_with_fg_bg(fg: Option<Color>, bg: Option<Color>) -> Style {
 /// ignored when selecting the effective color token.
 pub fn color_from_style_spec(spec: &str) -> Option<Color> {
     let token = extract_color_token(spec)?;
-    crate::ui::style::parse_color_token(&token.to_ascii_lowercase())
+    crate::core::style::parse_color_token(&token.to_ascii_lowercase())
 }
 
 fn extract_color_token(spec: &str) -> Option<&str> {
@@ -299,69 +248,37 @@ fn extract_color_token(spec: &str) -> Option<&str> {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CompletionTraceMenuState {
     pub selected_index: i64,
-    pub selected_row: u16,
+    pub selected_row: usize,
     pub selected_col: u16,
     pub active: bool,
     pub just_activated: bool,
     pub columns: u16,
     pub visible_rows: u16,
-    pub rows: u16,
+    pub rows: usize,
     pub menu_indent: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CompletionTracePayload<'a> {
-    event: &'a str,
-    line: &'a str,
-    cursor: usize,
-    stub: &'a str,
-    matches: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    buffer_before: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    buffer_after: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cursor_before: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cursor_after: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    accepted_value: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    replace_range: Option<[usize; 2]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_index: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_row: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    selected_col: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    just_activated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    columns: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    visible_rows: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rows: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    menu_indent: Option<u16>,
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct CompletionTraceEvent<'a> {
     pub event: &'a str,
     pub line: &'a str,
     pub cursor: usize,
     pub stub: &'a str,
     pub matches: Vec<String>,
-    pub replace_range: Option<[usize; 2]>,
-    pub menu: Option<CompletionTraceMenuState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub buffer_before: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub buffer_after: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_before: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_after: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub accepted_value: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replace_range: Option<[usize; 2]>,
+    #[serde(flatten)]
+    pub menu: Option<CompletionTraceMenuState>,
 }
 
 pub(crate) fn trace_completion(trace: CompletionTraceEvent<'_>) {
@@ -369,56 +286,7 @@ pub(crate) fn trace_completion(trace: CompletionTraceEvent<'_>) {
         return;
     }
 
-    let (
-        selected_index,
-        selected_row,
-        selected_col,
-        active,
-        just_activated,
-        columns,
-        visible_rows,
-        rows,
-        menu_indent,
-    ) = if let Some(menu) = trace.menu {
-        (
-            Some(menu.selected_index),
-            Some(menu.selected_row),
-            Some(menu.selected_col),
-            Some(menu.active),
-            Some(menu.just_activated),
-            Some(menu.columns),
-            Some(menu.visible_rows),
-            Some(menu.rows),
-            Some(menu.menu_indent),
-        )
-    } else {
-        (None, None, None, None, None, None, None, None, None)
-    };
-
-    let payload = CompletionTracePayload {
-        event: trace.event,
-        line: trace.line,
-        cursor: trace.cursor,
-        stub: trace.stub,
-        matches: trace.matches,
-        buffer_before: trace.buffer_before,
-        buffer_after: trace.buffer_after,
-        cursor_before: trace.cursor_before,
-        cursor_after: trace.cursor_after,
-        accepted_value: trace.accepted_value,
-        replace_range: trace.replace_range,
-        selected_index,
-        selected_row,
-        selected_col,
-        active,
-        just_activated,
-        columns,
-        visible_rows,
-        rows,
-        menu_indent,
-    };
-
-    let serialized = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    let serialized = serde_json::to_string(&trace).unwrap_or_else(|_| "{}".to_string());
     if let Ok(path) = std::env::var("OSP_REPL_TRACE_PATH")
         && !path.trim().is_empty()
     {
@@ -450,38 +318,16 @@ pub(crate) fn path_suggestions(
     quote_style: Option<QuoteStyle>,
     span: Span,
 ) -> Vec<Suggestion> {
-    let (lookup, insert_prefix, typed_prefix) = split_path_stub(token_stub);
-    let read_dir = std::fs::read_dir(&lookup);
-    let Ok(entries) = read_dir else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        if !file_name.starts_with(&typed_prefix) {
-            continue;
-        }
-
-        let path = entry.path();
-        let is_dir = path.is_dir();
-        let suffix = if is_dir { "/" } else { "" };
-        let inserted = render_path_completion(
-            raw_stub,
-            &format!("{insert_prefix}{file_name}{suffix}"),
-            quote_style,
-        );
-
-        out.push(Suggestion {
-            value: inserted,
+    crate::completion::path_candidates(token_stub)
+        .into_iter()
+        .map(|(candidate, is_dir)| Suggestion {
+            value: render_path_completion(raw_stub, &candidate, quote_style),
             description: Some(if is_dir { "dir" } else { "file" }.to_string()),
             span,
             append_whitespace: !is_dir,
             ..Suggestion::default()
-        });
-    }
-
-    out
+        })
+        .collect()
 }
 
 fn render_path_completion(
@@ -523,51 +369,5 @@ enum PathQuoteContext {
     Closed(QuoteStyle),
 }
 
-pub(crate) fn split_path_stub(stub: &str) -> (PathBuf, String, String) {
-    if stub.is_empty() {
-        return (PathBuf::from("."), String::new(), String::new());
-    }
-
-    let expanded = expand_home(stub);
-    let mut lookup = PathBuf::from(&expanded);
-    if stub.ends_with('/') {
-        return (lookup, stub.to_string(), String::new());
-    }
-
-    let typed_prefix = Path::new(stub)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(ToOwned::to_owned)
-        .unwrap_or_default();
-
-    let insert_prefix = match stub.rfind('/') {
-        Some(index) => stub[..=index].to_string(),
-        None => String::new(),
-    };
-
-    if let Some(parent) = lookup.parent() {
-        if parent.as_os_str().is_empty() {
-            lookup = PathBuf::from(".");
-        } else {
-            lookup = parent.to_path_buf();
-        }
-    } else {
-        lookup = PathBuf::from(".");
-    }
-
-    (lookup, insert_prefix, typed_prefix)
-}
-
-pub(crate) fn expand_home(path: &str) -> String {
-    if path == "~" {
-        return crate::config::default_home_dir()
-            .map(|home| home.display().to_string())
-            .unwrap_or_else(|| "~".to_string());
-    }
-    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
-        && let Some(home) = crate::config::default_home_dir()
-    {
-        return home.join(rest).display().to_string();
-    }
-    path.to_string()
-}
+#[cfg(test)]
+pub(crate) use crate::completion::paths::split_path_stub;

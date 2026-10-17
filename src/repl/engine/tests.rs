@@ -1,9 +1,7 @@
 use crate::completion::{CompletionNode, CompletionTree, FlagNode};
 use nu_ansi_term::Color;
-use reedline::Span;
 use reedline::{
-    Completer, EditCommand, Menu, Prompt, PromptEditMode, PromptHistorySearch,
-    PromptHistorySearchStatus,
+    Completer, EditCommand, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus,
 };
 use std::collections::BTreeSet;
 use std::io;
@@ -12,26 +10,19 @@ use std::sync::{Arc, Mutex};
 
 use super::editor::PaintedLine;
 use super::{
-    AutoCompleteEmacs, BasicInputReason, CompletionDebugOptions, DebugStep, HISTORY_MENU_NAME,
-    HistoryConfig, HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance,
-    ReplCompleter, ReplHistoryCompleter, ReplInputMode, ReplLineResult, ReplReloadKind,
-    ReplRunResult, SharedHistory, SubmissionContext, SubmissionResult, basic_input_reason,
-    build_history_menu, build_history_picker_options, build_repl_highlighter,
-    color_from_style_spec, contains_cursor_position_report, debug_completion,
-    debug_completion_steps, debug_history_menu, debug_history_menu_steps, default_pipe_verbs,
-    evaluate_repl_submission, expand_history, expand_home, history_picker_items,
-    is_cursor_position_error, parse_cursor_position_report, path_suggestions, split_path_stub,
-    trace_completion, trace_completion_enabled,
+    AutoCompleteEmacs, BasicInputReason, CompletionDebugOptions, DebugStep, HistoryConfig,
+    HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance, ReplCompleter,
+    ReplInputMode, ReplReloadKind, ReplResult, SharedHistory, SubmissionContext,
+    basic_input_reason, build_history_picker_options, build_repl_highlighter,
+    color_from_style_spec, debug_completion, debug_completion_steps, default_pipe_verbs,
+    evaluate_repl_submission, history_picker_items, parse_cursor_position_report, path_suggestions,
+    split_path_stub, trace_completion, trace_completion_enabled,
 };
 use crate::core::shell_words::QuoteStyle;
 use crate::repl::LineProjection;
 use crate::repl::ReplTabMode;
 use crate::repl::menu::{OspCompletionMenu, SharedCompletionMenu};
 use reedline::Emacs;
-
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
 
 fn completion_tree_with_config_show() -> CompletionTree {
     let show = CompletionNode::default()
@@ -64,12 +55,13 @@ fn completion_tree_with_root_commands() -> CompletionTree {
     }
 }
 
-fn history_config() -> super::HistoryConfigBuilder {
-    HistoryConfig::builder()
-        .with_enabled(true)
-        .with_max_entries(32)
-        .with_dedupe(false)
-        .with_profile_scoped(false)
+fn history_config() -> HistoryConfig {
+    HistoryConfig {
+        enabled: true,
+        max_entries: 32,
+        dedupe: false,
+        ..HistoryConfig::default()
+    }
 }
 
 fn test_appearance() -> super::ReplAppearance {
@@ -83,35 +75,40 @@ fn test_appearance() -> super::ReplAppearance {
 }
 
 fn disabled_history() -> SharedHistory {
-    SharedHistory::new(
-        history_config()
-            .with_enabled(false)
-            .with_max_entries(0)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    )
+    SharedHistory::new(HistoryConfig {
+        enabled: false,
+        max_entries: 0,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    })
 }
 
 // History expansion and submission contracts.
 
 #[test]
 fn history_expansion_variants_resolve_recent_relative_and_prefix_queries_unit() {
-    let latest_only = vec!["ldap user oistes".to_string()];
-    assert_eq!(
-        expand_history("!!", &latest_only, None, false),
-        Some("ldap user oistes".to_string())
-    );
+    use crate::repl::history_store::BangCommand;
 
-    let history = vec![
-        "ldap user oistes".to_string(),
-        "ldap netgroup ucore".to_string(),
-    ];
+    let history = test_history(&["ldap user oistes", "ldap netgroup ucore"]);
     assert_eq!(
-        expand_history("!-1", &history, None, false),
+        history
+            .with(|store| store.expand(&BangCommand::Last, None, false))
+            .ok()
+            .flatten(),
         Some("ldap netgroup ucore".to_string())
     );
     assert_eq!(
-        expand_history("!ldap user", &history, None, false),
+        history
+            .with(|store| store.expand(&BangCommand::Relative(1), None, false))
+            .ok()
+            .flatten(),
+        Some("ldap netgroup ucore".to_string())
+    );
+    assert_eq!(
+        history
+            .with(|store| store.expand(&BangCommand::Prefix("ldap user".to_string()), None, false))
+            .ok()
+            .flatten(),
         Some("ldap user oistes".to_string())
     );
 }
@@ -120,27 +117,32 @@ fn history_expansion_variants_resolve_recent_relative_and_prefix_queries_unit() 
 fn submission_delegates_help_and_exit_to_host() {
     let history = disabled_history();
     let mut seen = Vec::new();
-    let mut execute = |line: &str, _: &SharedHistory| {
+    let mut execute = |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        let crate::repl::ReplEvent::Line(line) = event else {
+            unreachable!()
+        };
         seen.push(line.to_string());
         Ok(match line {
-            "help" => ReplLineResult::Continue("host help".to_string()),
-            "!!" => ReplLineResult::ReplaceInput("ldap user oistes".to_string()),
-            "exit" => ReplLineResult::Exit(7),
-            other => ReplLineResult::Continue(other.to_string()),
+            "help" => ReplResult::Print("host help".to_string()),
+            "!!" => ReplResult::ReplaceInput("ldap user oistes".to_string()),
+            "exit" => ReplResult::Exit(7),
+            other => ReplResult::Print(other.to_string()),
         })
     };
     let mut submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut execute,
     };
 
-    let help = evaluate_repl_submission("help", &mut submission).expect("help should succeed");
-    let bang = evaluate_repl_submission("!!", &mut submission).expect("bang should succeed");
-    let exit = evaluate_repl_submission("exit", &mut submission).expect("exit should succeed");
+    let help = evaluate_repl_submission("help", &mut submission);
+    let bang = evaluate_repl_submission("!!", &mut submission);
+    let exit = evaluate_repl_submission("exit", &mut submission);
 
-    assert!(matches!(help, SubmissionResult::Print(text) if text == "host help"));
-    assert!(matches!(bang, SubmissionResult::ReplaceInput(text) if text == "ldap user oistes"));
-    assert!(matches!(exit, SubmissionResult::Exit(7)));
+    assert!(matches!(help, ReplResult::Print(text) if text == "host help"));
+    assert!(matches!(bang, ReplResult::ReplaceInput(text) if text == "ldap user oistes"));
+    assert!(matches!(exit, ReplResult::Exit(7)));
     assert_eq!(
         seen,
         vec!["help".to_string(), "!!".to_string(), "exit".to_string()]
@@ -164,6 +166,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
 
     let prefix_values = word_completer
         .complete("ld", 2)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -171,6 +175,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
 
     let fuzzy_values = word_completer
         .complete("lap", 3)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -179,6 +185,8 @@ fn completer_covers_prefix_fuzzy_and_pipe_scenarios_unit() {
     let mut pipe_completer = ReplCompleter::new(tree, None);
     let pipe_values = pipe_completer
         .complete("ldap user | F", "ldap user | F".len())
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -206,6 +214,8 @@ fn completer_can_use_projected_line_for_host_flags_unit() {
 
     let completions = completer.complete("--json config sh", "--json config sh".len());
     let values = completions
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -236,6 +246,8 @@ fn completer_hides_suggestions_requested_by_projection_unit() {
 
     let values = completer
         .complete("-", 1)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .map(|suggestion| suggestion.value)
         .collect::<Vec<_>>();
@@ -263,6 +275,8 @@ fn completer_uses_engine_metadata_for_subcommands() {
     let mut completer = ReplCompleter::new(tree, None);
     let completion = completer
         .complete("ld", 2)
+        .suggestions()
+        .to_vec()
         .into_iter()
         .find(|item| item.value == "ldap")
         .expect("ldap completion should exist");
@@ -325,13 +339,11 @@ fn debug_completion_and_steps_surface_menu_state_unit() {
         "config sh",
         "config sh".len(),
         CompletionDebugOptions::new(80, 6),
-        &[DebugStep::Tab, DebugStep::Accept],
+        &[DebugStep::Tab],
     );
-    assert_eq!(frames.len(), 2);
+    assert_eq!(frames.len(), 1);
     assert_eq!(frames[0].step, "tab");
-    assert!(frames[0].state.matches.iter().any(|item| item.id == "show"));
-    assert_eq!(frames[1].step, "accept");
-    assert_eq!(frames[1].state.line, "config show ");
+    assert_eq!(frames[0].state.line, "config show ");
 }
 
 #[cfg_attr(miri, ignore = "filesystem-backed path completion integration test")]
@@ -431,7 +443,7 @@ fn debug_completion_navigation_and_empty_match_states_unit() {
     assert_eq!(debug.line, "zzz");
     assert_eq!(debug.cursor, 3);
     assert!(debug.matches.is_empty());
-    assert_eq!(debug.selected, -1);
+    assert_eq!(debug.menu.selected_index, -1);
     assert_eq!(debug.stub, "zzz");
     assert_eq!(debug.replace_range, [0, 3]);
 }
@@ -450,46 +462,51 @@ fn completion_analysis_marks_uncommitted_root_tokens_as_subcommand_context_unit(
 fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
     let history = disabled_history();
 
-    let mut restart_execute = |_line: &str, _: &SharedHistory| {
-        Ok(ReplLineResult::Restart {
+    let mut restart_execute = |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        Ok(ReplResult::Restart {
             output: "restarting".to_string(),
             reload: ReplReloadKind::WithIntro,
         })
     };
     let mut submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut restart_execute,
     };
-    let restart =
-        evaluate_repl_submission("config set", &mut submission).expect("restart should map");
+    let restart = evaluate_repl_submission("config set", &mut submission);
     assert!(matches!(
         restart,
-        SubmissionResult::Restart {
+        ReplResult::Restart {
             output,
             reload: ReplReloadKind::WithIntro
         } if output == "restarting"
     ));
 
-    let mut failing_execute = |_line: &str, _: &SharedHistory| -> anyhow::Result<ReplLineResult> {
-        Err(anyhow::anyhow!("submit failed"))
-    };
+    let mut failing_execute =
+        |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| -> anyhow::Result<ReplResult> {
+            Err(anyhow::anyhow!("submit failed"))
+        };
     let mut failing_submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut failing_execute,
     };
-    let result = evaluate_repl_submission("broken", &mut failing_submission)
-        .expect("error should be absorbed");
-    assert!(matches!(result, SubmissionResult::Noop));
+    let result = evaluate_repl_submission("broken", &mut failing_submission);
+    assert!(matches!(result, ReplResult::Continue));
 
-    let mut noop_execute =
-        |_line: &str, _: &SharedHistory| Ok(ReplLineResult::Continue("ignored".to_string()));
+    let mut noop_execute = |_line: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        Ok(ReplResult::Print("ignored".to_string()))
+    };
     let mut noop_submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut noop_execute,
     };
-    let result =
-        evaluate_repl_submission("   ", &mut noop_submission).expect("blank lines should noop");
-    assert!(matches!(result, SubmissionResult::Noop));
+    let result = evaluate_repl_submission("   ", &mut noop_submission);
+    assert!(matches!(result, ReplResult::Continue));
 }
 
 #[test]
@@ -580,7 +597,10 @@ fn path_suggestions_cover_files_directories_and_quote_variants_unit() {
 #[cfg_attr(miri, ignore = "trace file filesystem integration test")]
 #[test]
 fn trace_completion_env_controls_and_jsonl_output_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let temp_dir = make_temp_dir("osp-repl-trace");
     let trace_path = temp_dir.join("trace.jsonl");
     let previous_enabled = std::env::var("OSP_REPL_TRACE_COMPLETION").ok();
@@ -617,25 +637,15 @@ fn trace_completion_env_controls_and_jsonl_output_unit() {
 }
 
 #[test]
-fn cursor_probe_helpers_distinguish_errors_and_valid_reports_unit() {
-    assert!(is_cursor_position_error(&io::Error::from_raw_os_error(25)));
-    assert!(is_cursor_position_error(&io::Error::other(
-        "Cursor position could not be read"
-    )));
-    assert!(!is_cursor_position_error(&io::Error::other(
-        "permission denied"
-    )));
-
+fn cursor_position_reports_parse_only_well_formed_replies_unit() {
     assert_eq!(parse_cursor_position_report(b"\x1b[12;34R"), Some((34, 12)));
     assert_eq!(
         parse_cursor_position_report(b"\x1b[1;200R trailing"),
         Some((200, 1))
     );
-    assert!(contains_cursor_position_report(b"noise\x1b[22;7R"));
     assert_eq!(parse_cursor_position_report(b"\x1b[;34R"), None);
     assert_eq!(parse_cursor_position_report(b"\x1b[12;R"), None);
     assert_eq!(parse_cursor_position_report(b"\x1b[12;34"), None);
-    assert!(!contains_cursor_position_report(b"\x1b[bad"));
 }
 
 #[test]
@@ -648,14 +658,15 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
     for reason in [
         Some(BasicInputReason::Explicit),
         Some(BasicInputReason::NotATerminal),
-        Some(BasicInputReason::CursorProbeUnsupported),
         None,
     ] {
-        let history = SharedHistory::new(history_config().build());
+        let history = SharedHistory::new(history_config());
         let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
         let mut execute =
-            |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
+            |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
         let mut submission = SubmissionContext {
+            root_input: false,
+            exit_on_interrupt: false,
             history_store: &history,
             execute: &mut execute,
         };
@@ -670,37 +681,50 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
                 tab_mode: ReplTabMode::Tab,
                 line_projector: None,
                 history_store: history.clone(),
+                actions: Vec::new(),
+                on_start: None,
             },
             reason,
             &mut submission,
             |basic_prompt, _submission| {
                 basic_calls += 1;
                 assert_eq!(basic_prompt.left(), "left");
-                Ok(ReplRunResult::Exit(7))
+                Ok(ReplResult::Exit(7))
             },
             |config, interactive_history, _submission| {
                 interactive_calls += 1;
                 assert_eq!(config.prompt.left(), "left");
                 assert!(config.completion_tree.root.children.contains_key("config"));
                 assert_eq!(config.appearance.history_menu_rows, 5);
-                assert_eq!(interactive_history.enabled(), history.enabled());
                 assert_eq!(
-                    interactive_history.recent_commands(),
-                    history.recent_commands()
+                    interactive_history
+                        .with(|store| store.history_enabled())
+                        .unwrap_or(false),
+                    history
+                        .with(|store| store.history_enabled())
+                        .unwrap_or(false)
                 );
-                Ok(ReplRunResult::Exit(7))
+                assert_eq!(
+                    interactive_history
+                        .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+                        .unwrap_or_default(),
+                    history
+                        .with(|store| store.recent_commands_for(store.shell_prefix().as_deref()))
+                        .unwrap_or_default()
+                );
+                Ok(ReplResult::Exit(7))
             },
         )
         .expect("routing path should succeed");
 
         match reason {
             Some(_) => {
-                assert_eq!(result, ReplRunResult::Exit(7));
+                assert_eq!(result, ReplResult::Exit(7));
                 assert_eq!(basic_calls, 1);
                 assert_eq!(interactive_calls, 0);
             }
             None => {
-                assert_eq!(result, ReplRunResult::Exit(7));
+                assert_eq!(result, ReplResult::Exit(7));
                 assert_eq!(basic_calls, 0);
                 assert_eq!(interactive_calls, 1);
             }
@@ -710,13 +734,29 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
 
 #[test]
 fn expand_home_and_prompt_renderers_behave_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let previous_home = std::env::var("HOME").ok();
-    set_env_var_for_test("HOME", "/tmp/osp-home");
-    assert_eq!(expand_home("~"), "/tmp/osp-home");
-    assert_eq!(expand_home("~/cache"), "/tmp/osp-home/cache");
-    assert_eq!(expand_home("~\\cache"), "/tmp/osp-home/cache");
-    assert_eq!(expand_home("/etc/hosts"), "/etc/hosts");
+    let home = crate::tests::make_temp_dir("osp-env");
+    set_env_var_for_test("HOME", home.path().to_str().unwrap());
+    assert_eq!(
+        crate::normalize::expand_home("~"),
+        Some(std::path::PathBuf::from(home.path()))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("~/cache"),
+        Some(home.join("cache"))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("~\\cache"),
+        Some(home.join("cache"))
+    );
+    assert_eq!(
+        crate::normalize::expand_home("/etc/hosts"),
+        Some(std::path::PathBuf::from("/etc/hosts"))
+    );
 
     let right: PromptRightRenderer = Arc::new(|| "rhs".to_string());
     let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), Some(right));
@@ -739,53 +779,39 @@ fn expand_home_and_prompt_renderers_behave_unit() {
 }
 
 #[test]
-fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() {
+fn interactive_editor_builder_and_driver_cover_signal_and_error_paths_unit() {
     let history = disabled_history();
     let appearance = test_appearance();
-    let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
-    let mut built_editor = super::session::build_interactive_editor(
+    let built_editor = super::session::build_interactive_editor(
         completion_tree_with_root_commands(),
         &appearance,
         ReplTabMode::Tab,
         None,
         history.clone(),
+        None,
     );
     assert_eq!(built_editor.current_buffer_contents(), "");
 
-    let mut fallback_execute =
-        |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
-    let mut fallback_submission = SubmissionContext {
-        history_store: &history,
-        execute: &mut fallback_execute,
-    };
-    let fallback = super::session::drive_interactive_editor(
-        &prompt,
-        &appearance,
-        &history,
-        &mut fallback_submission,
-        &mut built_editor,
-        |_editor| Err(io::Error::from_raw_os_error(25)),
-        |_prompt, _submission| Ok(ReplRunResult::Exit(9)),
-    )
-    .expect("cursor probe errors should fall back to basic mode");
-    assert_eq!(fallback, ReplRunResult::Exit(9));
-
     let executed = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&executed);
-    let mut execute = move |line: &str, _: &SharedHistory| {
+    let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+        let crate::repl::ReplEvent::Line(line) = event else {
+            unreachable!()
+        };
         seen.lock()
             .expect("executed command log should not be poisoned")
             .push(line.to_string());
-        Ok(ReplLineResult::Continue(String::new()))
+        Ok(ReplResult::Continue)
     };
     let mut submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut execute,
     };
     let mut editor = reedline::Reedline::create();
     let mut reads = 0usize;
     let exit = super::session::drive_interactive_editor(
-        &prompt,
         &appearance,
         &history,
         &mut submission,
@@ -798,10 +824,9 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
                 reedline::Signal::CtrlD
             })
         },
-        |_prompt, _submission| Ok(ReplRunResult::Exit(99)),
     )
     .expect("success and ctrl-d signals should succeed");
-    assert_eq!(exit, ReplRunResult::Exit(0));
+    assert_eq!(exit, ReplResult::Exit(0));
     assert_eq!(
         *executed
             .lock()
@@ -810,143 +835,25 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     );
 
     let mut error_execute =
-        |_line: &str, _history: &SharedHistory| Ok(ReplLineResult::Continue(String::new()));
+        |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
     let mut error_submission = SubmissionContext {
+        root_input: false,
+        exit_on_interrupt: false,
         history_store: &history,
         execute: &mut error_execute,
     };
     let err = super::session::drive_interactive_editor(
-        &prompt,
         &appearance,
         &history,
         &mut error_submission,
         &mut reedline::Reedline::create(),
         |_editor| Err(io::Error::other("boom")),
-        |_prompt, _submission| Ok(ReplRunResult::Exit(1)),
     )
-    .expect_err("non-cursor editor errors should bubble up");
+    .expect_err("editor errors should bubble up");
     assert!(err.to_string().contains("boom"));
 }
 
-// History menu and history-debug contracts.
-
-#[test]
-fn history_completer_returns_latest_unique_entries_for_empty_query_unit() {
-    let history = test_history(&[
-        "ldap user alice",
-        "mreg host foo",
-        "ldap user alice",
-        "config get theme",
-        "help ldap",
-        "doctor",
-    ]);
-    let mut completer = ReplHistoryCompleter::new(history);
-
-    let suggestions = completer.complete("", 0);
-    let values = suggestions
-        .iter()
-        .map(|suggestion| suggestion.value.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        values,
-        vec![
-            "doctor",
-            "help ldap",
-            "config get theme",
-            "ldap user alice",
-            "mreg host foo",
-        ]
-    );
-    assert!(
-        suggestions
-            .iter()
-            .all(|suggestion| suggestion.span == (Span { start: 0, end: 0 }))
-    );
-    assert_eq!(
-        suggestions[0]
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.first())
-            .cloned(),
-        Some("6  doctor".to_string())
-    );
-}
-
-#[test]
-fn history_completer_ranks_exact_prefix_then_substring_unit() {
-    let history = test_history(&[
-        "config list",
-        "ldap config",
-        "config get theme",
-        "show config",
-        "CONFIG",
-        "config",
-    ]);
-    let mut completer = ReplHistoryCompleter::new(history);
-
-    let suggestions = completer.complete("config", "config".len());
-    let values = suggestions
-        .iter()
-        .map(|suggestion| suggestion.value.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        values,
-        vec![
-            "config",
-            "CONFIG",
-            "config get theme",
-            "config list",
-            "show config",
-        ]
-    );
-    assert!(suggestions.iter().all(|suggestion| {
-        suggestion.span
-            == (Span {
-                start: 0,
-                end: "config".len(),
-            })
-    }));
-    assert_eq!(
-        suggestions[0]
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.first())
-            .cloned(),
-        Some("6  config".to_string())
-    );
-}
-
-#[test]
-fn debug_history_menu_surfaces_numbered_labels_and_steps_unit() {
-    let history = test_history(&["ldap user alice", "config get theme", "config"]);
-    let menu = build_history_menu(&ReplAppearance::default());
-    assert_eq!(menu.name(), HISTORY_MENU_NAME);
-    assert!(!menu.can_quick_complete());
-
-    let debug = debug_history_menu(
-        &history,
-        "config",
-        "config".len(),
-        CompletionDebugOptions::new(80, 6),
-    );
-    assert_eq!(debug.stub, "config");
-    assert_eq!(debug.matches[0].label, "3  config");
-    assert_eq!(debug.matches[0].id, "config");
-    assert!(debug.matches.iter().all(|item| item.kind == "history"));
-
-    let frames = debug_history_menu_steps(
-        &history,
-        "config",
-        "config".len(),
-        CompletionDebugOptions::new(80, 6),
-        &[DebugStep::Tab, DebugStep::Accept],
-    );
-    assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0].state.matches[0].label, "3  config");
-    assert_eq!(frames[1].state.line, "config");
-}
+// History picker contracts.
 
 #[test]
 fn history_picker_items_keep_latest_unique_commands_and_flatten_multiline_unit() {
@@ -982,12 +889,12 @@ fn history_picker_options_use_configured_rows_query_and_skin_unit() {
 
     assert_eq!(options.height, "8");
     assert_eq!(options.query.as_deref(), Some("doctor mreg"));
-    assert_eq!(options.prompt, "(reverse-i-search)> ");
+    assert_eq!(options.prompt, "history> ");
     assert!(options.no_info);
     assert_eq!(
         options.color.as_deref(),
         Some(
-            "normal:7,matched:7,current:7,current_match:7,query:7,prompt:7,cursor:7,selected:7,info:7,header:7,spinner:7,border:7,bg:0,matched_bg:0,current_bg:6,current_match_bg:6"
+            "normal:7,matched:7:underlined,current:7,current_match:7:underlined,query:7,prompt:7,cursor:7,selected:7,info:7,header:7,spinner:7,border:7,bg:0,matched_bg:0,current_bg:6,current_match_bg:6"
         )
     );
 }
@@ -1005,9 +912,7 @@ fn restore_env(key: &str, value: Option<String>) {
 }
 
 fn set_env_var_for_test(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // Test-only environment mutation is process-global on Rust 2024.
-    // Keep the unsafe boundary explicit and local to these regression
-    // tests instead of spreading raw calls through the module.
+    // Only the isolated child test reaches this environment mutation.
     unsafe {
         std::env::set_var(key, value);
     }
@@ -1022,16 +927,16 @@ fn remove_env_var_for_test(key: &str) {
 }
 
 fn test_history(commands: &[&str]) -> SharedHistory {
-    let history = SharedHistory::new(
-        history_config()
-            .with_max_entries(32)
-            .with_shell_context(HistoryShellContext::default())
-            .build(),
-    );
+    let history = SharedHistory::new(HistoryConfig {
+        max_entries: 32,
+        shell_context: HistoryShellContext::default(),
+        ..history_config()
+    });
 
     for command in commands {
         history
-            .save_command_line(command)
+            .with(|store| store.save_command_line(command))
+            .expect("history lock should be available")
             .expect("history save should succeed");
     }
 

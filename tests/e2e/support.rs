@@ -1,9 +1,7 @@
 #[cfg(unix)]
-pub(crate) use crate::output_support::{first_json_row, parse_json_stdout};
+pub(crate) use crate::output_support::parse_json_stdout;
 #[cfg(unix)]
 use crate::temp_support::{TestTempDir, make_temp_dir};
-#[cfg(unix)]
-use assert_cmd::Command;
 #[cfg(unix)]
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 #[cfg(unix)]
@@ -16,128 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-pub(crate) fn osp_command(home: &Path) -> Command {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
-    cmd.env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("TERM", "xterm-256color")
-        .env("LANG", "C.UTF-8")
-        .env("NO_COLOR", "1");
-    for (key, value) in crate::test_env::isolated_env(home) {
-        cmd.env(key, value);
-    }
-    cmd
-}
-
-#[cfg(unix)]
-pub(crate) fn write_config(home: &Path, config: &str) {
-    let config_dir = home.join(".config").join("osp");
-    std::fs::create_dir_all(&config_dir).expect("config dir should be created");
-    std::fs::write(config_dir.join("config.toml"), config).expect("config should be written");
-}
-
-#[cfg(unix)]
-pub(crate) fn stderr_utf8(bytes: Vec<u8>) -> String {
-    String::from_utf8(bytes).expect("stderr should be utf-8")
-}
-
-#[cfg(unix)]
-pub(crate) fn write_executable_script(path: &Path, script: &str) {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::write(path, script).expect("script should be written");
-    let mut perms = std::fs::metadata(path)
-        .expect("script metadata should be readable")
-        .permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(path, perms).expect("script should be executable");
-}
-
-#[cfg(unix)]
-pub(crate) fn write_table_plugin(
-    dir: &Path,
-    plugin_id: &str,
-    command_name: &str,
-    message: &str,
-) -> PathBuf {
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"message":"{message}"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
-JSON
-"#,
-        plugin_id = plugin_id,
-        command_name = command_name,
-        message = message,
-    );
-    write_executable_script(&plugin_path, &script);
-    plugin_path
-}
-
-#[cfg(unix)]
-pub(crate) fn write_nonzero_plugin(
-    dir: &Path,
-    plugin_id: &str,
-    command_name: &str,
-    status_code: i32,
-    stderr: &str,
-) -> PathBuf {
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-echo "{stderr}" >&2
-exit {status_code}
-"#,
-        plugin_id = plugin_id,
-        command_name = command_name,
-        stderr = stderr,
-        status_code = status_code,
-    );
-    write_executable_script(&plugin_path, &script);
-    plugin_path
-}
-
-#[cfg(unix)]
-pub(crate) fn write_timeout_plugin(dir: &Path, plugin_id: &str, command_name: &str) -> PathBuf {
-    let plugin_path = dir.join(format!("osp-{plugin_id}"));
-    let script = format!(
-        r#"#!/bin/sh
-PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{plugin_id} plugin","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-sleep 1
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"message":"late"}},"error":null,"meta":{{"format_hint":"table","columns":["message"]}}}}
-JSON
-"#,
-        plugin_id = plugin_id,
-        command_name = command_name,
-    );
-    write_executable_script(&plugin_path, &script);
-    plugin_path
-}
+pub(crate) use crate::process_support::{osp_command, write_config, write_executable_script};
 
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -151,7 +28,8 @@ pub(crate) enum ReplPtyColorMode {
 #[derive(Clone, Debug)]
 pub(crate) struct ReplPtyConfig<'a> {
     color_mode: ReplPtyColorMode,
-    cursor_position_reports: bool,
+    // Late replies model a slow SSH round trip.
+    cursor_report_delay: Duration,
     simple_prompt: bool,
     config: Option<&'a str>,
     plugins_dir: Option<&'a Path>,
@@ -163,7 +41,7 @@ impl Default for ReplPtyConfig<'_> {
     fn default() -> Self {
         Self {
             color_mode: ReplPtyColorMode::Plain,
-            cursor_position_reports: true,
+            cursor_report_delay: Duration::ZERO,
             simple_prompt: true,
             config: None,
             plugins_dir: None,
@@ -179,8 +57,8 @@ impl<'a> ReplPtyConfig<'a> {
         self
     }
 
-    pub(crate) fn without_cursor_position_reports(mut self) -> Self {
-        self.cursor_position_reports = false;
+    pub(crate) fn with_cursor_report_delay(mut self, delay: Duration) -> Self {
+        self.cursor_report_delay = delay;
         self
     }
 
@@ -209,8 +87,11 @@ impl<'a> ReplPtyConfig<'a> {
 pub(crate) struct ReplPtySession {
     child: Box<dyn portable_pty::Child + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    terminal: Box<dyn portable_pty::MasterPty + Send>,
     // PTY reads can split UTF-8 characters; retain bytes until taking a view.
     output: Arc<Mutex<Vec<u8>>>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    deadline: Instant,
     _home: TestTempDir,
     _plugins: Option<TestTempDir>,
 }
@@ -219,8 +100,6 @@ pub(crate) struct ReplPtySession {
 pub(crate) struct PtyCommandOutput {
     pub(crate) stdout: String,
     pub(crate) status: portable_pty::ExitStatus,
-    _home: TestTempDir,
-    _plugins: TestTempDir,
 }
 
 #[cfg(unix)]
@@ -273,20 +152,8 @@ pub(crate) fn run_osp_command_in_pty(
     let mut cmd = osp_pty_command_builder(&home, &plugins, color_mode);
     cmd.args(args);
 
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn osp");
-    drop(pair.slave);
-
-    let mut reader = pair.master.try_clone_reader().expect("clone reader");
-    let mut stdout = String::new();
-    reader.read_to_string(&mut stdout).expect("read pty stdout");
-    let status = child.wait().expect("wait for child");
-
-    PtyCommandOutput {
-        stdout,
-        status,
-        _home: home,
-        _plugins: plugins,
-    }
+    let (stdout, status) = crate::pty_support::capture(pair, cmd, Duration::from_secs(20));
+    PtyCommandOutput { stdout, status }
 }
 
 #[cfg(unix)]
@@ -328,20 +195,26 @@ impl ReplPtySession {
             },
         );
         cmd.env("OSP__REPL__HISTORY__ENABLED", "false");
-        if config.cursor_position_reports {
-            // Most PTY tests exercise interactive rendering paths directly and
-            // should not depend on cursor-probe timing.
-            cmd.env("OSP__REPL__INPUT_MODE", "interactive");
-        }
-        let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
         let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("take writer")));
 
         let output = Arc::new(Mutex::new(Vec::new()));
         let output_clone = Arc::clone(&output);
         let writer_clone = Arc::clone(&writer);
-        let cursor_position_reports = config.cursor_position_reports;
-        std::thread::spawn(move || {
+        let cursor_report_delay = config.cursor_report_delay;
+        let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
+        drop(pair.slave);
+        let mut session = Self {
+            child,
+            writer,
+            terminal: pair.master,
+            output,
+            reader: None,
+            deadline: Instant::now() + Duration::from_secs(120),
+            _home: home,
+            _plugins: plugins_temp,
+        };
+        session.reader = Some(std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
             let cpr_request = [0x1b, 0x5b, 0x36, 0x6e];
             let mut cpr_prefix = 0;
@@ -349,20 +222,27 @@ impl ReplPtySession {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if cursor_position_reports {
-                            // Requests may share a read or cross its boundary.
-                            for byte in &buf[..n] {
-                                cpr_prefix = if *byte == cpr_request[cpr_prefix] {
-                                    cpr_prefix + 1
-                                } else {
-                                    usize::from(*byte == cpr_request[0])
-                                };
-                                if cpr_prefix == cpr_request.len() {
-                                    let mut writer = writer_clone.lock().expect("writer lock");
+                        // Requests may share a read or cross its boundary.
+                        for byte in &buf[..n] {
+                            cpr_prefix = if *byte == cpr_request[cpr_prefix] {
+                                cpr_prefix + 1
+                            } else {
+                                usize::from(*byte == cpr_request[0])
+                            };
+                            if cpr_prefix == cpr_request.len() {
+                                let writer = Arc::clone(&writer_clone);
+                                let reply = move || {
+                                    std::thread::sleep(cursor_report_delay);
+                                    let mut writer = writer.lock().expect("writer lock");
                                     let _ = writer.write_all(b"\x1b[1;1R");
                                     let _ = writer.flush();
-                                    cpr_prefix = 0;
+                                };
+                                if cursor_report_delay.is_zero() {
+                                    reply();
+                                } else {
+                                    std::thread::spawn(reply);
                                 }
+                                cpr_prefix = 0;
                             }
                         }
                         output_clone
@@ -373,15 +253,9 @@ impl ReplPtySession {
                     Err(_) => break,
                 }
             }
-        });
+        }));
 
-        Self {
-            child,
-            writer,
-            output,
-            _home: home,
-            _plugins: plugins_temp,
-        }
+        session
     }
 
     pub(crate) fn output_len(&self) -> usize {
@@ -415,7 +289,31 @@ impl ReplPtySession {
         strip_terminal_noise(&self.output_snapshot(max_len))
     }
 
+    fn wait_deadline(&self, timeout: Duration) -> Instant {
+        // One-second waits belong to latency contracts; other waits detect hangs.
+        let timeout = if timeout > Duration::from_secs(1) {
+            timeout.max(Duration::from_secs(15))
+        } else {
+            timeout
+        };
+        (Instant::now() + timeout).min(self.deadline)
+    }
+
     pub(crate) fn write_bytes(&mut self, bytes: &[u8]) {
+        let deadline = self.wait_deadline(Duration::from_secs(15));
+        // A rendered prompt can still belong to the editor being rebuilt.
+        while self
+            .terminal
+            .get_termios()
+            .is_some_and(|termios| termios.local_flags.bits() & libc::ECHO != 0)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "editor never disabled terminal echo; output:\n{}",
+                self.output_snapshot(8000),
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let mut writer = self.writer.lock().expect("writer lock");
         writer.write_all(bytes).expect("write to pty");
         writer.flush().expect("flush pty");
@@ -424,7 +322,7 @@ impl ReplPtySession {
     pub(crate) fn type_text(&mut self, text: &str) {
         let start = self.output_len();
         self.write_bytes(text.as_bytes());
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = self.wait_deadline(Duration::from_secs(15));
         loop {
             let output = self.output_since(start);
             // Cooked terminal echo can precede editor startup after a reload.
@@ -444,18 +342,27 @@ impl ReplPtySession {
         }
     }
 
+    fn output_ready(&self, output: &str) -> bool {
+        output.rsplit_once("\x1b[?25h").is_some_and(|(_, tail)| {
+            !tail.contains("\x1b[?25l") && strip_terminal_noise(tail).is_empty()
+        })
+    }
+
     pub(crate) fn wait_for_output_since(
         &self,
         start: usize,
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = self.wait_deadline(timeout);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
-                if start < buf.len() && String::from_utf8_lossy(&buf[start..]).contains(needle) {
-                    return true;
+                if start < buf.len() {
+                    let output = String::from_utf8_lossy(&buf[start..]);
+                    if output.contains(needle) && self.output_ready(&output) {
+                        return true;
+                    }
                 }
             }
             if Instant::now() >= deadline {
@@ -465,20 +372,25 @@ impl ReplPtySession {
         }
     }
 
-    pub(crate) fn wait_for_plain_output(&self, needle: &str, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+    pub(crate) fn wait_for_editor_since(&self, start: usize, timeout: Duration) -> bool {
+        let deadline = self.wait_deadline(timeout);
         loop {
+            let output = self.output_since(start);
+            if let Some((_, frame)) = output.rsplit_once("\x1b[?25l")
+                && frame.contains("\x1b[J")
+                && frame.contains("\x1b[?25h")
             {
-                let buf = self.output.lock().expect("output lock");
-                if strip_terminal_noise(&String::from_utf8_lossy(&buf)).contains(needle) {
-                    return true;
-                }
+                return true;
             }
             if Instant::now() >= deadline {
                 return false;
             }
-            std::thread::sleep(Duration::from_millis(25));
+            std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    pub(crate) fn wait_for_plain_output(&self, needle: &str, timeout: Duration) -> bool {
+        self.wait_for_plain_output_since(0, needle, timeout)
     }
 
     pub(crate) fn wait_for_plain_output_since(
@@ -487,15 +399,16 @@ impl ReplPtySession {
         needle: &str,
         timeout: Duration,
     ) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = self.wait_deadline(timeout);
         loop {
             {
                 let buf = self.output.lock().expect("output lock");
-                if start < buf.len()
-                    && strip_terminal_noise(&String::from_utf8_lossy(&buf[start..]))
-                        .contains(needle)
-                {
-                    return true;
+                if start < buf.len() {
+                    let output = String::from_utf8_lossy(&buf[start..]);
+                    if strip_terminal_noise(&output).contains(needle) && self.output_ready(&output)
+                    {
+                        return true;
+                    }
                 }
             }
             if Instant::now() >= deadline {
@@ -506,7 +419,7 @@ impl ReplPtySession {
     }
 
     pub(crate) fn wait_for_exit(&mut self, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = self.wait_deadline(timeout);
         loop {
             match self.child.try_wait() {
                 Ok(Some(_)) => return true,
@@ -521,8 +434,17 @@ impl ReplPtySession {
     }
 
     pub(crate) fn kill(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.child.process_id() {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 

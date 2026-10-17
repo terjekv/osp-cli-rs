@@ -53,22 +53,6 @@ pub(crate) fn format_timing_badge(
     )
 }
 
-pub(crate) fn right_align_timing_line(
-    summary: TimingSummary,
-    debug_level: u8,
-    resolved: &ResolvedRenderSettings,
-) -> String {
-    let badge = format_timing_badge(summary, debug_level, resolved);
-    if badge.is_empty() {
-        return String::new();
-    }
-
-    let width = resolved.width.unwrap_or(80);
-    let visible = visible_width(&badge);
-    let padding = width.saturating_sub(visible);
-    format!("{}{}\n", " ".repeat(padding), badge)
-}
-
 fn timing_style(total: Duration) -> StyleToken {
     let total_ms = total.as_millis();
     if total_ms <= 250 {
@@ -99,34 +83,11 @@ fn format_duration(duration: Duration, debug_level: u8) -> String {
     format!("{ms:.1}ms")
 }
 
-fn visible_width(text: &str) -> usize {
-    let mut width = 0usize;
-    let mut chars = text.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' && matches!(chars.peek(), Some('[')) {
-            chars.next();
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-            continue;
-        }
-        width += 1;
-    }
-
-    width
-}
-
 #[cfg(test)]
 mod tests {
     use std::hint::black_box;
 
-    use super::{
-        TimingSummary, format_duration, format_timing_badge, right_align_timing_line, timing_style,
-        visible_width,
-    };
+    use super::{TimingSummary, format_duration, format_timing_badge, timing_style};
     use crate::ui::RenderSettings;
     use crate::ui::style::StyleToken;
     use std::time::Duration;
@@ -158,14 +119,6 @@ mod tests {
             .resolve_render_settings();
 
         assert!(black_box(format_timing_badge(TimingSummary::default(), 0, &resolved)).is_empty());
-        assert!(
-            black_box(right_align_timing_line(
-                TimingSummary::default(),
-                0,
-                &resolved
-            ))
-            .is_empty()
-        );
     }
 
     #[test]
@@ -203,24 +156,5 @@ mod tests {
             black_box(timing_style(Duration::from_millis(1_001))),
             StyleToken::MessageError
         );
-    }
-
-    #[test]
-    fn visible_width_and_right_alignment_ignore_ansi_sequences() {
-        assert_eq!(black_box(visible_width("\u{1b}[31mwarn\u{1b}[0m")), 4);
-
-        let mut resolved = RenderSettings::test_plain(crate::core::output::OutputFormat::Table)
-            .resolve_render_settings();
-        resolved.width = Some(12);
-        let line = right_align_timing_line(
-            TimingSummary {
-                total: Duration::from_millis(9),
-                ..TimingSummary::default()
-            },
-            1,
-            &resolved,
-        );
-
-        assert_eq!(line, "         9ms\n");
     }
 }

@@ -16,19 +16,39 @@
 //! - [`DeveloperLoggingConfig::new`] creates the exact runtime baseline and
 //!   `with_*` setters refine optional outputs
 
+use std::cell::Cell;
+#[cfg(test)]
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::fmt;
+use tracing_subscriber::fmt::{self, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry;
 use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
+
+thread_local! {
+    // A command override must not alter unrelated in-process hosts or tests.
+    static STDERR_OVERRIDE: Cell<Option<u8>> = const { Cell::new(None) };
+}
+
+pub(crate) struct StderrLevelGuard(Option<u8>);
+
+impl Drop for StderrLevelGuard {
+    fn drop(&mut self) {
+        STDERR_OVERRIDE.set(self.0);
+    }
+}
+
+pub(crate) fn override_stderr_level(level: u8) -> StderrLevelGuard {
+    StderrLevelGuard(STDERR_OVERRIDE.replace(Some(level)))
+}
 
 static LOGGING_STATE: OnceLock<Option<LoggingState>> = OnceLock::new();
 
@@ -51,15 +71,15 @@ impl FileLoggingConfig {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct DeveloperLoggingConfig {
-    pub debug_count: u8,
+    pub debug_level: u8,
     pub file: Option<FileLoggingConfig>,
 }
 
 impl DeveloperLoggingConfig {
     /// Creates developer logging settings with stderr verbosity only.
-    pub fn new(debug_count: u8) -> Self {
+    pub fn new(debug_level: u8) -> Self {
         Self {
-            debug_count,
+            debug_level,
             file: None,
         }
     }
@@ -72,8 +92,9 @@ impl DeveloperLoggingConfig {
 }
 
 /// Derives the initial developer logging configuration from raw CLI arguments.
-pub fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
-    DeveloperLoggingConfig::new(scan_debug_count(args))
+#[cfg(test)]
+fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
+    DeveloperLoggingConfig::new(crate::cli::invocation::scan_cli_argv(args).invocation.debug)
 }
 
 /// Initializes or reloads the process-global developer logging subscriber.
@@ -84,6 +105,11 @@ pub fn init_developer_logging(config: DeveloperLoggingConfig) {
     {
         state.apply(&config);
     }
+}
+
+/// Installs the default subscriber only if logging has not already been configured.
+pub(crate) fn initialize_developer_logging() {
+    LOGGING_STATE.get_or_init(|| LoggingState::initialize(&DeveloperLoggingConfig::new(0)));
 }
 
 /// Parses a textual log level into a `tracing_subscriber` filter.
@@ -100,8 +126,28 @@ pub fn parse_level_filter(value: &str) -> Option<LevelFilter> {
     }
 }
 
+// Operator events stay compact; internal diagnostics retain the active spans.
+struct StderrFormat(Arc<AtomicU8>);
+
+impl<S, N> fmt::FormatEvent<S, N> for StderrFormat
+where
+    S: tracing::Subscriber + for<'a> registry::LookupSpan<'a>,
+    N: for<'a> fmt::FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        context: &fmt::FmtContext<'_, S, N>,
+        mut writer: fmt::format::Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let _ = &self.0;
+        context.format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
 struct LoggingState {
-    stderr_handle: Box<dyn ReloadFilterHandle>,
+    stderr_level: Arc<AtomicU8>,
     file_handle: Box<dyn ReloadFilterHandle>,
     file_writer: DynamicFileWriter,
 }
@@ -131,13 +177,20 @@ impl LoggingState {
         };
 
         let use_ansi = std::io::stderr().is_terminal();
-        let (stderr_filter, stderr_handle) =
-            reload::Layer::new(map_debug_count(config.debug_count));
+        let stderr_level = Arc::new(AtomicU8::new(config.debug_level));
+        let level = stderr_level.clone();
+        let stderr_filter = tracing_subscriber::filter::filter_fn(move |metadata| {
+            let current = STDERR_OVERRIDE
+                .get()
+                .unwrap_or_else(|| level.load(Ordering::Relaxed));
+            metadata.target() == "osp::diagnostic" && metadata.level() <= &map_debug_level(current)
+        })
+        .with_max_level_hint(tracing::Level::TRACE);
         let stderr_layer = fmt::layer()
             .with_writer(std::io::stderr)
             .with_target(true)
             .with_ansi(use_ansi)
-            .compact()
+            .event_format(StderrFormat(stderr_level.clone()))
             .with_filter(stderr_filter);
         let (file_filter, file_handle) = reload::Layer::new(file_level);
         let file_writer_for_layer = file_writer.clone();
@@ -146,30 +199,33 @@ impl LoggingState {
             .with_target(true)
             .with_ansi(false)
             .compact()
-            .with_filter(file_filter);
+            .with_filter(file_filter)
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                matches!(metadata.target(), "osp::diagnostic" | "osp::evidence")
+            }));
 
-        if let Err(err) = registry().with(stderr_layer).with(file_layer).try_init() {
-            if config.debug_count >= 2 {
+        if let Err(err) = registry()
+            .with(crate::startup_trace::layer())
+            .with(stderr_layer)
+            .with(file_layer)
+            .try_init()
+        {
+            if config.debug_level >= 2 {
                 eprintln!("logging already initialized: {err}");
             }
             return None;
         }
 
         Some(Self {
-            stderr_handle: Box::new(stderr_handle),
+            stderr_level,
             file_handle: Box::new(file_handle),
             file_writer,
         })
     }
 
     fn apply(&self, config: &DeveloperLoggingConfig) {
-        if let Err(err) = self
-            .stderr_handle
-            .reload(map_debug_count(config.debug_count))
-            && config.debug_count >= 2
-        {
-            eprintln!("failed to reload stderr logging: {err}");
-        }
+        self.stderr_level
+            .store(config.debug_level, Ordering::Relaxed);
 
         let file_level = match self.file_writer.configure(config.file.as_ref()) {
             Ok(level) => level,
@@ -181,7 +237,7 @@ impl LoggingState {
         };
 
         if let Err(err) = self.file_handle.reload(file_level)
-            && config.debug_count >= 2
+            && config.debug_level >= 2
         {
             eprintln!("failed to reload file logging: {err}");
         }
@@ -270,8 +326,8 @@ fn split_file_path(path: &Path) -> Result<(PathBuf, String), String> {
     Ok((directory, file_name))
 }
 
-fn map_debug_count(debug_count: u8) -> LevelFilter {
-    match debug_count {
+fn map_debug_level(debug_level: u8) -> LevelFilter {
+    match debug_level {
         0 => LevelFilter::WARN,
         1 => LevelFilter::INFO,
         2 => LevelFilter::DEBUG,
@@ -279,39 +335,10 @@ fn map_debug_count(debug_count: u8) -> LevelFilter {
     }
 }
 
-fn scan_debug_count(args: &[OsString]) -> u8 {
-    let mut debug = 0u8;
-
-    for token in args.iter().skip(1) {
-        let Some(value) = token.to_str() else {
-            continue;
-        };
-
-        match value {
-            "--" => break,
-            "--debug" => {
-                debug = debug.saturating_add(1);
-                continue;
-            }
-            _ => {}
-        }
-
-        if value.starts_with('-') && !value.starts_with("--") {
-            for ch in value.chars().skip(1) {
-                if ch == 'd' {
-                    debug = debug.saturating_add(1);
-                }
-            }
-        }
-    }
-
-    debug
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        DynamicFileWriter, bootstrap_logging_config, map_debug_count, open_log_file,
+        DynamicFileWriter, bootstrap_logging_config, map_debug_level, open_log_file,
         parse_level_filter, split_file_path,
     };
     use std::ffi::OsString;
@@ -328,7 +355,7 @@ mod tests {
             (3, LevelFilter::TRACE),
             (9, LevelFilter::TRACE),
         ] {
-            assert_eq!(map_debug_count(count), expected);
+            assert_eq!(map_debug_level(count), expected);
         }
 
         for (value, expected) in [
@@ -350,7 +377,7 @@ mod tests {
             OsString::from("--debug"),
             OsString::from("list"),
         ]);
-        assert_eq!(counted.debug_count, 3);
+        assert_eq!(counted.debug_level, 3);
         assert!(counted.file.is_none());
 
         let stopped = bootstrap_logging_config(&[
@@ -360,14 +387,14 @@ mod tests {
             OsString::from("--debug"),
             OsString::from("-dd"),
         ]);
-        assert_eq!(stopped.debug_count, 1);
+        assert_eq!(stopped.debug_level, 1);
 
         let mixed = bootstrap_logging_config(&[
             OsString::from("osp"),
             OsString::from("-vqdd"),
             OsString::from("doctor"),
         ]);
-        assert_eq!(mixed.debug_count, 2);
+        assert_eq!(mixed.debug_level, 2);
     }
 
     #[cfg_attr(miri, ignore = "file logging filesystem integration test")]

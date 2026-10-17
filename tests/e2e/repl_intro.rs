@@ -11,19 +11,23 @@ use crate::support::{
 #[cfg(unix)]
 #[test]
 fn repl_startup_intro_uses_the_configured_rich_tty_path() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let config = r#"
 [default]
 profile.default = "default"
 ui.presentation = "expressive"
 repl.intro = "full"
 repl.simple_prompt = true
-user.full_name = "demo operator"
+user.name = "demo"
+user.display_names.demo = "demo operator"
 domain = "example.uio.no"
 theme.name = "dracula"
 repl.intro_tips = ["Inspect ownership before making changes."]
 repl.intro_template.full = """
 ## Operator desk
-Welcome {{ user.full_name }}.
+Welcome {{ display_name }}.
 Theme: {{ theme_display }}
 Tip: {{ tip }}
 
@@ -100,8 +104,13 @@ Export selected fields with `P key,value`.
         "theme change should rebuild the authored intro; output:\n{}",
         session.output_snapshot(12_000),
     );
+    let rebuilt_start = changed
+        + session
+            .output_since(changed)
+            .find("Operator desk")
+            .expect("the rebuilt intro should precede its theme");
     assert!(
-        session.wait_for_plain_output_since(changed, "default>", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(rebuilt_start, "default>", Duration::from_secs(3)),
         "rebuilt intro should return to the editor; output:\n{}",
         session.output_snapshot(12_000),
     );

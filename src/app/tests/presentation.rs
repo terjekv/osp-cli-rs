@@ -6,7 +6,7 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
     let settings = RenderSettings::test_plain(OutputFormat::Table);
     let resolved = settings.resolve_render_settings();
     let plain_timing = crate::app::DebugTimingState::default();
-    let plain = repl::render_repl_prompt_right_for_test(&resolved, None, false, &plain_timing);
+    let plain = repl::render_repl_prompt_right_for_test(&resolved, false, &plain_timing);
     assert!(plain.contains("incognito"));
 
     let breakdown_timing = crate::app::DebugTimingState::default();
@@ -19,25 +19,23 @@ fn repl_prompt_right_variants_render_incognito_and_timing_unit() {
             render: Some(std::time::Duration::from_millis(17)),
         },
     });
-    let breakdown =
-        repl::render_repl_prompt_right_for_test(&resolved, None, true, &breakdown_timing);
+    let breakdown = repl::render_repl_prompt_right_for_test(&resolved, true, &breakdown_timing);
     assert!(breakdown.contains("321.0ms"));
     assert!(breakdown.contains("p4.0ms"));
     assert!(breakdown.contains("e300.0ms"));
     assert!(breakdown.contains("r17.0ms"));
 
-    let mut session = crate::app::AppSession::with_cache_limit(8);
+    let mut session = crate::app::AppSession::default();
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(42));
     session.seed_startup_prompt_timing(1, std::time::Duration::from_millis(99));
-    let seeded =
-        repl::render_repl_prompt_right_for_test(&resolved, None, true, &session.prompt_timing);
+    let seeded = repl::render_repl_prompt_right_for_test(&resolved, true, &session.prompt_timing);
     assert!(seeded.contains("42ms"));
     assert!(!seeded.contains("99ms"));
 }
 
 #[test]
 fn repl_help_chrome_variants_render_expected_structure_unit() {
-    let state = make_completion_state(None);
+    let state = make_completion_state();
     let known_sections =
         "Usage: config <COMMAND>\n\nCommands:\n  show\n\nOptions:\n  -h, --help  Print help\n";
     let headings = repl_help::render_repl_help_with_chrome(
@@ -70,16 +68,16 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
     assert!(unicode.contains("Commands"));
     assert!(unicode.contains("Options"));
 
-    let austere = make_completion_state_with_entries(None, &[("ui.presentation", "austere")]);
-    let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins commands` to list plugin-provided commands.\n";
+    let austere = make_completion_state_with_entries(&[("ui.presentation", "austere")]);
+    let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins list` to list plugin-provided commands.\n";
     let rendered = repl_help::render_repl_help_with_chrome(
         repl_view(&austere.runtime, &austere.session),
         footer,
     );
     assert!(rendered.contains("Options"));
-    assert!(rendered.contains("Use `osp plugins commands`"));
-    assert!(rendered.contains("\n\nUse `osp plugins commands`"));
-    assert!(!rendered.contains("\n\n\nUse `osp plugins commands`"));
+    assert!(rendered.contains("Use `osp plugins list`"));
+    assert!(rendered.contains("\n\nUse `osp plugins list`"));
+    assert!(!rendered.contains("\n\n\nUse `osp plugins list`"));
 }
 
 #[cfg_attr(miri, ignore = "insta snapshot test spawns cargo metadata")]
@@ -126,23 +124,22 @@ fn help_render_overrides_parse_supported_and_edge_flags_unit() {
         "supported flags"
     );
     assert_eq!(
-        parsed.mode,
+        parsed.invocation.mode,
         Some(crate::core::output::RenderMode::Plain),
         "supported flags"
     );
     assert_eq!(
-        parsed.color,
+        parsed.invocation.color,
         Some(crate::core::output::ColorMode::Always),
         "supported flags"
     );
     assert_eq!(
-        parsed.unicode,
+        parsed.invocation.unicode,
         Some(crate::core::output::UnicodeMode::Never),
         "supported flags"
     );
     assert!(parsed.no_env);
     assert!(parsed.no_config_file);
-    assert!(parsed.ascii_legacy);
 
     let alias_args = vec![OsString::from("osp"), OsString::from("--gammel-og-bitter")];
     let alias = parse_help_render_overrides(&alias_args);
@@ -155,8 +152,8 @@ fn help_render_overrides_parse_supported_and_edge_flags_unit() {
         OsString::from("tsd"),
     ];
     let edge = parse_help_render_overrides(&edge_args);
-    assert_eq!(edge.mode, None);
-    assert_eq!(edge.profile.as_deref(), Some("tsd"));
+    assert_eq!(edge.invocation.mode, None);
+    assert_eq!(edge.profile, None);
 }
 
 #[test]
@@ -168,4 +165,7 @@ fn sensitive_key_detection_handles_common_variants_unit() {
     assert!(is_sensitive_key("bearer_token"));
     assert!(!is_sensitive_key("ui.keybinding"));
     assert!(!is_sensitive_key("monkey.business"));
+    // `config get` output labels the config key's name `key`.
+    assert!(!is_sensitive_key("key"));
+    assert!(is_sensitive_key("ssh.key"));
 }

@@ -2,17 +2,17 @@
 source: tests/contracts/help_commands/command_help.rs
 expression: plain
 ---
-Manage persisted REPL history
+Inspect or prune REPL history
 
 Usage: osp history [OPTIONS] <COMMAND>
 
-- Commands -------------------------------------------------------------
-  list   List persisted history entries
-  prune  Retain only the newest keep entries
-  clear  Remove all persisted history entries
+- Commands -------------
+  list   List recent history
+  prune  Keep last N entries
+  clear  Delete history lines matching a prefix or glob
   help   Print this message or the help of the given subcommand(s)
 
-- Options --------------------------------------------------------------
+- Options --------------
       --incognito
           Disable persistent REPL history and other identity-linked behavior
       --profile <PROFILE>
@@ -34,4 +34,8 @@ Usage: osp history [OPTIONS] <COMMAND>
           Disable colors and pleasantries (equivalent to `--presentation austere`)
   -h, --help
           Print help (see a summary with '-h')
-------------------------------------------------------------------------
+
+- Common Invocation Options
+  -v, --verbose  Increase message verbosity
+  -q, --quiet    Decrease message verbosity
+  -d, --debug    Increase developer log verbosity

@@ -84,7 +84,7 @@ Examples:
 plugins <TAB>
 config set <TAB>
 theme use <TAB>
-plugins commands | <TAB>
+plugins list | <TAB>
 ```
 
 That is the important contract: completion should help you finish real command
@@ -111,12 +111,10 @@ REPL completion also knows about the invocation-level flags shared with the
 CLI, such as:
 
 - `--format`
-- `--guide`
 - `--json`
 - `--verbose`
 - `--quiet`
 - `--debug`
-- `--plugin-provider`
 
 Parsing also accepts short forms like `-v/-q/-d`, but completion suggestions
 use the long names.
@@ -130,9 +128,27 @@ The REPL keeps history for two different jobs:
 
 An accepted command stays in navigation and persistent history when execution
 fails. Unknown commands and invalid syntax are removed after dispatch. The
-entered `!!` form expands in the editor on Tab; Enter executes the expanded
-command and keeps it as the last command when it is accepted, including after
-an execution failure.
+entered bang request expands in the editor on Tab; Enter echoes and executes
+the expanded command and keeps it as the last command when it is accepted,
+including after an execution failure.
+
+History updates are written immediately under a file lock and atomically
+replaced with private permissions. They use normal filesystem buffering rather
+than forcing a disk flush before the next prompt; recent history can be lost
+if the machine crashes or loses power.
+
+Ctrl-R filters commands as you type, ranks matches by score, and underlines the
+matched text. Equal scores retain newest-first order. Inside a shell it searches
+commands in that shell without their stored prefix; Ctrl-R again searches all
+history. Enter runs the selection and Tab puts it back in the editor.
+
+Bang IDs match `history list` and Ctrl-R in the current shell scope. The shell
+prefix is omitted from the recalled input and applied once during execution.
+
+Alt+. inserts the previous command's last shell word at the cursor, preserving
+quotes and escapes. Consecutive presses replace that insertion with the last
+word from successively older entries; any other key ends the cycle. Inside a
+shell it uses the same scoped, prefix-free history as Up-arrow and Ctrl-R.
 
 Supported expansions:
 
@@ -143,7 +159,7 @@ Supported expansions:
 - `!123`
   - absolute history entry
 - `!123 args...`
-  - absolute history entry with arguments appended to the editable recalled line
+  - absolute history entry with arguments appended before execution
 - `!prefix`
   - most recent command starting with that prefix
 - `!?text`
@@ -158,9 +174,9 @@ Examples:
 !123 --json
 ```
 
-Persisted history intentionally skips help-like and bang commands such as
-`help`, `history list`, `--help`, and `!` expansions. That is deliberate; it
-keeps durable history focused on commands you are likely to rerun.
+Help/history commands and literal bang expressions are excluded. Accepted bang
+replays save the expanded command unless excluded; a leading space keeps the
+replay off disk.
 
 `history list` accepts inclusive ISO-like time bounds when you want a smaller
 window:
@@ -174,6 +190,11 @@ timestamp with `Z` or a numeric offset. Natural-language values such as
 `today` and `now` are not accepted.
 
 ## Scoped History
+
+`repl.history.path` controls identity/profile isolation. Default filenames
+lowercase the identity and keep ordinary and drift accounts separate. Use a path
+without `${profile.active}` to share history across profiles.
+`repl.history.profile_scoped` is retired.
 
 History is shell-aware. That makes repeated work inside a supported shellable
 root more predictable because the shell prefix stays part of the command
@@ -193,11 +214,10 @@ If your install never exposes shellable roots, you can ignore this section.
 Check the command catalog and configuration first:
 
 1. confirm the command exists in the current catalog:
-   `plugins commands`
+   `plugins list`
 2. confirm the plugin/provider state is healthy:
-   `plugins doctor`
-3. if there is a provider conflict, choose one explicitly with
-   `--plugin-provider`
+   `doctor plugins`
+3. check shadowed or disabled entries in `plugins list`
 4. if the issue is on `config set`, confirm you are using a real config key
 
 Completion problems are often catalog problems, not editor problems.

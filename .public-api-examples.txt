@@ -4,11 +4,7 @@
 
 src/app/mod.rs run_with_sink
 src/app/mod.rs App::run_process
-src/core/command_def.rs from_clap
-src/core/plugin.rs from_clap_command
+src/core/plugin.rs DescribeCommandV1::from_clap
 src/native.rs execute
-src/plugin/manager.rs select_provider
-src/plugin/manager.rs clear_provider_selection
 src/dsl/engine.rs apply_output_pipeline
-src/ui/mod.rs render_output
-src/app/session.rs AppState::from_resolved_config
+src/ui/mod.rs render

@@ -5,16 +5,16 @@ use crate::ui::chrome::{
     FULL_HELP_LAYOUT_CHROME, GUIDE_SECTION_CHROME, PLAIN_SECTION_CHROME, RenderedTitle,
 };
 use crate::ui::doc::{
-    Block, Doc, GuideEntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
-    ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock, ParagraphBlock,
+    SectionBlock, SectionTitleChrome, TableBlock,
 };
 use crate::ui::settings::{RenderBackend, ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
 use crate::ui::text::{crop_display_width, wrap_display_width};
 
+use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
-use super::guide_entries::{PreparedGuideEntriesBlock, PreparedGuideEntryRow};
-use super::key_value::{aligned_display_key_width, display_key};
+use super::key_value::{aligned_display_key_width, display_key, scalar_text};
 use super::shared::{format_list_item, indent_lines};
 use super::table::{PreparedCell, PreparedTable};
 
@@ -40,7 +40,7 @@ fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
             Block::Paragraph(block) => out.push(emit_paragraph(block, settings)),
             Block::Section(block) => out.push(emit_section(block, settings)),
             Block::Table(block) => out.push(emit_table(block, settings)),
-            Block::GuideEntries(block) => out.push(emit_guide_entries(block, settings)),
+            Block::Entries(block) => out.push(emit_entries(block, settings)),
             Block::KeyValue(block) => out.push(emit_key_value(block, settings)),
             Block::List(block) => out.push(emit_list(block, settings)),
             Block::Json(block) => out.push(indent_lines(&block.text, settings.margin)),
@@ -118,38 +118,63 @@ fn emit_key_value(block: &KeyValueBlock, settings: &ResolvedRenderSettings) -> S
     indent_lines(&rendered, settings.margin)
 }
 
-fn emit_guide_entries(block: &GuideEntriesBlock, settings: &ResolvedRenderSettings) -> String {
-    emit_prepared_guide_entries(
-        &PreparedGuideEntriesBlock::from_block(block).rows,
+fn emit_entries(block: &EntriesBlock, settings: &ResolvedRenderSettings) -> String {
+    emit_prepared_entries(
+        &PreparedEntriesBlock::from_block(block).rows,
         settings.margin,
         settings,
+        block.inline_markup,
     )
 }
 
-fn emit_prepared_guide_entries(
-    rows: &[PreparedGuideEntryRow],
+fn emit_prepared_entries(
+    rows: &[PreparedEntryRow],
     margin: usize,
     settings: &ResolvedRenderSettings,
+    inline_markup: bool,
 ) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     rows.iter()
-        .map(|row| indent_lines(&emit_guide_entry_row(row, &styler), margin))
+        .map(|row| indent_lines(&emit_entry_row(row, &styler, inline_markup), margin))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn emit_guide_entry_row(row: &PreparedGuideEntryRow, styler: &ThemeStyler<'_>) -> String {
+fn emit_entry_row(row: &PreparedEntryRow, styler: &ThemeStyler<'_>, inline_markup: bool) -> String {
     let key = styler.paint(&row.key, StyleToken::Key);
     if row.value.is_empty() {
         format!("{}{}", row.indent, key)
     } else {
-        let value = styler.paint_inline(&row.value, StyleToken::TextMuted);
+        // Later description lines continue under the first one, which may
+        // start on its own line when the gap breaks the line.
+        let prefix = format!("{}{}{}", row.indent, row.key, row.gap);
+        let hang = " ".repeat(UnicodeWidthStr::width(
+            prefix.rsplit('\n').next().unwrap_or_default(),
+        ));
+        let text = row
+            .value
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 || line.is_empty() {
+                    line.to_string()
+                } else {
+                    format!("{hang}{line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = if inline_markup {
+            styler.paint_inline(&text, StyleToken::TextMuted)
+        } else {
+            styler.paint(&text, StyleToken::TextMuted)
+        };
         format!("{}{}{}{}", row.indent, key, row.gap, value)
     }
 }
 
 fn emit_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> String {
-    if block.auto_grid && block.items.len() > settings.medium_list_max {
+    if block.auto_grid && block.items.len() > 5 {
         return emit_grid_list(block, settings);
     }
 
@@ -173,37 +198,21 @@ fn emit_grid_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> Strin
         .iter()
         .map(|item| format_list_item(item, block.inline_markup))
         .collect::<Vec<_>>();
+    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
         .unwrap_or(100)
         .saturating_sub(settings.margin + block.indent)
         .max(1);
     let grid = PreparedGridList::from_items(&visible, available_width);
-    let prefix = " ".repeat(settings.margin + block.indent);
-    let mut out = String::new();
-
-    for row in &grid.rows {
-        out.push_str(&prefix);
-        let mut first = true;
-        for (column_index, cell) in row.iter().enumerate() {
-            if cell.is_empty() {
-                continue;
-            }
-            if !first {
-                out.push_str(&" ".repeat(grid.gap));
-            }
-            first = false;
-            out.push_str(cell);
-            if column_index + 1 != grid.column_widths.len() {
-                let pad = grid.column_widths[column_index]
-                    .saturating_sub(UnicodeWidthStr::width(cell.as_str()));
-                out.push_str(&" ".repeat(pad));
-            }
-        }
-        out.push('\n');
-    }
-
-    out.trim_end_matches('\n').to_string()
+    render_grid_rows(
+        &grid,
+        &" ".repeat(settings.margin + block.indent),
+        str::to_owned,
+    )
+    .join("\n")
+    .trim_end_matches('\n')
+    .to_string()
 }
 
 fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
@@ -371,7 +380,12 @@ fn fitted_table_widths(
     if matches!(overflow, TableOverflow::Ellipsis | TableOverflow::Wrap) {
         // Protect identifier cells and comma-separated identifier lists without
         // treating an isolated URL or long word inside prose as a column floor.
-        let token_width_limit = (available_width / 3).max(1);
+        let secondary_room = available_width
+            .saturating_sub(widths.len() * 3 + 1)
+            .saturating_sub(natural.first().copied().unwrap_or(0));
+        let token_width_limit = (available_width / 3)
+            .min(secondary_room / widths.len().saturating_sub(1).max(1))
+            .max(1);
         for (column, minimum_width) in minimum.iter_mut().enumerate() {
             for cell in rows.iter().filter_map(|row| row.get(column)) {
                 let tokens = cell.raw.split(", ").collect::<Vec<_>>();
@@ -448,7 +462,10 @@ fn table_row_lines(
         .map(|line_index| {
             let line_cells = cell_lines
                 .iter()
-                .map(|lines| PreparedCell {
+                .enumerate()
+                .map(|(index, lines)| PreparedCell {
+                    command: cells.get(index).is_some_and(|cell| cell.command),
+                    style: cells.get(index).and_then(|cell| cell.style.clone()),
                     raw: lines.get(line_index).cloned().unwrap_or_default(),
                     markdown: String::new(),
                     width: lines
@@ -467,19 +484,29 @@ fn table_cell_lines(raw: &str, width: usize, overflow: TableOverflow) -> Vec<Str
         return vec![String::new()];
     }
     match overflow {
-        TableOverflow::None => vec![raw.to_string()],
-        TableOverflow::Clip => vec![crop_display_width(raw, width)],
+        TableOverflow::None => vec![escape_table_line_breaks(raw)],
+        TableOverflow::Clip => vec![crop_display_width(&escape_table_line_breaks(raw), width)],
         TableOverflow::Ellipsis => {
-            if UnicodeWidthStr::width(raw) <= width {
-                vec![raw.to_string()]
+            let raw = escape_table_line_breaks(raw);
+            if UnicodeWidthStr::width(raw.as_str()) <= width {
+                vec![raw]
             } else if width == 1 {
                 vec!["…".to_string()]
             } else {
-                vec![format!("{}…", crop_display_width(raw, width - 1))]
+                vec![format!("{}…", crop_display_width(&raw, width - 1))]
             }
         }
-        TableOverflow::Wrap => wrap_display_width(raw, width),
+        TableOverflow::Wrap => raw
+            .split('\n')
+            .flat_map(|line| wrap_display_width(line, width))
+            .collect(),
     }
+}
+
+fn escape_table_line_breaks(raw: &str) -> String {
+    raw.replace("\r\n", "\\n")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 fn format_summary(
@@ -499,7 +526,7 @@ fn format_summary(
                 "{}{} {}",
                 styler.paint(&display_key(row), StyleToken::Key),
                 styler.paint(":", StyleToken::Punctuation),
-                styler.paint_value(value_scalar_text(&row.value).unwrap_or_default())
+                styler.paint_value(scalar_text(&row.value).unwrap_or_default())
             )
         })
         .collect::<Vec<_>>()
@@ -546,17 +573,23 @@ fn emit_plain_row_lines(
         effective_indent,
         " ".repeat(display_key_width.saturating_add(1 + value_spacing.len()))
     );
-    let child_indent = format!("{effective_indent}{}", " ".repeat(settings.indent_size));
+    let child_indent = format!("{effective_indent}{}", " ".repeat(2));
 
     match &row.value {
         KeyValueValue::Empty => vec![label],
         KeyValueValue::Scalar(text) if text.is_empty() => vec![label],
-        KeyValueValue::Scalar(text) => {
-            vec![format!(
-                "{label}{value_spacing}{}",
-                styler.paint_value(text)
-            )]
-        }
+        KeyValueValue::Scalar(text) => text
+            .split('\n')
+            .enumerate()
+            .map(|(index, line)| {
+                let prefix = if index == 0 {
+                    format!("{label}{value_spacing}")
+                } else {
+                    continuation_indent.clone()
+                };
+                format!("{prefix}{}", styler.paint_value(line))
+            })
+            .collect(),
         KeyValueValue::Object(rows) => {
             let mut lines = vec![label];
             if !rows.is_empty() {
@@ -585,20 +618,16 @@ fn emit_plain_array_lines(
     settings: &ResolvedRenderSettings,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
-    let Some(scalar_items) = items
-        .iter()
-        .map(value_scalar_text)
-        .collect::<Option<Vec<_>>>()
-    else {
+    let Some(scalar_items) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>() else {
         return emit_plain_complex_array_lines(items, label, child_indent, settings, styler);
     };
 
     match scalar_items.as_slice() {
         [] => vec![label.to_string()],
-        [only] if items.len() == 1 && !array_uses_count(items) => {
+        [only] => {
             vec![format!("{inline_prefix}{}", styler.paint_value(only))]
         }
-        values if values.len() > settings.medium_list_max => {
+        values if values.len() > 5 => {
             let mut lines = vec![label.to_string()];
             lines.extend(render_terminal_scalar_grid(
                 values,
@@ -657,7 +686,7 @@ fn emit_plain_array_item_lines(
             )]
         }
         KeyValueValue::Object(rows) => {
-            let nested_indent = format!("{child_indent}{}", " ".repeat(settings.indent_size));
+            let nested_indent = format!("{child_indent}{}", " ".repeat(2));
             let mut lines = vec![format!("{child_indent}{marker}{colon}")];
             if !rows.is_empty() {
                 lines.push(emit_plain_rows(rows, &nested_indent, settings, styler));
@@ -665,14 +694,14 @@ fn emit_plain_array_item_lines(
             lines
         }
         KeyValueValue::Array(items) => {
-            let nested_indent = format!("{child_indent}{}", " ".repeat(settings.indent_size));
+            let nested_indent = format!("{child_indent}{}", " ".repeat(2));
             let mut lines = vec![format!("{child_indent}{marker}{colon}")];
             lines.extend(emit_plain_array_lines(
                 items,
                 &format!("{nested_indent}{}", styler.paint("items", StyleToken::Key)),
                 &format!("{nested_indent}{}", styler.paint("items", StyleToken::Key)),
                 &nested_indent,
-                &format!("{nested_indent}{}", " ".repeat(settings.indent_size)),
+                &format!("{nested_indent}{}", " ".repeat(2)),
                 settings,
                 styler,
             ));
@@ -691,14 +720,22 @@ fn render_terminal_scalar_grid(
         .iter()
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
+    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
         .unwrap_or(100)
         .saturating_sub(settings.margin + UnicodeWidthStr::width(indent))
         .max(1);
     let grid = PreparedGridList::from_items(&visible, available_width);
-    let mut lines = Vec::new();
+    render_grid_rows(&grid, indent, |cell| styler.paint_value(cell))
+}
 
+fn render_grid_rows(
+    grid: &PreparedGridList,
+    indent: &str,
+    paint: impl Fn(&str) -> String,
+) -> Vec<String> {
+    let mut lines = Vec::new();
     for row in &grid.rows {
         let mut line = indent.to_string();
         let mut first = true;
@@ -710,7 +747,7 @@ fn render_terminal_scalar_grid(
                 line.push_str(&" ".repeat(grid.gap));
             }
             first = false;
-            line.push_str(&styler.paint_value(cell));
+            line.push_str(&paint(cell));
             if column_index + 1 != grid.column_widths.len() {
                 let pad = grid.column_widths[column_index]
                     .saturating_sub(UnicodeWidthStr::width(cell.as_str()));
@@ -719,16 +756,7 @@ fn render_terminal_scalar_grid(
         }
         lines.push(line);
     }
-
     lines
-}
-
-fn value_scalar_text(value: &KeyValueValue) -> Option<&str> {
-    match value {
-        KeyValueValue::Empty => Some(""),
-        KeyValueValue::Scalar(text) => Some(text),
-        KeyValueValue::Array(_) | KeyValueValue::Object(_) => None,
-    }
 }
 
 fn value_requires_block(value: &KeyValueValue) -> bool {
@@ -745,13 +773,6 @@ fn value_requires_block(value: &KeyValueValue) -> bool {
     }
 }
 
-fn array_uses_count(items: &[KeyValueValue]) -> bool {
-    items.is_empty()
-        || items.len() > 1
-        || items
-            .first()
-            .is_some_and(|value| !matches!(value, KeyValueValue::Empty | KeyValueValue::Scalar(_)))
-}
 fn table_row(
     cells: &[PreparedCell],
     widths: &[usize],
@@ -779,6 +800,10 @@ fn table_row(
         );
         let styled_cell = if header {
             styler.paint(raw_cell, StyleToken::TableHeader)
+        } else if let Some(spec) = cell.and_then(|cell| cell.style.as_deref()) {
+            crate::ui::style::apply_style_spec(raw_cell, spec, styler.enabled)
+        } else if cell.is_some_and(|cell| cell.command) {
+            styler.paint(raw_cell, StyleToken::PromptCommand)
         } else {
             styler.paint_value(raw_cell)
         };

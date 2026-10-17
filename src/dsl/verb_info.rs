@@ -13,7 +13,7 @@ const VERBS: &[VerbInfo] = &[
     VerbInfo {
         verb: "F",
         summary: "Filter rows",
-        help: "F field OP value; OP: = == != > >= < <= ~. F field text contains text. Example: F status=running. Quote regex alternation: F name ~ 'foo|bar'. Naive dates/times use local timezone; use RFC3339 offsets for ambiguous DST times.",
+        help: "F field OP value; OP: = == != > >= < <= ~. F field text contains text. Example: F status=running. Quote regex alternation: F name ~ 'foo|bar'. Ordered comparisons accept now and now-N{s,m,h,d} for fetched rows only. Naive dates/times use local timezone; use RFC3339 offsets for ambiguous DST times.",
     },
     VerbInfo {
         verb: "P",
@@ -117,6 +117,30 @@ pub fn verb_info(verb: &str) -> Option<&'static VerbInfo> {
     VERBS
         .iter()
         .find(|info| info.verb.eq_ignore_ascii_case(verb))
+}
+
+pub(crate) fn help_document(spec: &str) -> miette::Result<crate::core::document::Document> {
+    use crate::core::document::{DocBlock, Document, DocumentEntry};
+    let target = spec.split_whitespace().next().unwrap_or("");
+    let verbs = if target.is_empty() {
+        registered_verbs().iter().collect::<Vec<_>>()
+    } else {
+        vec![verb_info(target).ok_or_else(|| miette::miette!("Unknown DSL verb: {target}"))?]
+    };
+    Ok(Document {
+        blocks: vec![DocBlock::section(
+            "Commands",
+            vec![DocBlock::Entries {
+                entries: verbs
+                    .into_iter()
+                    .map(|info| DocumentEntry {
+                        name: info.verb.to_string(),
+                        description: info.help.to_string(),
+                    })
+                    .collect(),
+            }],
+        )],
+    })
 }
 
 /// Returns whether `verb` is a registered non-meta verb.

@@ -48,7 +48,7 @@ fn quick_search_keeps_leading_scope_letters_in_ordinary_tokens_unit() {
 }
 
 #[test]
-fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
+fn quick_family_narrows_single_rows_and_filters_multiple_rows_unit() {
     let matching = row(json!({
         "uid": "alice",
         "roles": ["eng", "ops"],
@@ -56,10 +56,15 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
     }));
     let other = row(json!({"name": "bob", "team": "eng"}));
 
-    for spec in ["ops", "V ops", "K uid", "?uid"] {
+    for (spec, expected) in [
+        ("ops", row(json!({"roles": ["ops"]}))),
+        ("V ops", row(json!({"roles": ["ops"]}))),
+        ("K uid", row(json!({"uid": "alice"}))),
+        ("?uid", matching.clone()),
+    ] {
         assert_eq!(
             apply_with_plan(vec![matching.clone()], &compile(spec).unwrap()).unwrap(),
-            vec![matching.clone()],
+            vec![expected],
             "{spec}"
         );
     }
@@ -71,15 +76,53 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
         .unwrap(),
         vec![matching.clone()]
     );
-    assert!(
-        apply_with_plan(vec![matching.clone()], &compile("! ops").unwrap())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        apply_with_plan(vec![matching.clone()], &compile("! ops").unwrap()).unwrap(),
+        vec![row(
+            json!({"uid": "alice", "roles": ["eng"], "city": "Oslo"})
+        )]
     );
     assert_eq!(
         apply_with_plan(vec![other.clone()], &compile("! ops").unwrap()).unwrap(),
         vec![other]
     );
+
+    let value_matches_key = row(json!({"status": "running", "note": "status"}));
+    assert_eq!(
+        apply_with_plan(vec![value_matches_key], &compile("V status").unwrap()).unwrap(),
+        vec![row(json!({"note": "status"}))]
+    );
+
+    // Like osprov-cli: on one object, keep fields whose names match and, in
+    // every other field, only the values and list items that contain the text.
+    let account = row(json!({
+        "uid": "oistes",
+        "uioAffiliation": "ANSATT@373034",
+        "netgroups": ["it-uio-azure-users", "los-alle", "mattermost-uio", "usit"],
+        "filegroups": ["oistes", "ucore"],
+        "dn": "uid=oistes,cn=users,dc=uio,dc=no",
+    }));
+    assert_eq!(
+        apply_with_plan(vec![account.clone()], &compile("uio").unwrap()).unwrap(),
+        vec![row(json!({
+            "uioAffiliation": "ANSATT@373034",
+            "netgroups": ["it-uio-azure-users", "mattermost-uio"],
+            "dn": "uid=oistes,cn=users,dc=uio,dc=no",
+        }))]
+    );
+    assert_eq!(
+        apply_with_plan(vec![account], &compile("uid").unwrap()).unwrap(),
+        vec![row(json!({"uid": "oistes"}))]
+    );
+    for source in [
+        row(json!({"metadata": {"owner": "Alice"}})),
+        row(json!({"members": [{"uid": "alice"}]})),
+    ] {
+        assert_eq!(
+            apply_with_plan(vec![source.clone()], &compile("V Alice").unwrap()).unwrap(),
+            vec![source]
+        );
+    }
 
     let groups = vec![Group {
         groups: row(json!({"team": "ops"})),
@@ -88,15 +131,147 @@ fn quick_family_filters_without_reshaping_single_rows_or_groups_unit() {
     }];
     let filtered =
         apply_groups_with_plan(groups, &compile("uid").unwrap()).expect("group quick should work");
-    assert_eq!(filtered[0].rows, vec![matching]);
+    assert_eq!(filtered[0].rows, vec![row(json!({"uid": "alice"}))]);
 }
 
 #[test]
-fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
+fn quick_scopes_and_modes_share_single_object_selection_unit() {
+    let source = row(json!({
+        "uioAffiliation": ["employee", "staff"],
+        "netgroups": ["UIO", "uio-ans", "other"],
+        "metadata": {"owner": "uio", "city": "Oslo"},
+        "commands": [
+            {"name": "doctor", "details": {"tags": ["uio", "other"]}},
+            {"name": "config", "details": {"tags": ["settings"]}}
+        ]
+    }));
+    let values = json!({
+        "netgroups": ["UIO", "uio-ans"],
+        "metadata": {"owner": "uio"},
+        "commands": [{"name": "doctor", "details": {"tags": ["uio", "other"]}}]
+    });
+    for (query, expected) in [
+        ("V uio", values.clone()),
+        ("V % uio", values),
+        (
+            "V % docter",
+            json!({"commands": [{"name": "doctor", "details": {"tags": ["uio", "other"]}}]}),
+        ),
+        ("K uio", json!({"uioAffiliation": ["employee", "staff"]})),
+        ("K % uio", json!({"uioAffiliation": ["employee", "staff"]})),
+        (
+            "=uio",
+            json!({
+                "netgroups": ["UIO"], "metadata": {"owner": "uio"},
+                "commands": [{"name": "doctor", "details": {"tags": ["uio", "other"]}}]
+            }),
+        ),
+        (
+            "==uio",
+            json!({
+                "metadata": {"owner": "uio"},
+                "commands": [{"name": "doctor", "details": {"tags": ["uio", "other"]}}]
+            }),
+        ),
+        (
+            "!uio",
+            json!({
+                "netgroups": ["other"], "metadata": {"city": "Oslo"},
+                "commands": [{"name": "config", "details": {"tags": ["settings"]}}]
+            }),
+        ),
+        (
+            "! V uio",
+            json!({
+                "uioAffiliation": ["employee", "staff"],
+                "netgroups": ["other"], "metadata": {"city": "Oslo"},
+                "commands": [{"name": "config", "details": {"tags": ["settings"]}}]
+            }),
+        ),
+        (
+            "!=uio",
+            json!({
+                "uioAffiliation": ["employee", "staff"],
+                "netgroups": ["uio-ans", "other"], "metadata": {"city": "Oslo"},
+                "commands": [{"name": "config", "details": {"tags": ["settings"]}}]
+            }),
+        ),
+        (
+            "=NETGROUPS",
+            json!({"netgroups": ["UIO", "uio-ans", "other"]}),
+        ),
+        (
+            "K !=netgroups",
+            json!({
+                "uioAffiliation": ["employee", "staff"],
+                "metadata": {"owner": "uio", "city": "Oslo"},
+                "commands": source["commands"].clone()
+            }),
+        ),
+        ("?metadata.owner", serde_json::Value::Object(source.clone())),
+        ("K metadata.owner", json!({"metadata": {"owner": "uio"}})),
+        (
+            "!metadata.owner",
+            json!({
+                "uioAffiliation": ["employee", "staff"],
+                "netgroups": ["UIO", "uio-ans", "other"],
+                "metadata": {"city": "Oslo"}, "commands": source["commands"].clone()
+            }),
+        ),
+    ] {
+        assert_eq!(
+            apply_with_plan(vec![source.clone()], &compile(query).unwrap()).unwrap(),
+            vec![row(expected)],
+            "{query}"
+        );
+    }
+    for query in ["V metadata", "V netgroups", "==NETGROUPS"] {
+        assert!(
+            apply_with_plan(vec![source.clone()], &compile(query).unwrap())
+                .unwrap()
+                .is_empty(),
+            "{query}"
+        );
+    }
+
+    let nested = row(json!({"name": {"first": "Alice"}, "provider": {"name": "service"}}));
+    for query in ["name", "=NAME", "==name"] {
+        assert_eq!(
+            apply_with_plan(vec![nested.clone()], &compile(query).unwrap()).unwrap(),
+            vec![row(json!({"name": {"first": "Alice"}}))],
+            "{query}"
+        );
+    }
+    assert_eq!(
+        apply_with_plan(vec![nested.clone()], &compile("K % name").unwrap()).unwrap(),
+        vec![nested]
+    );
+
+    let groups = vec![
+        Group {
+            groups: row(json!({"team": "ops"})),
+            aggregates: Row::new(),
+            rows: vec![source.clone()],
+        },
+        Group {
+            groups: row(json!({"team": "eng"})),
+            aggregates: Row::new(),
+            rows: vec![source.clone(), row(json!({"uid": "other"}))],
+        },
+    ];
+    let filtered = apply_groups_with_plan(groups.clone(), &compile("V uio").unwrap()).unwrap();
+    assert_eq!(filtered[0].groups, groups[0].groups);
+    assert_eq!(filtered[0].rows[0]["netgroups"], json!(["UIO", "uio-ans"]));
+    assert_eq!(filtered[1].groups, groups[1].groups);
+    assert_eq!(filtered[1].rows, vec![source]);
+}
+
+#[test]
+fn dotted_visible_values_and_structural_paths_narrow_single_rows_unit() {
     let visible = row(json!({"key": "theme.name", "value": "dracula"}));
     assert_eq!(
         apply_with_plan(vec![visible.clone()], &compile("theme.name").unwrap()).unwrap(),
-        vec![visible]
+        vec![row(json!({"key": "theme.name"}))]
     );
 
     let source = row(json!({
@@ -108,12 +283,14 @@ fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
     }));
     assert_eq!(
         apply_with_plan(vec![source.clone()], &compile("users[1]").unwrap()).unwrap(),
-        vec![source.clone()]
+        vec![row(json!({"uid": "bob", "team": "eng"}))]
     );
-    assert!(
-        apply_with_plan(vec![source.clone()], &compile("! users[0].uid").unwrap())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        apply_with_plan(vec![source.clone()], &compile("! users[0].uid").unwrap()).unwrap(),
+        vec![row(json!({
+            "meta": "people",
+            "users": [{"team": "ops"}, {"uid": "bob", "team": "eng"}]
+        }))]
     );
     assert!(
         apply_with_plan(vec![source], &compile("users[9]").unwrap())
@@ -123,7 +300,7 @@ fn dotted_visible_values_and_structural_paths_both_filter_whole_rows_unit() {
 }
 
 #[test]
-fn value_quick_filters_matching_document_members_without_projecting_fields_unit() {
+fn value_quick_narrows_matching_document_fields_and_selector_pairs_unit() {
     let source = json!({
         "commands": [
             {"name": "help", "short_help": "Show overview"},
@@ -132,7 +309,7 @@ fn value_quick_filters_matching_document_members_without_projecting_fields_unit(
     });
     assert_eq!(
         apply_value(source.clone(), "doctor").unwrap(),
-        json!([source])
+        json!([{"commands": [{"name": "doctor", "short_help": "Run diagnostics"}]}])
     );
 
     let addressed = json!({
@@ -144,7 +321,7 @@ fn value_quick_filters_matching_document_members_without_projecting_fields_unit(
     });
     assert_eq!(
         apply_value_with_plan(addressed.clone(), &compile("users[1]").unwrap()).unwrap(),
-        json!([addressed])
+        json!([{"uid": "bob", "team": "eng"}])
     );
 }
 

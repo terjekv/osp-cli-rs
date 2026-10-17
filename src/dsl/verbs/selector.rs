@@ -202,7 +202,7 @@ where
 
     for selector in selectors {
         for entry in selector.resolve_matches(root) {
-            if seen.insert(entry.flat_key.clone()) {
+            if seen.insert(entry.address.clone()) {
                 out.push(entry);
             }
         }

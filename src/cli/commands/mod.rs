@@ -15,12 +15,31 @@
 //! The modules here are grouped by built-in command namespace, not by transport
 //! or rendering concerns.
 
+pub(crate) use config::store_secret;
 pub(crate) mod config;
+pub(crate) mod context;
 pub(crate) mod doctor;
 pub(crate) mod history;
 pub(crate) mod intro;
 pub(crate) mod plugins;
 pub(crate) mod theme;
+
+/// Returns command rows, with a hint for an empty result as an info message
+/// rather than as a data row.
+fn rows_with_empty_info(
+    rows: Vec<crate::core::row::Row>,
+    empty_info: &str,
+) -> crate::app::CommandOutput {
+    let empty = rows.is_empty();
+    let mut result = crate::app::CommandOutput::output(
+        crate::cli::rows::output::rows_to_output_result(rows),
+        None,
+    );
+    if empty {
+        result.messages.info(empty_info);
+    }
+    result
+}
 
 fn resolve_terminal_selector(current: &str, selector: Option<&str>) -> Option<String> {
     let value = selector?;

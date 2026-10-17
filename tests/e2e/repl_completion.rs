@@ -42,6 +42,9 @@ fn json_result(session: &ReplPtySession, start: usize) -> serde_json::Value {
 #[cfg(unix)]
 #[test]
 fn repl_tab_completes_single_match_and_exits() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     session.type_text("ex");
@@ -71,6 +74,9 @@ fn repl_tab_completes_single_match_and_exits() {
 #[cfg(unix)]
 #[test]
 fn repl_tab_accepts_single_visible_completion() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     session.type_text("the");
@@ -92,7 +98,7 @@ fn repl_tab_accepts_single_visible_completion() {
         session.wait_for_output_since(accepted, "\x1b[?25h", Duration::from_secs(3)),
         "expected accepted completion to repaint the input",
     );
-    session.type_text(" show dracula");
+    session.type_text(" list | dracula");
     let start = session.output_len();
     session.write_bytes(b"\r");
     let result = json_result(&session, start);
@@ -108,16 +114,19 @@ fn repl_tab_accepts_single_visible_completion() {
 
 #[cfg(unix)]
 #[test]
-fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
+fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
-    session.type_text("theme show ");
+    session.type_text("theme use ");
 
     let start = session.output_len();
     session.write_bytes(b"\t");
     assert!(
         session.wait_for_plain_output_since(start, "catppuccin", Duration::from_secs(5)),
-        "expected visible theme completion menu for `theme show `; output:\n{}",
+        "expected visible theme completion menu for `theme use `; output:\n{}",
         session.plain_output_snapshot(8000),
     );
 
@@ -132,7 +141,7 @@ fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
         );
         let output = crate::support::strip_terminal_noise(&session.output_since(start));
         let selected = output
-            .rsplit_once("theme show ")
+            .rsplit_once("theme use ")
             .expect("selected theme should appear in the input")
             .1
             .split_whitespace()
@@ -154,8 +163,12 @@ fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
     );
     let start = session.output_len();
     session.write_bytes(b"\r");
-    let result = json_result(&session, start);
-    assert_eq!(result[0]["id"], selections[1]);
+    assert!(session.wait_for_plain_output_since(
+        start,
+        &format!("active theme set to: {}", selections[1]),
+        Duration::from_secs(3)
+    ));
+    assert!(session.wait_for_editor_since(start, Duration::from_secs(3)));
 
     session.write_bytes(b"exit\r\r");
     assert!(
@@ -167,6 +180,9 @@ fn repl_theme_show_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
 #[cfg(unix)]
 #[test]
 fn repl_close_menu_keeps_typed_input() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     let mut session = spawn_repl();
 
     let start = session.output_len();

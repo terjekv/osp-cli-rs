@@ -11,12 +11,50 @@ fn apply_guide_stage(
     value: serde_json::Value,
     stage: &CompiledStage,
 ) -> anyhow::Result<serde_json::Value> {
-    let output = crate::core::output_model::OutputResult::from_rows(Vec::new()).with_document(
-        crate::core::output_model::OutputDocument::new(
-            crate::core::output_model::OutputDocumentKind::Guide,
-            value,
-        ),
-    );
+    use crate::core::document::{DocBlock, Document, DocumentEntry};
+    let mut blocks = Vec::new();
+    for (key, title) in [("usage", "Usage"), ("notes", "Notes")] {
+        if let Some(lines) = value.get(key).and_then(serde_json::Value::as_array) {
+            blocks.push(DocBlock::section(
+                title,
+                lines
+                    .iter()
+                    .filter_map(|text| text.as_str())
+                    .map(|text| DocBlock::Paragraph { text: text.into() })
+                    .collect(),
+            ));
+        }
+    }
+    let sources = value
+        .get("sections")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| {
+            [("commands", "Commands"), ("options", "Options")]
+                .iter()
+                .filter_map(|(key, title)| {
+                    value
+                        .get(key)
+                        .map(|entries| json!({"title":title,"entries":entries}))
+                })
+                .collect()
+        });
+    for section in sources {
+        let entries = section["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| DocumentEntry {
+                name: entry["name"].as_str().unwrap().into(),
+                description: entry["short_help"].as_str().unwrap_or("").into(),
+            })
+            .collect();
+        blocks.push(DocBlock::section(
+            section["title"].as_str().unwrap(),
+            vec![DocBlock::Entries { entries }],
+        ));
+    }
+    let output = Document { blocks }.to_output_result();
     let output = crate::dsl::engine::run_compiled(
         output,
         &crate::dsl::compiled::CompiledPipeline {
@@ -25,7 +63,7 @@ fn apply_guide_stage(
     )?;
     Ok(output
         .document
-        .map(|document| document.value)
+        .map(|document| document.json_value())
         .unwrap_or_else(|| crate::core::output_model::output_items_to_value(&output.items)))
 }
 
@@ -90,19 +128,14 @@ fn quick_keeps_only_matching_root_fields_and_matching_array_elements_unit() {
     let filtered = apply_guide_stage(value, &stage(ParsedStageKind::Quick, "", "", "show"))
         .expect("quick stage should succeed");
 
-    assert!(filtered.get("commands").is_some());
-    assert_eq!(filtered["usage"], json!([]));
-    assert_eq!(filtered["notes"], json!([]));
-    let commands = filtered["commands"].as_array().expect("commands array");
-    assert_eq!(commands.len(), 1);
     assert_eq!(
-        commands[0],
-        json!({"name": "help", "short_help": "Show overview"})
+        filtered,
+        json!({"section":"Commands","name":"help","description":"Show overview"})
     );
 }
 
 #[test]
-fn quick_keeps_matching_array_object_elements_whole_without_inventing_values_unit() {
+fn quick_keeps_matching_objects_in_mixed_arrays_unit() {
     let value = json!({
         "k": [
             "a",
@@ -114,11 +147,11 @@ fn quick_keeps_matching_array_object_elements_whole_without_inventing_values_uni
     let filtered = apply_stage(value.clone(), &stage(ParsedStageKind::Quick, "", "", "c"))
         .expect("quick stage should succeed");
 
-    assert_eq!(filtered, json!([value]));
+    assert_eq!(filtered, json!([{"k": [{"a": "d", "k": "c"}]}]));
 }
 
 #[test]
-fn quick_preserves_singleton_matching_array_member_and_siblings_unit() {
+fn quick_narrows_singleton_matching_array_member_unit() {
     let value = json!({
         "k": [
             {"c2": "d2", "e1": "e2"}
@@ -128,7 +161,7 @@ fn quick_preserves_singleton_matching_array_member_and_siblings_unit() {
     let filtered = apply_stage(value.clone(), &stage(ParsedStageKind::Quick, "", "", "d2"))
         .expect("quick stage should succeed");
 
-    assert_eq!(filtered, json!([value]));
+    assert_eq!(filtered, json!([{"k": [{"c2": "d2", "e1": "e2"}]}]));
 }
 
 #[test]
@@ -143,9 +176,8 @@ fn limit_trims_nested_semantic_collections_unit() {
     let limited = apply_guide_stage(value, &stage(ParsedStageKind::Explicit, "L", "1", "L 1"))
         .expect("limit stage should succeed");
 
-    let commands = limited["commands"].as_array().expect("commands array");
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0]["name"], json!("help"));
+    assert_eq!(limited["name"], "help");
+    assert_eq!(limited["section"], "Commands");
 }
 
 #[test]
@@ -167,10 +199,8 @@ fn quick_preserves_container_metadata_when_descendants_match_unit() {
     let filtered = apply_guide_stage(value, &stage(ParsedStageKind::Quick, "", "", "show"))
         .expect("quick stage should succeed");
 
-    let section = &filtered["sections"].as_array().expect("sections")[0];
-    assert_eq!(section["title"], json!("Commands"));
-    assert_eq!(section["kind"], json!("commands"));
-    assert_eq!(section["entries"].as_array().expect("entries").len(), 1);
+    assert_eq!(filtered["section"], "Commands");
+    assert_eq!(filtered["name"], "help");
 }
 
 #[test]
@@ -181,11 +211,8 @@ fn filter_preserves_section_metadata_when_descendants_match_unit() {
     )
     .expect("filter stage should succeed");
 
-    let section = &filtered["sections"].as_array().expect("sections")[0];
-    assert_eq!(section["title"], json!("Commands"));
-    assert_eq!(section["kind"], json!("commands"));
-    assert_eq!(section["entries"].as_array().expect("entries").len(), 1);
-    assert_eq!(section["entries"][0]["name"], json!("help"));
+    assert_eq!(filtered["section"], "Commands");
+    assert_eq!(filtered["name"], "help");
 }
 
 #[test]
@@ -310,10 +337,8 @@ fn value_scope_alias_filters_semantic_entries_by_value_unit() {
     )
     .expect("value-scope quick stage should succeed");
 
-    let section = &filtered["sections"].as_array().expect("sections")[0];
-    assert_eq!(section["title"], json!("Commands"));
-    assert_eq!(section["entries"].as_array().expect("entries").len(), 1);
-    assert_eq!(section["entries"][0]["name"], json!("help"));
+    assert_eq!(filtered["section"], "Commands");
+    assert_eq!(filtered["name"], "help");
 }
 
 #[test]
@@ -324,9 +349,9 @@ fn key_scope_alias_filters_semantic_entries_by_key_unit() {
     )
     .expect("key-scope quick stage should succeed");
 
-    let section = &filtered["sections"].as_array().expect("sections")[0];
-    assert_eq!(section["title"], json!("Commands"));
-    assert_eq!(section["entries"].as_array().expect("entries").len(), 2);
+    let rows = filtered.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row["section"] == "Commands"));
 }
 
 #[test]
@@ -337,10 +362,11 @@ fn fuzzy_quick_filters_semantic_entries_with_typo_tolerance_unit() {
     )
     .expect("fuzzy quick stage should succeed");
 
-    let section = &filtered["sections"].as_array().expect("sections")[0];
-    assert_eq!(section["title"], json!("Commands"));
-    assert_eq!(section["entries"].as_array().expect("entries").len(), 1);
-    assert_eq!(section["entries"][0]["name"], json!("exit"));
+    let rows = filtered.as_array().expect("fuzzy rows");
+    assert!(
+        rows.iter()
+            .any(|row| row["name"] == "exit" && row["section"] == "Commands")
+    );
 }
 
 #[test]
@@ -371,7 +397,7 @@ fn sort_orders_nested_semantic_entry_collections_unit() {
     )
     .expect("sort stage should succeed");
 
-    let commands = sorted["commands"].as_array().expect("commands");
+    let commands = sorted.as_array().expect("document rows");
     assert_eq!(commands[0]["name"], json!("exit"));
     assert_eq!(commands[1]["name"], json!("help"));
 }

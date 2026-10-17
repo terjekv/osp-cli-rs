@@ -13,7 +13,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut unset = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut unset = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = unset
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -30,7 +30,7 @@ ui.mode = "plain"
     assert_eq!(row["changed"], true);
     assert_eq!(row["previous"], "plain");
 
-    let mut get = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut get = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     get.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--json", "config", "get", "ui.mode"]);
@@ -55,7 +55,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -85,7 +85,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -119,7 +119,7 @@ repl.history.exclude = []
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -159,7 +159,7 @@ repl.history.exclude = []
     );
 
     let run = |args: &[&str]| {
-        Command::new(assert_cmd::cargo::cargo_bin!("osp"))
+        crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"))
             .envs(crate::test_env::isolated_env(&home))
             .env("PATH", "/usr/bin:/bin")
             .args(args)
@@ -242,7 +242,7 @@ repl.history.exclude = []
         assert_eq!(explain["scope"], format!("profile:{profile} terminal:cli"));
     }
     let preview = run(&[
-        "--plain",
+        "--json",
         "config",
         "set",
         "repl.history.exclude",
@@ -253,10 +253,13 @@ repl.history.exclude = []
         "--dry-run",
         "--explain",
     ]);
-    assert!(
-        String::from_utf8_lossy(&preview.stdout)
-            .contains("value: [\"help\",\"config show\"] (list)")
-    );
+    let payload = parse_json_stdout(&preview.stdout);
+    for row in payload.as_array().expect("each profile should have a write plan") {
+        assert_eq!(row["value"], serde_json::json!([]));
+        assert_eq!(row["path"], config_path.to_str().unwrap());
+        assert_eq!(row["current"]["value"], exclusions);
+        assert_eq!(row["current"]["value_type"], "list");
+    }
     assert!(String::from_utf8_lossy(&preview.stderr).contains("would set"));
 
     for preview in [true, false] {
@@ -461,7 +464,7 @@ profile.default = "tsd"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")

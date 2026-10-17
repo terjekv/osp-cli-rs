@@ -7,7 +7,8 @@ use regex::Regex;
 use crate::dsl::{
     eval::{
         matchers::{contains_case_insensitive, eq_case_insensitive, render_value},
-        resolve::{resolve_values, resolve_values_truthy},
+        numeric::{integer_value, parse_integer},
+        resolve::{is_truthy, resolve_values},
     },
     parse::key_spec::{ExactMode, KeySpec},
     verbs::common::parse_stage_words,
@@ -23,6 +24,10 @@ pub(crate) struct FilterPlan {
 impl FilterPlan {
     pub(crate) fn matches(&self, row: &Row) -> bool {
         evaluate_row(row, &self.parsed)
+    }
+
+    fn matches_group_header_value(&self, value: &serde_json::Value) -> bool {
+        evaluate_values(std::iter::once(value), true, &self.parsed)
     }
 }
 
@@ -71,6 +76,9 @@ pub(crate) fn apply_set(
         if grouped {
             let header = crate::core::output_model::group_header_row(partition);
             let selector = &plan.parsed.column.key_spec;
+            if let Some(value) = header.get(&selector.token) {
+                return plan.matches_group_header_value(value);
+            }
             if !resolve_values(&header, &selector.token, selector.exact).is_empty() {
                 return plan.matches(&header);
             }
@@ -154,7 +162,7 @@ fn parse_filter_spec(spec: &str) -> Result<ParsedFilterSpec> {
             value = ComparisonValue {
                 text: rhs_spec.token,
                 exact: matches!(parsed_op, Operator::Eq | Operator::Ne),
-                strict: rhs_spec.exact == ExactMode::CaseSensitive,
+                strict: token == "==" || rhs_spec.exact == ExactMode::CaseSensitive,
                 negated: rhs_spec.negated,
                 regex: None,
             };
@@ -191,11 +199,51 @@ fn parse_filter_spec(spec: &str) -> Result<ParsedFilterSpec> {
         operator,
         Operator::Gt | Operator::Ge | Operator::Lt | Operator::Le
     ) && value.text.get(..10).and_then(parse_date).is_some()
-        && parse_timestamp(&value.text).is_none()
+        && parse_timestamp(&value.text, false).is_none()
     {
         return Err(anyhow!(
             "F: invalid or ambiguous local timestamp; specify an RFC3339 time with Z or an explicit UTC offset"
         ));
+    }
+
+    if matches!(
+        operator,
+        Operator::Gt | Operator::Ge | Operator::Lt | Operator::Le
+    ) && (value.text == "now" || value.text.starts_with("now-"))
+    {
+        let now = chrono::Utc::now();
+        let seconds = if value.text == "now" {
+            0
+        } else {
+            let duration = &value.text[4..];
+            let split = duration.len().saturating_sub(1);
+            let amount = duration
+                .get(..split)
+                .ok_or_else(|| anyhow!("F: invalid relative time"))?;
+            let unit = &duration[split..];
+            let multiplier = match unit {
+                "s" => 1,
+                "m" => 60,
+                "h" => 3600,
+                "d" => 86400,
+                _ => {
+                    return Err(anyhow!(
+                        "F: relative time requires now-N followed by s, m, h, or d"
+                    ));
+                }
+            };
+            amount
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+                .then(|| amount.parse::<i64>().ok())
+                .flatten()
+                .and_then(|amount| amount.checked_mul(multiplier))
+                .ok_or_else(|| anyhow!("F: relative time duration is invalid or out of range"))?
+        };
+        value.text = chrono::Duration::try_seconds(seconds)
+            .and_then(|duration| now.checked_sub_signed(duration))
+            .ok_or_else(|| anyhow!("F: relative time is out of range"))?
+            .to_rfc3339();
     }
 
     let original_operator = operator;
@@ -236,9 +284,17 @@ fn parse_operator_token(token: &str) -> Option<Operator> {
 }
 
 fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
+    let values = resolve_values(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
+    evaluate_values(values.iter(), !values.is_empty(), spec)
+}
+
+fn evaluate_values<'a>(
+    mut values: impl Iterator<Item = &'a serde_json::Value>,
+    has_values: bool,
+    spec: &ParsedFilterSpec,
+) -> bool {
     if spec.existence_check {
-        let found =
-            resolve_values_truthy(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
+        let found = values.any(is_truthy);
         return if spec.column.key_spec.negated {
             !found
         } else {
@@ -246,8 +302,7 @@ fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
         };
     }
 
-    let values = resolve_values(row, &spec.column.key_spec.token, spec.column.key_spec.exact);
-    if values.is_empty() {
+    if !has_values {
         return spec.negated;
     }
 
@@ -255,9 +310,7 @@ fn evaluate_row(row: &Row, spec: &ParsedFilterSpec) -> bool {
         return false;
     };
 
-    let positive = values
-        .iter()
-        .any(|value| matches_value(value, spec.operator, value_spec));
+    let positive = values.any(|value| matches_value(value, spec.operator, value_spec));
 
     if spec.negated { !positive } else { positive }
 }
@@ -284,35 +337,32 @@ fn matches_scalar(value: &serde_json::Value, operator: Operator, rhs: &Compariso
 }
 
 fn compare_numbers(left: &serde_json::Value, rhs: &str, operator: Operator) -> bool {
-    let left_num = value_to_f64(left);
-    let right_num = rhs.parse::<f64>().ok();
-    if let (Some(left_num), Some(right_num)) = (left_num, right_num) {
-        return match operator {
-            Operator::Gt => left_num > right_num,
-            Operator::Ge => left_num >= right_num,
-            Operator::Lt => left_num < right_num,
-            Operator::Le => left_num <= right_num,
-            _ => false,
-        };
-    }
+    let ordering = integer_value(left)
+        .zip(parse_integer(rhs))
+        .map(|(left, right)| left.cmp(&right))
+        .or_else(|| value_to_f64(left)?.partial_cmp(&rhs.parse::<f64>().ok()?))
+        .or_else(|| {
+            Some(value_to_timestamp(left)?.cmp(&parse_timestamp(rhs, operator == Operator::Le)?))
+        });
 
-    let left_time = value_to_timestamp(left);
-    let right_time = parse_timestamp(rhs);
-    if let (Some(left_time), Some(right_time)) = (left_time, right_time) {
-        return match operator {
-            Operator::Gt => left_time > right_time,
-            Operator::Ge => left_time >= right_time,
-            Operator::Lt => left_time < right_time,
-            Operator::Le => left_time <= right_time,
-            _ => false,
-        };
-    }
-
-    false
+    ordering.is_some_and(|ordering| match operator {
+        Operator::Gt => ordering.is_gt(),
+        Operator::Ge => ordering.is_ge(),
+        Operator::Lt => ordering.is_lt(),
+        Operator::Le => ordering.is_le(),
+        _ => false,
+    })
 }
 
 fn compare_text_or_bool(left: &serde_json::Value, rhs: &ComparisonValue) -> bool {
     let left_rendered = render_value(left);
+
+    if rhs.strict {
+        if rhs.exact {
+            return left_rendered == rhs.text;
+        }
+        return left_rendered.contains(&rhs.text);
+    }
 
     if let serde_json::Value::Bool(flag) = left {
         if eq_case_insensitive(&rhs.text, "true") {
@@ -321,13 +371,6 @@ fn compare_text_or_bool(left: &serde_json::Value, rhs: &ComparisonValue) -> bool
         if eq_case_insensitive(&rhs.text, "false") {
             return !*flag;
         }
-    }
-
-    if rhs.strict {
-        if rhs.exact {
-            return left_rendered == rhs.text;
-        }
-        return left_rendered.contains(&rhs.text);
     }
 
     if rhs.exact {
@@ -345,19 +388,24 @@ fn value_to_f64(value: &serde_json::Value) -> Option<f64> {
     }
 }
 
-fn value_to_timestamp(value: &serde_json::Value) -> Option<i64> {
+fn value_to_timestamp(value: &serde_json::Value) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     match value {
-        serde_json::Value::String(text) => parse_timestamp(text),
-        serde_json::Value::Number(number) => number.as_i64(),
+        serde_json::Value::String(text) => parse_timestamp(text, false),
+        serde_json::Value::Number(number) => {
+            chrono::DateTime::from_timestamp(number.as_i64()?, 0).map(|time| time.fixed_offset())
+        }
         _ => None,
     }
 }
 
-pub(crate) fn parse_timestamp(input: &str) -> Option<i64> {
+pub(crate) fn parse_timestamp(
+    input: &str,
+    end_of_day: bool,
+) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
     let text = input.trim();
     if let Ok(time) = DateTime::parse_from_rfc3339(text) {
-        return Some(time.timestamp());
+        return Some(time);
     }
     let naive = [
         "%Y-%m-%d %H:%M:%S%.f",
@@ -367,11 +415,18 @@ pub(crate) fn parse_timestamp(input: &str) -> Option<i64> {
     ]
     .iter()
     .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok())
-    .or_else(|| parse_date(text)?.and_hms_opt(0, 0, 0))?;
+    .or_else(|| {
+        let date = parse_date(text)?;
+        if end_of_day {
+            date.and_hms_nano_opt(23, 59, 59, 999_999_999)
+        } else {
+            date.and_hms_opt(0, 0, 0)
+        }
+    })?;
     Local
         .from_local_datetime(&naive)
         .single()
-        .map(|time| time.timestamp())
+        .map(|time| time.fixed_offset())
 }
 
 fn parse_date(input: &str) -> Option<chrono::NaiveDate> {
@@ -476,11 +531,12 @@ mod tests {
     #[test]
     fn parses_timestamps_for_ordered_comparison() {
         assert_eq!(
-            parse_timestamp("2026-02-13"),
-            parse_timestamp("2026-02-13 00:00:00")
+            parse_timestamp("2026-02-13", false),
+            parse_timestamp("2026-02-13 00:00:00", false)
         );
         assert!(
-            parse_timestamp("2026-02-13T20:00:00+00:00") > parse_timestamp("2026-02-13 00:00:00")
+            parse_timestamp("2026-02-13T20:00:00+00:00", false)
+                > parse_timestamp("2026-02-13 00:00:00", false)
         );
     }
 

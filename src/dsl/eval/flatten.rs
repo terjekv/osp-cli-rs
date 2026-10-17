@@ -131,6 +131,11 @@ fn ensure_array(value: &mut Value, fill_value: &Value) {
 
 fn flatten_value(prefix: Option<&str>, value: &Value, out: &mut Row) {
     match value {
+        Value::Object(map) if map.is_empty() => {
+            if let Some(key) = prefix {
+                out.insert(key.to_string(), value.clone());
+            }
+        }
         Value::Object(map) => {
             for (key, nested_value) in map {
                 let next_prefix = match prefix {
@@ -138,6 +143,11 @@ fn flatten_value(prefix: Option<&str>, value: &Value, out: &mut Row) {
                     None => key.clone(),
                 };
                 flatten_value(Some(next_prefix.as_str()), nested_value, out);
+            }
+        }
+        Value::Array(values) if values.is_empty() => {
+            if let Some(key) = prefix {
+                out.insert(key.to_string(), value.clone());
             }
         }
         Value::Array(values) => {

@@ -7,7 +7,7 @@
 //! High-level flow:
 //!
 //! - track prompt timing plus last-success/last-failure REPL details
-//! - maintain REPL scope stack and small in-memory caches
+//! - maintain the REPL scope stack
 //! - bundle session state that host code needs to carry between dispatches
 //!
 //! Contract:
@@ -19,29 +19,27 @@
 //!
 //! Public API shape:
 //!
-//! - use [`AppSession::default`] or [`AppSession::with_cache_limit`] plus the
-//!   `with_*` chainers for session-scoped REPL state
+//! - use [`AppSession::default`] plus the `with_*` chainers for session-scoped
+//!   REPL state
 //! - use [`AppStateBuilder`] when you need a fully assembled runtime/session
 //!   snapshot outside the full CLI bootstrap
 //! - these types are host machinery, not lightweight semantic DTOs
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use crate::config::{ConfigLayer, DEFAULT_SESSION_CACHE_MAX_RESULTS};
-use crate::core::row::Row;
+use crate::config::ConfigLayer;
 use crate::native::{NativeCommandRegistry, NativeSessionContext};
 use crate::plugin::PluginManager;
 use crate::repl::HistoryShellContext;
 
-use super::command_output::ReplCommandOutput;
+use super::command_output::CommandOutput;
 use super::runtime::{AppClients, AppRuntime, LaunchContext, RuntimeContext, UiState};
 use super::timing::TimingSummary;
 
 #[derive(Debug, Clone, Copy, Default)]
 /// Timing badge rendered in the prompt for the most recent command.
-pub struct DebugTimingBadge {
+pub(crate) struct DebugTimingBadge {
     /// Prompt detail level used when rendering the badge.
     pub level: u8,
     pub(crate) summary: TimingSummary,
@@ -50,7 +48,7 @@ pub struct DebugTimingBadge {
 /// Shared prompt-timing storage that dispatch code can update and prompt
 /// rendering can read.
 #[derive(Clone, Default, Debug)]
-pub struct DebugTimingState {
+pub(crate) struct DebugTimingState {
     inner: Arc<RwLock<Option<DebugTimingBadge>>>,
 }
 
@@ -77,7 +75,7 @@ impl DebugTimingState {
 
 /// One entered command scope inside the interactive REPL shell stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReplScopeFrame {
+pub(crate) struct ReplScopeFrame {
     command: String,
 }
 
@@ -86,7 +84,7 @@ impl ReplScopeFrame {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeFrame;
     ///
     /// let frame = ReplScopeFrame::new("theme");
@@ -111,7 +109,7 @@ impl ReplScopeFrame {
 /// Shells are root commands, so there is at most one: entering another shell
 /// switches to it rather than nesting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReplScopeStack {
+pub(crate) struct ReplScopeStack {
     frame: Option<ReplScopeFrame>,
 }
 
@@ -150,7 +148,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -168,7 +166,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -188,7 +186,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -210,7 +208,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -230,15 +228,15 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
     /// scope.enter("theme");
     ///
     /// assert_eq!(
-    ///     scope.prefixed_tokens(&["show".to_string(), "dracula".to_string()]),
-    ///     vec!["theme".to_string(), "show".to_string(), "dracula".to_string()]
+    ///     scope.prefixed_tokens(&["use".to_string(), "dracula".to_string()]),
+    ///     vec!["theme".to_string(), "use".to_string(), "dracula".to_string()]
     /// );
     /// ```
     pub fn prefixed_tokens(&self, tokens: &[String]) -> Vec<String> {
@@ -255,7 +253,7 @@ impl ReplScopeStack {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::ReplScopeStack;
     ///
     /// let mut scope = ReplScopeStack::default();
@@ -272,67 +270,146 @@ impl ReplScopeStack {
     }
 }
 
-/// Session-scoped REPL state, caches, and prompt metadata.
+/// Session-scoped REPL state and prompt metadata.
 #[non_exhaustive]
 #[must_use]
 #[derive(Clone)]
-pub struct AppSession {
+pub(crate) struct AppSession {
     /// Prompt prefix shown before any scope label.
+    #[cfg(test)]
     pub prompt_prefix: String,
     /// Whether history capture is enabled for this session.
     pub history_enabled: bool,
+    pub(crate) recording: crate::repl::recording::Recording,
     /// Shell-scoped history prefix state shared with the history store.
     pub history_shell: HistoryShellContext,
     /// Shared prompt timing badge state.
     pub prompt_timing: DebugTimingState,
     /// Session-scoped context exposed by native commands to the REPL host.
     pub native_context: NativeSessionContext,
+    /// Structured follow-up commands, independent of resource context.
+    pub repl_feedback: crate::repl::ReplFeedback,
     pub(crate) startup_prompt_timing_pending: bool,
     /// Current command shell within the REPL.
     pub scope: ReplScopeStack,
-    /// Rows returned by the most recent successful REPL command.
-    pub last_rows: Vec<Row>,
     /// Raw output plus pipeline stages from the most recent successful REPL command.
     pub(crate) last_success: Option<LastSuccess>,
     /// Summary of the most recent failed REPL command.
     pub last_failure: Option<LastFailure>,
-    pub(crate) last_failure_diagnostics: Option<LastFailureDiagnostics>,
-    /// Cached row outputs keyed by command line.
-    pub result_cache: HashMap<String, Vec<Row>>,
-    /// Eviction order for the row-result cache.
-    pub cache_order: VecDeque<String>,
-    /// Maximum number of cached result sets to retain.
-    pub max_cached_results: usize,
     /// Session-scoped config overrides layered above persisted config.
     pub config_overrides: ConfigLayer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-/// Summary of the last failed REPL command.
-pub struct LastFailure {
-    /// Command line that produced the failure.
+/// The last failed REPL command and its original diagnostic evidence.
+#[derive(Debug, Clone)]
+pub(crate) struct LastFailure {
+    /// Command label identifying the failure without retaining its arguments.
     pub command_line: String,
     /// Short failure summary suitable for prompts or status output.
     pub summary: String,
-    /// Longer failure detail for follow-up inspection.
-    pub detail: String,
+    evidence: FailureEvidence,
+    pub(crate) command_evidence: String,
 }
 
-/// Pre-rendered diagnostic ladder retained for `doctor last`.
-///
-/// Reports can borrow short-lived dispatch state, so the session stores safe
-/// rendered evidence rather than retaining error objects across REPL commands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LastFailureDiagnostics {
-    pub(crate) normal: String,
-    pub(crate) debug: String,
-    pub(crate) forensic: String,
+#[derive(Debug, Clone)]
+enum FailureEvidence {
+    #[cfg(test)]
+    Text(String),
+    Report {
+        report: std::sync::Arc<miette::Report>,
+        settings: Box<crate::ui::RenderSettings>,
+        backtrace: Option<std::sync::Arc<std::backtrace::Backtrace>>,
+    },
+}
+
+impl LastFailure {
+    /// Records supplied summary and detail text without duplicating the detail ladder.
+    #[cfg(test)]
+    pub fn new(command_line: String, summary: String, detail: String) -> Self {
+        Self {
+            command_line,
+            summary,
+            evidence: FailureEvidence::Text(detail),
+            command_evidence: String::new(),
+        }
+    }
+
+    pub(crate) fn from_report(
+        command_line: String,
+        report: std::sync::Arc<miette::Report>,
+        settings: crate::ui::RenderSettings,
+    ) -> Self {
+        let summary = super::host::render_report_message(
+            &report,
+            crate::core::MessageLevel::Success,
+            &settings,
+        );
+        let backtrace =
+            super::host::capture_missing_report_backtrace(&report).map(std::sync::Arc::new);
+        let report = if super::host::find_error_in_chain::<
+            super::command_output::CommandBackendDetails,
+        >(&report)
+        .is_some()
+            || super::host::find_error_in_chain::<crate::config::ConfigError>(&report).is_some()
+        {
+            std::sync::Arc::new(miette::miette!("{}", summary))
+        } else {
+            report
+        };
+        let root = command_line.split_whitespace().next().unwrap_or_default();
+        let command_line = if command_line.split_whitespace().nth(1).is_some() {
+            format!("{root} …")
+        } else {
+            root.to_owned()
+        };
+        Self {
+            command_line,
+            summary,
+            command_evidence: super::host::report_evidence(
+                &report,
+                crate::core::MessageLevel::Evidence,
+            )
+            .0,
+            evidence: FailureEvidence::Report {
+                report,
+                settings: Box::new(settings),
+                backtrace,
+            },
+        }
+    }
+
+    /// Renders diagnostic detail with the terminal settings captured at failure time.
+    pub fn detail(&self, level: crate::core::MessageLevel) -> String {
+        match &self.evidence {
+            #[cfg(test)]
+            FailureEvidence::Text(detail) => detail.clone(),
+            FailureEvidence::Report {
+                report, settings, ..
+            } => super::host::render_report_message(report, level, settings),
+        }
+    }
+    /// Renders the backtrace captured when the failure was recorded, if available.
+    pub fn backtrace(&self) -> Option<String> {
+        match &self.evidence {
+            #[cfg(test)]
+            FailureEvidence::Text(_) => None,
+            FailureEvidence::Report {
+                report,
+                settings,
+                backtrace,
+            } => super::host::render_backtrace(report, settings).or_else(|| {
+                backtrace
+                    .as_ref()
+                    .map(|trace| format!("Stack backtrace:\n{trace}"))
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 /// Stored output contract for replaying the last successful REPL result.
 pub(crate) struct LastSuccess {
-    pub(crate) output: ReplCommandOutput,
+    pub(crate) output: std::sync::Arc<CommandOutput>,
     pub(crate) stages: Vec<String>,
 }
 
@@ -342,98 +419,23 @@ pub(crate) enum ReplExitTransition {
     LeftShell { frame: ReplScopeFrame },
 }
 
-#[derive(Clone)]
-pub(crate) struct AppSessionRebuildState(AppSession);
-
-impl AppSessionRebuildState {
-    pub(crate) fn is_scoped(&self) -> bool {
-        !self.0.scope.is_root()
-    }
-
-    pub(crate) fn session_layer(&self) -> Option<ConfigLayer> {
-        (!self.0.config_overrides.entries().is_empty()).then(|| self.0.config_overrides.clone())
-    }
-
-    fn restore_into(self, next: &mut AppSession) {
-        *next = self.0;
-        next.sync_history_shell_context();
-    }
-}
-
 impl AppSession {
-    /// Creates a session with a bounded row-result cache.
-    ///
-    /// A requested cache limit of `0` is clamped to `1` so the session never
-    /// stores a zero-capacity cache by accident.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use osp_cli::app::AppSession;
-    ///
-    /// let session = AppSession::with_cache_limit(4).with_prompt_prefix("demo");
-    ///
-    /// assert_eq!(session.max_cached_results, 4);
-    /// assert_eq!(session.prompt_prefix, "demo");
-    /// ```
-    pub fn with_cache_limit(max_cached_results: usize) -> Self {
-        let bounded = max_cached_results.max(1);
-        Self {
-            prompt_prefix: "osp".to_string(),
-            history_enabled: true,
-            history_shell: HistoryShellContext::default(),
-            prompt_timing: DebugTimingState::default(),
-            native_context: NativeSessionContext::default(),
-            startup_prompt_timing_pending: true,
-            scope: ReplScopeStack::default(),
-            last_rows: Vec::new(),
-            last_success: None,
-            last_failure: None,
-            last_failure_diagnostics: None,
-            result_cache: HashMap::new(),
-            cache_order: VecDeque::new(),
-            max_cached_results: bounded,
-            config_overrides: ConfigLayer::default(),
-        }
-    }
-
-    /// Creates the default session snapshot for the current resolved config.
-    pub(crate) fn from_resolved_config(config: &crate::config::ResolvedConfig) -> Self {
-        let session_cache_max_results = crate::app::config_usize(
-            config,
-            "session.cache.max_results",
-            DEFAULT_SESSION_CACHE_MAX_RESULTS as usize,
-        );
-        Self::with_cache_limit(session_cache_max_results)
-    }
-
-    /// Creates the default session snapshot for the current resolved config
-    /// and attaches the supplied session-layer overrides.
-    pub(crate) fn from_resolved_config_with_overrides(
-        config: &crate::config::ResolvedConfig,
-        config_overrides: ConfigLayer,
-    ) -> Self {
-        Self::with_cache_limit(crate::app::config_usize(
-            config,
-            "session.cache.max_results",
-            DEFAULT_SESSION_CACHE_MAX_RESULTS as usize,
-        ))
-        .with_config_overrides(config_overrides)
-    }
-
     /// Replaces the prompt prefix shown ahead of any scope label.
+    #[cfg(test)]
     pub fn with_prompt_prefix(mut self, prompt_prefix: impl Into<String>) -> Self {
         self.prompt_prefix = prompt_prefix.into();
         self
     }
 
     /// Enables or disables history capture for this session.
+    #[cfg(test)]
     pub fn with_history_enabled(mut self, history_enabled: bool) -> Self {
         self.history_enabled = history_enabled;
         self
     }
 
     /// Replaces the shell-scoped history context shared with the history store.
+    #[cfg(test)]
     pub fn with_history_shell(mut self, history_shell: HistoryShellContext) -> Self {
         self.history_shell = history_shell;
         self
@@ -476,39 +478,11 @@ impl AppSession {
         self.sync_history_shell_context();
     }
 
-    /// Captures the session-scoped state that must survive a runtime rebuild.
-    pub(crate) fn capture_rebuild_state(&self) -> AppSessionRebuildState {
-        let state = self.clone();
-        AppSessionRebuildState(state)
-    }
-
-    /// Restores session-scoped state after a runtime rebuild.
-    pub(crate) fn restore_rebuild_state(&mut self, state: AppSessionRebuildState) {
-        state.restore_into(self);
-    }
-
-    /// Stores the latest successful row output and updates the result cache.
-    pub fn record_result(&mut self, command_line: &str, rows: Vec<Row>) {
-        let key = command_line.trim().to_string();
-        if key.is_empty() {
-            return;
-        }
-
-        self.last_rows = rows.clone();
-        insert_bounded_cache(
-            &mut self.result_cache,
-            &mut self.cache_order,
-            self.max_cached_results,
-            key,
-            rows,
-        );
-    }
-
     /// Stores the last successful output so the REPL can replay it later.
     pub(crate) fn record_success_output(
         &mut self,
         command_line: &str,
-        output: &ReplCommandOutput,
+        output: CommandOutput,
         stages: &[String],
     ) {
         let command_line = command_line.trim().to_string();
@@ -516,12 +490,13 @@ impl AppSession {
             return;
         }
         self.last_success = Some(LastSuccess {
-            output: output.clone(),
+            output: std::sync::Arc::new(output),
             stages: stages.to_vec(),
         });
     }
 
     /// Records details about the latest failed command.
+    #[cfg(test)]
     pub fn record_failure(
         &mut self,
         command_line: &str,
@@ -534,42 +509,21 @@ impl AppSession {
         }
         let summary = summary.into();
         let detail = detail.into();
-        self.last_failure = Some(LastFailure {
-            command_line,
-            summary,
-            detail: detail.clone(),
-        });
-        self.last_failure_diagnostics = Some(LastFailureDiagnostics {
-            normal: detail.clone(),
-            debug: detail.clone(),
-            forensic: detail,
-        });
+        self.last_failure = Some(LastFailure::new(command_line, summary, detail));
     }
 
-    /// Records a failure with distinct evidence for each verbosity level.
-    pub(crate) fn record_failure_diagnostics(
+    /// Retains the original report so follow-up diagnostics render on demand.
+    pub(crate) fn record_failure_report(
         &mut self,
         command_line: &str,
-        summary: String,
-        diagnostics: LastFailureDiagnostics,
+        report: std::sync::Arc<miette::Report>,
+        settings: crate::ui::RenderSettings,
     ) {
         let command_line = command_line.trim().to_string();
         if command_line.is_empty() {
             return;
         }
-        self.last_failure = Some(LastFailure {
-            command_line,
-            summary,
-            detail: diagnostics.normal.clone(),
-        });
-        self.last_failure_diagnostics = Some(diagnostics);
-    }
-
-    /// Returns cached rows for a previously executed command line.
-    pub fn cached_rows(&self, command_line: &str) -> Option<&[Row]> {
-        self.result_cache
-            .get(command_line.trim())
-            .map(|rows| rows.as_slice())
+        self.last_failure = Some(LastFailure::from_report(command_line, report, settings));
     }
 
     /// Returns the last successful REPL output contract, if available.
@@ -629,74 +583,22 @@ impl AppSession {
     }
 }
 
-fn insert_bounded_cache<V>(
-    cache: &mut HashMap<String, V>,
-    order: &mut VecDeque<String>,
-    limit: usize,
-    key: String,
-    value: V,
-) {
-    if !cache.contains_key(&key)
-        && cache.len() >= limit
-        && let Some(evict_key) = order.pop_front()
-    {
-        cache.remove(&evict_key);
-    }
-
-    order.retain(|item| item != &key);
-    order.push_back(key.clone());
-    cache.insert(key, value);
-}
-
 impl Default for AppSession {
     fn default() -> Self {
-        Self::with_cache_limit(DEFAULT_SESSION_CACHE_MAX_RESULTS as usize)
-    }
-}
-
-pub(crate) struct AppStateInit {
-    pub context: RuntimeContext,
-    pub config: crate::config::ResolvedConfig,
-    pub render_settings: crate::ui::RenderSettings,
-    pub message_verbosity: crate::ui::messages::MessageLevel,
-    pub error_detail: crate::app::ErrorDetail,
-    pub debug_verbosity: u8,
-    pub plugins: crate::plugin::PluginManager,
-    pub native_commands: NativeCommandRegistry,
-    pub themes: crate::ui::theme_catalog::ThemeCatalog,
-    pub launch: LaunchContext,
-}
-
-pub(crate) struct AppStateParts {
-    pub runtime: AppRuntime,
-    pub session: AppSession,
-    pub clients: AppClients,
-}
-
-impl AppStateParts {
-    fn from_init(init: AppStateInit, session_override: Option<AppSession>) -> Self {
-        init.native_commands.configure(&init.config);
-        let clients = AppClients::new(init.plugins, init.native_commands);
-        let config = crate::app::ConfigState::new(init.config);
-        let ui = crate::app::UiState::new(
-            init.render_settings,
-            init.message_verbosity,
-            init.debug_verbosity,
-        )
-        .with_error_detail(init.error_detail);
-        let auth = crate::app::AuthState::from_resolved_with_external_policies(
-            config.resolved(),
-            clients.plugins(),
-            clients.native_commands(),
-        );
-        let runtime = AppRuntime::new(init.context, config, ui, auth, init.themes, init.launch);
-        let session = session_override
-            .unwrap_or_else(|| AppSession::from_resolved_config(runtime.config.resolved()));
-
         Self {
-            runtime,
-            session,
-            clients,
+            #[cfg(test)]
+            prompt_prefix: "osp".to_string(),
+            history_enabled: true,
+            recording: Default::default(),
+            history_shell: HistoryShellContext::default(),
+            prompt_timing: DebugTimingState::default(),
+            native_context: NativeSessionContext::default(),
+            repl_feedback: Default::default(),
+            startup_prompt_timing_pending: true,
+            scope: ReplScopeStack::default(),
+            last_success: None,
+            last_failure: None,
+            config_overrides: ConfigLayer::default(),
         }
     }
 }
@@ -704,22 +606,32 @@ impl AppStateParts {
 /// Aggregate application state shared between runtime and session logic.
 #[non_exhaustive]
 #[must_use]
-pub struct AppState {
+pub(crate) struct AppState {
     /// Runtime-scoped services and resolved config state.
     pub runtime: AppRuntime,
-    /// Session-scoped REPL caches and prompt metadata.
+    /// Session-scoped REPL state and prompt metadata.
     pub session: AppSession,
     /// Shared client registries used during command execution.
     pub clients: AppClients,
 }
 
 impl AppState {
+    pub(crate) fn reload_config_after_access_hook(&mut self) -> miette::Result<()> {
+        if self.runtime.config_reload_requested {
+            crate::app::assembly::rebuild_repl_in_place(self)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl AppState {
     /// Builds a full application-state snapshot by deriving UI state from the
     /// resolved config and runtime context.
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::app::{AppState, RuntimeContext, TerminalKind};
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     ///
@@ -727,7 +639,7 @@ impl AppState {
     /// defaults.set("profile.default", "default");
     /// defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
     /// defaults.set("theme.path", Vec::<String>::new());
-    /// defaults.set("ui.message.verbosity", "warning");
+    /// defaults.set("ui.verbosity", "warning");
     ///
     /// let mut resolver = ConfigResolver::default();
     /// resolver.set_defaults(defaults);
@@ -740,7 +652,7 @@ impl AppState {
     /// .unwrap();
     ///
     /// assert_eq!(state.runtime.config_state().resolved().active_profile(), "default");
-    /// assert_eq!(state.runtime.ui().message_verbosity.as_env_str(), "warning");
+    /// assert_eq!(state.runtime.ui().verbosity.as_str(), "warning");
     /// assert!(state.clients.plugins().explicit_dirs().is_empty());
     /// ```
     pub fn from_resolved_config(
@@ -748,25 +660,6 @@ impl AppState {
         config: crate::config::ResolvedConfig,
     ) -> miette::Result<Self> {
         AppStateBuilder::from_resolved_config(context, config).map(AppStateBuilder::build)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new(init: AppStateInit) -> Self {
-        Self::from_parts(AppStateParts::from_init(init, None))
-    }
-
-    pub(crate) fn from_parts(parts: AppStateParts) -> Self {
-        Self {
-            runtime: parts.runtime,
-            session: parts.session,
-            clients: parts.clients,
-        }
-    }
-
-    pub(crate) fn replace_parts(&mut self, parts: AppStateParts) {
-        self.runtime = parts.runtime;
-        self.session = parts.session;
-        self.clients = parts.clients;
     }
 
     /// Returns the prompt prefix configured for the current session.
@@ -779,11 +672,6 @@ impl AppState {
         self.session.sync_history_shell_context();
     }
 
-    /// Records rows produced by a REPL command.
-    pub fn record_repl_rows(&mut self, command_line: &str, rows: Vec<Row>) {
-        self.session.record_result(command_line, rows);
-    }
-
     /// Records a failed REPL command and its associated messages.
     pub fn record_repl_failure(
         &mut self,
@@ -794,26 +682,9 @@ impl AppState {
         self.session.record_failure(command_line, summary, detail);
     }
 
-    /// Returns the rows from the most recent successful REPL command.
-    pub fn last_repl_rows(&self) -> Vec<Row> {
-        self.session.last_rows.clone()
-    }
-
     /// Returns details about the most recent failed REPL command.
     pub fn last_repl_failure(&self) -> Option<LastFailure> {
         self.session.last_failure.clone()
-    }
-
-    /// Returns cached rows for a previously executed REPL command.
-    pub fn cached_repl_rows(&self, command_line: &str) -> Option<Vec<Row>> {
-        self.session
-            .cached_rows(command_line)
-            .map(ToOwned::to_owned)
-    }
-
-    /// Returns the number of cached REPL result sets.
-    pub fn repl_cache_size(&self) -> usize {
-        self.session.result_cache.len()
     }
 }
 
@@ -828,7 +699,7 @@ impl AppState {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::app::{AppSession, AppStateBuilder, RuntimeContext, TerminalKind};
 /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions};
 ///
@@ -845,24 +716,26 @@ impl AppState {
 ///     RuntimeContext::new(None, TerminalKind::Repl, None),
 ///     config,
 /// )?
-/// .with_session(AppSession::with_cache_limit(32).with_prompt_prefix("demo"))
+/// .with_session(AppSession::default().with_prompt_prefix("demo"))
 /// .build();
 ///
 /// assert_eq!(state.prompt_prefix(), "demo");
 /// # Ok::<(), miette::Report>(())
 /// ```
 #[must_use]
-pub struct AppStateBuilder {
-    context: RuntimeContext,
-    config: crate::config::ResolvedConfig,
-    ui: UiState,
-    launch: LaunchContext,
-    plugins: Option<PluginManager>,
-    native_commands: NativeCommandRegistry,
-    session: Option<AppSession>,
-    themes: Option<crate::ui::theme_catalog::ThemeCatalog>,
+pub(crate) struct AppStateBuilder {
+    pub(crate) context: RuntimeContext,
+    pub(crate) config: crate::config::ResolvedConfig,
+    pub(crate) ui: UiState,
+    pub(crate) launch: LaunchContext,
+    pub(crate) plugins: Option<PluginManager>,
+    pub(crate) native_commands: NativeCommandRegistry,
+    pub(crate) session: Option<AppSession>,
+    pub(crate) themes: Option<crate::ui::theme_catalog::ThemeCatalog>,
+    pub(crate) definition: std::sync::Arc<super::AppDefinition>,
 }
 
+#[cfg(test)]
 impl AppStateBuilder {
     /// Starts building an application-state snapshot from the resolved config
     /// and UI state the caller wants to expose.
@@ -885,23 +758,7 @@ impl AppStateBuilder {
             native_commands: NativeCommandRegistry::default(),
             session: None,
             themes: None,
-        }
-    }
-
-    pub(crate) fn from_host_inputs(
-        context: RuntimeContext,
-        config: crate::config::ResolvedConfig,
-        host_inputs: crate::app::assembly::ResolvedHostInputs,
-    ) -> Self {
-        Self {
-            context,
-            config,
-            ui: host_inputs.ui,
-            launch: LaunchContext::default(),
-            plugins: Some(host_inputs.plugins),
-            native_commands: NativeCommandRegistry::default(),
-            session: Some(host_inputs.default_session),
-            themes: Some(host_inputs.themes),
+            definition: Default::default(),
         }
     }
 
@@ -914,30 +771,27 @@ impl AppStateBuilder {
         context: RuntimeContext,
         config: crate::config::ResolvedConfig,
     ) -> miette::Result<Self> {
-        // This path is the canonical embedder factory: derive host inputs once
-        // and hand callers a coherent runtime/session snapshot. Plugins are
-        // intentionally derived later at build time from the final launch
-        // context, because callers may still override launch roots before the
-        // state is assembled.
-        let host_inputs = crate::app::assembly::ResolvedHostInputs::derive(
-            &context,
-            &config,
-            &LaunchContext::default(),
-            crate::app::assembly::RenderSettingsSeed::DefaultAuto,
-            None,
-            None,
-            None,
-        )?;
-        crate::ui::theme_catalog::log_theme_issues(&host_inputs.themes.issues);
+        let (ui, themes) =
+            super::assembly::build_host(super::assembly::HostBuildRequest::Presentation {
+                context: &context,
+                config: Some(&config),
+                seed: super::assembly::RenderSettingsSeed::DefaultAuto,
+                theme: None,
+                tolerant: false,
+            })?
+            .presentation();
+        let session = AppSession::default();
+        crate::ui::theme_catalog::log_theme_issues(&themes.issues);
         Ok(Self {
             context,
             config,
-            ui: host_inputs.ui,
+            ui,
             launch: LaunchContext::default(),
             plugins: None,
             native_commands: NativeCommandRegistry::default(),
-            session: Some(host_inputs.default_session),
-            themes: Some(host_inputs.themes),
+            session: Some(session),
+            themes: Some(themes),
+            definition: Default::default(),
         })
     }
 
@@ -953,7 +807,8 @@ impl AppStateBuilder {
     ///
     /// If omitted, the builder derives the plugin manager from the resolved
     /// config plus the current launch context during [`AppStateBuilder::build`].
-    pub fn with_plugins(mut self, plugins: PluginManager) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_plugins(mut self, plugins: PluginManager) -> Self {
         self.plugins = Some(plugins);
         self
     }
@@ -982,78 +837,175 @@ impl AppStateBuilder {
     /// omitted pieces such as themes, plugin manager, and default session before
     /// returning the final value.
     pub fn build(self) -> AppState {
-        let Self {
-            context,
-            config,
-            ui,
-            launch,
-            plugins,
-            native_commands,
-            session,
-            themes,
-        } = self;
-        let should_log_theme_issues = themes.is_none();
-        let (themes, plugins, session) = match (themes, plugins, session) {
-            (Some(themes), Some(plugins), Some(session)) => (themes, plugins, Some(session)),
-            (themes, plugins, session) => {
-                let defaults =
-                    crate::app::assembly::derive_host_defaults(&config, &launch, None, None);
-                (
-                    themes.unwrap_or(defaults.themes),
-                    plugins.unwrap_or(defaults.plugins),
-                    Some(session.unwrap_or(defaults.default_session)),
-                )
-            }
-        };
-        if should_log_theme_issues {
-            crate::ui::theme_catalog::log_theme_issues(&themes.issues);
-        }
-
-        let crate::app::UiState {
-            render_settings,
-            message_verbosity,
-            error_detail,
-            debug_verbosity,
-            ..
-        } = ui;
-
-        AppState::from_parts(AppStateParts::from_init(
-            AppStateInit {
-                context,
-                config,
-                render_settings,
-                message_verbosity,
-                error_detail,
-                debug_verbosity,
-                plugins,
-                native_commands,
-                themes,
-                launch,
-            },
-            session,
-        ))
+        super::assembly::build_host(super::assembly::HostBuildRequest::State(Box::new(self)))
+            .unwrap_or_else(|_| unreachable!("resolved state builder inputs are infallible"))
+            .state()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
-    use serde_json::Value;
+    #[test]
+    fn host_state_example_1() {
+        use crate::app::ReplScopeFrame;
+
+        let frame = ReplScopeFrame::new("theme");
+        assert_eq!(frame.command(), "theme");
+    }
+
+    #[test]
+    fn host_state_example_2() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.display_label(), None);
+
+        scope.enter("orch");
+        scope.enter("nh");
+        assert_eq!(scope.display_label(), Some("nh".to_string()));
+    }
+
+    #[test]
+    fn host_state_example_3() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+        scope.enter("orch");
+
+        assert_eq!(scope.history_prefix(), "orch ");
+    }
+
+    #[test]
+    fn host_state_example_4() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.history_scope_prefix(), None);
+
+        scope.enter("theme");
+        assert_eq!(scope.history_scope_prefix(), Some("theme ".to_string()));
+    }
+
+    #[test]
+    fn host_state_example_5() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        assert_eq!(scope.history_scope_label(), "root history");
+
+        scope.enter("theme");
+        scope.enter("orch");
+        assert_eq!(scope.history_scope_label(), "orch shell history");
+    }
+
+    #[test]
+    fn host_state_example_6() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+
+        assert_eq!(
+            scope.prefixed_tokens(&["use".to_string(), "dracula".to_string()]),
+            vec![
+                "theme".to_string(),
+                "use".to_string(),
+                "dracula".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn host_state_example_7() {
+        use crate::app::ReplScopeStack;
+
+        let mut scope = ReplScopeStack::default();
+        scope.enter("theme");
+
+        assert_eq!(
+            scope.help_tokens(),
+            vec!["theme".to_string(), "--help".to_string()]
+        );
+    }
+
+    #[test]
+    fn host_state_example_8() {
+        (|| {
+            use crate::app::{AppSession, AppStateBuilder, RuntimeContext, TerminalKind};
+            use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+            let mut defaults = ConfigLayer::default();
+            defaults.set("profile.default", "default");
+            defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
+            defaults.set("theme.path", Vec::<String>::new());
+
+            let mut resolver = ConfigResolver::default();
+            resolver.set_defaults(defaults);
+            let config = resolver
+                .resolve(ResolveOptions::new().with_terminal("repl"))
+                .unwrap();
+
+            let state = AppStateBuilder::from_resolved_config(
+                RuntimeContext::new(None, TerminalKind::Repl, None),
+                config,
+            )?
+            .with_session(AppSession::default().with_prompt_prefix("demo"))
+            .build();
+
+            assert_eq!(state.prompt_prefix(), "demo");
+            Ok::<(), miette::Report>(())
+        })()
+        .unwrap();
+    }
+
+    #[test]
+    fn internal_example_1() {
+        use crate::app::{AppState, RuntimeContext, TerminalKind};
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("repl.history.path", "/tmp/osp-doc-history.jsonl");
+        defaults.set("theme.path", Vec::<String>::new());
+        defaults.set("ui.verbosity", "warning");
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let config = resolver
+            .resolve(ResolveOptions::new().with_terminal("repl"))
+            .unwrap();
+
+        let state = AppState::from_resolved_config(
+            RuntimeContext::new(None, TerminalKind::Repl, None),
+            config,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.runtime.config_state().resolved().active_profile(),
+            "default"
+        );
+        assert_eq!(state.runtime.ui().verbosity.as_str(), "warning");
+        assert!(state.clients.plugins().explicit_dirs().is_empty());
+    }
+
+    use std::time::Duration;
 
     use super::{AppSession, ReplExitTransition};
     use crate::config::ConfigLayer;
 
     #[test]
     fn request_repl_exit_tracks_root_and_shell_transitions_unit() {
-        let mut root = AppSession::with_cache_limit(4);
+        let mut root = AppSession::default();
         assert!(matches!(
             root.request_repl_exit(),
             ReplExitTransition::ExitRoot
         ));
 
         // Entering another shell switches; exit then returns to root.
-        let mut shell = AppSession::with_cache_limit(4);
+        let mut shell = AppSession::default();
         shell.enter_repl_scope("ldap");
         shell.enter_repl_scope("orch");
         assert_eq!(shell.scope.commands(), vec!["orch".to_string()]);
@@ -1065,37 +1017,30 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_state_round_trip_preserves_rows_and_scope_unit() {
-        let mut session = AppSession::with_cache_limit(4)
+    fn rebuild_state_round_trip_preserves_replay_and_scope_unit() {
+        let mut session = AppSession::default()
             .with_prompt_prefix("osp-dev")
             .with_history_enabled(false);
         let mut overrides = ConfigLayer::default();
         overrides.set("ui.format", "json");
         session = session.with_config_overrides(overrides);
-        session.max_cached_results = 7;
         session.enter_repl_scope("ldap");
         session.record_prompt_timing(2, Duration::from_secs(3), None, None, None);
         session.startup_prompt_timing_pending = false;
 
-        let mut row = crate::core::row::Row::new();
-        row.insert("name".to_string(), Value::from("alice"));
-        session.record_result("list users", vec![row.clone()]);
         session.record_success_output(
             "list users",
-            &crate::app::ReplCommandOutput::Json(serde_json::json!([{ "name": "alice" }])),
+            crate::app::CommandOutput::json(serde_json::json!([{ "name": "alice" }])),
             &["P name".to_string()],
         );
         session.record_failure("list users", "Command failed", "detail");
-        let snapshot = session.capture_rebuild_state();
-        let mut restored = AppSession::with_cache_limit(1);
-        restored.restore_rebuild_state(snapshot);
+        let restored = session.clone();
+        restored.sync_history_shell_context();
 
         assert_eq!(restored.prompt_prefix, "osp-dev");
         assert!(!restored.history_enabled);
-        assert_eq!(restored.max_cached_results, 7);
         assert_eq!(restored.scope.commands(), vec!["ldap".to_string()]);
         assert_eq!(restored.history_shell.prefix(), Some("ldap ".to_string()));
-        assert_eq!(restored.cached_rows("list users"), Some(&[row][..]));
         assert!(restored.last_success().is_some());
         assert_eq!(
             restored

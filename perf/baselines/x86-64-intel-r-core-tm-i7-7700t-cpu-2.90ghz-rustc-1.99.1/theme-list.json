@@ -1,0 +1,12 @@
+{
+  "instructions": 5400025,
+  "partition": "x86-64-intel-r-core-tm-i7-7700t-cpu-2.90ghz-rustc-1.99.1",
+  "host": "bybanen.uio.no",
+  "platform": "Linux-5.14.0-687.56.1.el9_8.x86_64-x86_64-with-glibc2.34",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "valgrind": "valgrind-3.26.0",
+  "source_revision": "17fc30f5d262c188a3928b705640d076d1a48a16",
+  "source_dirty": true,
+  "binary_sha256": "3c15f8341161ccacd6dbf87525678e0c9fbea0bc030ff03522d85951fcc19946",
+  "recorded_at": "2026-10-17T12:03:52+00:00"
+}

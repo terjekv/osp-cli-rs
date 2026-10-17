@@ -4,7 +4,7 @@ Start here when commands, configuration, or terminal output behave unexpectedly.
 
 Examples that use `inventory ...` below are illustrative provider-backed
 commands. Replace them with a real plugin command from
-`osp plugins commands`.
+`osp plugins list`.
 
 ## Start Here
 
@@ -15,32 +15,30 @@ These commands usually tell you the most with the least effort:
 - `osp -vvv ...`
 - `osp -d ...`
 - `osp config explain <key>`
-- `osp plugins doctor`
+- `osp doctor plugins`
 - `osp plugins list`
-- `osp plugins commands`
 
 Use these to identify the problem before changing settings.
 
-Error-detail ladder:
+Failures give one actionable error and an optional request ID and hint. Use
+`-v` to inspect service/account/session selection, `-vv` to inspect exchanges,
+and `-vvv` for additional response and cache evidence. Use `-d` for host
+loading/dispatch, or `-dd` for additional host decisions and backtraces.
 
-- default
-  - short actionable failure
-- `-v`
-  - summary plus cause/context chain
-- `-vv`
-  - rich diagnostic output, including snippets for config/DSL/input failures
-- `-vvv`
-  - the same rich report plus a stack backtrace
+`doctor` checks this machine only. It cannot establish remote service health
+or resolve an unreachable service. Check connectivity or your VPN for network
+failures. JSON command data stays on stdout; diagnostics go to stderr.
 
-Use `-d/-dd/-ddd` when you need host debug logs and timing. Use `-v/-vv/-vvv`
-when you need a better failure report.
+For startup delays before the first REPL prompt or a one-shot command, run
+`OSP_TRACE_STARTUP=1 osp` or `OSP_TRACE_STARTUP=json osp ...` and inspect the
+phase tree on `stderr`. See [startup tracing](LOGGING.md#startup-tracing).
 
 In the REPL, the normal loop is:
 
 1. let the command fail normally
 2. read the short error
-3. rerun with `-v/-vv/-vvv` or inspect the recorded failure with
-   `doctor last -v/-vv/-vvv`
+3. rerun with `-v` or inspect the recorded failure with
+   `doctor last -v`
 
 For successful REPL output, use:
 
@@ -51,50 +49,17 @@ For successful REPL output, use:
 
 ## Symptom: A Plugin Command Is Missing
 
-Check, in order:
+Check `osp plugins list` for its path and status. The file must be executable
+and named `osp-NAME`. Builtins and native commands win name clashes, then the
+first executable in search order wins. Enable a disabled plugin with
+`osp plugins enable NAME`; inspect issues with `osp doctor plugins`.
 
-1. is the plugin discoverable?
-2. is the plugin healthy?
-3. is the command enabled in the active scope?
-4. is there a provider conflict?
+## Symptom: Plugin Metadata Times Out
 
-Useful commands:
-
-```bash
-osp plugins list
-osp plugins commands
-osp plugins doctor
-```
-
-If multiple plugins provide the same command, choose one explicitly:
-
-Illustrative provider-backed example:
-
-```bash
-osp inventory host web-01 --plugin-provider inventory-a
-```
-
-Or persist a preferred provider:
-
-```bash
-osp plugins select-provider inventory inventory-a
-```
-
-## Symptom: A Plugin Command Times Out
-
-Plugin discovery and execution are bounded by
-`extensions.plugins.timeout_ms`.
-
-Useful checks:
-
-```bash
-osp -v plugins doctor
-osp -vv plugins doctor
-osp config get extensions.plugins.timeout_ms
-```
-
-Increase the timeout if the backend needs more time. Otherwise, inspect the
-plugin diagnostics for a connection or process failure.
+`extensions.plugins.timeout_ms` limits optional `--osp-describe` calls.
+Inspect `osp doctor plugins`, fix the describe hook, then run
+`osp plugins refresh`. A describe failure does not prevent ordinary runs,
+which have no host time limit.
 
 ## Symptom: The Wrong Profile Seems Active
 
@@ -158,7 +123,7 @@ config set ui.format json --permanent
 To see which setting takes precedence, run:
 
 ```bash
-osp config explain ui.format
+osp config explain ui.verbosity
 ```
 
 ## Symptom: Themes Look Wrong
@@ -167,7 +132,7 @@ Start with:
 
 ```bash
 osp theme list
-osp theme show dracula
+osp theme list '|' dracula
 osp doctor theme
 osp config explain theme.name
 ```
@@ -181,4 +146,4 @@ load, or a custom file overrode a builtin.
 - Completion and history: [COMPLETION.md](COMPLETION.md)
 - Invocation flags: [FORMATTING.md](FORMATTING.md)
 - Config: [CONFIG.md](CONFIG.md)
-- Plugins: [USING_PLUGINS.md](USING_PLUGINS.md)
+- Plugins: [PLUGINS.md](PLUGINS.md)

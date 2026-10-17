@@ -39,10 +39,8 @@ fn parse_input_value_covers_float_unknown_and_allowed_scope_paths_unit() {
 
 #[test]
 fn schema_extension_runtime_and_scope_helpers_cover_aliases_and_bootstrap_specs_unit() {
-    let mut schema = ConfigSchema::default();
-    schema.set_allow_extensions_namespace(false);
-    assert!(!schema.is_known_key("extensions.demo.token"));
-    schema.set_allow_extensions_namespace(true);
+    let schema = ConfigSchema::default();
+
     assert!(schema.is_known_key("extensions.demo.token"));
     assert!(schema.is_runtime_visible_key("extensions.demo.token"));
     assert!(schema.is_known_key("alias.lookup"));

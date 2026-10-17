@@ -12,6 +12,7 @@
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -105,9 +106,18 @@ pub trait UiSink {
 
 /// Sink that forwards output directly to the process stdio streams.
 ///
-/// Empty writes are ignored.
+/// Empty writes are ignored. A stdout write failure other than a closed pipe
+/// is reported on stderr and makes [`crate::App::run_process`] fail.
 #[derive(Default)]
 pub struct StdIoUiSink;
+
+// Process stdout is global, so its failure state is too.
+static STDOUT_WRITE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Returns and clears whether process stdout lost command output.
+pub(crate) fn take_stdout_write_failure() -> bool {
+    STDOUT_WRITE_FAILED.swap(false, Ordering::Relaxed)
+}
 
 impl UiSink for StdIoUiSink {
     fn write_stdout(&mut self, text: &str) {
@@ -118,6 +128,7 @@ impl UiSink for StdIoUiSink {
                 .and_then(|()| stdout.flush())
                 && err.kind() != io::ErrorKind::BrokenPipe
             {
+                STDOUT_WRITE_FAILED.store(true, Ordering::Relaxed);
                 let _ = writeln!(io::stderr(), "failed to write command output: {err}");
             }
         }
@@ -275,6 +286,10 @@ impl<'a> ProgressUiSink<'a> {
         }
     }
 
+    pub(crate) fn can_replace(&self) -> bool {
+        self.previous_lines > 0 || self.spinner.is_some()
+    }
+
     fn display_width(text: &str) -> usize {
         crate::ui::display_width(text)
     }
@@ -331,7 +346,7 @@ impl<'a> ProgressUiSink<'a> {
 
 impl UiSink for ProgressUiSink<'_> {
     fn write_stdout(&mut self, text: &str) {
-        self.write_progress(text, false);
+        self.inner.write_stdout(text);
     }
 
     fn write_stderr(&mut self, text: &str) {
@@ -419,4 +434,34 @@ impl UiSink for BufferedUiSink {
     fn write_stderr(&mut self, text: &str) {
         self.stderr.push_str(text);
     }
+}
+
+pub(crate) fn write_diagnostics(
+    sink: &mut dyn UiSink,
+    text: &str,
+    settings: &crate::ui::RenderSettings,
+) {
+    if !sink.stderr_is_terminal() || !settings.resolve_render_settings().color {
+        sink.write_stderr(text);
+        return;
+    }
+    let mut rendered = String::new();
+    for line in text.split_inclusive('\n') {
+        if let Some((prefix, body)) = line.split_once(": ") {
+            let style = match prefix {
+                "error" => nu_ansi_term::Color::Red.normal(),
+                "warning" => nu_ansi_term::Color::Yellow.normal(),
+                "info" => nu_ansi_term::Color::Cyan.normal(),
+                "evidence" | "debug" | "trace" => nu_ansi_term::Style::new().dimmed(),
+                _ => {
+                    rendered.push_str(line);
+                    continue;
+                }
+            };
+            let _ = write!(rendered, "{} {body}", style.paint(format!("{prefix}:")));
+        } else {
+            rendered.push_str(line);
+        }
+    }
+    sink.write_stderr(&rendered);
 }

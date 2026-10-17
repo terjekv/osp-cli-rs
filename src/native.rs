@@ -25,25 +25,38 @@
 //!   leaking host-internal runtime state
 //! - downstream product crates typically build a registry once and pass it
 //!   into [`crate::App::with_native_commands`] or
-//!   [`crate::AppBuilder::with_native_commands`] as part of their own wrapper
+//!   [`crate::App::with_native_commands`] as part of their own wrapper
 //!   or builder layer
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use clap::Command;
 
-use crate::completion::CommandSpec;
+/// Declares the state effect of a native command.
+/// Attach to the owning clap subcommand with `Command::add`.
+#[derive(Clone, Copy, Debug)]
+pub enum NativeEffect {
+    /// Does not mutate remote or local service state.
+    Read,
+    /// May mutate service state.
+    Write,
+}
+impl clap::builder::CommandExt for NativeEffect {}
+
+use crate::completion::CompletionNode;
 use crate::config::ResolvedConfig;
-use crate::core::command_policy::CommandPolicyRegistry;
+use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{
     DescribeCommandAuthV1, DescribeCommandV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
 };
 use crate::core::runtime::RuntimeHints;
-use crate::plugin::catalog::register_describe_command_policies;
+use crate::plugin::catalog::collect_command_auth;
+use crate::plugin::{CommandCatalogEntry, CommandSource};
 
 /// Elevation requested for one native-command execution.
 ///
@@ -66,30 +79,12 @@ impl InvocationElevation {
     }
 }
 
-/// Public metadata snapshot for one registered native command.
-///
-/// This is the describe-time surface projected into help, completion, and
-/// policy code. It is not an execution handle; callers should fetch the command
-/// from [`NativeCommandRegistry`] when they need to run it.
-#[derive(Debug, Clone)]
-pub struct NativeCommandCatalogEntry {
-    /// Canonical command path root exposed to CLI and REPL users.
-    pub name: String,
-    /// Short human-facing summary used in listings and overviews.
-    pub about: String,
-    /// Optional auth/visibility metadata projected into policy surfaces.
-    pub auth: Option<DescribeCommandAuthV1>,
-    /// Direct child names available immediately below this command.
-    pub subcommands: Vec<String>,
-    /// Completion tree rooted at this command's describe-time shape.
-    pub completion: CommandSpec,
-}
-
 /// Runtime context passed to native command implementations.
 ///
 /// This keeps the command surface small and stable: commands receive the
 /// resolved config snapshot and runtime hints they need to behave like the host
 /// would, without exposing the whole app runtime for ad hoc coupling.
+#[non_exhaustive]
 pub struct NativeCommandContext<'a> {
     /// Current resolved config snapshot for this execution.
     pub config: &'a ResolvedConfig,
@@ -99,7 +94,12 @@ pub struct NativeCommandContext<'a> {
     pub invocation_elevation: InvocationElevation,
     /// Session-scoped native context that may be surfaced by the host REPL.
     pub session_context: NativeSessionContext,
+    /// Structured command hints and history entries for the hosting REPL.
+    pub repl_feedback: crate::repl::ReplFeedback,
+    command_scope: crate::core::CommandScope,
+    diagnostics: Option<&'a crate::diagnostics::DiagnosticSink>,
     progress: Option<&'a dyn NativeProgressSink>,
+    pub(crate) output_pipeline: bool,
 }
 
 impl<'a> NativeCommandContext<'a> {
@@ -110,8 +110,70 @@ impl<'a> NativeCommandContext<'a> {
             runtime_hints,
             invocation_elevation: InvocationElevation::Ordinary,
             session_context: NativeSessionContext::default(),
+            repl_feedback: Default::default(),
+            command_scope: Default::default(),
+            diagnostics: None,
             progress: None,
+            output_pipeline: false,
         }
+    }
+
+    /// Attaches command-local sanitized service evidence.
+    pub fn with_diagnostic_sink(mut self, sink: &'a crate::diagnostics::DiagnosticSink) -> Self {
+        self.diagnostics = Some(sink);
+        self
+    }
+
+    /// Returns this command's evidence sink, when hosted.
+    pub fn diagnostics(&self) -> Option<&'a crate::diagnostics::DiagnosticSink> {
+        self.diagnostics
+    }
+
+    /// Sets where this invocation's reader types suggested commands.
+    pub fn with_command_scope(mut self, scope: crate::core::CommandScope) -> Self {
+        self.command_scope = scope;
+        self
+    }
+
+    /// Returns the reader's command scope for pure output helpers.
+    pub fn command_scope(&self) -> &crate::core::CommandScope {
+        &self.command_scope
+    }
+
+    /// Renders a root-form command for the reader's current prompt.
+    pub fn command(&self, line: &str) -> String {
+        self.command_scope.command(line)
+    }
+
+    /// Produces a Run hint and retains its root-form command for editor recall.
+    /// The editor inserts the command only; Enter still controls execution.
+    pub fn run_hint(&self, command: &str, suffix: &str) -> String {
+        self.repl_feedback.remember_hint(command);
+        format!("hint: Run {}{suffix}", self.command(command))
+    }
+
+    /// Whether this invocation transforms its result with output pipe stages.
+    pub fn has_output_pipeline(&self) -> bool {
+        self.output_pipeline
+    }
+
+    /// Whether this invocation may read a confirmation from its terminal.
+    /// Requires stdin and stderr terminals, non-JSON output and no output pipeline.
+    /// Credential acquisition owns any additional command-scope restrictions.
+    pub fn may_prompt(&self) -> bool {
+        self.human_output()
+            && !crate::ui::prompt::input_is_replay()
+            && std::io::stderr().is_terminal()
+    }
+
+    /// Whether live or preliminary documents can be presented on stderr.
+    pub fn can_present(&self) -> bool {
+        self.human_output() && self.progress.is_some_and(|sink| sink.stderr_is_terminal())
+    }
+
+    fn human_output(&self) -> bool {
+        !self.output_pipeline
+            && self.runtime_hints.format != crate::core::output::OutputFormat::Json
     }
 
     /// Attaches explicit elevation intent to this execution only.
@@ -144,19 +206,54 @@ impl<'a> NativeCommandContext<'a> {
         Ok(())
     }
 
+    /// Requests a rate-limited terminal bell after this REPL invocation flushes.
+    ///
+    /// The master sound setting, JSON/basic/one-shot suppression and actual
+    /// terminal ownership are host policy. This never adds bytes to a payload.
+    pub fn request_bell(&self) {
+        crate::repl::notices::request_foreground_bell(self.config, self.runtime_hints.format);
+    }
+
     /// Display a notice or confirmation through the host renderer, outside stream filters.
     ///
-    /// Without a progress sink, this is a no-op.
+    /// This is a no-op unless [`Self::can_present`] permits terminal frames.
     pub fn present(&self, document: NativeProgressEvent) -> Result<()> {
+        if !self.can_present() {
+            return Ok(());
+        }
         match self.progress {
             Some(progress) => progress.present(document),
             None => Ok(()),
         }
     }
 
+    /// Reports a completed operation through the host before execution resumes.
+    /// Unlike preliminary progress, notices bypass result filters and also reach
+    /// nonterminal sinks. A reporting failure lets callers stop subsequent writes.
+    pub fn emit_notice(&self, document: NativeProgressEvent) -> Result<()> {
+        match self.progress {
+            Some(progress) => progress.present(document),
+            None => Ok(()),
+        }
+    }
+
+    /// Draws a preliminary document and reports whether the host can replace it.
+    /// Returns false without emitting when [`Self::can_present`] is false.
+    pub fn emit_progress_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        if !self.can_present() {
+            return Ok(false);
+        }
+        match self.progress {
+            Some(sink) => sink.emit_measured(event),
+            None => Ok(false),
+        }
+    }
+
     /// Submits one structured transient progress document to the host.
     ///
     /// The host may coalesce terminal replacement updates before displaying them.
+    /// Events remain available to stream consumers even without a terminal;
+    /// use [`Self::present`] or [`Self::emit_progress_measured`] for frames.
     /// A context created outside the host has no sink, in which case emission
     /// is a no-op. Native commands should still return the stable final
     /// document through [`NativeCommandOutcome`].
@@ -164,6 +261,27 @@ impl<'a> NativeCommandContext<'a> {
         match self.progress {
             Some(progress) => progress.emit(event),
             None => Ok(()),
+        }
+    }
+
+    /// Emits a canonical object to live consumers and the invocation's DSL.
+    /// JSON output writes each surviving event as one stdout JSON line before
+    /// the final result document. Human output uses the shared renderer.
+    pub fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        match self.progress {
+            Some(progress) => progress.emit_stream(event),
+            None => Ok(()),
+        }
+    }
+
+    /// Emits a stream event and reports whether its terminal frame is replaceable.
+    /// JSON and redirected consumers receive the event without terminal gating.
+    pub fn emit_stream_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        match self.progress {
+            Some(progress) => progress.emit_stream_measured(event),
+            None => Ok(false),
         }
     }
 }
@@ -179,6 +297,18 @@ pub struct NativeProgressEvent {
     pub meta: ResponseMetaV1,
     /// Historical input: retain it in event streams without animating a terminal replay.
     pub replay: bool,
+    /// Optional structured terminal snapshot. Event data remains the stream
+    /// and DSL contract; filtered invocations never display this snapshot.
+    pub frame: Option<NativeProgressFrame>,
+}
+
+/// Accumulated structured state for a live terminal replacement frame.
+#[derive(Debug, Clone)]
+pub struct NativeProgressFrame {
+    /// Canonical snapshot data rendered by the shared renderer.
+    pub data: serde_json::Value,
+    /// Preferred human projection and format for the snapshot.
+    pub meta: ResponseMetaV1,
 }
 
 impl NativeProgressEvent {
@@ -189,6 +319,7 @@ impl NativeProgressEvent {
             messages: Vec::new(),
             meta: ResponseMetaV1::default(),
             replay: false,
+            frame: None,
         }
     }
 
@@ -203,12 +334,44 @@ impl NativeProgressEvent {
         self.messages = messages;
         self
     }
+
+    /// Uses a structured snapshot for unfiltered human terminal updates.
+    pub fn with_frame(mut self, data: impl Into<serde_json::Value>, meta: ResponseMetaV1) -> Self {
+        self.frame = Some(NativeProgressFrame {
+            data: data.into(),
+            meta,
+        });
+        self
+    }
 }
 
 /// Host boundary that renders transient native-command progress.
 pub trait NativeProgressSink {
+    /// Whether the presentation destination is a terminal. Hosts with captured
+    /// output should report their sink's capability instead of process stderr.
+    fn stderr_is_terminal(&self) -> bool {
+        std::io::stderr().is_terminal()
+    }
+
     /// Renders or records one progress document before command execution resumes.
     fn emit(&self, event: NativeProgressEvent) -> Result<()>;
+
+    /// Delivers an event without terminal coalescing or replay suppression.
+    fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
+        self.emit(event)
+    }
+
+    /// Delivers a stream event and reports whether its frame can be replaced.
+    fn emit_stream_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        self.emit_stream(event)?;
+        Ok(false)
+    }
+
+    /// Draws immediately and reports whether terminal replacement is available.
+    fn emit_measured(&self, event: NativeProgressEvent) -> Result<bool> {
+        self.emit(event)?;
+        Ok(false)
+    }
 
     /// Render a notice or confirmation without applying result-stream filters.
     fn present(&self, document: NativeProgressEvent) -> Result<()> {
@@ -221,13 +384,58 @@ pub trait NativeProgressSink {
     }
 }
 
-/// One prompt-visible session context value owned by a native command.
+/// Compact prompt view of one visible entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativePromptContextEntry {
     /// Short label rendered in compact prompt surfaces.
     pub label: String,
     /// Current value for the context entry.
     pub value: String,
+}
+
+/// One operator-visible value remembered for the current REPL session.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NativeSessionContextEntry {
+    /// Owning integration.
+    pub service: String,
+    /// Profile at selection.
+    pub profile: String,
+    /// Effective identity at selection.
+    pub identity: String,
+    /// Service endpoint binding.
+    pub origin: String,
+    /// Last command that consumed this entry.
+    pub used_by: String,
+    /// Subject kind from the shared entity vocabulary.
+    pub kind: String,
+    /// Latest value stored for this kind.
+    pub value: String,
+    /// Command path that last set this value.
+    pub command: String,
+    /// UTC timestamp in RFC 3339 format when the value was last set.
+    pub when: String,
+}
+
+impl NativeSessionContextEntry {
+    pub(crate) fn key(&self) -> ContextKey {
+        if crate::context::shared(&self.kind) {
+            (
+                self.kind.clone(),
+                String::new(),
+                self.profile.clone(),
+                self.identity.clone(),
+                String::new(),
+            )
+        } else {
+            (
+                self.kind.clone(),
+                self.service.clone(),
+                self.profile.clone(),
+                self.identity.clone(),
+                self.origin.clone(),
+            )
+        }
+    }
 }
 
 /// Trusted REPL commands for moving between pages produced by a native
@@ -255,17 +463,22 @@ struct PaginationState {
     carried: Option<Vec<Vec<String>>>,
 }
 
-/// Session-scoped context shared between native commands and the REPL host.
+type ContextKey = (String, String, String, String, String);
+
+/// Session-scoped context shared between native commands, plugins, and the REPL host.
 ///
-/// This is deliberately in-memory only. Native commands can retain small
-/// workflow values between commands and separately expose prompt-safe values
-/// without writing hidden target state to disk.
+/// Private workflow caches stay in memory. Declared entity selections are
+/// visible in the prompt and `context`, scoped to service, identity and profile.
+/// Services may opt specific kinds into REPL-only persistence.
 #[derive(Clone, Default)]
 pub struct NativeSessionContext {
-    values: Arc<RwLock<BTreeMap<String, String>>>,
-    prompt_entries: Arc<RwLock<BTreeMap<String, NativePromptContextEntry>>>,
+    pub(crate) values: Arc<RwLock<BTreeMap<String, String>>>,
+    pub(crate) context_entries: Arc<RwLock<BTreeMap<ContextKey, NativeSessionContextEntry>>>,
+    pub(crate) binding: Arc<RwLock<crate::context::ContextBinding>>,
+    pub(crate) service: String,
     pagination: Arc<RwLock<PaginationState>>,
     completion_refresh_requested: Arc<AtomicBool>,
+    pub(crate) command_path: Option<Arc<str>>,
 }
 
 impl fmt::Debug for NativeSessionContext {
@@ -273,7 +486,7 @@ impl fmt::Debug for NativeSessionContext {
         formatter
             .debug_struct("NativeSessionContext")
             .field("values", &"[redacted]")
-            .field("prompt_entries", &self.prompt_entries)
+            .field("context_entries", &"[redacted]")
             .field("pagination", &"[redacted]")
             .field(
                 "completion_refresh_requested",
@@ -299,37 +512,168 @@ impl NativeSessionContext {
             .and_then(|values| values.get(key).cloned())
     }
 
-    /// Sets one prompt-visible context entry.
-    pub fn set_prompt_value(
-        &self,
-        key: impl Into<String>,
-        label: impl Into<String>,
-        value: impl Into<String>,
-    ) {
-        if let Ok(mut entries) = self.prompt_entries.write() {
-            entries.insert(
-                key.into(),
-                NativePromptContextEntry {
-                    label: label.into(),
-                    value: value.into(),
-                },
-            );
+    /// Stores one operator-visible value for this REPL session.
+    ///
+    /// The active native command path is recorded as the source. Plugin
+    /// responses use the same store after the host receives their context
+    /// updates.
+    pub fn set_context_value(&self, kind: impl Into<String>, value: impl Into<String>) {
+        let kind = context_kind(&kind.into());
+        let value = value.into();
+        if value.trim().is_empty() {
+            self.clear_context(Some(&kind));
+            return;
+        }
+        if !crate::context::valid_value(&value) {
+            return;
+        }
+        let command = self
+            .command_path
+            .as_deref()
+            .unwrap_or("context set")
+            .to_string();
+        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
+        let profile = binding.profile.clone();
+        let identity = binding.identity.clone();
+        let origin = binding
+            .origins
+            .get(&self.service)
+            .cloned()
+            .unwrap_or_default();
+        let service = self.service.clone();
+        let when = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        if let Ok(mut entries) = self.context_entries.write() {
+            let entry = NativeSessionContextEntry {
+                kind: kind.clone(),
+                value,
+                command,
+                when,
+                service,
+                profile,
+                identity,
+                origin,
+                used_by: String::new(),
+            };
+            entries.insert(entry.key(), entry);
         }
     }
 
-    /// Removes one prompt-visible context entry.
-    pub fn remove_prompt_value(&self, key: &str) {
-        if let Ok(mut entries) = self.prompt_entries.write() {
-            entries.remove(key);
+    /// Restores an entry with its original scope and provenance during migration.
+    pub fn restore_context_entry(&self, entry: NativeSessionContextEntry) {
+        if !crate::context::valid_value(&entry.value) {
+            return;
+        }
+        if let Ok(mut entries) = self.context_entries.write() {
+            entries.entry(entry.key()).or_insert(entry);
         }
     }
 
-    /// Returns all prompt-visible context entries in stable key order.
-    pub fn prompt_entries(&self) -> Vec<NativePromptContextEntry> {
-        self.prompt_entries
+    /// Returns context visible to the current profile and identity.
+    pub fn context_entries(&self) -> Vec<NativeSessionContextEntry> {
+        let binding = self.binding.read().unwrap_or_else(|e| e.into_inner());
+        self.context_entries
             .read()
-            .map(|entries| entries.values().cloned().collect())
+            .map(|entries| {
+                entries
+                    .values()
+                    .filter(|entry| {
+                        entry.profile == binding.profile
+                            && entry.identity == binding.identity
+                            && (entry.service.is_empty()
+                                || binding
+                                    .origins
+                                    .get(&entry.service)
+                                    .is_none_or(|origin| origin == &entry.origin))
+                    })
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default()
+    }
+
+    /// Clears visible selections in this service, or all services when unbound.
+    /// The host saves persisted kinds after the command.
+    pub fn clear_context(&self, kind: Option<&str>) {
+        let visible: Vec<_> = self
+            .context_entries()
+            .into_iter()
+            .filter(|entry| {
+                self.service.is_empty()
+                    || crate::context::shared(&entry.kind)
+                    || entry.service == self.service
+            })
+            .collect();
+        if let Ok(mut entries) = self.context_entries.write() {
+            entries.retain(|_, entry| {
+                !visible.contains(entry) || kind.is_some_and(|k| k != entry.kind)
+            });
+        }
+    }
+
+    /// Returns a visible entity in this service's scope.
+    pub fn context_value(&self, kind: &str) -> Option<String> {
+        self.context_entries()
+            .into_iter()
+            .find(|entry| {
+                entry.kind == kind
+                    && (crate::context::shared(kind) || entry.service == self.service)
+            })
+            .map(|entry| entry.value)
+    }
+
+    /// Binds a command to its owning service without copying its selections.
+    pub fn for_service(&self, service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+            ..self.clone()
+        }
+    }
+
+    /// Clears entries belonging to a logged-out service.
+    pub fn clear_service_context(&self) {
+        if let Ok(mut entries) = self.context_entries.write() {
+            entries.retain(|_, entry| entry.service != self.service);
+        }
+    }
+
+    pub(crate) fn for_command(&self, command_path: impl Into<String>) -> Self {
+        Self {
+            command_path: Some(Arc::from(command_path.into())),
+            ..self.clone()
+        }
+    }
+
+    /// Returns prompt entries using the same labels as the tutorial renderer.
+    pub fn prompt_entries(&self) -> Vec<NativePromptContextEntry> {
+        let entries = self.context_entries();
+        entries
+            .iter()
+            .map(|entry| NativePromptContextEntry {
+                label: if entries
+                    .iter()
+                    .filter(|other| other.kind == entry.kind)
+                    .count()
+                    > 1
+                {
+                    format!("{}/{}", entry.service, entry.kind)
+                } else {
+                    entry.kind.clone()
+                },
+                value: entry.value.clone(),
+            })
+            .collect()
+    }
+
+    /// Renders one compact prompt token, also suitable for instructional text.
+    pub fn render_context_token(kind: &str, value: &str) -> String {
+        format!("{kind}:{value}")
+    }
+
+    pub(crate) fn for_editor_action(&self) -> Self {
+        Self {
+            pagination: Arc::new(RwLock::new(PaginationState::default())),
+            ..self.clone()
+        }
     }
 
     /// Replaces the trusted native-command pagination context for this REPL.
@@ -403,6 +747,11 @@ impl NativeSessionContext {
     }
 }
 
+/// Context kinds compare like command names: trimmed and lowercase.
+fn context_kind(kind: &str) -> String {
+    kind.trim().to_lowercase()
+}
+
 /// Result of executing a native command.
 pub enum NativeCommandOutcome {
     /// Return rendered help text directly.
@@ -420,10 +769,34 @@ pub enum NativeCommandOutcome {
     Exit(i32),
 }
 
+impl NativeCommandOutcome {
+    /// Treats help, version and missing-subcommand requests as help documents;
+    /// preserves all other clap failures as errors.
+    pub fn from_clap(error: clap::Error) -> Result<Self> {
+        if is_clap_help_error(error.kind()) {
+            Ok(Self::Help(error.to_string()))
+        } else {
+            Err(error.into())
+        }
+    }
+}
+
+pub(crate) fn is_clap_help_error(kind: clap::error::ErrorKind) -> bool {
+    matches!(
+        kind,
+        clap::error::ErrorKind::DisplayHelp
+            | clap::error::ErrorKind::DisplayVersion
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+            | clap::error::ErrorKind::MissingSubcommand
+    )
+}
+
 /// Trait implemented by in-process commands registered alongside plugins.
 pub trait NativeCommand: Send + Sync {
     /// Applies the resolved host configuration before help, policy, completion,
     /// or execution reads this command's state. Called again on REPL rebuild.
+    /// Cloned registries share command instances, so embedders must serialize
+    /// invocations that use `configure` to select mutable session state.
     ///
     /// Keep this local: select the service/session context and invalidate stale
     /// snapshots here; remote refresh belongs in execution, invocation metadata
@@ -431,7 +804,11 @@ pub trait NativeCommand: Send + Sync {
     /// The registered command name must remain stable across configurations.
     fn configure(&self, _config: &ResolvedConfig) {}
 
-    /// Returns the clap command definition for this command.
+    /// Returns the unbuilt clap command definition for this command.
+    ///
+    /// The host sets its invocation-specific binary name before clap caches usage
+    /// names. Build a separate copy when projecting implicit positional indices
+    /// into custom descriptions or completion metadata.
     fn command(&self) -> Command;
 
     /// Converts supplied arguments to the canonical command grammar.
@@ -454,21 +831,22 @@ pub trait NativeCommand: Send + Sync {
 
     /// Prepares metadata when an invocation fails strict parsing or requests help.
     ///
-    /// For ordinary execution, the host authorizes the command root as runnable
-    /// before calling this. For help, it first authorizes the cached command
-    /// path as visible and treats preparation errors as a cache miss so help
+    /// For ordinary execution, the host checks cached-path visibility and runs
+    /// the product access hook before calling this. For help, it checks cached
+    /// visibility and treats preparation errors as a cache miss so help
     /// remains available offline and without acquiring credentials. Arguments
     /// are the original supplied arguments, without the registered command name
     /// or DSL pipeline. Remote discovery is permitted, but this must not execute
-    /// the requested action.
+    /// the requested action. Use the supplied command scope for recovery hints.
     /// Return `true` only when the grammar changed: the host then normalizes,
     /// describes, and strictly parses the invocation once more, and authorizes
-    /// its full path against both host policy and refreshed native declarations
-    /// before execution. Installed host restrictions remain in force.
+    /// its full path against refreshed native declarations and product visibility
+    /// before execution. The product hook is not called again after refresh.
     fn prepare_invocation_metadata(
         &self,
         _args: &[String],
         _config: &ResolvedConfig,
+        _command_scope: &crate::core::CommandScope,
     ) -> Result<bool> {
         Ok(false)
     }
@@ -488,6 +866,26 @@ pub trait NativeCommand: Send + Sync {
         false
     }
 
+    /// Endpoint binding used to hide selections after a service switch.
+    fn context_origin(&self, _config: &ResolvedConfig) -> String {
+        String::new()
+    }
+
+    /// Service-local kinds available before dynamic command metadata is loaded.
+    fn context_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Imports an older service-owned selection file into the shared store.
+    fn migrate_context(&self, _session: &NativeSessionContext) -> Result<()> {
+        Ok(())
+    }
+
+    /// Kinds persisted by this service, loaded before the first REPL prompt.
+    fn persisted_context_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Builds the plugin-protocol style description for this command.
     fn describe(&self) -> DescribeCommandV1 {
         let mut describe = DescribeCommandV1::from_clap(self.command());
@@ -496,16 +894,67 @@ pub trait NativeCommand: Send + Sync {
         describe
     }
 
+    /// Projects the command grammar and cached metadata into completion nodes.
+    ///
+    /// Override this when cached suggestions are also needed in noninteractive
+    /// catalogs. Interactive-only enrichment belongs in `augment_completion`.
+    fn completion(&self) -> CompletionNode {
+        CompletionNode::from_clap(&self.command())
+    }
+
     /// Adds runtime-owned suggestions to the otherwise static completion tree.
     ///
     /// The host calls this only while preparing an interactive completion
     /// surface. Implementations should cache any remote data they use so REPL
     /// editing never performs network I/O per keystroke.
-    fn augment_completion(&self, _completion: &mut CommandSpec) {}
+    fn augment_completion(&self, _completion: &mut CompletionNode) {}
+
+    /// Returns a cached, single-line product status for the right prompt.
+    ///
+    /// Called during editor paints: never perform I/O or wait for a worker here.
+    /// The host sanitizes text and omits it in basic and JSON sessions.
+    fn repl_status(&self) -> Option<crate::repl::ReplStatus> {
+        None
+    }
+
+    /// Named editor actions offered by this product, resolved against config.
+    fn repl_actions(&self, _config: &ResolvedConfig) -> Result<Vec<crate::repl::ReplAction>> {
+        Ok(Vec::new())
+    }
+
+    /// Runs a registered editor action with ordinary invocation context.
+    ///
+    /// The host suspends editor output and preserves draft, cursor, history,
+    /// pagination and shell scope. This does not run the interactive access hook:
+    /// missing credentials must return guidance without an implicit login.
+    fn execute_repl_action(
+        &self,
+        _id: &str,
+        _context: &NativeCommandContext<'_>,
+    ) -> Result<NativeCommandOutcome> {
+        anyhow::bail!("unknown editor action")
+    }
+
+    /// Reports actual REPL input selection without blocking startup.
+    ///
+    /// Rich input supplies a cancellable lifetime. Basic input supplies `None`
+    /// for existing startup behavior only: do not start recurring work or audio.
+    /// Session-wide JSON never calls this hook. Stop rich work on cancellation.
+    fn start_repl(&self, _config: &ResolvedConfig, _session: Option<crate::repl::ReplSession>) {}
+
+    /// Consumes a request to fetch completion data after configuration or execution.
+    ///
+    /// The REPL checks this between editor cycles, after configuration has been
+    /// applied. Keep it local and one-shot: publishing fetched data should only
+    /// request a tree rebuild, not another fetch.
+    fn take_completion_fetch_request(&self) -> bool {
+        false
+    }
 
     /// Refreshes runtime completion data on a host-owned background thread.
     ///
-    /// The host invokes this once when an authorized interactive REPL starts.
+    /// The host invokes this when an authorized interactive REPL starts, and
+    /// after [`Self::take_completion_fetch_request`] requests another fetch.
     /// Implementations may perform remote I/O here, then atomically replace
     /// the snapshot read by [`NativeCommand::augment_completion`].
     fn refresh_completion(&self) -> Result<()> {
@@ -577,6 +1026,7 @@ pub trait NativeCommand: Send + Sync {
 #[must_use]
 pub struct NativeCommandRegistry {
     commands: Arc<BTreeMap<String, Arc<dyn NativeCommand>>>,
+    completion_refresh_requested: Arc<AtomicBool>,
 }
 
 impl NativeCommandRegistry {
@@ -595,7 +1045,7 @@ impl NativeCommandRegistry {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use anyhow::Result;
     /// use clap::Command;
     /// use osp_cli::{
@@ -635,7 +1085,7 @@ impl NativeCommandRegistry {
     pub fn register(&mut self, command: impl NativeCommand + 'static) {
         let mut next = (*self.commands).clone();
         let command = Arc::new(command) as Arc<dyn NativeCommand>;
-        let name = normalize_name(&command.describe().name);
+        let name = normalize_name(command.command().get_name());
         next.insert(name, command);
         self.commands = Arc::new(next);
     }
@@ -653,29 +1103,76 @@ impl NativeCommandRegistry {
         self.commands.get(&normalize_name(name))
     }
 
+    /// Resolves parsed argv through clap, so values cannot impersonate command names.
+    pub(crate) fn writes(&self, tokens: &[String]) -> Option<bool> {
+        let tokens = if tokens.first().is_some_and(|token| token == "sudo") {
+            &tokens[1..]
+        } else {
+            tokens
+        };
+        let native = self.command(tokens.first()?)?;
+        let args = native.normalize_args(&tokens[1..]).ok()?;
+        let command = native.command();
+        // Templates can put {} in typed value slots. Keep the resolved command path.
+        let matches = command
+            .clone()
+            .ignore_errors(true)
+            .try_get_matches_from(std::iter::once(tokens[0].clone()).chain(args))
+            .ok()?;
+        let mut leaf = &command;
+        let mut matched = &matches;
+        let mut effect = leaf.get::<NativeEffect>().copied();
+        while let Some((name, child)) = matched.subcommand() {
+            leaf = leaf.find_subcommand(name)?;
+            effect = leaf.get::<NativeEffect>().copied().or(effect);
+            matched = child;
+        }
+        if leaf.get_subcommands().next().is_some() {
+            return None;
+        }
+        effect
+            .map(|effect| matches!(effect, NativeEffect::Write))
+            .or_else(|| {
+                const READ_VERBS: &[&str] = &[
+                    "host", "info", "find", "list", "get", "show", "status", "history", "help",
+                ];
+                READ_VERBS.contains(&leaf.get_name()).then_some(false)
+            })
+    }
+
     /// Returns catalog metadata for all registered native commands.
-    pub fn catalog(&self) -> Vec<NativeCommandCatalogEntry> {
+    pub(crate) fn catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(false)
     }
 
     /// Returns catalog metadata with native runtime completion additions.
-    pub fn completion_catalog(&self) -> Vec<NativeCommandCatalogEntry> {
+    pub(crate) fn completion_catalog(&self) -> Vec<CommandCatalogEntry> {
         self.catalog_with_completion(true)
     }
 
-    pub(crate) fn refresh_completion_in_background(&self, should_refresh: impl Fn(&str) -> bool) {
+    pub(crate) fn take_completion_refresh_request(&self) -> bool {
+        self.completion_refresh_requested
+            .swap(false, Ordering::AcqRel)
+    }
+
+    pub(crate) fn refresh_completion_in_background(
+        &self,
+        should_refresh: impl Fn(&str, &dyn NativeCommand) -> bool,
+    ) {
         for (name, command) in self.commands.iter() {
-            if !should_refresh(name) {
+            if !should_refresh(name, command.as_ref()) {
                 continue;
             }
             let name = name.clone();
             let command = Arc::clone(command);
+            let completion_refresh_requested = Arc::clone(&self.completion_refresh_requested);
             if let Err(error) = std::thread::Builder::new()
                 .name(format!("osp-completion-{name}"))
                 .spawn(move || {
                     if let Err(error) = command.refresh_completion() {
                         tracing::debug!(command = %name, %error, "native completion refresh failed");
                     }
+                    completion_refresh_requested.store(true, Ordering::Release);
                 })
             {
                 tracing::warn!(%error, "failed to start native completion refresh");
@@ -683,34 +1180,41 @@ impl NativeCommandRegistry {
         }
     }
 
-    fn catalog_with_completion(&self, augment_completion: bool) -> Vec<NativeCommandCatalogEntry> {
+    fn catalog_with_completion(&self, augment_completion: bool) -> Vec<CommandCatalogEntry> {
         self.commands
             .values()
             .map(|command| {
                 let mut describe = command.describe();
                 describe.inherit_auth_from_parents();
-                let mut completion = crate::plugin::conversion::to_command_spec(&describe);
+                let mut completion = command.completion();
                 if augment_completion {
                     command.augment_completion(&mut completion);
                 }
-                NativeCommandCatalogEntry {
-                    name: describe.name.clone(),
-                    about: describe.about.clone(),
+                CommandCatalogEntry {
+                    name: completion.name.clone(),
+                    about: crate::core::clap_metadata::plain(command.command().get_about())
+                        .unwrap_or_default(),
                     auth: describe.auth.clone(),
-                    subcommands: crate::plugin::conversion::direct_subcommand_names(&completion),
+                    subcommands: command
+                        .command()
+                        .get_subcommands()
+                        .filter(|child| !child.is_hide_set())
+                        .map(|child| child.get_name().to_string())
+                        .collect(),
                     completion,
+                    source: CommandSource::Native,
                 }
             })
             .collect()
     }
 
-    /// Builds a command-policy registry derived from command descriptions.
-    pub fn command_policy_registry(&self) -> CommandPolicyRegistry {
-        let mut registry = CommandPolicyRegistry::new();
+    /// Collects inherited wire auth by canonical command path.
+    pub(crate) fn command_auth(&self) -> BTreeMap<CommandPath, DescribeCommandAuthV1> {
+        let mut registry = BTreeMap::new();
         for command in self.commands.values() {
             let mut describe = command.describe();
             describe.inherit_auth_from_parents();
-            register_describe_command_policies(&mut registry, &describe, &[]);
+            collect_command_auth(&mut registry, &describe, &[]);
         }
         registry
     }

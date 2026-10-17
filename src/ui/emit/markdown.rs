@@ -1,11 +1,10 @@
 use crate::core::output_model::ColumnAlignment;
 use crate::ui::doc::{
-    Block, Doc, GuideEntriesBlock, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
+    Block, Doc, EntriesBlock, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 
-use super::key_value::display_key;
-use super::shared::format_list_item;
+use super::key_value::{display_key, scalar_text};
 use super::shared::indent_lines;
 use super::table::{PreparedCell, PreparedTable};
 
@@ -27,7 +26,7 @@ fn emit_blocks(blocks: &[Block]) -> String {
             Block::Paragraph(block) => out.push(emit_paragraph(block)),
             Block::Section(block) => out.push(emit_section(block)),
             Block::Table(block) => out.push(emit_table(block)),
-            Block::GuideEntries(block) => out.push(emit_guide_entries(block)),
+            Block::Entries(block) => out.push(emit_entries(block)),
             Block::KeyValue(block) => out.push(emit_key_value(block)),
             Block::List(block) => out.push(emit_list(block)),
             Block::Json(JsonBlock { text }) => out.push(format!("```json\n{text}\n```")),
@@ -67,7 +66,7 @@ fn emit_key_value(block: &KeyValueBlock) -> String {
     emit_plain_rows(&block.rows, 0)
 }
 
-fn emit_guide_entries(block: &GuideEntriesBlock) -> String {
+fn emit_entries(block: &EntriesBlock) -> String {
     block
         .rows
         .iter()
@@ -75,7 +74,7 @@ fn emit_guide_entries(block: &GuideEntriesBlock) -> String {
             if row.value.is_empty() {
                 format!("- `{}`", row.key)
             } else {
-                format!("- `{}` {}", row.key, row.value)
+                list_item(&format!("`{}` {}", row.key, row.value))
             }
         })
         .collect::<Vec<_>>()
@@ -83,12 +82,27 @@ fn emit_guide_entries(block: &GuideEntriesBlock) -> String {
 }
 
 fn emit_list(block: &ListBlock) -> String {
+    // Items are already Markdown, so their inline markup is kept as written.
     block
         .items
         .iter()
-        .map(|item| format!("- {}", format_list_item(item, block.inline_markup)))
+        .map(|item| list_item(item))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Formats one list item, indenting continuation lines so they stay inside it.
+fn list_item(text: &str) -> String {
+    let mut lines = text.lines();
+    let mut out = format!("- {}", lines.next().unwrap_or_default());
+    for line in lines {
+        out.push('\n');
+        if !line.is_empty() {
+            out.push_str("  ");
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 fn emit_table(block: &TableBlock) -> String {
@@ -207,11 +221,7 @@ fn emit_markdown_array_lines(
     label: &str,
     child_indent: usize,
 ) -> Vec<String> {
-    let Some(scalar_items) = items
-        .iter()
-        .map(markdown_scalar_text)
-        .collect::<Option<Vec<_>>>()
-    else {
+    let Some(scalar_items) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>() else {
         let mut lines = vec![format!("{prefix}{label}:")];
         lines.extend(emit_markdown_nested_items(items, child_indent));
         return lines;
@@ -219,7 +229,7 @@ fn emit_markdown_array_lines(
 
     match scalar_items.as_slice() {
         [] => vec![format!("{prefix}{label}:")],
-        [only] if items.len() == 1 && !markdown_array_uses_count(items) => {
+        [only] => {
             vec![format!("{prefix}{label}: {only}")]
         }
         values => {
@@ -256,28 +266,12 @@ fn emit_markdown_nested_items(items: &[KeyValueValue], indent: usize) -> Vec<Str
     lines
 }
 
-fn markdown_scalar_text(value: &KeyValueValue) -> Option<&str> {
-    match value {
-        KeyValueValue::Empty => Some(""),
-        KeyValueValue::Scalar(text) => Some(text),
-        KeyValueValue::Array(_) | KeyValueValue::Object(_) => None,
-    }
-}
-
-fn markdown_array_uses_count(items: &[KeyValueValue]) -> bool {
-    items.is_empty()
-        || items.len() > 1
-        || items
-            .first()
-            .is_some_and(|value| !matches!(value, KeyValueValue::Empty | KeyValueValue::Scalar(_)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{emit_doc, emit_table};
     use crate::core::output_model::ColumnAlignment;
     use crate::ui::doc::{
-        Block, Doc, GuideEntriesBlock, GuideEntryRow, KeyValueRow, KeyValueValue, ParagraphBlock,
+        Block, Doc, EntriesBlock, EntryRow, KeyValueRow, KeyValueValue, ParagraphBlock,
         SectionBlock, SectionTitleChrome, TableBlock,
     };
 
@@ -304,10 +298,11 @@ mod tests {
                     body_indent: 0,
                     inline_title_suffix: None,
                     trailing_newline: false,
-                    blocks: vec![Block::GuideEntries(GuideEntriesBlock {
+                    blocks: vec![Block::Entries(EntriesBlock {
+                        inline_markup: true,
                         default_indent: "  ".to_string(),
                         default_gap: None,
-                        rows: vec![GuideEntryRow {
+                        rows: vec![EntryRow {
                             key: "list".to_string(),
                             value: "List history entries".to_string(),
                             indent_hint: None,
@@ -328,6 +323,7 @@ mod tests {
     #[test]
     fn markdown_emitter_handles_empty_and_summary_tables_unit() {
         let empty = TableBlock {
+            cell_styles: Vec::new(),
             summary: Vec::new(),
             headers: Vec::new(),
             rows: Vec::new(),
@@ -337,6 +333,7 @@ mod tests {
         assert_eq!(emit_table(&empty), "");
 
         let table = TableBlock {
+            cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
                 key: "team".to_string(),
                 value: KeyValueValue::Scalar("prod".to_string()),

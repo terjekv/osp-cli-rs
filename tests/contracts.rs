@@ -40,6 +40,9 @@ mod ui_rendering;
 #[path = "contracts/version_commands.rs"]
 mod version_commands;
 
+#[path = "contracts/startup_trace.rs"]
+mod startup_trace;
+
 #[path = "contracts/snapshot_support.rs"]
 mod snapshot_support;
 
@@ -51,3 +54,18 @@ mod temp_support;
 
 #[path = "support/output.rs"]
 mod output_support;
+
+#[path = "support/process.rs"]
+mod process_support;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "contracts/binary_surface.rs"]
+mod binary_surface;
+
+#[path = "contracts/plugin_processes.rs"]
+mod plugin_processes;
+
+#[path = "contracts/cli_invocation.rs"]
+mod cli_invocation;

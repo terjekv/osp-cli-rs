@@ -12,7 +12,7 @@ arrives already baked into the tree; this module never fetches it.
 | File | Owns |
 |---|---|
 | `model.rs` | Plain data: `CompletionTree`, `CompletionNode`, `FlagNode`, `ArgNode`, `SuggestionEntry`, analysis types |
-| `tree.rs` | `CommandSpec` and `CompletionTreeBuilder`; lowering `CommandDef` into nodes |
+| `tree.rs` | Clap/describe projections and `CompletionTreeBuilder` over `CompletionNode` |
 | `parse.rs` | Shell-like tokenizing and what the cursor is editing |
 | `context.rs` | Resolving the command path, flag scope and selected provider |
 | `suggest.rs` | Matching and ranking: exact, prefix, word-boundary, then fuzzy |

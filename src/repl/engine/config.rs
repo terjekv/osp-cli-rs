@@ -77,6 +77,30 @@ pub enum ReplInputMode {
     Basic,
 }
 
+impl ReplInputMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Interactive, Self::Basic];
+
+    /// Parses the input-mode setting, including `full` and `plain` aliases.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "interactive" | "full" => Some(Self::Interactive),
+            "basic" | "plain" => Some(Self::Basic),
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Interactive => "interactive",
+            Self::Basic => "basic",
+        }
+    }
+}
+
 /// Selects when typing, rather than Tab, opens the completion menu.
 ///
 /// Tab and a leading `-` open the menu in every mode.
@@ -95,7 +119,7 @@ impl ReplTabMode {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplTabMode;
     ///
     /// assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
@@ -129,30 +153,21 @@ pub enum ReplReloadKind {
     WithIntro,
 }
 
-/// Outcome of executing one submitted REPL line.
+/// Outcome of a REPL submission or editor run.
+///
+/// The editor consumes continuation actions and returns only [`Self::Exit`] or
+/// [`Self::Restart`] to the surrounding host.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplLineResult {
+pub enum ReplResult {
+    /// Continue without printing or changing the input buffer.
+    Continue,
     /// Print output and continue the current session.
-    Continue(String),
+    Print(String),
     /// Replace the current input buffer instead of printing output.
     ReplaceInput(String),
     /// Exit the REPL with the given process status.
     Exit(i32),
     /// Rebuild the REPL runtime, optionally showing intro chrome again.
-    Restart {
-        /// Output to print before restarting.
-        output: String,
-        /// Restart presentation mode to use.
-        reload: ReplReloadKind,
-    },
-}
-
-/// Outcome of one `run_repl` session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReplRunResult {
-    /// Exit the editor loop and return a process status.
-    Exit(i32),
-    /// Restart the surrounding REPL host loop with refreshed state.
     Restart {
         /// Output to print before restarting.
         output: String,
@@ -185,6 +200,12 @@ pub struct ReplRunConfig {
     pub prompt_right: Option<PromptRightRenderer>,
     /// Optional projector used before completion/highlighting analysis.
     pub line_projector: Option<LineProjector>,
+    /// Named product actions, executed after the editor releases the terminal.
+    pub actions: Vec<crate::repl::ReplAction>,
+    /// Reports actual input selection: a rich lifetime, or `None` for basic input.
+    pub on_start: Option<Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
+    /// Ends an embedded guided session on Ctrl-C or Esc.
+    pub exit_on_interrupt: bool,
 }
 
 impl ReplRunConfig {
@@ -203,6 +224,9 @@ impl ReplRunConfig {
             tab_mode: ReplTabMode::Tab,
             prompt_right: None,
             line_projector: None,
+            actions: Vec::new(),
+            on_start: None,
+            exit_on_interrupt: false,
         }
     }
 
@@ -210,12 +234,12 @@ impl ReplRunConfig {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::{HistoryConfig, ReplInputMode, ReplPrompt, ReplRunConfig};
     ///
     /// let config = ReplRunConfig::builder(
     ///     ReplPrompt::simple("osp> "),
-    ///     HistoryConfig::builder().build(),
+    ///     HistoryConfig::default(),
     /// )
     /// .with_input_mode(ReplInputMode::Basic)
     /// .build();
@@ -301,7 +325,7 @@ impl ReplPrompt {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplPrompt;
     ///
     /// let prompt = ReplPrompt::simple("osp> ");
@@ -337,6 +361,8 @@ pub struct ReplAppearance {
     /// Without it the REPL shows no inline suggestion, which would be
     /// indistinguishable from typed text.
     pub hint_style: Option<String>,
+    /// Whether the host resolved ANSI color for the editor session.
+    pub(crate) ansi_colors: bool,
     /// Maximum number of visible rows in the history search menu.
     pub history_menu_rows: u16,
 }
@@ -346,7 +372,7 @@ impl ReplAppearance {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplAppearance;
     ///
     /// let appearance = ReplAppearance::builder()
@@ -371,6 +397,7 @@ impl Default for ReplAppearance {
             command_highlight_style: None,
             error_highlight_style: None,
             hint_style: None,
+            ansi_colors: true,
             history_menu_rows: DEFAULT_HISTORY_MENU_ROWS,
         }
     }
@@ -455,6 +482,11 @@ impl ReplAppearanceBuilder {
         self
     }
 
+    pub(crate) fn with_ansi_colors(mut self, ansi_colors: bool) -> Self {
+        self.appearance.ansi_colors = ansi_colors;
+        self
+    }
+
     /// Builds the configured [`ReplAppearance`].
     pub fn build(self) -> ReplAppearance {
         self.appearance
@@ -463,8 +495,60 @@ impl ReplAppearanceBuilder {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn repl_internal_example_1() {
+        use crate::repl::ReplTabMode;
+
+        assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
+        assert_eq!(
+            ReplTabMode::parse("after_1_letter"),
+            Some(ReplTabMode::AfterLetters(1))
+        );
+        assert_eq!(
+            ReplTabMode::parse("after_3_letters"),
+            Some(ReplTabMode::AfterLetters(3))
+        );
+        assert_eq!(ReplTabMode::parse("after_0_letters"), None);
+    }
+
+    #[test]
+    fn repl_internal_example_2() {
+        use crate::repl::{HistoryConfig, ReplInputMode, ReplPrompt, ReplRunConfig};
+
+        let config = ReplRunConfig::builder(ReplPrompt::simple("osp> "), HistoryConfig::default())
+            .with_input_mode(ReplInputMode::Basic)
+            .build();
+
+        assert_eq!(config.prompt.left, "osp> ");
+        assert_eq!(config.input_mode, ReplInputMode::Basic);
+    }
+
+    #[test]
+    fn repl_internal_example_3() {
+        use crate::repl::ReplPrompt;
+
+        let prompt = ReplPrompt::simple("osp> ");
+
+        assert_eq!(prompt.left, "osp> ");
+        assert!(prompt.indicator.is_empty());
+    }
+
+    #[test]
+    fn repl_internal_example_4() {
+        use crate::repl::ReplAppearance;
+
+        let appearance = ReplAppearance::builder()
+            .with_history_menu_rows(8)
+            .with_command_highlight_style(Some("green".to_string()))
+            .build();
+
+        assert_eq!(appearance.history_menu_rows, 8);
+        assert_eq!(appearance.command_highlight_style.as_deref(), Some("green"));
+    }
+
     use super::{
-        ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplRunConfig, ReplRunResult,
+        ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig,
     };
     use crate::repl::HistoryConfig;
 
@@ -474,13 +558,10 @@ mod tests {
             .with_history_menu_rows(8)
             .with_command_highlight_style(Some("green".to_string()))
             .build();
-        let config = ReplRunConfig::builder(
-            ReplPrompt::simple("osp> "),
-            HistoryConfig::builder().build(),
-        )
-        .with_appearance(appearance.clone())
-        .with_input_mode(ReplInputMode::Basic)
-        .build();
+        let config = ReplRunConfig::builder(ReplPrompt::simple("osp> "), HistoryConfig::default())
+            .with_appearance(appearance.clone())
+            .with_input_mode(ReplInputMode::Basic)
+            .build();
 
         assert_eq!(config.prompt.left, "osp> ");
         assert_eq!(config.input_mode, ReplInputMode::Basic);
@@ -497,13 +578,13 @@ mod tests {
         assert_eq!(prompt.left, "osp");
         assert!(prompt.indicator.is_empty());
 
-        let restart = ReplRunResult::Restart {
+        let restart = ReplResult::Restart {
             output: "reloading".to_string(),
             reload: ReplReloadKind::WithIntro,
         };
         assert!(matches!(
             restart,
-            ReplRunResult::Restart {
+            ReplResult::Restart {
                 output,
                 reload: ReplReloadKind::WithIntro
             } if output == "reloading"

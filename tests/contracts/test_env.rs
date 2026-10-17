@@ -4,6 +4,10 @@ use std::path::Path;
 pub(crate) fn isolated_env(home: &Path) -> Vec<(&'static str, OsString)> {
     let mut env = vec![
         ("HOME", home.as_os_str().to_owned()),
+        ("COLUMNS", "80".into()),
+        ("LINES", "24".into()),
+        ("LANG", "C.UTF-8".into()),
+        ("LC_ALL", "C.UTF-8".into()),
         ("XDG_CONFIG_HOME", home.join(".config").into_os_string()),
         ("XDG_CACHE_HOME", home.join(".cache").into_os_string()),
         (
@@ -25,6 +29,17 @@ pub(crate) fn isolated_env_with_config_home(
     xdg_config_home: &Path,
 ) -> Vec<(&'static str, OsString)> {
     let mut env = isolated_env(home);
-    env[1].1 = xdg_config_home.into();
+    env.iter_mut()
+        .find(|(key, _)| *key == "XDG_CONFIG_HOME")
+        .expect("isolated config home")
+        .1 = xdg_config_home.into();
     env
+}
+
+/// Construct a bounded CLI contract process.
+#[allow(dead_code)]
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> assert_cmd::Command {
+    let mut command = assert_cmd::Command::new(program);
+    command.timeout(std::time::Duration::from_secs(30));
+    command
 }

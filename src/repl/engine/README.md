@@ -35,9 +35,12 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
   never reaches scrollback.
 - Without colour there is no hint style, so no inline suggestion; it would
   look like typed text.
+- Reedline 0.36 is the minimum for multiline prompts: earlier painters treated
+  the cursor row after a resize as the prompt's first row, leaving the first
+  prompt line behind on repaint (including the first Tab after startup).
 
 ## Common changes
 
 - **Key binding:** `build_repl_keybindings` in `session.rs`.
-- **When typing opens the menu:** `AutoCompleteEmacs::opens_menu`.
+- **When typing opens the menu:** `AutoCompleteEmacs::opens_menu_at`.
 - **What the status line says:** `ReplHinter::status`.

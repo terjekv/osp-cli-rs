@@ -1,4 +1,5 @@
 use crate::core::output_model::ColumnAlignment;
+use crate::ui::text::escape_markdown_table_cell;
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::doc::TableBlock;
@@ -16,6 +17,8 @@ pub(super) struct PreparedCell {
     pub raw: String,
     pub markdown: String,
     pub width: usize,
+    pub command: bool,
+    pub style: Option<String>,
 }
 
 impl PreparedTable {
@@ -32,7 +35,20 @@ impl PreparedTable {
         let rows = block
             .rows
             .iter()
-            .map(|row| prepare_cells(row))
+            .enumerate()
+            .map(|(index, row)| {
+                let mut cells = prepare_cells(row);
+                for (col, (cell, header)) in cells.iter_mut().zip(&block.headers).enumerate() {
+                    cell.style = block
+                        .cell_styles
+                        .get(index)
+                        .and_then(|row| row.get(col))
+                        .cloned()
+                        .flatten();
+                    cell.command = header == "command";
+                }
+                cells
+            })
             .collect::<Vec<_>>();
         let mut widths = headers
             .iter()
@@ -63,8 +79,10 @@ fn prepare_cells(cells: &[String]) -> Vec<PreparedCell> {
 impl PreparedCell {
     fn new(raw: &str) -> Self {
         Self {
+            command: false,
+            style: None,
             raw: raw.to_string(),
-            markdown: raw.replace('|', "\\|"),
+            markdown: escape_markdown_table_cell(raw),
             width: UnicodeWidthStr::width(raw),
         }
     }
@@ -79,6 +97,7 @@ mod tests {
     #[test]
     fn prepared_table_captures_shared_width_and_markdown_shape_unit() {
         let table = TableBlock {
+            cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
                 key: "count".to_string(),
                 value: KeyValueValue::Scalar("1".to_string()),

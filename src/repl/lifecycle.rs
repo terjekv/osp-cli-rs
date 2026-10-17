@@ -6,7 +6,7 @@
 //! the host loop stays readable.
 
 use crate::completion::CompletionTree;
-use crate::repl::{ReplAppearance, ReplReloadKind, ReplRunConfig, ReplRunResult};
+use crate::repl::{ReplAppearance, ReplReloadKind, ReplResult, ReplRunConfig};
 use miette::Result;
 
 use crate::app;
@@ -18,8 +18,8 @@ use super::completion;
 use super::history;
 use super::input;
 use super::presentation::{
-    ReplInputMode, build_repl_appearance, build_repl_prompt, build_repl_prompt_right_renderer,
-    render_repl_intro, repl_input_mode, repl_tab_mode,
+    build_repl_appearance, build_repl_prompt, build_repl_prompt_right_renderer, render_repl_intro,
+    repl_input_mode, repl_tab_mode,
 };
 use super::surface;
 
@@ -71,11 +71,14 @@ impl ReplLoopState {
     pub(super) fn apply_run_result(
         &mut self,
         sink: &mut dyn UiSink,
-        result: ReplRunResult,
+        result: ReplResult,
         exit_message: &str,
     ) -> Option<i32> {
         match result {
-            ReplRunResult::Exit(code) => {
+            ReplResult::Continue | ReplResult::Print(_) | ReplResult::ReplaceInput(_) => {
+                unreachable!("the editor consumes continuation actions")
+            }
+            ReplResult::Exit(code) => {
                 let message = exit_message.trim_end();
                 if !message.is_empty() {
                     sink.write_stdout(message);
@@ -83,7 +86,7 @@ impl ReplLoopState {
                 }
                 Some(code)
             }
-            ReplRunResult::Restart { output, reload } => {
+            ReplResult::Restart { output, reload } => {
                 self.pending_reload = true;
                 self.show_intro = matches!(reload, ReplReloadKind::WithIntro);
                 if self.show_intro {
@@ -116,8 +119,16 @@ impl ReplCycle {
         clients: &AppClients,
         include_help_text: bool,
     ) -> Result<Self> {
-        let prepared = prepare_repl_surface_state(runtime, session, clients)?;
-        let view = ReplViewContext::from_parts(runtime, session);
+        let prepared = {
+            let _phase =
+                tracing::info_span!(target: "osp_startup", "REPL completion surface").entered();
+            prepare_repl_surface_state(runtime, session, clients)?
+        };
+        let actions = resolved_product_actions(runtime, clients)?;
+        let view = ReplViewContext {
+            actions: &actions,
+            ..ReplViewContext::from_parts(runtime, session)
+        };
         let intro_text = if include_help_text {
             render_repl_intro(view, &prepared.surface)
         } else {
@@ -125,38 +136,124 @@ impl ReplCycle {
         };
 
         Ok(Self {
-            run_config: build_repl_cycle_run_config(runtime, session, prepared),
+            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared)?,
             help_text: intro_text,
             clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
         })
     }
 }
 
+pub(crate) fn resolved_product_actions(
+    runtime: &AppRuntime,
+    clients: &AppClients,
+) -> Result<Vec<crate::repl::ReplAction>> {
+    let mut actions = Vec::new();
+    use std::io::IsTerminal;
+    if runtime.ui.render_settings.format == crate::core::output::OutputFormat::Json
+        || repl_input_mode(runtime.config.resolved()) == crate::repl::ReplInputMode::Basic
+        || !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
+    {
+        return Ok(actions);
+    }
+    let mut hint = crate::repl::ReplAction::resolve(
+        "hint.insert",
+        "Insert suggested command",
+        2,
+        runtime.config.resolved(),
+    )
+    .map_err(|e| miette::miette!("{e:#}"))?;
+    if runtime
+        .config
+        .resolved()
+        .get_string("repl.bindings.hint.insert")
+        .is_none()
+    {
+        hint.key = Some(crate::repl::ReplActionKey::AltEnter);
+    }
+    actions.push(hint);
+    for (_, command) in crate::app::runtime::visible_native_commands(&runtime.auth, clients) {
+        actions.extend(
+            command
+                .repl_actions(runtime.config.resolved())
+                .map_err(|e| miette::miette!("{e:#}"))?,
+        );
+    }
+    Ok(actions)
+}
+
 fn build_repl_cycle_run_config(
     runtime: &AppRuntime,
     session: &AppSession,
+    clients: &AppClients,
     prepared: PreparedReplSurfaceState,
-) -> ReplRunConfig {
+) -> Result<ReplRunConfig> {
+    session.native_context.activate(runtime);
+    for entry in clients.native_commands().catalog() {
+        if let Some(command) = clients.native_commands().command(&entry.name) {
+            session.native_context.register_context(
+                &entry.name,
+                command.context_origin(runtime.config.resolved()),
+                command.persisted_context_kinds(),
+                &command.command(),
+                command.context_kinds(),
+            );
+        }
+    }
+    session
+        .native_context
+        .load_context()
+        .map_err(|e| miette::miette!("{e:#}"))?;
+    for entry in clients.native_commands().catalog() {
+        if let Some(command) = clients.native_commands().command(&entry.name) {
+            command
+                .migrate_context(&session.native_context)
+                .map_err(|e| miette::miette!("{e:#}"))?;
+        }
+    }
     let view = ReplViewContext::from_parts(runtime, session);
 
-    ReplRunConfig::builder(
+    let product_status =
+        if runtime.ui.render_settings.format == crate::core::output::OutputFormat::Json {
+            None
+        } else {
+            let commands = crate::app::runtime::visible_native_commands(&runtime.auth, clients)
+                .map(|(_, command)| command.clone())
+                .collect::<Vec<_>>();
+            Some(std::sync::Arc::new(move || {
+                commands.iter().find_map(|command| command.repl_status())
+            }) as super::product::ReplStatusRenderer)
+        };
+    let mut config = ReplRunConfig::builder(
         build_repl_prompt(view),
         history::build_history_config(runtime, session),
     )
     .with_completion_tree(prepared.completion_tree)
     .with_appearance(prepared.appearance)
-    .with_input_mode(map_repl_input_mode(repl_input_mode(
-        runtime.config.resolved(),
-    )))
+    .with_input_mode(repl_input_mode(runtime.config.resolved()))
     .with_tab_mode(repl_tab_mode(runtime.config.resolved()))
     .with_prompt_right(Some(build_repl_prompt_right_renderer(
         view,
         session.prompt_timing.clone(),
+        product_status,
     )))
     .with_line_projector(Some(input::build_repl_ui_line_projector(
         runtime.config.resolved(),
     )))
-    .build()
+    .build();
+    config.exit_on_interrupt = runtime.definition.repl_line_handler.is_some();
+    config.actions = resolved_product_actions(runtime, clients)?;
+    if runtime.ui.render_settings.format != crate::core::output::OutputFormat::Json {
+        let commands = crate::app::runtime::visible_native_commands(&runtime.auth, clients)
+            .map(|(_, command)| command.clone())
+            .collect::<Vec<_>>();
+        let resolved = runtime.config.resolved().clone();
+        config.on_start = Some(std::sync::Arc::new(move |session| {
+            for command in &commands {
+                command.start_repl(&resolved, session.clone());
+            }
+        }));
+    }
+    Ok(config)
 }
 
 pub(super) fn prepare_repl_surface_state(
@@ -164,7 +261,11 @@ pub(super) fn prepare_repl_surface_state(
     session: &AppSession,
     clients: &AppClients,
 ) -> Result<PreparedReplSurfaceState> {
-    let catalog = app::authorized_completion_command_catalog_for(&runtime.auth, clients)?;
+    let catalog = app::authorized_command_catalog_for(
+        &runtime.auth,
+        clients,
+        clients.native_commands().completion_catalog(),
+    );
     let view = ReplViewContext::from_parts(runtime, session);
     let surface = surface::build_repl_surface(view, &catalog);
     let completion_tree = completion::build_repl_completion_tree(view, &surface)?;
@@ -174,14 +275,6 @@ pub(super) fn prepare_repl_surface_state(
         completion_tree,
         surface,
     })
-}
-
-fn map_repl_input_mode(mode: ReplInputMode) -> crate::repl::ReplInputMode {
-    match mode {
-        ReplInputMode::Auto => crate::repl::ReplInputMode::Auto,
-        ReplInputMode::Interactive => crate::repl::ReplInputMode::Interactive,
-        ReplInputMode::Basic => crate::repl::ReplInputMode::Basic,
-    }
 }
 
 pub(crate) fn build_cycle_chrome_output(
@@ -205,10 +298,10 @@ pub(crate) fn build_cycle_chrome_output(
 mod tests {
     use super::{ReplLoopState, build_cycle_chrome_output};
     use crate::app::sink::BufferedUiSink;
-    use crate::app::{AppState, AppStateInit, LaunchContext, RuntimeContext, TerminalKind};
+    use crate::app::{LaunchContext, RuntimeContext, TerminalKind};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
-    use crate::repl::{ReplReloadKind, ReplRunResult};
+    use crate::repl::{ReplReloadKind, ReplResult};
     use crate::ui::RenderSettings;
     use crate::ui::messages::MessageLevel;
     use crate::ui::theme_catalog::ThemeCatalog;
@@ -218,7 +311,7 @@ mod tests {
         let mut loop_state = ReplLoopState::new(true);
         let mut sink = BufferedUiSink::default();
         assert_eq!(
-            loop_state.apply_run_result(&mut sink, ReplRunResult::Exit(7), "Goodbye.\n"),
+            loop_state.apply_run_result(&mut sink, ReplResult::Exit(7), "Goodbye.\n"),
             Some(7)
         );
         assert_eq!(sink.stdout, "Goodbye.\n");
@@ -226,7 +319,7 @@ mod tests {
         let mut silent = ReplLoopState::new(false);
         let mut silent_sink = BufferedUiSink::default();
         assert_eq!(
-            silent.apply_run_result(&mut silent_sink, ReplRunResult::Exit(0), ""),
+            silent.apply_run_result(&mut silent_sink, ReplResult::Exit(0), ""),
             Some(0)
         );
         assert!(silent_sink.stdout.is_empty());
@@ -236,7 +329,7 @@ mod tests {
         assert_eq!(
             loop_state.apply_run_result(
                 &mut sink,
-                ReplRunResult::Restart {
+                ReplResult::Restart {
                     output: "hello".to_string(),
                     reload: ReplReloadKind::WithIntro,
                 },
@@ -254,7 +347,7 @@ mod tests {
         assert_eq!(
             loop_state.apply_run_result(
                 &mut sink,
-                ReplRunResult::Restart {
+                ReplResult::Restart {
                     output: "ignored".to_string(),
                     reload: ReplReloadKind::Default,
                 },
@@ -301,20 +394,26 @@ mod tests {
             .resolve(ResolveOptions::default().with_terminal("repl"))
             .expect("config should resolve");
 
-        let mut state = AppState::new(AppStateInit {
+        let mut state = crate::app::AppStateBuilder {
             context: RuntimeContext::new(None, TerminalKind::Repl, None),
             config,
-            render_settings: RenderSettings::test_plain(OutputFormat::Table),
-            message_verbosity: MessageLevel::Success,
-            error_detail: crate::app::ErrorDetail::Terse,
-            debug_verbosity: 0,
-            plugins: crate::plugin::PluginManager::new(Vec::new())
-                .with_bundled_roots(false)
-                .with_default_roots(false),
-            native_commands: crate::native::NativeCommandRegistry::default(),
-            themes: ThemeCatalog::default(),
             launch: LaunchContext::default(),
-        });
+            native_commands: crate::native::NativeCommandRegistry::default(),
+            ui: crate::app::UiState::new(
+                RenderSettings::test_plain(OutputFormat::Table),
+                MessageLevel::Success,
+                0,
+            ),
+            plugins: Some(
+                crate::plugin::PluginManager::new(Vec::new())
+                    .with_bundled_roots(false)
+                    .with_default_roots(false),
+            ),
+            themes: Some(ThemeCatalog::default()),
+            session: None,
+            definition: Default::default(),
+        }
+        .build();
 
         let mut loop_state = ReplLoopState::new(true);
         let first = loop_state
@@ -325,7 +424,7 @@ mod tests {
 
         loop_state.apply_run_result(
             &mut BufferedUiSink::default(),
-            ReplRunResult::Restart {
+            ReplResult::Restart {
                 output: String::new(),
                 reload: ReplReloadKind::Default,
             },

@@ -1,13 +1,13 @@
 //! Lower structured output into the UI document IR.
 //!
-//! This module is the semantic bridge between [`crate::core::output_model`]
+//! This module is the semantic bridge between `crate::core::output_model`
 //! and [`crate::ui::doc`]. It owns the answer to "what kind of document should
 //! a given output payload become?" while deliberately staying ignorant of
 //! terminal-specific rendering details.
 //!
 //! Keep the split here:
 //!
-//! - output semantics and guide shape come in from upstream modules
+//! - output semantics and document blocks come in from upstream modules
 //! - this module chooses document structure
 //! - emitters later decide spacing, borders, markdown markers, and terminal
 //!   chrome
@@ -16,62 +16,36 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
-use crate::core::output::OutputFormat;
-use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocumentKind, OutputItems, OutputResult, group_rows,
-    output_items_to_rows, output_items_to_value,
-};
-use crate::core::row::Row;
-use crate::guide::{
-    GuideEntry, GuideSection, GuideSectionKind, GuideView, payload_entry_value_as_entry,
-};
-
 use super::doc::{
-    Block, Doc, GuideEntriesBlock, GuideEntryRow, JsonBlock, KeyValueBlock, KeyValueRow,
-    KeyValueValue, ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, EntryRow, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue,
+    ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::RenderPlan;
-use super::settings::{HelpLayout, ResolvedHelpChromeSettings};
+use super::settings::HelpLayout;
 use super::text::{display_width, sanitize_human_text};
 use super::visible_inline_text;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GuidePresentation {
-    Direct,
-    HelpLayout(HelpLayout, bool),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct GuideSectionRef<'a> {
-    title: &'a str,
-    kind: GuideSectionKind,
-    paragraphs: &'a [String],
-    entries: &'a [GuideEntry],
-    data: Option<&'a Value>,
-}
-
-impl<'a> GuideSectionRef<'a> {
-    fn from_section(section: &'a GuideSection) -> Self {
-        Self {
-            title: &section.title,
-            kind: section.kind,
-            paragraphs: &section.paragraphs,
-            entries: &section.entries,
-            data: section.data.as_ref(),
-        }
-    }
-}
+use crate::core::document::{DocBlock, Document};
+use crate::core::output::OutputFormat;
+use crate::core::output_model::{
+    ColumnAlignment, Group, OutputDocument, OutputItems, OutputResult, group_rows,
+    output_items_to_rows,
+};
+use crate::core::row::Row;
 
 pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
-    if plan.format != OutputFormat::Json && !output.meta.presentation_lines.is_empty() {
-        return lower_presentation_lines(&output.meta.presentation_lines, plan.settings.width);
-    }
-
     let is_empty = match &output.items {
         OutputItems::Rows(rows) => rows.is_empty() || rows.iter().all(Row::is_empty),
         OutputItems::Groups(groups) => groups.is_empty(),
     };
-    if plan.format != OutputFormat::Json && is_empty {
+    let declared_empty_table = matches!(
+        plan.format,
+        OutputFormat::Table | OutputFormat::Guide | OutputFormat::Markdown
+    ) && output
+        .meta
+        .display_columns
+        .as_ref()
+        .is_some_and(|columns| !columns.is_empty());
+    if plan.format != OutputFormat::Json && is_empty && !declared_empty_table {
         return Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
                 text: "No results.".to_string(),
@@ -96,9 +70,55 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         _ => (output, None),
     };
 
-    let guide = GuideView::try_from_output_result(output);
+    if output.meta.document_rows
+        && matches!(
+            plan.format,
+            OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+        )
+    {
+        let mut doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
+            Some(document) => lower_document(document, plan.format),
+            None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
+        };
+        sanitize_doc(&mut doc);
+        return doc;
+    }
+
+    if output.meta.document_rows && plan.format == OutputFormat::Value {
+        let items = output
+            .as_rows()
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|row| {
+                if row.len() == 3
+                    && let Some(description) = row.get("description").and_then(Value::as_str)
+                {
+                    return vec![if description.is_empty() {
+                        row.get("name").map(display_value).unwrap_or_default()
+                    } else {
+                        description.into()
+                    }];
+                }
+                row.iter()
+                    .filter(|(key, value)| key.as_str() != "section" && !value.is_null())
+                    .map(|(_, value)| display_value(value))
+                    .collect()
+            })
+            .collect();
+        let mut doc = Doc {
+            blocks: vec![Block::List(ListBlock {
+                items,
+                indent: 0,
+                inline_markup: false,
+                auto_grid: false,
+            })],
+        };
+        sanitize_doc(&mut doc);
+        return doc;
+    }
 
     // Human projection is deliberately downstream of filtering and JSON output.
+    let style_source = output;
     let display;
     let output = if plan.format != OutputFormat::Json
         && (output.meta.display_columns.is_some()
@@ -112,65 +132,33 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
 
     let mut doc = match plan.format {
-        OutputFormat::Guide => {
-            if let Some(guide) = guide.as_ref() {
-                lower_guide(
-                    guide,
-                    plan.format,
-                    plan.settings.indent_size,
-                    GuidePresentation::Direct,
-                    None,
-                )
-            } else {
-                Doc {
-                    blocks: match &output.items {
-                        OutputItems::Rows(rows) if rows.len() == 1 => {
-                            lower_value_blocks(&Value::Object(rows[0].clone()))
-                        }
-                        _ => lower_value_blocks(&output_items_to_value(&output.items)),
-                    },
-                }
-            }
-        }
         OutputFormat::Json => Doc {
             blocks: vec![Block::Json(JsonBlock {
                 text: serde_json::to_string_pretty(&json_value(output))
                     .unwrap_or_else(|_| "null".to_string()),
             })],
         },
-        OutputFormat::Table => lower_table_doc(output),
-        OutputFormat::Markdown => {
-            if let Some(guide) = guide.as_ref() {
-                lower_guide(
-                    guide,
-                    plan.format,
-                    plan.settings.indent_size,
-                    GuidePresentation::Direct,
-                    None,
-                )
-            } else {
-                lower_markdown_doc(output)
-            }
-        }
-        OutputFormat::Value => {
-            if let Some(guide) = guide.as_ref() {
-                Doc {
-                    blocks: vec![Block::List(ListBlock {
-                        items: guide.to_value_lines(),
-                        indent: 0,
-                        inline_markup: false,
-                        auto_grid: false,
-                    })],
-                }
-            } else {
-                lower_value_doc(output)
-            }
-        }
+        OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output),
+        OutputFormat::Markdown => lower_markdown_doc(output),
+        OutputFormat::Value => lower_value_doc(output),
         OutputFormat::Mreg => lower_mreg_doc(output),
-        OutputFormat::Auto => Doc::default(),
+        OutputFormat::Auto | OutputFormat::Csv | OutputFormat::Tsv => Doc::default(),
     };
+    if plan.settings.color && plan.format != OutputFormat::Json {
+        apply_value_styles(&mut doc.blocks, style_source);
+    }
     if plan.format != OutputFormat::Json {
         sanitize_doc(&mut doc);
+    }
+    if plan.format != OutputFormat::Json {
+        doc.blocks
+            .extend(output.meta.display_notes.iter().map(|text| {
+                Block::Paragraph(ParagraphBlock {
+                    text: sanitize_human_text(text),
+                    indent: 0,
+                    inline_markup: false,
+                })
+            }));
     }
     if let Some((shown, total)) = shortened {
         doc.blocks.push(Block::Paragraph(ParagraphBlock {
@@ -182,126 +170,233 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     doc
 }
 
-fn lower_presentation_lines(lines: &[String], width: Option<usize>) -> Doc {
-    let lines = lines
-        .iter()
-        .map(|line| sanitize_human_text(&visible_inline_text(line)))
-        .flat_map(|line| wrap_presentation_line(&line, width))
-        .collect::<Vec<_>>();
-    if lines.is_empty() {
-        return Doc::default();
-    }
+pub(crate) fn lower_document(document: &Document, format: OutputFormat) -> Doc {
     Doc {
-        blocks: vec![Block::Paragraph(ParagraphBlock {
-            text: lines.join("\n"),
-            indent: 0,
-            inline_markup: false,
-        })],
+        blocks: lower_document_blocks(
+            &document.blocks,
+            DocumentLayout::Direct { format },
+            false,
+            false,
+        ),
     }
 }
 
-fn wrap_presentation_line(line: &str, width: Option<usize>) -> Vec<String> {
-    let Some(width) = width.filter(|width| *width > 0) else {
-        return vec![line.to_string()];
-    };
-    if display_width(line) <= width {
-        return vec![line.to_string()];
-    }
-
-    let mut remaining = line.to_string();
-    let mut wrapped = Vec::new();
-    let tree_prefix = presentation_tree_continuation_prefix(line);
-    let mut first = true;
-    while !remaining.is_empty() {
-        let continuation = if first {
-            String::new()
-        } else {
-            let prefix = tree_prefix.as_deref().unwrap_or("    ");
-            if width > display_width(prefix) {
-                prefix.to_string()
+fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
+    let mut blocks = Vec::new();
+    let mut start = 0;
+    while start < rows.len() {
+        let section = rows[start]
+            .get("section")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let end = start
+            + rows[start..]
+                .iter()
+                .take_while(|row| {
+                    row.get("section").and_then(Value::as_str).unwrap_or("") == section
+                })
+                .count();
+        let mut body = Vec::new();
+        for row in &rows[start..end] {
+            if row.len() == 3
+                && row.contains_key("description")
+                && let Some(name) = row.get("name").and_then(Value::as_str)
+            {
+                let entry = EntryRow {
+                    key: name.into(),
+                    value: row
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .into(),
+                    indent_hint: None,
+                    gap_hint: None,
+                };
+                if let Some(Block::Entries(entries)) = body.last_mut() {
+                    entries.rows.push(entry);
+                } else {
+                    body.push(Block::Entries(EntriesBlock {
+                        inline_markup: true,
+                        default_indent: " ".repeat(2),
+                        default_gap: None,
+                        rows: vec![entry],
+                    }));
+                }
+            } else if row.len() == 2
+                && let Some(text) = row.get("text").and_then(Value::as_str)
+            {
+                body.push(Block::Paragraph(ParagraphBlock {
+                    text: text.into(),
+                    indent: 0,
+                    inline_markup: true,
+                }));
             } else {
-                String::new()
+                let mut data = row.clone();
+                data.remove("section");
+                body.extend(lower_value_blocks(&Value::Object(data)));
             }
+        }
+        let next = if section.is_empty() {
+            body
+        } else {
+            vec![Block::Section(SectionBlock {
+                title: Some(section.into()),
+                title_chrome: if format == OutputFormat::Markdown {
+                    SectionTitleChrome::Ruled
+                } else {
+                    SectionTitleChrome::Plain
+                },
+                body_indent: 0,
+                inline_title_suffix: None,
+                trailing_newline: false,
+                blocks: body,
+            })]
         };
-        let available = width.saturating_sub(display_width(&continuation));
-        let (chunk, rest) = take_presentation_chunk(&remaining, available.max(1));
-        if chunk.is_empty() && rest == remaining {
-            break;
-        }
-        wrapped.push(format!("{continuation}{chunk}"));
-        remaining = rest;
-        first = false;
+        extend_with_blank_between(&mut blocks, next);
+        start = end;
     }
-    if wrapped.is_empty() {
-        vec![String::new()]
-    } else {
-        wrapped
-    }
+    Doc { blocks }
 }
 
-fn presentation_tree_continuation_prefix(line: &str) -> Option<String> {
-    let prefix_end = line
-        .char_indices()
-        .find(|(_, ch)| !matches!(ch, ' ' | '│' | '├' | '└' | '─'))
-        .map_or(line.len(), |(index, _)| index);
-    let prefix = &line[..prefix_end];
-    if !prefix.chars().any(|ch| matches!(ch, '│' | '├' | '└')) {
-        return None;
-    }
+#[derive(Clone, Copy)]
+enum DocumentLayout<'a> {
+    Direct {
+        format: OutputFormat,
+    },
+    Help {
+        plan: &'a RenderPlan,
+        layout: HelpLayout,
+    },
+}
 
-    let Some((branch_index, branch)) = prefix
-        .char_indices()
-        .rev()
-        .find(|(_, ch)| matches!(ch, '├' | '└'))
-    else {
-        return Some(prefix.to_string());
+fn lower_document_blocks(
+    blocks: &[DocBlock],
+    layout: DocumentLayout<'_>,
+    inside: bool,
+    long_help: bool,
+) -> Vec<Block> {
+    let (format, help) = match layout {
+        DocumentLayout::Direct { format } => (format, None),
+        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, Some((plan, layout))),
     };
-    let mut continuation = prefix[..branch_index].to_string();
-    continuation.push(if branch == '├' { '│' } else { ' ' });
-    continuation.extend(
-        prefix[branch_index + branch.len_utf8()..]
-            .chars()
-            .map(|_| ' '),
-    );
-    Some(continuation)
+    let mut lowered = Vec::new();
+    for block in blocks {
+        let next = match block {
+            DocBlock::Section { title, blocks, .. } => {
+                let suffix = match blocks.as_slice() {
+                    [DocBlock::Paragraph { text }]
+                        if help.is_some() && title == "Usage" && text.lines().count() == 1 =>
+                    {
+                        Some(visible_inline_text(text))
+                    }
+                    _ => None,
+                };
+                let body = if suffix.is_some() {
+                    Vec::new()
+                } else {
+                    lower_document_blocks(
+                        blocks,
+                        layout,
+                        true,
+                        long_help
+                            && !matches!(
+                                title.as_str(),
+                                "Common Invocation Options" | "Product options"
+                            ),
+                    )
+                };
+                vec![Block::Section(SectionBlock {
+                    title: (help.is_none() || !title.is_empty()).then(|| title.clone()),
+                    title_chrome: if suffix.is_some() {
+                        SectionTitleChrome::Plain
+                    } else if let Some((_, layout)) = help {
+                        help_layout_title_chrome(layout)
+                    } else if matches!(
+                        format,
+                        OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+                    ) {
+                        SectionTitleChrome::Ruled
+                    } else {
+                        SectionTitleChrome::Plain
+                    },
+                    body_indent: if format == OutputFormat::Markdown {
+                        0
+                    } else {
+                        2
+                    },
+                    inline_title_suffix: suffix,
+                    trailing_newline: help.is_none() && format != OutputFormat::Markdown,
+                    blocks: body,
+                })]
+            }
+            DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
+                text: text.clone(),
+                indent: 0,
+                inline_markup: true,
+            })],
+            DocBlock::Entries { entries } => {
+                let mut block =
+                    entries_block_with_defaults(entries, if inside { 0 } else { 2 }, None);
+                if let Some((plan, _)) = help {
+                    block.inline_markup =
+                        !long_help || !entries.iter().all(|entry| entry.name.starts_with('-'));
+                    let width = entries
+                        .iter()
+                        .map(|entry| display_width(&entry.name))
+                        .max()
+                        .unwrap_or(0);
+                    for row in &mut block.rows {
+                        if long_help && row.key.starts_with('-') {
+                            row.value = row
+                                .value
+                                .lines()
+                                .filter(|line| !line.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            row.indent_hint =
+                                Some(" ".repeat(if row.key.starts_with("--") { 4 } else { 0 }));
+                            row.gap_hint = Some("\n        ".into());
+                        } else {
+                            row.gap_hint = plan.document_entry_gap.map(|gap| {
+                                " ".repeat(width.saturating_sub(display_width(&row.key)) + gap)
+                            });
+                        }
+                    }
+                }
+                vec![Block::Entries(block)]
+            }
+            DocBlock::List { items } => vec![Block::List(ListBlock {
+                items: if format == OutputFormat::Markdown {
+                    items.clone()
+                } else {
+                    items.iter().map(|item| format!("- {item}")).collect()
+                },
+                indent: 0,
+                inline_markup: true,
+                auto_grid: false,
+            })],
+            DocBlock::Data { value } => match help {
+                Some(_) => help_layout_blocks_from_value(value, if inside { 0 } else { 2 }),
+                None => lower_value_blocks(value),
+            },
+        };
+        if help.is_some() {
+            let section_break = matches!(block, DocBlock::Section { .. })
+                || matches!(lowered.last(), Some(Block::Section(_)));
+            if section_break {
+                push_blank_lines(&mut lowered, 1);
+            } else if !lowered.is_empty() && !matches!(block, DocBlock::Paragraph { .. }) {
+                lowered.push(Block::Blank);
+            }
+            lowered.extend(next);
+        } else {
+            extend_with_blank_between(&mut lowered, next);
+        }
+    }
+    lowered
 }
 
-fn take_presentation_chunk(text: &str, width: usize) -> (String, String) {
-    if display_width(text) <= width {
-        return (text.trim_end().to_string(), String::new());
-    }
-
-    let mut used = 0;
-    let mut end = 0;
-    let mut last_break = None;
-    for (index, ch) in text.char_indices() {
-        let next = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + next > width {
-            break;
-        }
-        used += next;
-        end = index + ch.len_utf8();
-        if ch.is_whitespace() {
-            last_break = Some(end);
-        }
-    }
-    let split = last_break
-        .filter(|split| *split > 0 && !text[..*split].trim().is_empty())
-        .unwrap_or(end);
-    if split == 0 {
-        let end = text
-            .char_indices()
-            .nth(1)
-            .map_or(text.len(), |(index, _)| index);
-        return (text[..end].to_string(), text[end..].to_string());
-    }
-    (
-        text[..split].trim_end().to_string(),
-        text[split..].trim_start().to_string(),
-    )
-}
-
-fn sanitize_doc(doc: &mut Doc) {
+pub(crate) fn sanitize_doc(doc: &mut Doc) {
     sanitize_blocks(&mut doc.blocks);
 }
 
@@ -334,7 +429,7 @@ fn sanitize_blocks(blocks: &mut [Block]) {
                     }
                 }
             }
-            Block::GuideEntries(entries) => {
+            Block::Entries(entries) => {
                 entries.default_indent = sanitize_human_text(&entries.default_indent);
                 if let Some(gap) = &mut entries.default_gap {
                     *gap = sanitize_human_text(gap);
@@ -401,6 +496,37 @@ fn sanitize_key_value(value: &mut KeyValueValue) {
     }
 }
 
+/// Keep a base-2^128 carry so even a full IPv6 range has an exact human total.
+fn address_range_total(ranges: &Value, start: &str, end: &str) -> Option<String> {
+    use std::net::IpAddr;
+    let (mut high, mut low) = (0u128, 0u128);
+    for range in ranges.as_array()? {
+        let first = display_path(range, start)?
+            .as_str()?
+            .parse::<IpAddr>()
+            .ok()?;
+        let last = display_path(range, end)?.as_str()?.parse::<IpAddr>().ok()?;
+        let (first, last) = match (first, last) {
+            (IpAddr::V4(first), IpAddr::V4(last)) => {
+                (u128::from(u32::from(first)), u128::from(u32::from(last)))
+            }
+            (IpAddr::V6(first), IpAddr::V6(last)) => (u128::from(first), u128::from(last)),
+            _ => return None,
+        };
+        let (sum, carry) = low.overflowing_add(last.checked_sub(first)?);
+        let (sum, inclusive_carry) = sum.overflowing_add(1);
+        high = high.checked_add(u128::from(carry) + u128::from(inclusive_carry))?;
+        low = sum;
+    }
+    Some(match (high, low) {
+        (0, count) => count.to_string(),
+        (1, 0) => "2^128".into(),
+        (1, count) => format!("2^128 + {count}"),
+        (multiple, 0) => format!("{multiple} × 2^128"),
+        (multiple, count) => format!("{multiple} × 2^128 + {count}"),
+    })
+}
+
 fn display_output(output: &OutputResult) -> OutputResult {
     let mut display = output.clone();
     if let OutputItems::Rows(rows) = &mut display.items {
@@ -410,6 +536,102 @@ fn display_output(output: &OutputResult) -> OutputResult {
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::AddressRangeTotal {
+                        ranges,
+                        start,
+                        end,
+                        field,
+                    } => {
+                        if let Some(total) = display_path(&raw, ranges)
+                            .and_then(|ranges| address_range_total(ranges, start, end))
+                            && let Some(map) = original.as_object_mut()
+                        {
+                            map.insert(field.clone(), Value::String(total));
+                        }
+                    }
+                    DisplayRule::AddressCountRemaining {
+                        network,
+                        used,
+                        field,
+                    } => {
+                        if let Some(text) = display_path(&raw, network).and_then(Value::as_str)
+                            && let Some((address, prefix)) = text.split_once('/')
+                            && let Ok(address) = address.parse::<std::net::IpAddr>()
+                            && let Ok(prefix) = prefix.parse::<u32>()
+                            && let Some(bits) =
+                                (if address.is_ipv4() { 32u32 } else { 128 }).checked_sub(prefix)
+                            && let Some(used) = display_path(&raw, used).and_then(Value::as_u64)
+                            && let Some(map) = original.as_object_mut()
+                        {
+                            let remaining = if bits > 64 {
+                                Some(format!("2^{bits} − {used}"))
+                            } else {
+                                (1u128 << bits)
+                                    .checked_sub(u128::from(used))
+                                    .map(|count| count.to_string())
+                            };
+                            if let Some(remaining) = remaining {
+                                map.insert(field.clone(), Value::String(remaining));
+                            }
+                        }
+                    }
+                    DisplayRule::NullText { field, text } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && value.is_null()
+                        {
+                            *value = Value::String(text.clone());
+                        }
+                    }
+                    DisplayRule::Date { field, pattern } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && let Some(text) = value.as_str()
+                            && let Some(formatted) = format_date(text, pattern)
+                        {
+                            *value = Value::String(formatted);
+                        }
+                    }
+                    DisplayRule::Decimal { field, precision } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && let Some(number) = value.as_f64()
+                        {
+                            *value =
+                                Value::String(format!("{:.*}", (*precision).min(4096), number));
+                        }
+                    }
+                    DisplayRule::TextLimit { field, length } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && !value.is_null()
+                        {
+                            *value =
+                                Value::String(display_value(value).chars().take(*length).collect());
+                        }
+                    }
+                    DisplayRule::Compose { field, parts } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && (value.is_object() || value.is_array())
+                        {
+                            use crate::core::output_model::DisplayPart;
+                            let text: Option<String> = parts
+                                .iter()
+                                .map(|part| match part {
+                                    DisplayPart::Literal { text } => Some(text.clone()),
+                                    DisplayPart::Field { field } => {
+                                        display_path(value, field).map(display_value)
+                                    }
+                                })
+                                .collect();
+                            if let Some(text) = text {
+                                *value = Value::String(text);
+                            }
+                        }
+                    }
+                    DisplayRule::HideArrayItemsWhenTrue { field, when } => {
+                        if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
+                            items.retain(|item| {
+                                display_path(item, when).and_then(Value::as_bool) != Some(true)
+                            });
+                        }
+                    }
                     DisplayRule::SuffixWhenTrue {
                         field,
                         when,
@@ -459,17 +681,13 @@ fn display_output(output: &OutputResult) -> OutputResult {
                 }
             }
             *row = if let Some(columns) = &output.meta.display_columns {
-                let labels = output
-                    .meta
-                    .display_column_labels
-                    .as_ref()
-                    .filter(|labels| labels.len() == columns.len());
+                let labels = display_labels(output, columns);
                 columns
                     .iter()
                     .enumerate()
                     .map(|(index, path)| {
                         let value = display_path(&original, path);
-                        let label = labels.and_then(|labels| labels.get(index)).unwrap_or(path);
+                        let label = &labels[index];
                         (label.clone(), value.cloned().unwrap_or(Value::Null))
                     })
                     .collect()
@@ -478,27 +696,131 @@ fn display_output(output: &OutputResult) -> OutputResult {
             };
         }
         if let Some(columns) = &output.meta.display_columns {
-            display.meta.key_index = output
-                .meta
-                .display_column_labels
-                .as_ref()
-                .filter(|labels| labels.len() == columns.len())
-                .cloned()
-                .unwrap_or_else(|| columns.clone());
+            display.meta.key_index = display_labels(output, columns);
         }
     }
     display
 }
 
-fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    value
-        .get(path)
-        .or_else(|| path.split('.').try_fold(value, |value, key| value.get(key)))
+fn format_date(text: &str, pattern: &str) -> Option<String> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let date = NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S")
+        .ok()
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(text)
+                .ok()
+                .map(|date| date.naive_local())
+        })
+        .or_else(|| {
+            NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                .ok()?
+                .and_hms_opt(0, 0, 0)
+        })?;
+    let mut result = String::new();
+    use std::fmt::Write;
+    write!(&mut result, "{}", date.format(pattern)).ok()?;
+    Some(result)
+}
+
+fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
+    use crate::core::output_model::DisplayRule;
+    let columns = output
+        .meta
+        .display_columns
+        .as_deref()
+        .unwrap_or(&output.meta.key_index);
+    let labels = display_labels(output, columns);
+    let style = |key: &str, value: &str, row_index: usize| {
+        output.meta.display_rules.iter().find_map(|rule| {
+            let DisplayRule::ValueStyle { field, bold } = rule else {
+                return None;
+            };
+            let label = columns
+                .iter()
+                .position(|column| column == field)
+                .and_then(|index| labels.get(index))
+                .unwrap_or(field);
+            if key != label {
+                return None;
+            }
+            let original = output
+                .as_rows()
+                .and_then(|rows| rows.get(row_index))
+                .and_then(|row| display_path(&Value::Object(row.clone()), field).cloned());
+            let value = original.as_ref().and_then(Value::as_str).unwrap_or(value);
+            crate::core::style::is_valid_style_spec(value).then(|| {
+                if *bold {
+                    format!("bold {value}")
+                } else {
+                    value.to_owned()
+                }
+            })
+        })
+    };
+    for block in blocks {
+        match block {
+            Block::Section(section) => apply_value_styles(&mut section.blocks, output),
+            Block::Table(table) => {
+                table.cell_styles = table
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(row_index, row)| {
+                        row.iter()
+                            .zip(&table.headers)
+                            .map(|(value, key)| style(key, value, row_index))
+                            .collect()
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn display_labels(output: &OutputResult, columns: &[String]) -> Vec<String> {
+    let labels = output
+        .meta
+        .display_column_labels
+        .as_deref()
+        .filter(|labels| labels.len() == columns.len())
+        .unwrap_or(columns);
+    let mut used = BTreeSet::new();
+    labels
+        .iter()
+        .zip(columns)
+        .map(|(label, path)| {
+            let mut heading = if labels.iter().filter(|other| *other == label).count() > 1 {
+                format!("{label} ({path})")
+            } else {
+                label.clone()
+            };
+            let base = heading.clone();
+            let mut count = 2;
+            while !used.insert(heading.clone()) {
+                heading = format!("{base} ({count})");
+                count += 1;
+            }
+            heading
+        })
+        .collect()
+}
+
+pub(super) fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    value.get(path).or_else(|| {
+        if path.starts_with('/') {
+            value.pointer(path)
+        } else {
+            path.split('.').try_fold(value, |value, key| value.get(key))
+        }
+    })
 }
 
 fn display_path_mut<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
     if value.get(path).is_some() {
         value.get_mut(path)
+    } else if path.starts_with('/') {
+        value.pointer_mut(path)
     } else {
         path.split('.')
             .try_fold(value, |value, key| value.get_mut(key))
@@ -529,19 +851,26 @@ fn lower_value_doc(output: &OutputResult) -> Doc {
     Doc { blocks }
 }
 
-pub(crate) fn lower_guide_help_layout(
-    view: &GuideView,
+pub(crate) fn lower_document_help_layout(
+    document: &Document,
     plan: &RenderPlan,
     layout: HelpLayout,
-    show_footer_rule: bool,
+    footer: bool,
 ) -> Doc {
-    lower_guide(
-        view,
-        plan.format,
-        plan.settings.indent_size,
-        GuidePresentation::HelpLayout(layout, show_footer_rule),
-        Some(&plan.settings.help_chrome),
-    )
+    let mut blocks = lower_document_blocks(
+        &document.blocks,
+        DocumentLayout::Help { plan, layout },
+        false,
+        plan.document_long_help,
+    );
+    if footer
+        && blocks
+            .iter()
+            .any(|block| matches!(block, Block::Section(_)))
+    {
+        blocks.push(Block::Rule);
+    }
+    Doc { blocks }
 }
 
 /// Shortens a long row set, or the long lists inside a one-record document,
@@ -556,37 +885,60 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
         return None;
     };
     let mut total = 0;
-    if rows.len() > limit {
+    let record_document = rows.len() == 1
+        && matches!(
+            output.document,
+            Some(OutputDocument::Json(Value::Object(_)))
+        );
+    if rows.len() > limit && !record_document {
         total = rows.len();
         limited_rows.truncate(limit);
     } else if let [record] = limited_rows.as_mut_slice() {
-        for value in record.values_mut() {
-            if let Value::Array(items) = value
-                && items.len() > limit
-            {
-                total = total.max(items.len());
-                items.truncate(limit);
+        fn shorten(value: &mut Value, limit: usize, total: &mut usize) {
+            match value {
+                Value::Array(items) => {
+                    if items.len() > limit {
+                        *total = (*total).max(items.len());
+                        items.truncate(limit);
+                    }
+                    for item in items {
+                        shorten(item, limit, total);
+                    }
+                }
+                Value::Object(fields) => {
+                    for value in fields.values_mut() {
+                        shorten(value, limit, total);
+                    }
+                }
+                _ => {}
             }
+        }
+        for value in record.values_mut() {
+            shorten(value, limit, &mut total);
         }
     }
     (total > 0).then_some((limited, total))
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
-    if let Some(document) = output
-        .document
-        .as_ref()
-        .filter(|document| document.kind == OutputDocumentKind::Json)
+    let data = if let Some(document) = &output.document
+        && (output.meta.document_rows || matches!(document, OutputDocument::Json(_)))
     {
-        return document.value.clone();
-    }
-    match &output.items {
-        OutputItems::Rows(rows) => {
-            Value::Array(rows.iter().cloned().map(Value::Object).collect::<Vec<_>>())
+        document.json_value()
+    } else {
+        match &output.items {
+            OutputItems::Rows(rows) => {
+                Value::Array(rows.iter().cloned().map(Value::Object).collect())
+            }
+            OutputItems::Groups(groups) => {
+                Value::Array(groups.iter().map(json_group_value).collect())
+            }
         }
-        OutputItems::Groups(groups) => {
-            Value::Array(groups.iter().map(json_group_value).collect::<Vec<_>>())
-        }
+    };
+    if output.meta.context.is_empty() {
+        data
+    } else {
+        serde_json::json!({"data": data, "meta": {"context": output.meta.context}})
     }
 }
 
@@ -621,7 +973,7 @@ fn lower_markdown_doc(output: &OutputResult) -> Doc {
         OutputItems::Rows(rows) if rows.len() == 1 && row_has_nested_values(&rows[0]) => Doc {
             blocks: vec![Block::KeyValue(key_value_from_map(
                 &rows[0],
-                Some(&output.meta.key_index),
+                &output.meta.key_index,
             ))],
         },
         _ => lower_table_doc(output),
@@ -650,12 +1002,6 @@ fn json_group_value(group: &Group) -> Value {
 }
 
 fn lower_mreg_doc(output: &OutputResult) -> Doc {
-    if let Some(guide) = GuideView::try_from_output_result(output) {
-        return Doc {
-            blocks: lower_mreg_guide_blocks(&guide.to_json_value(), 0),
-        };
-    }
-
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
         OutputItems::Rows(rows) if rows.len() == 1 && row_has_table_arrays(&rows[0]) => Doc {
@@ -664,7 +1010,7 @@ fn lower_mreg_doc(output: &OutputResult) -> Doc {
         OutputItems::Rows(rows) if rows.len() == 1 => Doc {
             blocks: vec![Block::KeyValue(key_value_from_map(
                 &rows[0],
-                Some(&output.meta.key_index),
+                &output.meta.key_index,
             ))],
         },
         _ => lower_table_doc(output),
@@ -692,289 +1038,27 @@ fn lower_value_blocks(value: &Value) -> Vec<Block> {
                 auto_grid: false,
             })]
         }
-        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, None))],
+        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
     }
+}
+
+fn ordered_keys<'a>(
+    preferred_keys: &'a [String],
+    keys: impl IntoIterator<Item = &'a String>,
+) -> impl Iterator<Item = &'a String> {
+    let mut seen = BTreeSet::new();
+    preferred_keys
+        .iter()
+        .chain(keys)
+        .filter(move |key| seen.insert(*key))
 }
 
 fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = BTreeSet::new();
-
-    for key in key_order {
-        if !seen.insert(key.clone()) {
-            continue;
-        }
-        if let Some(value) = row.get(key)
-            && !value.is_null()
-        {
-            out.push(display_value(value));
-        }
-    }
-
-    for key in row.keys() {
-        if seen.contains(key) {
-            continue;
-        }
-        if let Some(value) = row.get(key)
-            && !value.is_null()
-        {
-            out.push(display_value(value));
-        }
-    }
-
-    out
-}
-
-fn lower_mreg_guide_blocks(value: &Value, indent: usize) -> Vec<Block> {
-    match value {
-        Value::Object(map) => ordered_keys_for_map(map)
-            .into_iter()
-            .flat_map(|key| {
-                map.get(&key)
-                    .map(|value| lower_mreg_guide_named_value(&key, value, indent))
-                    .unwrap_or_default()
-            })
-            .collect(),
-        _ => vec![Block::Paragraph(ParagraphBlock {
-            text: display_value(value),
-            indent,
-            inline_markup: false,
-        })],
-    }
-}
-
-fn lower_mreg_guide_named_value(key: &str, value: &Value, indent: usize) -> Vec<Block> {
-    match value {
-        Value::Null => vec![mreg_line_block(format!("{key}:"), indent)],
-        Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-            vec![mreg_line_block(
-                format!("{key}: {}", display_value(value)),
-                indent,
-            )]
-        }
-        Value::Array(items) if items.is_empty() => {
-            vec![mreg_line_block(format!("{key}: []"), indent)]
-        }
-        Value::Array(items)
-            if items
-                .iter()
-                .all(|item| !matches!(item, Value::Object(_) | Value::Array(_))) =>
-        {
-            if items.len() == 1 {
-                vec![mreg_line_block(
-                    format!("{key}: {}", display_value(&items[0])),
-                    indent,
-                )]
-            } else {
-                let mut blocks = vec![mreg_line_block(format!("{key} ({}):", items.len()), indent)];
-                blocks.extend(
-                    items
-                        .iter()
-                        .map(|item| mreg_line_block(display_value(item), indent + 2)),
-                );
-                blocks
-            }
-        }
-        Value::Array(items) => {
-            let mut blocks = vec![mreg_line_block(section_title(key, items.len()), indent)];
-            for (index, item) in items.iter().enumerate() {
-                if index > 0 {
-                    blocks.push(mreg_line_block("---".to_string(), indent + 2));
-                }
-                blocks.extend(lower_mreg_guide_blocks(item, indent + 2));
-            }
-            blocks
-        }
-        Value::Object(map) => {
-            let mut blocks = vec![mreg_line_block(format!("{key}:"), indent)];
-            blocks.extend(
-                ordered_keys_for_map(map)
-                    .into_iter()
-                    .flat_map(|nested_key| {
-                        map.get(&nested_key)
-                            .map(|nested| {
-                                lower_mreg_guide_named_value(&nested_key, nested, indent + 2)
-                            })
-                            .unwrap_or_default()
-                    }),
-            );
-            blocks
-        }
-    }
-}
-
-fn ordered_keys_for_map(map: &Map<String, Value>) -> Vec<String> {
-    let mut keys = map.keys().cloned().collect::<Vec<_>>();
-    keys.sort_by_key(|key| match key.as_str() {
-        "preamble" => (0usize, key.clone()),
-        "usage" => (1, key.clone()),
-        "commands" => (2, key.clone()),
-        "arguments" => (3, key.clone()),
-        "options" => (4, key.clone()),
-        "common_invocation_options" => (5, key.clone()),
-        "notes" => (6, key.clone()),
-        "sections" => (7, key.clone()),
-        "epilogue" => (8, key.clone()),
-        _ => (9, key.clone()),
-    });
-    keys
-}
-
-fn mreg_line_block(text: String, indent: usize) -> Block {
-    Block::Paragraph(ParagraphBlock {
-        text,
-        indent,
-        inline_markup: false,
-    })
-}
-
-fn lower_guide(
-    view: &GuideView,
-    format: OutputFormat,
-    indent_size: usize,
-    presentation: GuidePresentation,
-    help_chrome: Option<&ResolvedHelpChromeSettings>,
-) -> Doc {
-    let mut blocks = guide_paragraph_blocks(&view.preamble);
-    let sections = guide_sections(view);
-
-    match presentation {
-        GuidePresentation::HelpLayout(layout, show_footer_rule) => {
-            let Some(help_chrome) = help_chrome else {
-                return Doc::default();
-            };
-            extend_with_blank_between(
-                &mut blocks,
-                help_layout_blocks(&sections, layout, show_footer_rule, help_chrome),
-            );
-        }
-        GuidePresentation::Direct => {
-            extend_with_blank_between(
-                &mut blocks,
-                direct_guide_blocks(&sections, format, indent_size),
-            );
-        }
-    }
-
-    extend_with_blank_between(&mut blocks, guide_paragraph_blocks(&view.epilogue));
-    Doc { blocks }
-}
-
-fn guide_sections(view: &GuideView) -> Vec<GuideSectionRef<'_>> {
-    let use_ordered_sections = view.uses_ordered_section_representation();
-    let mut sections = Vec::new();
-    let builtin_sections = [
-        (
-            GuideSectionKind::Usage,
-            "Usage",
-            view.usage.as_slice(),
-            &[][..],
-        ),
-        (
-            GuideSectionKind::Commands,
-            "Commands",
-            &[][..],
-            view.commands.as_slice(),
-        ),
-        (
-            GuideSectionKind::Arguments,
-            "Arguments",
-            &[][..],
-            view.arguments.as_slice(),
-        ),
-        (
-            GuideSectionKind::Options,
-            "Options",
-            &[][..],
-            view.options.as_slice(),
-        ),
-        (
-            GuideSectionKind::CommonInvocationOptions,
-            "Common Invocation Options",
-            &[][..],
-            view.common_invocation_options.as_slice(),
-        ),
-        (
-            GuideSectionKind::Notes,
-            "Notes",
-            view.notes.as_slice(),
-            &[][..],
-        ),
-    ];
-    for (kind, title, paragraphs, entries) in builtin_sections {
-        if (paragraphs.is_empty() && entries.is_empty())
-            || (use_ordered_sections && view.has_canonical_builtin_section_kind(kind))
-        {
-            continue;
-        }
-
-        sections.push(GuideSectionRef {
-            title,
-            kind,
-            paragraphs,
-            entries,
-            data: None,
-        });
-    }
-
-    for section in &view.sections {
-        if !use_ordered_sections && section.is_canonical_builtin_section() {
-            continue;
-        }
-        sections.push(GuideSectionRef::from_section(section));
-    }
-
-    sections
-}
-
-fn direct_guide_blocks(
-    sections: &[GuideSectionRef<'_>],
-    format: OutputFormat,
-    indent_size: usize,
-) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    let title_chrome = if matches!(format, OutputFormat::Guide | OutputFormat::Markdown) {
-        SectionTitleChrome::Ruled
-    } else {
-        SectionTitleChrome::Plain
-    };
-    let body_indent = if matches!(format, OutputFormat::Guide) {
-        indent_size
-    } else {
-        0
-    };
-    let trailing_newline = matches!(format, OutputFormat::Guide);
-    for section in sections {
-        let section_blocks = direct_section_blocks(*section);
-        if section_blocks.is_empty() {
-            continue;
-        }
-
-        extend_with_blank_between(
-            &mut blocks,
-            vec![Block::Section(SectionBlock {
-                title: Some(section.title.to_string()),
-                title_chrome,
-                body_indent,
-                inline_title_suffix: None,
-                trailing_newline,
-                blocks: section_blocks,
-            })],
-        );
-    }
-    blocks
-}
-
-fn direct_section_blocks(section: GuideSectionRef<'_>) -> Vec<Block> {
-    let mut section_blocks = guide_paragraph_blocks(section.paragraphs);
-    let entry_blocks = entry_blocks(section.entries);
-    extend_with_blank_between(&mut section_blocks, entry_blocks);
-
-    if let Some(data) = section.data {
-        extend_with_blank_between(&mut section_blocks, lower_value_blocks(data));
-    }
-
-    section_blocks
+    ordered_keys(key_order, row.keys())
+        .filter_map(|key| row.get(key))
+        .filter(|value| !value.is_null())
+        .map(display_value)
+        .collect()
 }
 
 fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
@@ -987,115 +1071,32 @@ fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
     blocks.append(&mut extra);
 }
 
-fn guide_paragraph_blocks(paragraphs: &[String]) -> Vec<Block> {
-    trimmed_lines(paragraphs)
-        .into_iter()
-        .map(|text| {
-            Block::Paragraph(ParagraphBlock {
-                text,
-                indent: 0,
-                inline_markup: true,
-            })
-        })
-        .collect()
-}
-
-fn entry_blocks(entries: &[GuideEntry]) -> Vec<Block> {
-    if entries.is_empty() {
-        return Vec::new();
-    }
-    vec![Block::GuideEntries(guide_entries_block(entries))]
-}
-
-fn help_layout_blocks(
-    sections: &[GuideSectionRef<'_>],
-    layout: HelpLayout,
-    show_footer_rule: bool,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    for section in sections {
-        let Some(section_block) = help_layout_section_block(*section, layout, help_chrome) else {
-            continue;
-        };
-        push_blank_lines(&mut blocks, help_chrome.section_spacing);
-        blocks.push(Block::Section(section_block));
-    }
-    if show_footer_rule && !blocks.is_empty() {
-        blocks.push(Block::Rule);
-    }
-    blocks
-}
-
-fn help_layout_section_block(
-    section: GuideSectionRef<'_>,
-    layout: HelpLayout,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Option<SectionBlock> {
-    let paragraph_indent = if section.kind == GuideSectionKind::Usage
-        && section.title.trim_end_matches(':') != "Usage"
+fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::DocumentEntry> {
+    let map = value.as_object()?;
+    if map
+        .keys()
+        .any(|key| !matches!(key.as_str(), "name" | "description"))
     {
-        0
-    } else {
-        2
-    };
-    let lines = trimmed_lines(section.paragraphs);
-    let inline_title_suffix = usage_title_suffix(section, &lines);
-    let mut blocks = if lines.is_empty() || inline_title_suffix.is_some() {
-        Vec::new()
-    } else {
-        vec![Block::Paragraph(ParagraphBlock {
-            text: lines.join("\n"),
-            indent: paragraph_indent,
-            inline_markup: true,
-        })]
-    };
-
-    if !section.entries.is_empty() {
-        extend_with_blank_between(
-            &mut blocks,
-            vec![Block::GuideEntries(guide_entries_block_with_defaults(
-                section.entries,
-                help_chrome.entry_indent,
-                help_chrome.entry_gap,
-            ))],
-        );
+        return None;
     }
-    if let Some(data) = section.data {
-        extend_with_blank_between(
-            &mut blocks,
-            help_layout_blocks_from_value(data, help_chrome),
-        );
-    }
-    if blocks.is_empty() && inline_title_suffix.is_none() {
-        None
-    } else {
-        Some(SectionBlock {
-            title: Some(section.title.to_string()),
-            title_chrome: if inline_title_suffix.is_some() {
-                SectionTitleChrome::Plain
-            } else {
-                help_layout_title_chrome(layout)
-            },
-            body_indent: 0,
-            inline_title_suffix,
-            trailing_newline: false,
-            blocks,
-        })
-    }
+    Some(crate::core::document::DocumentEntry {
+        name: map.get("name")?.as_str()?.to_string(),
+        description: map
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+    })
 }
 
-fn help_layout_blocks_from_value(
-    value: &Value,
-    help_chrome: &ResolvedHelpChromeSettings,
-) -> Vec<Block> {
+fn help_layout_blocks_from_value(value: &Value, indent: usize) -> Vec<Block> {
     match value {
         Value::Object(map) if should_render_as_key_value_group(map) => {
-            vec![Block::KeyValue(key_value_from_guide_data_map(map))]
+            vec![Block::KeyValue(key_value_from_document_data_map(
+                map, indent,
+            ))]
         }
-        Value::Object(map) => vec![Block::KeyValue(KeyValueBlock {
-            rows: key_value_from_map(map, None).rows,
-        })],
+        Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
         Value::Array(items) if items.is_empty() => Vec::new(),
         Value::Array(items) => {
             if let Some(entries) = items
@@ -1103,15 +1104,13 @@ fn help_layout_blocks_from_value(
                 .map(payload_entry_value_as_entry)
                 .collect::<Option<Vec<_>>>()
             {
-                vec![Block::GuideEntries(guide_entries_block_with_defaults(
-                    &entries,
-                    help_chrome.entry_indent,
-                    help_chrome.entry_gap,
+                vec![Block::Entries(entries_block_with_defaults(
+                    &entries, indent, None,
                 ))]
             } else if items.iter().all(is_scalar_like) {
                 vec![Block::List(ListBlock {
                     items: items.iter().map(display_value).collect(),
-                    indent: 2,
+                    indent,
                     inline_markup: true,
                     auto_grid: true,
                 })]
@@ -1130,22 +1129,11 @@ fn help_layout_blocks_from_value(
         Value::Bool(_) | Value::Number(_) | Value::String(_) => {
             vec![Block::Paragraph(ParagraphBlock {
                 text: display_value(value),
-                indent: 2,
+                indent,
                 inline_markup: true,
             })]
         }
     }
-}
-
-fn usage_title_suffix(section: GuideSectionRef<'_>, lines: &[String]) -> Option<String> {
-    if section.title.trim_end_matches(':') != "Usage"
-        || lines.len() != 1
-        || !section.entries.is_empty()
-        || !matches!(section.data, None | Some(Value::Null))
-    {
-        return None;
-    }
-    Some(visible_inline_text(&lines[0]))
 }
 
 fn push_blank_lines(blocks: &mut Vec<Block>, count: usize) {
@@ -1155,38 +1143,19 @@ fn push_blank_lines(blocks: &mut Vec<Block>, count: usize) {
     blocks.extend((0..count).map(|_| Block::Blank));
 }
 
-fn key_value_from_map(
-    map: &Map<String, Value>,
-    preferred_keys: Option<&[String]>,
-) -> KeyValueBlock {
-    let mut rows = Vec::new();
-    let mut seen = BTreeSet::new();
-    if let Some(order) = preferred_keys {
-        for key in order {
-            if seen.insert(key.clone())
-                && let Some(value) = map.get(key)
-            {
-                rows.push(KeyValueRow {
+fn key_value_from_map(map: &Map<String, Value>, preferred_keys: &[String]) -> KeyValueBlock {
+    KeyValueBlock {
+        rows: ordered_keys(preferred_keys, map.keys())
+            .filter_map(|key| {
+                map.get(key).map(|value| KeyValueRow {
                     key: key.clone(),
                     value: lower_key_value_value(value, false),
                     indent: None,
                     gap: None,
-                });
-            }
-        }
+                })
+            })
+            .collect(),
     }
-    for (key, value) in map {
-        if seen.insert(key.clone()) {
-            rows.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-
-    KeyValueBlock { rows }
 }
 
 #[derive(Debug, Default)]
@@ -1235,16 +1204,8 @@ impl MregRecordBuilder {
 
 fn mreg_record_blocks(map: &Map<String, Value>, preferred_keys: &[String]) -> Vec<Block> {
     let mut builder = MregRecordBuilder::default();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone())
-            && let Some(value) = map.get(key)
-        {
-            visit_mreg_record_field(&mut builder, key, value, 0);
-        }
-    }
-    for (key, value) in map {
-        if seen.insert(key.clone()) {
+    for key in ordered_keys(preferred_keys, map.keys()) {
+        if let Some(value) = map.get(key) {
             visit_mreg_record_field(&mut builder, key, value, 0);
         }
     }
@@ -1305,7 +1266,7 @@ fn lower_key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
                 .map(|item| lower_key_value_value(item, false))
                 .collect(),
         ),
-        Value::Object(map) => KeyValueValue::Object(key_value_from_map(map, None).rows),
+        Value::Object(map) => KeyValueValue::Object(key_value_from_map(map, &[]).rows),
     }
 }
 
@@ -1331,10 +1292,11 @@ fn table_from_rows(
         .collect::<Vec<_>>();
     let mut visible_columns = (0..all_headers.len())
         .filter(|index| {
-            all_rows.iter().any(|row| {
-                row.get(*index)
-                    .is_some_and(|value| !value.trim().is_empty())
-            })
+            all_rows.is_empty()
+                || all_rows.iter().any(|row| {
+                    row.get(*index)
+                        .is_some_and(|value| !value.trim().is_empty())
+                })
         })
         .collect::<Vec<_>>();
     if visible_columns.is_empty() && !all_headers.is_empty() {
@@ -1343,6 +1305,7 @@ fn table_from_rows(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     TableBlock {
+        cell_styles: Vec::new(),
         summary: Vec::new(),
         headers: visible_columns
             .iter()
@@ -1372,31 +1335,11 @@ fn table_from_group(
 ) -> TableBlock {
     let merged_rows = group_rows(group);
     let mut summary = Vec::new();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone())
-            && let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key))
-        {
-            summary.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-    for (key, value) in &group.groups {
-        if seen.insert(key.clone()) {
-            summary.push(KeyValueRow {
-                key: key.clone(),
-                value: lower_key_value_value(value, false),
-                indent: None,
-                gap: None,
-            });
-        }
-    }
-    for (key, value) in &group.aggregates {
-        if seen.insert(key.clone()) {
+    for key in ordered_keys(
+        preferred_keys,
+        group.groups.keys().chain(group.aggregates.keys()),
+    ) {
+        if let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key)) {
             summary.push(KeyValueRow {
                 key: key.clone(),
                 value: lower_key_value_value(value, false),
@@ -1411,21 +1354,9 @@ fn table_from_group(
 }
 
 fn headers_for_rows(rows: &[Row], preferred_keys: &[String]) -> Vec<String> {
-    let mut headers = Vec::new();
-    let mut seen = BTreeSet::new();
-    for key in preferred_keys {
-        if seen.insert(key.clone()) {
-            headers.push(key.clone());
-        }
-    }
-    for row in rows {
-        for key in row.keys() {
-            if seen.insert(key.clone()) {
-                headers.push(key.clone());
-            }
-        }
-    }
-    headers
+    ordered_keys(preferred_keys, rows.iter().flat_map(Row::keys))
+        .cloned()
+        .collect()
 }
 
 fn table_from_value_array(items: &[Value]) -> Option<TableBlock> {
@@ -1473,42 +1404,30 @@ fn display_value(value: &Value) -> String {
     }
 }
 
-fn key_value_from_guide_data_map(map: &Map<String, Value>) -> KeyValueBlock {
+fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> KeyValueBlock {
     KeyValueBlock {
         rows: map
             .iter()
             .map(|(key, value)| KeyValueRow {
                 key: key.clone(),
                 value: lower_key_value_value(value, true),
-                indent: Some("  ".to_string()),
+                indent: Some(" ".repeat(indent)),
                 gap: None,
             })
             .collect(),
     }
 }
 
-fn trimmed_lines(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-fn guide_entries_block(entries: &[GuideEntry]) -> GuideEntriesBlock {
-    guide_entries_block_with_defaults(entries, 0, None)
-}
-
-fn guide_entries_block_with_defaults(
-    entries: &[GuideEntry],
+fn entries_block_with_defaults(
+    entries: &[crate::core::document::DocumentEntry],
     entry_indent: usize,
     entry_gap: Option<usize>,
-) -> GuideEntriesBlock {
-    GuideEntriesBlock {
+) -> EntriesBlock {
+    EntriesBlock {
+        inline_markup: true,
         default_indent: " ".repeat(entry_indent),
         default_gap: entry_gap.map(|value| " ".repeat(value)),
-        rows: entries.iter().map(guide_entry_row).collect(),
+        rows: entries.iter().map(entry_row).collect(),
     }
 }
 
@@ -1519,12 +1438,12 @@ fn help_layout_title_chrome(layout: HelpLayout) -> SectionTitleChrome {
     }
 }
 
-fn guide_entry_row(entry: &GuideEntry) -> GuideEntryRow {
-    GuideEntryRow {
+fn entry_row(entry: &crate::core::document::DocumentEntry) -> EntryRow {
+    EntryRow {
         key: entry.name.clone(),
-        value: entry.short_help.clone(),
-        indent_hint: entry.display_indent.clone(),
-        gap_hint: entry.display_gap.clone(),
+        value: entry.description.clone(),
+        indent_hint: None,
+        gap_hint: None,
     }
 }
 

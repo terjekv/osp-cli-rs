@@ -20,6 +20,8 @@ Supported formats:
 - `auto`
 - `guide`
 - `json`
+- `csv`
+- `tsv`
 - `table`
 - `md`
 - `mreg`
@@ -31,6 +33,10 @@ Selection order is:
 2. a command/plugin recommendation attached to the output
 3. automatic inference from the output shape
 
+Help and intro documents keep their document layout when
+`ui.guide.default_format=guide`, unless `--format` is given for that invocation.
+With `inherit` or `none`, they follow the configured format.
+
 When `format=auto`, the current rules are:
 
 - grouped output renders as `table`
@@ -38,9 +44,17 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg`
 - larger row sets render as `table`
 
-`guide` is a special-purpose format for semantic help/intro output. In
-practice you usually see it when a command explicitly produces guide-style
-content or when you ask for it directly.
+Help and intro producers build `core::Document`: ordered sections,
+paragraphs, named entries, lists, and data blocks. `auto` renders these as human
+documents laid out for the active `ui.presentation`. Ordinary records never
+become documents from field names such as `notes` or `commands`.
+
+Unstaged `--json` emits the document object, for example
+`{"blocks":[{"section":"Options","blocks":[{"entries":[{"name":"--json","description":"Emit JSON"}]}]}]}`.
+With any pipe stage, JSON emits the resulting flat rows instead. Document rows
+carry their section in a column; human rendering emits headings for consecutive
+runs without changing row order. Shape-changing stages return ordinary data.
+`guide` and `--guide` render human documents with the shared document renderer.
 
 ## Render Modes
 
@@ -80,11 +94,11 @@ Useful persistent config keys:
 - `ui.width`
 - `ui.width-max`
 
-`ui.width-max` defaults to `-1`: output grows to its content, including tables
-wider than the physical terminal. Set a positive maximum to fit output to that
-limit or the narrower measured terminal. `0` also disables the maximum.
-An explicit `ui.width` remains an upper width preference. Piped output keeps
-natural width unless an explicit width was supplied.
+`ui.width-max` defaults to `-1`: no additional cap is imposed on the measured
+terminal width. Set a positive maximum to fit output to that limit or the
+narrower terminal. `0` also disables the additional cap. An explicit `ui.width`
+is an upper width preference for terminal output. Piped output keeps full values
+regardless of these terminal preferences.
 
 ## Tables and MREG Layout
 
@@ -98,9 +112,14 @@ Table-oriented tuning lives here:
     `addresses (2):`; `inherit` follows `ui.table.border`
 - `ui.table.overflow`
   - `clip | ellipsis | wrap | none`
-  - defaults to `ellipsis`, keeping list rows compact when a table is wider
-    than the configured or detected terminal width
-  - explicit `wrap` preserves complete values across as many lines as needed
+  - defaults to `ellipsis`: each cell stays on one line, with embedded newlines
+    shown as literal `\n` and long values ellipsized to the fitted column width
+  - explicit `wrap` preserves complete values and embedded line breaks across
+    as many lines as needed
+  - `none` explicitly permits tables wider than the terminal
+
+Table cells comma-join lists. Markdown keeps complete cell values and escapes
+embedded newlines as `<br>`; JSON preserves the original typed values.
 
 `table` is the dense grid view for many rows.
 
@@ -133,9 +152,9 @@ In practice:
 The main keys here are:
 
 - `ui.help.level`
-  - `inherit | none | tiny | normal | verbose`
+  - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `ui.messages.layout`
-  - `grouped | plain | minimal`
+  - See [CONFIG.md](CONFIG.md#uirepl-keys-current) for values and aliases.
 - `ui.chrome.frame`
   - `none | top | bottom | top-bottom | square | round`
 - `ui.chrome.rule_policy`
@@ -146,10 +165,10 @@ What these do:
 - `ui.help.level` controls how much help/detail is shown
 - `ui.messages.layout` controls whether messages are grouped into sections or
   shown as plain indented groups or inline with minimal chrome
-- `ui.chrome.frame` controls the section framing style used by help, guide, and
-  grouped messages
-- `ui.chrome.rule_policy` controls whether section rules are rendered
-  independently or shared across sibling sections
+- `ui.chrome.frame` controls section framing for grouped messages. Help and
+  document headings follow the selected help layout.
+- `ui.chrome.rule_policy` controls whether grouped message rules are rendered
+  independently or shared across sibling message sections
 
 These settings change presentation only. They do not change the underlying
 command data.
@@ -215,7 +234,7 @@ ui.messages.layout = "minimal"
 Force Markdown for one command without changing config:
 
 ```bash
-osp --format md plugins commands
+osp --format md plugins list
 ```
 
 Force plain JSON for scripting:
@@ -223,3 +242,11 @@ Force plain JSON for scripting:
 ```bash
 osp --format json --render-mode plain plugins list
 ```
+
+## Fixed layout defaults
+
+Help tables have no border, help entries use two-space indentation, and help
+sections retain their default spacing. Nested output uses two-space indentation;
+lists expand after five items. These layout details are fixed rather than
+configurable. The right REPL prompt combines session context, incognito state,
+and timing when applicable.

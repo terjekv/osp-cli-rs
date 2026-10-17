@@ -2,8 +2,8 @@
 //!
 //! Public API shape:
 //!
-//! - describe command surfaces with [`CommandSpec`]
-//! - lower them into a cached [`crate::completion::CompletionTree`] with
+//! - describe command surfaces with [`CompletionNode`]
+//! - assemble them into a cached [`crate::completion::CompletionTree`] with
 //!   [`CompletionTreeBuilder`]
 //! - keep the resulting tree as plain data so the engine and embedders can
 //!   reuse it without retaining builder state
@@ -11,9 +11,10 @@
 use std::collections::BTreeMap;
 
 use crate::completion::model::{
-    ArgNode, CompletionNode, CompletionTree, FlagHints, FlagNode, PlanningHints, SuggestionEntry,
+    ArgNode, CompletionNode, CompletionTree, FlagHints, FlagNode, SuggestionEntry,
 };
-use crate::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
+use crate::core::clap_metadata as clap_meta;
+use crate::core::plugin::{DescribeCommandV1, DescribeFlagV1, DescribeSuggestionV1};
 use thiserror::Error;
 
 /// Error returned when declarative completion metadata cannot be lowered into a
@@ -26,14 +27,6 @@ pub enum CompletionTreeBuildError {
         /// Duplicate root command name.
         name: String,
     },
-    /// Two subcommand specs under the same parent path used the same name.
-    #[error("duplicate subcommand spec under {parent_path}: {name}")]
-    DuplicateSubcommand {
-        /// Parent command path that already contains `name`.
-        parent_path: String,
-        /// Duplicate subcommand name.
-        name: String,
-    },
     /// Two injected `config set` key specs used the same key.
     #[error("duplicate config set key: {key}")]
     DuplicateConfigSetKey {
@@ -42,39 +35,8 @@ pub enum CompletionTreeBuildError {
     },
 }
 
-impl CompletionTreeBuildError {
-    fn duplicate_subcommand(parent_path: &[String], name: &str) -> Self {
-        Self::DuplicateSubcommand {
-            parent_path: parent_path.join(" "),
-            name: name.to_string(),
-        }
-    }
-}
-
-/// Declarative command description used to build a completion tree.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[must_use]
-pub struct CommandSpec {
-    /// Command or subcommand name.
-    pub name: String,
-    /// Optional description shown alongside the command.
-    pub tooltip: Option<String>,
-    /// Optional hidden sort key for display ordering.
-    pub sort: Option<String>,
-    /// Positional arguments accepted by this command.
-    pub args: Vec<ArgNode>,
-    /// Flags accepted by this command.
-    pub flags: BTreeMap<String, FlagNode>,
-    /// Provider-aware flag visibility and requiredness hints.
-    pub flag_hints: Option<FlagHints>,
-    /// Optional advisory relational facts used to narrow explicit flag values.
-    pub planning: Option<PlanningHints>,
-    /// Nested subcommands below this command.
-    pub subcommands: Vec<CommandSpec>,
-}
-
-impl CommandSpec {
-    /// Starts a declarative command spec with the given command name.
+impl CompletionNode {
+    /// Creates a named command node.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -87,14 +49,6 @@ impl CommandSpec {
     /// If omitted, completion UIs show no description for this command.
     pub fn tooltip(mut self, tooltip: impl Into<String>) -> Self {
         self.tooltip = Some(tooltip.into());
-        self
-    }
-
-    /// Attaches a hidden sort key used to stabilize menu ordering.
-    ///
-    /// If omitted, the command carries no explicit sort hint.
-    pub fn sort(mut self, sort: impl Into<String>) -> Self {
-        self.sort = Some(sort.into());
         self
     }
 
@@ -122,19 +76,29 @@ impl CommandSpec {
         self
     }
 
-    /// Appends one nested subcommand.
+    /// Adds one named child command.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this node already contains the child name.
     ///
     /// If omitted, the command contributes no nested subcommand metadata.
-    pub fn subcommand(mut self, subcommand: CommandSpec) -> Self {
-        self.subcommands.push(subcommand);
+    pub fn subcommand(mut self, subcommand: CompletionNode) -> Self {
+        let name = subcommand.name.clone();
+        assert!(
+            self.children.insert(name.clone(), subcommand).is_none(),
+            "duplicate subcommand: {name}"
+        );
         self
     }
 
     /// Extends the command with nested subcommands.
     ///
     /// If omitted, the command contributes no nested subcommand metadata.
-    pub fn subcommands(mut self, subcommands: impl IntoIterator<Item = CommandSpec>) -> Self {
-        self.subcommands.extend(subcommands);
+    pub fn subcommands(mut self, subcommands: impl IntoIterator<Item = CompletionNode>) -> Self {
+        for subcommand in subcommands {
+            self = self.subcommand(subcommand);
+        }
         self
     }
 }
@@ -146,7 +110,7 @@ impl CommandSpec {
 pub struct CompletionTreeBuilder;
 
 impl CompletionTreeBuilder {
-    /// Builds an immutable completion tree from declarative command specs.
+    /// Assembles an immutable completion tree from named command nodes.
     ///
     /// The resulting structure is intentionally plain data so callers can cache
     /// it, augment it with plugin/provider hints, and pass it into the engine
@@ -155,19 +119,17 @@ impl CompletionTreeBuilder {
     /// # Errors
     ///
     /// Returns [`CompletionTreeBuildError::DuplicateRootCommand`] when `specs`
-    /// contains duplicate root command names, or
-    /// [`CompletionTreeBuildError::DuplicateSubcommand`] when any nested
-    /// subcommand list reuses a name under the same parent path.
+    /// contains duplicate root command names.
     ///
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::completion::{CommandSpec, CompletionTreeBuilder};
+    /// use osp_cli::completion::{CompletionNode, CompletionTreeBuilder};
     ///
     /// let tree = CompletionTreeBuilder.build_from_specs(
-    ///     &[CommandSpec::new("config")
+    ///     &[CompletionNode::new("config")
     ///         .tooltip("Runtime configuration")
-    ///         .subcommand(CommandSpec::new("set"))],
+    ///         .subcommand(CompletionNode::new("set"))],
     ///     [("P".to_string(), "Project fields".to_string())],
     /// )
     /// .expect("tree should build");
@@ -178,13 +140,13 @@ impl CompletionTreeBuilder {
     /// ```
     pub fn build_from_specs(
         &self,
-        specs: &[CommandSpec],
+        specs: &[CompletionNode],
         pipe_verbs: impl IntoIterator<Item = (String, String)>,
     ) -> Result<CompletionTree, CompletionTreeBuildError> {
         let mut root = CompletionNode::default();
         for spec in specs {
             let name = spec.name.clone();
-            let node = Self::node_from_spec(spec, &[])?;
+            let node = spec.clone();
             if root.children.insert(name.clone(), node).is_some() {
                 return Err(CompletionTreeBuildError::DuplicateRootCommand { name });
             }
@@ -207,11 +169,11 @@ impl CompletionTreeBuilder {
     ///
     /// # Examples
     ///
-    /// ```
-    /// use osp_cli::completion::{CommandSpec, CompletionTreeBuilder, ConfigKeySpec};
+    /// ```text
+    /// use osp_cli::completion::{CompletionNode, CompletionTreeBuilder, ConfigKeySpec};
     ///
     /// let mut tree = CompletionTreeBuilder.build_from_specs(
-    ///     &[CommandSpec::new("config").subcommand(CommandSpec::new("set"))],
+    ///     &[CompletionNode::new("config").subcommand(CompletionNode::new("set"))],
     ///     [],
     /// )
     /// .expect("tree should build");
@@ -229,7 +191,7 @@ impl CompletionTreeBuilder {
     /// assert!(set_node.children.contains_key("log.level"));
     /// assert!(set_node.children["ui.format"].value_key);
     /// ```
-    pub fn apply_config_set_keys(
+    pub(crate) fn apply_config_set_keys(
         &self,
         tree: &mut CompletionTree,
         keys: impl IntoIterator<Item = ConfigKeySpec>,
@@ -240,12 +202,14 @@ impl CompletionTreeBuilder {
         let Some(set_node) = config_node.children.get_mut("set") else {
             return Ok(());
         };
+        let set_flags = set_node.flags.clone();
 
         for key in keys {
             let key_name = key.key.clone();
             let mut node = CompletionNode {
                 tooltip: key.tooltip,
                 value_key: true,
+                flags: set_flags.clone(),
                 ..CompletionNode::default()
             };
             for suggestion in key.value_suggestions {
@@ -265,139 +229,208 @@ impl CompletionTreeBuilder {
 
         Ok(())
     }
+}
 
-    fn node_from_spec(
-        spec: &CommandSpec,
-        parent_path: &[String],
-    ) -> Result<CompletionNode, CompletionTreeBuildError> {
-        let mut node = CompletionNode {
-            tooltip: spec.tooltip.clone(),
-            sort: spec.sort.clone(),
-            args: spec.args.clone(),
-            flags: spec.flags.clone(),
-            flag_hints: spec.flag_hints.clone(),
-            planning: spec.planning.clone(),
-            ..CompletionNode::default()
-        };
+impl CompletionNode {
+    /// Projects visible clap grammar directly into completion metadata.
+    pub fn from_clap(command: &clap::Command) -> Self {
+        let mut required_common = Vec::new();
+        let flags = command
+            .get_arguments()
+            .filter(|arg| !arg.is_positional() && !arg.is_hide_set())
+            .flat_map(|arg| {
+                let spellings = clap_meta::flag_spellings(arg);
+                let preferred = spellings.first().cloned();
+                if arg.is_required_set() {
+                    required_common.extend(preferred.clone());
+                }
+                spellings.into_iter().enumerate().map(move |(index, name)| {
+                    (
+                        name,
+                        FlagNode {
+                            alias_of: (index > 0).then(|| preferred.clone()).flatten(),
+                            tooltip: clap_meta::arg_help(arg),
+                            flag_only: !arg.get_action().takes_values(),
+                            multi: clap_meta::is_multi(arg),
+                            value_type: clap_meta::is_path(arg)
+                                .then_some(crate::completion::ValueType::Path),
+                            suggestions: clap_suggestions(arg),
+                            ..FlagNode::default()
+                        },
+                    )
+                })
+            })
+            .collect();
+        // Native metadata previously crossed the sorted wire flag map.
+        required_common.sort();
+        Self {
+            name: command.get_name().to_string(),
+            tooltip: clap_meta::plain(command.get_about()),
+            args: command
+                .get_positionals()
+                .filter(|arg| !arg.is_hide_set())
+                .map(|arg| ArgNode {
+                    name: Some(clap_meta::arg_name(arg)),
+                    tooltip: clap_meta::arg_help(arg),
+                    required: arg.is_required_set(),
+                    multi: clap_meta::is_multi(arg),
+                    value_type: clap_meta::is_path(arg)
+                        .then_some(crate::completion::ValueType::Path),
+                    suggestions: clap_suggestions(arg),
+                    catalogs: Vec::new(),
+                })
+                .collect(),
+            flags,
+            flag_hints: required_hints(required_common),
+            children: command
+                .get_subcommands()
+                .filter(|child| !child.is_hide_set())
+                .map(|child| (child.get_name().to_string(), Self::from_clap(child)))
+                .collect(),
+            ..Self::default()
+        }
+    }
 
-        let mut path = parent_path.to_vec();
-        path.push(spec.name.clone());
-        for subcommand in &spec.subcommands {
-            let name = subcommand.name.clone();
-            let child = Self::node_from_spec(subcommand, &path)?;
-            if node.children.insert(name.clone(), child).is_some() {
-                return Err(CompletionTreeBuildError::duplicate_subcommand(&path, &name));
+    /// Projects external plugin metadata at the describe boundary.
+    pub fn from_describe(command: &DescribeCommandV1) -> Self {
+        // Alias metadata belongs to the preferred spelling. Preserve that rule
+        // even for plugins whose aliases carry different suggestions or help.
+        let mut groups = BTreeMap::<String, DescribeFlagGroup<'_>>::new();
+        for (name, flag) in &command.flags {
+            if flag.alias_of.is_none() && name.starts_with('-') {
+                groups.insert(
+                    name.clone(),
+                    DescribeFlagGroup {
+                        flag,
+                        spellings: normalized_flag_name(name).into_iter().collect(),
+                    },
+                );
             }
         }
-
-        Ok(node)
-    }
-}
-
-pub(crate) fn command_spec_from_command_def(def: &CommandDef) -> CommandSpec {
-    let required_common = def
-        .flags
-        .iter()
-        .filter(|flag| flag.required && !flag.hidden)
-        .filter_map(preferred_flag_spelling)
-        .collect::<Vec<_>>();
-    CommandSpec {
-        name: def.name.clone(),
-        tooltip: def.about.clone(),
-        sort: def.sort_key.clone(),
-        args: def.args.iter().map(arg_node_from_def).collect(),
-        flags: def.flags.iter().flat_map(flag_entries_from_def).collect(),
-        flag_hints: (!required_common.is_empty()).then_some(FlagHints {
-            required_common,
-            ..FlagHints::default()
-        }),
-        planning: None,
-        subcommands: def
-            .subcommands
-            .iter()
-            .map(command_spec_from_command_def)
-            .collect(),
-    }
-}
-
-fn preferred_flag_spelling(flag: &FlagDef) -> Option<String> {
-    flag.long
-        .as_deref()
-        .map(|long| format!("--{long}"))
-        .or_else(|| flag.short.map(|short| format!("-{short}")))
-        .or_else(|| flag.aliases.first().cloned())
-}
-
-fn arg_node_from_def(arg: &ArgDef) -> ArgNode {
-    ArgNode {
-        name: Some(arg.value_name.as_deref().unwrap_or(&arg.id).to_string()),
-        tooltip: arg.help.clone(),
-        required: arg.required,
-        multi: arg.multi,
-        value_type: to_completion_value_type(arg.value_kind),
-        suggestions: arg.choices.iter().map(suggestion_from_choice).collect(),
-        catalogs: Vec::new(),
-    }
-}
-
-fn flag_entries_from_def(flag: &FlagDef) -> Vec<(String, FlagNode)> {
-    let node = FlagNode {
-        tooltip: flag.help.clone(),
-        flag_only: !flag.takes_value,
-        multi: flag.multi,
-        value_type: to_completion_value_type(flag.value_kind),
-        suggestions: flag.choices.iter().map(suggestion_from_choice).collect(),
-        ..FlagNode::default()
-    };
-
-    let spellings = flag_spellings(flag);
-    let preferred = spellings.first().cloned();
-    spellings
-        .into_iter()
-        .enumerate()
-        .map(|(index, name)| {
-            let mut node = node.clone();
-            if index > 0 {
-                node.alias_of = preferred.clone();
+        for (name, flag) in &command.flags {
+            if let Some(preferred) = &flag.alias_of {
+                if let Some(group) = groups.get_mut(preferred) {
+                    group.spellings.push(name.clone());
+                } else if name.starts_with('-') {
+                    groups.insert(
+                        name.clone(),
+                        DescribeFlagGroup {
+                            flag,
+                            spellings: normalized_flag_name(name).into_iter().collect(),
+                        },
+                    );
+                }
             }
-            (name, node)
+        }
+        let mut required_common = Vec::new();
+        let mut flags = BTreeMap::new();
+        for DescribeFlagGroup { flag, spellings } in groups.into_values() {
+            let preferred = spellings.first().cloned();
+            if flag.required {
+                required_common.extend(preferred.clone());
+            }
+            for (index, name) in spellings.into_iter().enumerate() {
+                flags.insert(
+                    name,
+                    FlagNode {
+                        alias_of: (index > 0).then(|| preferred.clone()).flatten(),
+                        tooltip: flag.about.clone(),
+                        flag_only: flag.flag_only,
+                        multi: flag.multi,
+                        value_type: flag.value_type.map(|_| crate::completion::ValueType::Path),
+                        suggestions: flag
+                            .suggestions
+                            .iter()
+                            .map(suggestion_from_describe)
+                            .collect(),
+                        ..FlagNode::default()
+                    },
+                );
+            }
+        }
+        Self {
+            name: command.name.clone(),
+            tooltip: (!command.about.trim().is_empty()).then(|| command.about.clone()),
+            args: command
+                .args
+                .iter()
+                .map(|arg| ArgNode {
+                    name: Some(arg.name.clone().unwrap_or_else(|| "value".to_string())),
+                    tooltip: arg.about.clone(),
+                    required: arg.required,
+                    multi: arg.multi,
+                    value_type: arg.value_type.map(|_| crate::completion::ValueType::Path),
+                    suggestions: arg
+                        .suggestions
+                        .iter()
+                        .map(suggestion_from_describe)
+                        .collect(),
+                    catalogs: Vec::new(),
+                })
+                .collect(),
+            flags,
+            flag_hints: required_hints(required_common),
+            children: command
+                .subcommands
+                .iter()
+                .map(|child| (child.name.clone(), Self::from_describe(child)))
+                .collect(),
+            ..Self::default()
+        }
+    }
+}
+
+struct DescribeFlagGroup<'a> {
+    flag: &'a DescribeFlagV1,
+    spellings: Vec<String>,
+}
+
+fn normalized_flag_name(name: &str) -> Option<String> {
+    if name.starts_with("--") {
+        Some(name.to_string())
+    } else {
+        name.strip_prefix('-')?
+            .chars()
+            .next()
+            .map(|short| format!("-{short}"))
+    }
+}
+
+fn required_hints(required_common: Vec<String>) -> Option<FlagHints> {
+    (!required_common.is_empty()).then_some(FlagHints {
+        required_common,
+        ..FlagHints::default()
+    })
+}
+
+fn clap_suggestions(arg: &clap::Arg) -> Vec<SuggestionEntry> {
+    arg.get_possible_values()
+        .into_iter()
+        .filter(|value| !value.is_hide_set())
+        .map(|value| SuggestionEntry {
+            value: value.get_name().to_string(),
+            meta: value.get_help().map(ToString::to_string),
+            display: None,
+            sort: None,
+            aliases: Vec::new(),
         })
         .collect()
 }
 
-fn flag_spellings(flag: &FlagDef) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Some(long) = flag.long.as_deref() {
-        names.push(format!("--{long}"));
-    }
-    if let Some(short) = flag.short {
-        names.push(format!("-{short}"));
-    }
-    names.extend(flag.aliases.iter().cloned());
-    names
-}
-
-fn suggestion_from_choice(choice: &ValueChoice) -> SuggestionEntry {
+fn suggestion_from_describe(value: &DescribeSuggestionV1) -> SuggestionEntry {
     SuggestionEntry {
-        value: choice.value.clone(),
-        meta: choice.help.clone(),
-        display: choice.display.clone(),
-        sort: choice.sort_key.clone(),
+        value: value.value.clone(),
+        meta: value.meta.clone(),
+        display: value.display.clone(),
+        sort: value.sort.clone(),
         aliases: Vec::new(),
-    }
-}
-
-fn to_completion_value_type(value_kind: Option<ValueKind>) -> Option<crate::completion::ValueType> {
-    match value_kind {
-        Some(ValueKind::Path) => Some(crate::completion::ValueType::Path),
-        Some(ValueKind::Enum | ValueKind::FreeText) | None => None,
     }
 }
 
 /// Declarative `config set` key metadata used for completion nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[must_use]
-pub struct ConfigKeySpec {
+pub(crate) struct ConfigKeySpec {
     /// Config key name completed below `config set`.
     pub key: String,
     /// Optional description shown for the key.
@@ -437,18 +470,41 @@ impl ConfigKeySpec {
 
 #[cfg(test)]
 mod tests {
-    use crate::completion::model::CompletionTree;
-    use crate::core::command_def::{ArgDef, CommandDef, FlagDef, ValueChoice, ValueKind};
 
-    use super::{
-        CommandSpec, CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec,
-        command_spec_from_command_def,
-    };
+    #[test]
+    fn internal_example_1() {
+        use crate::completion::{CompletionNode, CompletionTreeBuilder, ConfigKeySpec};
+
+        let mut tree = CompletionTreeBuilder
+            .build_from_specs(
+                &[CompletionNode::new("config").subcommand(CompletionNode::new("set"))],
+                [],
+            )
+            .expect("tree should build");
+        CompletionTreeBuilder
+            .apply_config_set_keys(
+                &mut tree,
+                [
+                    ConfigKeySpec::new("ui.format"),
+                    ConfigKeySpec::new("log.level"),
+                ],
+            )
+            .expect("config keys should inject");
+
+        let set_node = &tree.root.children["config"].children["set"];
+        assert!(set_node.children.contains_key("ui.format"));
+        assert!(set_node.children.contains_key("log.level"));
+        assert!(set_node.children["ui.format"].value_key);
+    }
+
+    use crate::completion::model::CompletionTree;
+
+    use super::{CompletionNode, CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};
 
     fn build_tree() -> CompletionTree {
         CompletionTreeBuilder
             .build_from_specs(
-                &[CommandSpec::new("config").subcommand(CommandSpec::new("set"))],
+                &[CompletionNode::new("config").subcommand(CompletionNode::new("set"))],
                 [("F".to_string(), "Filter".to_string())],
             )
             .expect("tree should build")
@@ -458,7 +514,7 @@ mod tests {
     fn duplicate_root_specs_return_an_error() {
         let err = CompletionTreeBuilder
             .build_from_specs(
-                &[CommandSpec::new("config"), CommandSpec::new("config")],
+                &[CompletionNode::new("config"), CompletionNode::new("config")],
                 [],
             )
             .expect_err("duplicate root command should fail");
@@ -489,67 +545,6 @@ mod tests {
             CompletionTreeBuildError::DuplicateConfigSetKey {
                 key: "ui.format".to_string()
             }
-        );
-    }
-
-    #[test]
-    fn duplicate_subcommands_return_an_error() {
-        let err = CompletionTreeBuilder
-            .build_from_specs(
-                &[CommandSpec::new("config")
-                    .subcommands([CommandSpec::new("set"), CommandSpec::new("set")])],
-                [],
-            )
-            .expect_err("duplicate subcommand should fail");
-
-        assert_eq!(
-            err,
-            CompletionTreeBuildError::DuplicateSubcommand {
-                parent_path: "config".to_string(),
-                name: "set".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn command_spec_conversion_preserves_flag_spellings_and_choices_unit() {
-        let def = CommandDef::new("theme")
-            .about("Inspect themes")
-            .sort("10")
-            .arg(
-                ArgDef::new("name")
-                    .help("Theme name")
-                    .value_kind(ValueKind::Path)
-                    .choices([ValueChoice::new("nord").help("Builtin theme")]),
-            )
-            .flag(
-                FlagDef::new("raw")
-                    .long("raw")
-                    .short('r')
-                    .alias("--plain")
-                    .help("Show raw values"),
-            )
-            .flag(FlagDef::new("yes").long("yes").required());
-
-        let spec = command_spec_from_command_def(&def);
-
-        assert_eq!(spec.tooltip.as_deref(), Some("Inspect themes"));
-        assert_eq!(spec.sort.as_deref(), Some("10"));
-        assert!(spec.flags.contains_key("--raw"));
-        assert!(spec.flags.contains_key("-r"));
-        assert!(spec.flags.contains_key("--plain"));
-        assert_eq!(
-            spec.flag_hints
-                .as_ref()
-                .expect("required flags should produce hints")
-                .required_common,
-            ["--yes"]
-        );
-        assert_eq!(spec.args[0].tooltip.as_deref(), Some("Theme name"));
-        assert_eq!(spec.args[0].suggestions[0].value, "nord");
-        assert_eq!(
-            spec.args[0].value_type,
-            Some(crate::completion::ValueType::Path)
         );
     }
 }

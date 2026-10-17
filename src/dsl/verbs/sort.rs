@@ -2,12 +2,14 @@
 use crate::core::output_model::OutputItems;
 use std::{cmp::Ordering, net::IpAddr};
 
-use crate::core::{output_model::Group, row::Row};
+use crate::core::output_model::{Group, group_header_row};
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
 use crate::dsl::{
-    eval::resolve::resolve_first_value, parse::key_spec::KeySpec, verbs::common::parse_stage_words,
+    eval::{matchers::fold_case, numeric::integer_value, resolve::resolve_first_value},
+    parse::key_spec::KeySpec,
+    verbs::common::parse_stage_words,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,21 +43,13 @@ pub(crate) fn apply_set(
     plan: &SortPlan,
 ) -> Result<crate::dsl::model::RowSet> {
     if set.grouped {
-        validate_keys(
-            &set.partitions
-                .iter()
-                .map(merged_group_row)
-                .collect::<Vec<_>>(),
-            plan,
-        )?;
-        set.partitions
-            .sort_by(|left, right| compare_groups(left, right, &plan.keys));
+        set.partitions = sort_items(set.partitions, plan, resolve_group_value)?;
         Ok(set)
     } else {
-        set.map_rows(|mut rows| {
-            validate_keys(&rows, plan)?;
-            rows.sort_by(|left, right| compare_rows(left, right, &plan.keys));
-            Ok(rows)
+        set.map_rows(|rows| {
+            sort_items(rows, plan, |row, key| {
+                resolve_first_value(row, &key.key_spec.token, key.key_spec.exact)
+            })
         })
     }
 }
@@ -73,20 +67,32 @@ fn apply_value_with_plan(value: Value, plan: &SortPlan) -> Result<Value> {
     )
 }
 
-fn validate_keys(rows: &[Row], plan: &SortPlan) -> Result<()> {
-    for key in &plan.keys {
-        if !rows.is_empty()
-            && !rows.iter().any(|row| {
-                resolve_first_value(row, &key.key_spec.token, key.key_spec.exact).is_some()
-            })
-        {
+fn sort_items<T>(
+    items: Vec<T>,
+    plan: &SortPlan,
+    resolve: impl Fn(&T, &SortKeySpec) -> Option<Value>,
+) -> Result<Vec<T>> {
+    let mut keyed = items
+        .into_iter()
+        .map(|item| {
+            let values = plan
+                .keys
+                .iter()
+                .map(|key| resolve(&item, key))
+                .collect::<Vec<_>>();
+            (item, values)
+        })
+        .collect::<Vec<_>>();
+    for (index, key) in plan.keys.iter().enumerate() {
+        if !keyed.is_empty() && !keyed.iter().any(|(_, values)| values[index].is_some()) {
             return Err(anyhow!(
                 "S: field '{}' is absent from all rows",
                 key.key_spec.token
             ));
         }
     }
-    Ok(())
+    keyed.sort_by(|(_, left), (_, right)| compare_keys(left, right, &plan.keys));
+    Ok(keyed.into_iter().map(|(item, _)| item).collect())
 }
 
 fn parse_sort_spec(spec: &str) -> Result<Vec<SortKeySpec>> {
@@ -156,35 +162,33 @@ fn parse_sort_cast(raw: &str) -> Result<SortCast> {
     }
 }
 
-fn compare_rows(left: &Row, right: &Row, keys: &[SortKeySpec]) -> Ordering {
-    for key in keys {
-        let left_value = resolve_first_value(left, &key.key_spec.token, key.key_spec.exact);
-        let right_value = resolve_first_value(right, &key.key_spec.token, key.key_spec.exact);
-
+fn compare_keys(left: &[Option<Value>], right: &[Option<Value>], keys: &[SortKeySpec]) -> Ordering {
+    for ((left_value, right_value), key) in left.iter().zip(right).zip(keys) {
         let mut ordering =
             compare_optional_values(left_value.as_ref(), right_value.as_ref(), key.cast);
         if key.descending && left_value.is_some() && right_value.is_some() {
             ordering = ordering.reverse();
         }
-
         if ordering != Ordering::Equal {
             return ordering;
         }
     }
-
     Ordering::Equal
 }
 
-fn compare_groups(left: &Group, right: &Group, keys: &[SortKeySpec]) -> Ordering {
-    let left_row = merged_group_row(left);
-    let right_row = merged_group_row(right);
-    compare_rows(&left_row, &right_row, keys)
-}
-
-fn merged_group_row(group: &Group) -> Row {
-    let mut merged = group.groups.clone();
-    merged.extend(group.aggregates.clone());
-    merged
+fn resolve_group_value(group: &Group, key: &SortKeySpec) -> Option<Value> {
+    group
+        .groups
+        .get(&key.key_spec.token)
+        .or_else(|| group.aggregates.get(&key.key_spec.token))
+        .cloned()
+        .or_else(|| {
+            resolve_first_value(
+                &group_header_row(group),
+                &key.key_spec.token,
+                key.key_spec.exact,
+            )
+        })
 }
 
 fn compare_optional_values(
@@ -209,11 +213,13 @@ fn compare_values(left: &Value, right: &Value, cast: SortCast) -> Ordering {
     }
 }
 
-fn compare_auto(left: &Value, right: &Value) -> Ordering {
+pub(super) fn compare_auto(left: &Value, right: &Value) -> Ordering {
     // Classification must depend on each value, never on its comparison
     // partner: pairwise numeric/text fallback produces ordering cycles.
     match (to_f64(left), to_f64(right)) {
-        (Some(left), Some(right)) => left.total_cmp(&right),
+        (Some(left_num), Some(right_num)) => {
+            compare_numeric_values(left, right, left_num, right_num)
+        }
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => compare_ip(left, right),
@@ -222,7 +228,9 @@ fn compare_auto(left: &Value, right: &Value) -> Ordering {
 
 fn compare_numbers(left: &Value, right: &Value) -> Ordering {
     match (to_f64(left), to_f64(right)) {
-        (Some(left_num), Some(right_num)) => left_num.total_cmp(&right_num),
+        (Some(left_num), Some(right_num)) => {
+            compare_numeric_values(left, right, left_num, right_num)
+        }
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => to_string_normalized(left).cmp(&to_string_normalized(right)),
@@ -235,6 +243,13 @@ fn compare_ip(left: &Value, right: &Value) -> Ordering {
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => to_string_normalized(left).cmp(&to_string_normalized(right)),
+    }
+}
+
+fn compare_numeric_values(left: &Value, right: &Value, left_num: f64, right_num: f64) -> Ordering {
+    match (integer_value(left), integer_value(right)) {
+        (Some(left), Some(right)) => left.cmp(&right),
+        _ => left_num.total_cmp(&right_num),
     }
 }
 
@@ -257,8 +272,8 @@ fn to_ip(value: &Value) -> Option<IpAddr> {
 
 fn to_string_normalized(value: &Value) -> String {
     match value {
-        Value::String(text) => text.to_ascii_lowercase(),
-        _ => value.to_string().to_ascii_lowercase(),
+        Value::String(text) => fold_case(text),
+        _ => fold_case(&value.to_string()),
     }
 }
 

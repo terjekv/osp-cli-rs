@@ -7,15 +7,14 @@
 //! - expanding aliases into prefilled command and flag state
 //! - re-rooting the tree when the REPL is inside a shell scope
 
-use crate::app::CMD_CONFIG;
 use crate::cli::invocation::scan_command_tokens;
 use crate::cli::pipeline::{is_cli_help_stage, validate_cli_dsl_stages};
 use crate::completion::{
-    ArgNode, CommandLineParser, CompletionNode, CompletionTree, CompletionTreeBuilder,
-    ContextScope, FlagNode, SuggestionEntry,
+    ArgNode, CompletionEngine, CompletionNode, CompletionTree, CompletionTreeBuilder, ContextScope,
+    FlagNode, SuggestionEntry,
 };
 use crate::dsl::parse::pipeline::parse_stage;
-use crate::dsl::{registered_verbs, verb_info};
+use crate::dsl::verb_info;
 use crate::repl::default_pipe_verbs;
 use crate::ui::section_chrome::{
     SectionRenderContext, SectionStyleTokens, render_section_block_with_overrides,
@@ -37,12 +36,11 @@ pub(crate) fn build_repl_completion_tree(
         .build_from_specs(&surface.specs, default_pipe_verbs())
         .into_diagnostic()
         .wrap_err("failed to build REPL completion tree")?;
-    if view.auth.is_builtin_visible(CMD_CONFIG) {
-        CompletionTreeBuilder
-            .apply_config_set_keys(&mut tree, config_set_key_specs(view))
-            .into_diagnostic()
-            .wrap_err("failed to attach config completion keys")?;
-    }
+    CompletionTreeBuilder
+        .apply_config_set_keys(&mut tree, config_set_key_specs(view))
+        .into_diagnostic()
+        .wrap_err("failed to attach config completion keys")?;
+
     inject_invocation_flags(&mut tree.root);
     mark_context_only_flags(&mut tree.root);
 
@@ -96,13 +94,18 @@ fn inject_alias_nodes(
     fallback_root: Option<&CompletionNode>,
     aliases: &[ReplAliasEntry],
 ) {
+    let parse_root = fallback_root.unwrap_or(preferred_root);
+    let parse_engine = CompletionEngine::new(CompletionTree {
+        root: parse_root.clone(),
+        ..CompletionTree::default()
+    });
     for alias in aliases {
         if target_root.children.contains_key(alias.name.as_str()) {
             continue;
         }
         target_root.children.insert(
             alias.name.clone(),
-            alias_completion_node(preferred_root, fallback_root, alias),
+            alias_completion_node(preferred_root, fallback_root, alias, &parse_engine),
         );
     }
 }
@@ -111,8 +114,9 @@ fn alias_completion_node(
     preferred_root: &CompletionNode,
     fallback_root: Option<&CompletionNode>,
     alias: &ReplAliasEntry,
+    parse_engine: &CompletionEngine,
 ) -> CompletionNode {
-    let Some(parsed) = alias_completion_command(&alias.template) else {
+    let Some(parsed) = alias_completion_command(&alias.template, parse_engine) else {
         return CompletionNode {
             tooltip: Some(alias.tooltip.clone()),
             ..CompletionNode::default()
@@ -143,7 +147,10 @@ fn alias_completion_node(
     node
 }
 
-fn alias_completion_command(template: &str) -> Option<AliasCompletionCommand> {
+fn alias_completion_command(
+    template: &str,
+    parse_engine: &CompletionEngine,
+) -> Option<AliasCompletionCommand> {
     // Alias templates may contain `${...}` placeholders that are meaningful at
     // execution time but would break completion parsing. Replace them with a
     // stable sentinel so the completer can still resolve the alias shape.
@@ -151,13 +158,14 @@ fn alias_completion_command(template: &str) -> Option<AliasCompletionCommand> {
     let parsed = crate::dsl::parse_pipeline(&sanitized).ok()?;
     let tokens = shell_words::split(&parsed.command).ok()?;
     let scanned = scan_command_tokens(&tokens).ok()?;
-    if scanned.tokens.is_empty() {
+    if scanned.tokens.is_empty()
+        && scanned.invocation == crate::cli::invocation::InvocationOptions::default()
+    {
         return None;
     }
 
-    let parser = CommandLineParser;
     Some(AliasCompletionCommand {
-        command: parser.parse(&scanned.tokens),
+        command: parse_engine.parse_command_tokens(&scanned.tokens),
         prefilled_flags: invocation_prefilled_flags(&scanned.invocation),
     })
 }
@@ -202,7 +210,12 @@ fn resolved_alias_target_node(
     }
 
     let mut prefilled_positionals = Vec::new();
-    for segment in command.head().iter().skip(matched) {
+    for segment in command
+        .head()
+        .iter()
+        .skip(matched)
+        .chain(command.positional_args())
+    {
         if segment == ALIAS_PLACEHOLDER_TOKEN {
             break;
         }
@@ -280,9 +293,6 @@ fn invocation_prefilled_flags(
     if invocation.debug > 0 {
         out.insert("--debug".to_string(), Vec::new());
     }
-    if let Some(provider) = invocation.plugin_provider.clone() {
-        out.insert("--plugin-provider".to_string(), vec![provider]);
-    }
 
     out
 }
@@ -355,123 +365,23 @@ fn repl_host_command_without_invocation_flags(name: &str) -> bool {
 }
 
 fn invocation_flag_nodes() -> Vec<(String, FlagNode)> {
-    let format_values = ["auto", "guide", "json", "table", "mreg", "value", "md"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let mode_values = ["auto", "plain", "rich"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let color_values = ["auto", "always", "never"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-    let unicode_values = ["auto", "always", "never"]
-        .into_iter()
-        .map(SuggestionEntry::value)
-        .collect::<Vec<_>>();
-
-    vec![
-        (
-            "--format".to_string(),
-            FlagNode::new()
-                .tooltip("Format this invocation only")
-                .suggestions(format_values),
-        ),
-        (
-            "--guide".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format guide"),
-        ),
-        (
-            "--json".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format json"),
-        ),
-        (
-            "--table".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format table"),
-        ),
-        (
-            "--mreg".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format mreg"),
-        ),
-        (
-            "--value".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --format value"),
-        ),
-        (
-            "--md".to_string(),
-            FlagNode::new().flag_only().tooltip("Alias for --format md"),
-        ),
-        (
-            "--render-mode".to_string(),
-            FlagNode::new()
-                .tooltip("Render mode for this invocation")
-                .suggestions(mode_values),
-        ),
-        (
-            "--plain".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --render-mode plain"),
-        ),
-        (
-            "--rich".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --render-mode rich"),
-        ),
-        (
-            "--color".to_string(),
-            FlagNode::new()
-                .tooltip("Color policy for this invocation")
-                .suggestions(color_values),
-        ),
-        (
-            "--unicode".to_string(),
-            FlagNode::new()
-                .tooltip("Unicode policy for this invocation")
-                .suggestions(unicode_values),
-        ),
-        (
-            "--ascii".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Alias for --unicode never"),
-        ),
-        (
-            "--verbose".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Increase message verbosity"),
-        ),
-        (
-            "--quiet".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Decrease message verbosity"),
-        ),
-        (
-            "--debug".to_string(),
-            FlagNode::new()
-                .flag_only()
-                .tooltip("Increase developer log verbosity"),
-        ),
-        (
-            "--plugin-provider".to_string(),
-            FlagNode::new().tooltip("Select plugin provider for this invocation"),
-        ),
-    ]
+    crate::cli::invocation::INVOCATION_FLAGS
+        .iter()
+        .flat_map(|flag| {
+            let mut node = FlagNode::new().tooltip(flag.completion_help.unwrap_or(flag.help));
+            if flag.value_name.is_some() {
+                node = node.suggestions((flag.choices)().into_iter().map(SuggestionEntry::value));
+            } else {
+                node = node.flag_only();
+            }
+            std::iter::once((flag.long.to_string(), node)).chain(flag.aliases.iter().map(|alias| {
+                (
+                    alias.long.to_string(),
+                    FlagNode::new().flag_only().tooltip(alias.tooltip(flag)),
+                )
+            }))
+        })
+        .collect()
 }
 
 fn mark_context_only_flags(node: &mut CompletionNode) {
@@ -508,18 +418,29 @@ fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
     let mut lines = Vec::new();
 
     let target = spec.split_whitespace().next().unwrap_or("").trim();
-    if target.is_empty() {
-        for info in registered_verbs() {
-            lines.push(format!("  {:<5} {}", info.verb, info.summary));
+    match crate::dsl::verb_info::help_document(spec) {
+        Ok(document) => {
+            for row in document.rows() {
+                let name = row["name"].as_str().unwrap_or_default();
+                let Some(info) = verb_info(name) else {
+                    continue;
+                };
+                if target.is_empty() {
+                    lines.push(format!("  {:<5} {}", name, info.summary));
+                } else {
+                    lines.push(format!("  {}  {}", name, info.summary));
+                    lines.push(format!(
+                        "  {}",
+                        row["description"].as_str().unwrap_or_default()
+                    ));
+                }
+            }
+            if target.is_empty() {
+                lines.push(String::new());
+                lines.push("  Use | H <verb> for details.".to_string());
+            }
         }
-        lines.push(String::new());
-        lines.push("  Use | H <verb> for details.".to_string());
-    } else {
-        let lookup = target.to_ascii_uppercase();
-        if let Some(info) = verb_info(&lookup) {
-            lines.push(format!("  {}  {}", info.verb, info.summary));
-            lines.push(format!("  {}", info.help));
-        } else {
+        Err(_) => {
             lines.push(format!("  Unknown DSL verb: {target}"));
             lines.push("  Use | H to list available verbs.".to_string());
         }
@@ -558,7 +479,9 @@ mod tests {
         AppState, AppStateBuilder, LaunchContext, ReplScopeStack, RuntimeContext, TerminalKind,
         UiState,
     };
-    use crate::completion::{CompletionNode, CompletionTree, ContextScope, FlagNode};
+    use crate::completion::{
+        CompletionEngine, CompletionNode, CompletionTree, ContextScope, FlagNode,
+    };
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
     use crate::core::output::OutputFormat;
     use crate::plugin::PluginManager;
@@ -681,7 +604,9 @@ mod tests {
                 .iter()
                 .map(|entry| entry.value.as_str())
                 .collect::<Vec<_>>(),
-            vec!["auto", "guide", "json", "table", "mreg", "value", "md"]
+            vec![
+                "auto", "guide", "json", "csv", "tsv", "table", "md", "mreg", "value"
+            ]
         );
     }
 
@@ -698,8 +623,9 @@ mod tests {
 
     #[test]
     fn alias_completion_helpers_cover_prefilled_flags_missing_targets_and_collisions_unit() {
+        let parse_engine = CompletionEngine::new(CompletionTree::default());
         for template in ["--json --no-color ldap user ${uid}", "--json --no-color"] {
-            let parsed = alias_completion_command(template).expect("alias parses");
+            let parsed = alias_completion_command(template, &parse_engine).expect("alias parses");
             assert_eq!(
                 parsed.prefilled_flags.get("--format"),
                 Some(&vec!["json".to_string()])
@@ -718,7 +644,7 @@ mod tests {
             template: "missing user ${uid}".to_string(),
             tooltip: "Lookup a user".to_string(),
         };
-        let node = alias_completion_node(&CompletionNode::default(), None, &alias);
+        let node = alias_completion_node(&CompletionNode::default(), None, &alias, &parse_engine);
         assert_eq!(node.tooltip.as_deref(), Some("Lookup a user"));
         assert!(node.children.is_empty());
 

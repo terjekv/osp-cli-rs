@@ -1,11 +1,11 @@
 use super::super::menu::OspCompletionMenu;
 use super::adapter::{color_from_style_spec, style_with_fg_bg};
 use super::config::ReplAppearance;
-use super::{COMPLETION_MENU_NAME, HISTORY_MENU_NAME, SharedHistory};
+use super::{COMPLETION_MENU_NAME, SharedHistory};
 use anyhow::Result;
 use nu_ansi_term::Color;
 #[cfg(not(miri))]
-use skim::options::MatchScheme;
+use skim::item::RankCriteria;
 #[cfg(not(miri))]
 use skim::prelude::{
     Skim, SkimItem, SkimItemReceiver, SkimItemSender, SkimOptionsBuilder,
@@ -49,28 +49,40 @@ impl SkimItem for HistoryPickerItem {
     }
 }
 
+pub(crate) enum HistorySelection {
+    Run { command: String, root: bool },
+    Edit { command: String, root: bool },
+}
+
 pub(crate) fn launch_history_picker(
     history: &SharedHistory,
     appearance: &ReplAppearance,
     current_line: &str,
-) -> Result<Option<String>> {
-    let items = history_picker_items(history);
-    if items.is_empty() {
-        return Ok(None);
-    }
-
-    let options = build_history_picker_options(appearance, current_line.trim())?;
+) -> Result<Option<HistorySelection>> {
+    let shell_prefix = history
+        .with(|store| store.shell_prefix())
+        .unwrap_or_default();
+    let mut scope = shell_prefix.as_deref();
+    let mut query = current_line.trim().to_string();
 
     #[cfg(miri)]
     {
         let _ = appearance;
         let _ = current_line;
-        let _ = options;
+        let _ = (&mut scope, &mut query);
         return Ok(None);
     }
 
     #[cfg(not(miri))]
-    {
+    loop {
+        let items = history_picker_items_for(history, scope);
+        if items.is_empty() && shell_prefix.is_none() {
+            return Ok(None);
+        }
+        let mut options = build_history_picker_options(appearance, &query)?;
+        if shell_prefix.is_some() {
+            options.prompt = format!("history ({})> ", scope.map(str::trim).unwrap_or("all"));
+        }
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = skim_unbounded();
         let payload = items
             .into_iter()
@@ -79,8 +91,13 @@ pub(crate) fn launch_history_picker(
         let _ = tx.send(payload);
         drop(tx);
 
-        let output = Skim::run_with(build_skim_options(options)?, Some(rx))
+        let output = Skim::run_with(build_skim_options(options, scope.is_some())?, Some(rx))
             .map_err(|err| anyhow::anyhow!("failed to launch REPL history picker: {err}"))?;
+        if skim::binds::parse_key("ctrl-r").ok() == Some(output.final_key) {
+            scope = None;
+            query = output.query;
+            continue;
+        }
         if output.is_abort {
             return Ok(None);
         }
@@ -88,19 +105,49 @@ pub(crate) fn launch_history_picker(
         // Prefer the explicit selection, but fall back to skim's current row
         // so a plain Enter accepts the active history item even if nothing was
         // toggled.
-        Ok(output
+        let edit = skim::binds::parse_key("tab").ok() == Some(output.final_key);
+        return Ok(output
             .selected_items
             .first()
             .map(|item| item.output().into_owned())
-            .or_else(|| output.current.map(|item| item.output().into_owned())))
+            .or_else(|| output.current.map(|item| item.output().into_owned()))
+            .map(|command| {
+                if edit {
+                    HistorySelection::Edit {
+                        command,
+                        root: scope.is_none() && shell_prefix.is_some(),
+                    }
+                } else {
+                    HistorySelection::Run {
+                        command,
+                        root: scope.is_none() && shell_prefix.is_some(),
+                    }
+                }
+            }));
     }
 }
 
+#[cfg(test)]
 pub(crate) fn history_picker_items(history: &SharedHistory) -> Vec<HistoryPickerItem> {
+    let scope = history
+        .with(|store| store.shell_prefix())
+        .unwrap_or_default();
+    history_picker_items_for(history, scope.as_deref())
+}
+
+fn history_picker_items_for(
+    history: &SharedHistory,
+    scope: Option<&str>,
+) -> Vec<HistoryPickerItem> {
     let mut seen = BTreeSet::new();
     let mut entries = Vec::new();
 
-    for entry in history.list_entries().into_iter().rev() {
+    for entry in history
+        .with(|store| store.list_entries_for(scope))
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+    {
         // Keep the newest copy of each unique command so an empty query acts
         // like "recent history", not "all repeats of the last thing I ran".
         if seen.insert(entry.command.clone()) {
@@ -146,14 +193,14 @@ pub(crate) fn build_history_picker_options(
             .saturating_add(1)
             .to_string(),
         query: Some(initial_query.to_string()),
-        prompt: "(reverse-i-search)> ".to_string(),
+        prompt: "history> ".to_string(),
         no_info: true,
         color: build_history_picker_color(appearance),
     })
 }
 
 #[cfg(not(miri))]
-fn build_skim_options(options: HistoryPickerOptions) -> Result<skim::SkimOptions> {
+fn build_skim_options(options: HistoryPickerOptions, scoped: bool) -> Result<skim::SkimOptions> {
     let mut builder = SkimOptionsBuilder::default();
     builder
         .height(options.height)
@@ -164,10 +211,16 @@ fn build_skim_options(options: HistoryPickerOptions) -> Result<skim::SkimOptions
         .no_mouse(true)
         .prompt(options.prompt)
         .query(options.query.unwrap_or_default())
-        .scheme(MatchScheme::History)
-        // `Ctrl-R` inside the picker should stay within skim's history mode,
-        // not recursively re-enter the REPL host command path.
-        .bind(vec!["ctrl-r:toggle-sort".to_string()]);
+        .tiebreak(vec![RankCriteria::Score, RankCriteria::Index])
+        .bind(vec![
+            "tab:accept".to_string(),
+            if scoped {
+                "ctrl-r:accept"
+            } else {
+                "ctrl-r:ignore"
+            }
+            .to_string(),
+        ]);
 
     if let Some(color) = options.color {
         builder.color(color);
@@ -201,9 +254,9 @@ fn build_history_picker_color(appearance: &ReplAppearance) -> Option<String> {
         // prompt/query chrome, and match highlights. Set them all explicitly so
         // the picker does not inherit unreadable defaults from skim itself.
         parts.push(format!("normal:{text}"));
-        parts.push(format!("matched:{text}"));
+        parts.push(format!("matched:{text}:underlined"));
         parts.push(format!("current:{text}"));
-        parts.push(format!("current_match:{text}"));
+        parts.push(format!("current_match:{text}:underlined"));
         parts.push(format!("query:{text}"));
         parts.push(format!("prompt:{text}"));
         parts.push(format!("cursor:{text}"));
@@ -263,14 +316,6 @@ pub(crate) fn build_completion_menu(appearance: &ReplAppearance) -> OspCompletio
         .with_max_rows(u16::MAX)
 }
 
-pub(crate) fn build_history_menu(appearance: &ReplAppearance) -> OspCompletionMenu {
-    build_candidate_menu(appearance, HISTORY_MENU_NAME)
-        .with_only_buffer_difference(false)
-        .with_quick_complete(false)
-        .with_columns(1)
-        .with_max_rows(appearance.history_menu_rows.max(1))
-}
-
 fn build_candidate_menu(appearance: &ReplAppearance, name: &str) -> OspCompletionMenu {
     let text_color = appearance
         .completion_text_style
@@ -304,12 +349,11 @@ mod tests {
     use reedline::Menu;
 
     fn empty_history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_enabled(false)
-                .with_max_entries(0)
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            enabled: false,
+            max_entries: 0,
+            ..HistoryConfig::default()
+        })
     }
 
     #[test]
@@ -331,10 +375,6 @@ mod tests {
         let completion_menu = build_completion_menu(&appearance);
         assert_eq!(completion_menu.name(), COMPLETION_MENU_NAME);
         assert!(!completion_menu.can_quick_complete());
-
-        let history_menu = build_history_menu(&appearance);
-        assert_eq!(history_menu.name(), HISTORY_MENU_NAME);
-        assert!(!history_menu.can_quick_complete());
 
         let options = build_history_picker_options(&appearance, "needle")
             .expect("history picker options should build");

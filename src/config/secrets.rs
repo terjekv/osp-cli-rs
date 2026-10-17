@@ -22,7 +22,7 @@ const KEYRING_SERVICE: &str = "osp-cli:secrets:v1";
 
 /// Supported persistent secrets backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SecretBackendKind {
+pub(crate) enum SecretBackendKind {
     /// Owner-only TOML file.
     Toml,
     /// Native platform credential store with a value-free TOML index.
@@ -30,6 +30,9 @@ pub enum SecretBackendKind {
 }
 
 impl SecretBackendKind {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 2] = [Self::Toml, Self::Keyring];
+
     /// Parses a resolved config value.
     pub fn parse(value: &str) -> Result<Self, ConfigError> {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -53,7 +56,7 @@ impl SecretBackendKind {
 
 /// Backend-neutral result from changing a persisted secret.
 #[derive(Clone, PartialEq)]
-pub struct SecretStoreEditResult {
+pub(crate) struct SecretStoreEditResult {
     /// Previously stored value, when present.
     pub previous: Option<ConfigValue>,
     /// Backend that received the operation.
@@ -63,7 +66,7 @@ pub struct SecretStoreEditResult {
 }
 
 /// Runtime-selected persistent secret store.
-pub struct RuntimeSecretStore {
+pub(crate) struct RuntimeSecretStore {
     backend: SecretStoreBackend,
 }
 
@@ -554,7 +557,7 @@ fn write_owner_only_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError>
             format!("failed to create {}: {err}", parent.display()),
         )
     })?;
-    write_text_atomic(path, bytes, true).map_err(|err| {
+    write_text_atomic(path, bytes, true, super::AtomicWriteDurability::Synced).map_err(|err| {
         secret_error(
             "keyring",
             format!("failed to atomically write {}: {err}", path.display()),

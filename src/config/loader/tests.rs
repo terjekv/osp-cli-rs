@@ -67,8 +67,13 @@ fn secrets_and_env_loaders_mark_secret_entries_and_directory_errors_unit() {
     std::fs::write(&secrets_path, "[default.auth]\ntoken = \"shh\"\n")
         .expect("secrets file should be written");
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&secrets_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let secrets = SecretsTomlLoader::new(secrets_path.clone())
-        .with_strict_permissions(false)
         .required()
         .load()
         .expect("secrets file should load");
@@ -93,7 +98,6 @@ fn secrets_and_env_loaders_mark_secret_entries_and_directory_errors_unit() {
     );
 
     let err = SecretsTomlLoader::new(root.to_path_buf())
-        .with_strict_permissions(false)
         .required()
         .load()
         .expect_err("reading a directory as secrets TOML should fail");
@@ -140,13 +144,12 @@ fn pipeline_builder_covers_schema_collected_env_and_optional_layer_paths_unit() 
     let env: EnvVarLoader = [("OSP__THEME__NAME", "nord")].into_iter().collect();
     let secrets: EnvSecretsLoader = [("OSP_SECRET__AUTH__TOKEN", "tok")].into_iter().collect();
 
-    let layers = LoaderPipeline::new(StaticLayerLoader::new(ConfigLayer::default()))
+    let mut layers = LoaderPipeline::new(StaticLayerLoader::new(ConfigLayer::default()))
         .with_env(env)
-        .with_secrets(secrets)
-        .with_schema(ConfigSchema::default())
         .load_layers()
         .expect("pipeline should load collected loaders");
 
+    layers.secrets = secrets.load().expect("secret env should load");
     assert_eq!(layers.env.entries().len(), 1);
     assert_eq!(layers.secrets.entries().len(), 1);
 
@@ -171,7 +174,7 @@ fn pipeline_builder_covers_schema_collected_env_and_optional_layer_paths_unit() 
         }))
         .with_session(StaticLayerLoader::new({
             let mut layer = ConfigLayer::default();
-            layer.insert("session.cache.max_results", 32_i64, Scope::global());
+            layer.insert("repl.history.menu_rows", 32_i64, Scope::global());
             layer
         }))
         .load_layers()
@@ -196,10 +199,13 @@ fn pipeline_resolver_preserves_custom_schema_for_explain_unit() {
         SchemaEntry::integer().with_doc("Custom integer used in tests"),
     );
 
-    let resolver = LoaderPipeline::new(StaticLayerLoader::new(defaults))
-        .with_schema(schema)
-        .resolver()
-        .expect("pipeline resolver should preserve schema");
+    let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
+        crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        },
+        schema,
+    );
 
     let explain = resolver
         .explain_key("custom.answer", ResolveOptions::default())

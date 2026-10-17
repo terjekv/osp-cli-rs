@@ -1,8 +1,7 @@
+use crate::core::document::Document;
 use crate::core::output_model::{
-    OutputDocument, OutputDocumentKind, OutputItems, OutputResult, RenderRecommendation,
-    output_items_to_value,
+    OutputDocument, OutputItems, OutputResult, RenderRecommendation, output_items_to_value,
 };
-use crate::guide::GuideView;
 use serde_json::json;
 
 use super::{apply_output_pipeline, apply_pipeline, execute_pipeline};
@@ -148,7 +147,7 @@ fn question_stage_variants_clean_empty_fields_and_filter_by_existence_unit() {
 }
 
 #[test]
-fn output_pipeline_filters_nested_single_record_documents_unit() {
+fn output_pipeline_narrows_quick_and_filters_nested_single_record_documents_unit() {
     let output = OutputResult::from_rows(vec![
         json!({
             "name": "it-usit-gsd-drift",
@@ -168,31 +167,24 @@ fn output_pipeline_filters_nested_single_record_documents_unit() {
         .expect("object"),
     ]);
     let mut output = output;
-    output.document = Some(OutputDocument::new(
-        OutputDocumentKind::Json,
-        output_items_to_value(&output.items),
-    ));
+    output.document = Some(OutputDocument::Json(output_items_to_value(&output.items)));
     output.meta.render_recommendation = Some(RenderRecommendation::Format(
         crate::core::output::OutputFormat::Mreg,
     ));
 
-    for stage in ["primary", "F role=primary"] {
+    for (stage, expected) in [
+        (
+            "primary",
+            json!({"siteadmins": {
+                "current": [{"contact": "iti-ops@usit.uio.no", "role": "primary", "hosts": 242}],
+                "expired": [{"contact": "iti-ssd@usit.uio.no", "role": "primary", "hosts": 3}]
+            }}),
+        ),
+        ("F role=primary", output_items_to_value(&output.items)),
+    ] {
         let filtered = apply_output_pipeline(output.clone(), &[stage.to_string()])
-            .expect("nested document filter should pass");
-        let value = output_items_to_value(&filtered.items);
-
-        assert_eq!(value["siteadmins"]["current"].as_array().unwrap().len(), 2);
-        assert_eq!(
-            value["siteadmins"]["current"][0]["contact"],
-            json!("iti-ops@usit.uio.no")
-        );
-        assert_eq!(value["siteadmins"]["expired"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            value["siteadmins"]["expired"][0]["contact"],
-            json!("iti-ssd@usit.uio.no")
-        );
-        assert!(value.to_string().contains("unix-drift@usit.uio.no"));
-        assert_eq!(value["status_counts"], json!({"current": 2, "expired": 1}));
+            .expect("nested document stage should pass");
+        assert_eq!(output_items_to_value(&filtered.items), expected, "{stage}");
         assert!(filtered.document.is_none());
     }
 }
@@ -416,8 +408,11 @@ fn apply_output_pipeline_covers_explicit_materializing_row_stages_unit() {
     assert!(grouped.meta.grouped);
 
     let aggregated =
-        apply_pipeline(rows.clone(), &["A count total".to_string()]).expect("aggregate works");
-    assert!(!output_rows(&aggregated).is_empty());
+        apply_pipeline(rows.clone(), &["A count AS total".to_string()]).expect("aggregate works");
+    assert_eq!(
+        output_rows(&aggregated),
+        &[json!({"total": 3}).as_object().cloned().expect("object")]
+    );
 
     let counted = apply_pipeline(rows.clone(), &["C".to_string()]).expect("count works");
     assert_eq!(output_rows(&counted).len(), 1);
@@ -440,23 +435,16 @@ fn semantic_document_rebuilds_from_document_source_unit() {
             .expect("object"),
     ]);
     output = output.with_document(
-        GuideView::from_text("Commands:\n  list  Show\n")
+        Document::from_help_text("Commands:\n  list  Show\n")
             .to_output_result()
             .document
             .expect("guide document"),
     );
-    output.meta.render_recommendation = Some(RenderRecommendation::Guide);
+    output.meta.render_recommendation = Some(RenderRecommendation::Document);
 
     let rebuilt = apply_output_pipeline(output, &[]).expect("pipeline should succeed");
-    let guide = GuideView::try_from_output_result(&rebuilt).expect("guide should restore");
-    assert_eq!(guide.commands.len(), 1);
-    assert_eq!(guide.commands[0].name, "list");
-    assert!(
-        rebuilt
-            .as_rows()
-            .expect("rows")
-            .first()
-            .expect("row")
-            .contains_key("commands")
-    );
+    let document: Document =
+        serde_json::from_value(rebuilt.document.as_ref().unwrap().json_value()).unwrap();
+    assert_eq!(document.rows()[0]["name"], "list");
+    assert!(rebuilt.document.is_some());
 }

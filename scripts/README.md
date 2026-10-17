@@ -18,6 +18,9 @@ The folder is intentionally flat for now. The current rule is simple:
 - `release-budget.py`
   Measures the already-built release binary's startup and size against an
   intentionally reviewed baseline.
+- `perf.py`
+  Checks the release binary's syscall, instruction and startup-phase budgets
+  from `perf/budgets.json`; the product reuses it for its own scenarios.
 - `run-hermetic-cargo.py`
   Isolates runtime roots and ambient settings for behavior and coverage checks.
 - `public-api-examples.py`

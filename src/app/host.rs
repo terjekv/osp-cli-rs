@@ -7,14 +7,14 @@
 
 use crate::config::ResolvedConfig;
 use crate::core::output::OutputFormat;
-use crate::native::{NativeCommandCatalogEntry, NativeCommandRegistry};
+use crate::native::NativeCommandRegistry;
 use crate::repl;
 use clap::{CommandFactory, FromArgMatches};
-use miette::{Result, WrapErr, miette};
+use miette::{Result, miette};
 use nu_ansi_term::Style;
 
-use crate::guide::{GuideSection, GuideSectionKind, GuideView, HelpLevel};
-use crate::ui::{RenderBackend, RenderSettings};
+use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
+use crate::ui::RenderSettings;
 use std::backtrace::Backtrace;
 use std::borrow::Cow;
 use std::ffi::OsString;
@@ -23,44 +23,32 @@ use std::time::Instant;
 
 use super::help;
 use super::help::help_level;
-use crate::app::logging::{bootstrap_logging_config, init_developer_logging};
+use crate::app::logging::{DeveloperLoggingConfig, init_developer_logging};
 use crate::app::sink::{StdIoUiSink, UiSink};
 use crate::app::{AppClients, AppState, AuthState, UiState};
-use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_cli_argv};
-use crate::cli::{Cli, Commands};
-use crate::plugin::{CommandCatalogEntry, PluginDispatchError};
-
-pub(crate) use super::bootstrap::{
-    RuntimeConfigRequest, prepare_startup_host, resolve_runtime_config,
+use crate::cli::invocation::{
+    InvocationOptions, ScannedCliArgs, extend_with_invocation_help, scan_cli_argv,
 };
-pub(crate) use super::command_output::run_cli_command_with_ui;
+use crate::cli::{Cli, Commands};
+use crate::plugin::CommandCatalogEntry;
+
+#[cfg(test)]
+pub(crate) use super::assembly::rebuild_repl_state;
 pub(crate) use super::dispatch::{
-    DispatchPlan, RunAction, build_dispatch_plan, ensure_builtin_visible_for,
-    normalize_cli_profile, normalize_profile_override,
+    DispatchPlan, RunAction, build_dispatch_plan, normalize_profile_override,
 };
 use super::external::run_external_command;
 pub(crate) use super::external::run_external_command_with_help_renderer;
-#[cfg(test)]
-pub(crate) use super::repl_lifecycle::rebuild_repl_state;
-pub(crate) use super::timing::{TimingSummary, format_timing_badge, right_align_timing_line};
-pub(crate) use crate::plugin::config::{
-    PluginConfigEntry, PluginConfigScope, plugin_config_entries,
-};
-#[cfg(test)]
-pub(crate) use crate::plugin::config::{
-    collect_plugin_config_env, config_value_to_plugin_env, plugin_config_env_name,
-};
-
+pub(crate) use super::timing::{TimingSummary, format_timing_badge};
 pub(crate) const CMD_PLUGINS: &str = "plugins";
 pub(crate) const CMD_DOCTOR: &str = "doctor";
 pub(crate) const CMD_CONFIG: &str = "config";
 pub(crate) const CMD_THEME: &str = "theme";
 pub(crate) const CMD_HISTORY: &str = "history";
+pub(crate) const CMD_CONTEXT: &str = "context";
 pub(crate) const CMD_INTRO: &str = "intro";
 pub(crate) const CMD_HELP: &str = "help";
 pub(crate) const CMD_LIST: &str = "list";
-pub(crate) const CMD_SHOW: &str = "show";
-pub(crate) const CMD_USE: &str = "use";
 pub const EXIT_CODE_ERROR: i32 = 1;
 pub const EXIT_CODE_USAGE: i32 = 2;
 pub const EXIT_CODE_WAITING_APPROVAL: i32 = 3;
@@ -76,7 +64,6 @@ pub(crate) struct ReplCommandSpec {
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedInvocation {
     pub(crate) ui: UiState,
-    pub(crate) plugin_provider: Option<String>,
     pub(crate) help_level: HelpLevel,
 }
 
@@ -86,17 +73,57 @@ struct PreparedHostRun {
     invocation_ui: ResolvedInvocation,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ErrorDisplaySettings {
+    pub(crate) verbosity: crate::ui::messages::MessageLevel,
+    pub(crate) debug_level: u8,
+    pub(crate) render_settings: RenderSettings,
+}
+
+impl From<&UiState> for ErrorDisplaySettings {
+    fn from(ui: &UiState) -> Self {
+        Self {
+            verbosity: ui.verbosity,
+            debug_level: ui.debug_level,
+            render_settings: ui.render_settings.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ErrorContext {
+    NativeExecution,
+    Config,
+    Operation(&'static str),
+}
+
+impl std::fmt::Display for ErrorContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NativeExecution => "native command execution failed",
+            Self::Config => "config resolution failed",
+            Self::Operation(text) => text,
+        })
+    }
+}
+
 #[derive(Debug)]
 struct BoxedContextError {
-    context: &'static str,
+    context: ErrorContext,
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
     backtrace: Backtrace,
+    command_path: Option<String>,
+    command_suffix: Option<String>,
+    structured: Option<crate::core::CommandError>,
 }
 
 #[derive(Debug)]
 struct ReportContextError {
-    context: &'static str,
+    context: Option<ErrorContext>,
     source: miette::Report,
+    error_display: Option<ErrorDisplaySettings>,
+    diagnostics: Option<crate::diagnostics::DiagnosticSink>,
+    backtrace: Option<Backtrace>,
 }
 
 #[derive(Clone, Copy)]
@@ -104,44 +131,6 @@ struct KnownErrorChain<'a> {
     boxed_context: Option<&'a BoxedContextError>,
     clap: Option<&'a clap::Error>,
     config: Option<&'a crate::config::ConfigError>,
-    plugin: Option<&'a PluginDispatchError>,
-    missing_capabilities: Option<&'a crate::app::dispatch::MissingCommandCapabilities>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-/// Process-facing error detail ladder used by the host renderer.
-///
-/// This is separate from UI message severity. The host uses it to decide how
-/// much of a failure to show when rendering a `miette::Report`.
-///
-/// Current contract:
-///
-/// - [`ErrorDetail::Terse`] renders one actionable summary and an optional hint
-/// - [`ErrorDetail::Normal`] renders the summary plus cause-chain context
-/// - [`ErrorDetail::Debug`] renders the rich diagnostic report without a
-///   backtrace
-/// - [`ErrorDetail::Forensic`] renders the rich diagnostic report plus a
-///   stack backtrace
-pub enum ErrorDetail {
-    /// Show one short actionable summary and any directly helpful hint.
-    Terse,
-    /// Show the summary plus the cause/context chain.
-    Normal,
-    /// Show the rich diagnostic report without a backtrace.
-    Debug,
-    /// Show the rich diagnostic report plus a stack backtrace.
-    Forensic,
-}
-
-impl ErrorDetail {
-    fn from_rank(rank: i8) -> Self {
-        match rank {
-            i8::MIN..=0 => ErrorDetail::Terse,
-            1 => ErrorDetail::Normal,
-            2 => ErrorDetail::Debug,
-            _ => ErrorDetail::Forensic,
-        }
-    }
 }
 
 impl<'a> KnownErrorChain<'a> {
@@ -150,22 +139,13 @@ impl<'a> KnownErrorChain<'a> {
             boxed_context: find_error_in_chain::<BoxedContextError>(err),
             clap: find_error_in_chain::<clap::Error>(err),
             config: find_error_in_chain::<crate::config::ConfigError>(err),
-            plugin: find_error_in_chain::<PluginDispatchError>(err),
-            missing_capabilities: find_error_in_chain::<
-                crate::app::dispatch::MissingCommandCapabilities,
-            >(err),
         }
     }
 }
 
 impl std::fmt::Display for BoxedContextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string();
-        if source.is_empty() {
-            write!(f, "{}", self.context)
-        } else {
-            write!(f, "{}: {}", self.context, source)
-        }
+        std::fmt::Display::fmt(&self.context, f)
     }
 }
 
@@ -179,11 +159,9 @@ impl miette::Diagnostic for BoxedContextError {}
 
 impl std::fmt::Display for ReportContextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let source = self.source.to_string();
-        if source.is_empty() {
-            write!(f, "{}", self.context)
-        } else {
-            write!(f, "{}: {}", self.context, source)
+        match self.context {
+            Some(context) => std::fmt::Display::fmt(&context, f),
+            None => std::fmt::Display::fmt(&self.source, f),
         }
     }
 }
@@ -236,8 +214,11 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
+    crate::startup_trace::initialize();
     let mut sink = StdIoUiSink;
-    run_from_with_sink(args, &mut sink)
+    let result = run_from_with_sink(args, &mut sink);
+    crate::startup_trace::finish();
+    result
 }
 
 pub(crate) fn run_from_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> Result<i32>
@@ -245,56 +226,122 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    run_from_with_sink_and_app(args, sink, &super::AppDefinition::default())
+    run_from_with_sink_and_app(args, sink, &std::sync::Arc::default())
 }
 
 pub(crate) fn run_from_with_sink_and_app<I, T>(
     args: I,
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
 ) -> Result<i32>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let argv = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
-    init_developer_logging(bootstrap_logging_config(&argv));
+    crate::startup_trace::initialize();
+    let argv = {
+        let _phase = tracing::info_span!(target: "osp_startup", "argv collection").entered();
+        args.into_iter().map(Into::into).collect::<Vec<OsString>>()
+    };
     let pipe = argv.iter().position(|arg| arg == "|").unwrap_or(argv.len());
-    let suffix = argv[pipe..]
-        .iter()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let scanned = scan_cli_argv(&argv[..pipe])?;
-    let mut stage_tokens = vec!["command".to_string()];
-    stage_tokens.extend(suffix.iter().cloned());
-    let stages = crate::cli::pipeline::split_command_tokens(&stage_tokens).stages;
-    crate::cli::validate_cli_dsl_stages(&stages)?;
-    let mut command = Cli::command();
-    for &(name, help, key, _) in &app.config_flags {
-        let conflicts = app
-            .config_flags
-            .iter()
-            .filter(|&&(other, _, other_key, _)| other != name && other_key == key)
-            .map(|&(other, _, _, _)| other);
-        command = command.arg(
-            clap::Arg::new(name)
-                .long(name)
-                .help(help)
-                .action(clap::ArgAction::SetTrue)
-                .conflicts_with_all(conflicts),
-        );
+    let mut scan = scan_cli_argv(&argv[..pipe]);
+    run_scanned_with_sink_and_app(
+        &argv[pipe..],
+        &mut scan,
+        sink,
+        app,
+        &mut TimingSummary::default(),
+    )
+}
+
+pub(crate) fn run_scanned_with_sink_and_app(
+    suffix: &[OsString],
+    scanned: &mut ScannedCliArgs,
+    sink: &mut dyn UiSink,
+    app: &std::sync::Arc<super::AppDefinition>,
+    timing: &mut TimingSummary,
+) -> Result<i32> {
+    {
+        let _phase =
+            tracing::info_span!(target: "osp_startup", "developer logging bootstrap").entered();
+        init_developer_logging(DeveloperLoggingConfig::new(scanned.invocation.debug));
     }
-    let parsed = command
-        .try_get_matches_from(scanned.argv.iter().cloned())
-        .and_then(|matches| {
-            let mut cli = Cli::from_arg_matches(&matches)?;
-            for &(name, _, key, value) in &app.config_flags {
-                if matches.get_flag(name) {
-                    cli.product_overrides.set(key, value);
+    let (suffix, stages) = {
+        let _phase = tracing::info_span!(target: "osp_startup", "argv/invocation scan").entered();
+        if let Some(error) = scanned.error.take() {
+            return Err(error);
+        }
+        let suffix = suffix
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let mut stage_tokens = vec!["command".to_string()];
+        stage_tokens.extend(suffix.iter().cloned());
+        let stages = crate::cli::pipeline::split_command_tokens(&stage_tokens).stages;
+        crate::cli::validate_cli_dsl_stages(&stages)?;
+        (suffix, stages)
+    };
+    let (parsed, help_command) = {
+        let _phase = tracing::info_span!(target: "osp_startup", "clap parse").entered();
+        let mut command = Cli::command();
+        for &(name, help, key, _) in &app.config_flags {
+            let conflicts = app
+                .config_flags
+                .iter()
+                .filter(|&&(other, _, other_key, _)| other != name && other_key == key)
+                .map(|&(other, _, _, _)| other);
+            command = command.arg(
+                clap::Arg::new(name)
+                    .long(name)
+                    .help(help)
+                    .action(clap::ArgAction::SetTrue)
+                    .conflicts_with_all(conflicts),
+            );
+        }
+        for flag in &app.action_flags {
+            let mut arg = clap::Arg::new(flag.name).long(flag.name).help(flag.help);
+            arg = if let Some(value) = flag.optional_value {
+                arg.value_name(value.value_name)
+                    .num_args(0..=1)
+                    .default_missing_value("")
+            } else {
+                arg.action(clap::ArgAction::SetTrue)
+            };
+            command = command.arg(arg);
+        }
+        // Let the shared help grammar recognize --all before clap's automatic
+        // help subcommand interprets it as a command path.
+        let help_all = command
+            .clone()
+            .disable_help_subcommand(true)
+            .try_get_matches_from(scanned.argv.iter().cloned())
+            .ok()
+            .and_then(|matches| Cli::from_arg_matches(&matches).ok())
+            .is_some_and(|cli| match cli.command {
+                Some(Commands::External(tokens)) => crate::cli::is_help_all(&tokens),
+                _ => false,
+            });
+        if help_all {
+            command = command.disable_help_subcommand(true);
+        }
+        let parsed = command
+            .try_get_matches_from_mut(scanned.argv.iter().cloned())
+            .and_then(|matches| {
+                let mut cli = Cli::from_arg_matches(&matches)?;
+                cli.product_overrides = product_config_overrides(app, &matches);
+                for flag in &app.action_flags {
+                    if matches.value_source(flag.name) == Some(clap::parser::ValueSource::CommandLine) {
+                        if cli.product_action.is_some() || cli.command.is_some() {
+                            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                                "product action flags cannot be combined with commands or other actions"));
+                        }
+                        cli.product_action = Some(flag.name.to_string());
+                    }
                 }
-            }
-            Ok(cli)
-        });
+                Ok(cli)
+            });
+        (parsed, command)
+    };
     match parsed {
         Ok(Cli {
             command: Some(Commands::Completions(args)),
@@ -305,47 +352,142 @@ where
                     "shell completion scripts do not support DSL pipeline stages"
                 ));
             }
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
             sink.write_stdout(&crate::cli::render_shell_completions(args));
             Ok(0)
         }
         Ok(mut cli) => {
             if let Some(Commands::External(tokens)) = cli.command.as_mut() {
                 tokens.extend(suffix);
-                run(cli, scanned.invocation, &[], sink, app)
+                run(cli, scanned.invocation.clone(), &[], sink, app, timing)
             } else {
-                run(cli, scanned.invocation, &stages, sink, app)
+                run(cli, scanned.invocation.clone(), &stages, sink, app, timing)
             }
         }
-        Err(err) => handle_clap_parse_error(&argv[..pipe], err, &stages, sink, app),
+        Err(err) => handle_clap_parse_error(scanned, &help_command, err, &stages, sink, app),
     }
 }
 
+fn product_config_overrides(
+    app: &std::sync::Arc<super::AppDefinition>,
+    matches: &clap::ArgMatches,
+) -> crate::config::ConfigLayer {
+    let mut overrides = crate::config::ConfigLayer::default();
+    for &(name, _, key, value) in &app.config_flags {
+        if matches.get_flag(name) {
+            overrides.set(key, value);
+        }
+    }
+    for flag in &app.action_flags {
+        if let Some(argument) = flag.optional_value
+            && let Some(value) = matches
+                .get_one::<String>(flag.name)
+                .filter(|v| !v.is_empty())
+        {
+            overrides.set(argument.config_key, value.clone());
+        }
+    }
+    overrides
+}
+
 fn handle_clap_parse_error(
-    args: &[OsString],
+    scanned: &ScannedCliArgs,
+    command: &clap::Command,
     err: clap::Error,
     stages: &[String],
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
 ) -> Result<i32> {
     match err.kind() {
         clap::error::ErrorKind::DisplayHelp
         | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
-            let help_context = help::render_settings_for_help(args, &app.product_defaults);
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
+            let tokens = scanned
+                .argv
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let product_overrides = crate::cli::passive_command(command.clone())
+                .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
+                .map(|matches| product_config_overrides(app, &matches))
+                .unwrap_or_default();
+            let help_context = help::render_settings_for_help_with_scan(
+                scanned,
+                &app.product_defaults,
+                &product_overrides,
+            );
             if let Some(config) = &help_context.config {
+                sink.write_stderr(&config.ignored_keys_warning());
+                let _phase = tracing::info_span!(target: "osp_startup", "native command configure")
+                    .entered();
                 app.native_commands.configure(config);
             }
-            let raw_help = err.to_string();
-            // Only the root command's usage is `<bin> [OPTIONS] [COMMAND]`; the
-            // binary name depends on how osp was installed, so it is not matched.
-            let root_help = raw_help.lines().any(|line| {
-                let words = line.split_whitespace().collect::<Vec<_>>();
-                matches!(words.as_slice(), ["Usage:", _, "[OPTIONS]", "[COMMAND]"])
-            });
-            let mut body = GuideView::from_text(&raw_help);
+            let (mut body, root_help, long_help) = crate::cli::command_help_document(
+                command.clone(),
+                &tokens,
+                &crate::core::CommandScope::OneShot,
+            );
             extend_with_invocation_help(&mut body, help_context.help_level);
             if root_help {
                 add_product_option_help(&mut body, &app.product_help_options);
-                add_native_command_help(&mut body, &app.native_commands);
+                let auth =
+                    AuthState::for_policy(app.access_policy.clone(), help_context.config.as_ref());
+                add_native_command_help(&mut body, &app.native_commands, &auth);
+                if let Some(config) = &help_context.config {
+                    let matches = crate::cli::passive_command(command.clone())
+                        .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
+                        .ok();
+                    let mut launch = super::LaunchContext::default();
+                    if let Some(matches) = &matches {
+                        launch.plugin_dirs = matches
+                            .try_get_many::<std::path::PathBuf>("plugin_dirs")
+                            .ok()
+                            .flatten()
+                            .into_iter()
+                            .flatten()
+                            .cloned()
+                            .collect();
+                        let flag = |name| {
+                            matches
+                                .try_get_one::<bool>(name)
+                                .ok()
+                                .flatten()
+                                .copied()
+                                .unwrap_or(false)
+                        };
+                        launch.runtime_load = crate::cli::runtime_load_options_from_flags(
+                            flag("no_env"),
+                            flag("no_config_file"),
+                            flag("defaults_only"),
+                        );
+                    }
+                    let plugins = super::assembly::build_plugin_manager(config, &launch);
+                    let natives = app
+                        .native_commands
+                        .catalog()
+                        .into_iter()
+                        .map(|e| e.name)
+                        .collect::<std::collections::HashSet<_>>();
+                    let entries = plugins
+                        .command_catalog()
+                        .into_iter()
+                        .filter(|entry| {
+                            !natives.contains(&entry.name)
+                                && !crate::cli::builtin_command_names().contains(&entry.name)
+                                && auth.is_external_command_visible(&entry.name)
+                        })
+                        .map(|entry| DocumentEntry {
+                            name: entry.name,
+                            description: entry.about,
+                        })
+                        .collect::<Vec<_>>();
+                    if !entries.is_empty() {
+                        body.blocks.push(DocBlock::section(
+                            "Plugins",
+                            vec![DocBlock::Entries { entries }],
+                        ));
+                    }
+                }
             }
             let mut filtered = body.filtered_for_help_level(help_context.help_level);
             let dsl_help = stages.iter().find_map(|raw| {
@@ -353,38 +495,18 @@ fn handle_clap_parse_error(
                 crate::cli::is_cli_help_stage(&parsed).then_some(parsed.spec)
             });
             if let Some(spec) = &dsl_help {
-                let target = spec.split_whitespace().next().unwrap_or("");
-                let verbs = if target.is_empty() {
-                    crate::dsl::verb_info::registered_verbs()
-                        .iter()
-                        .collect::<Vec<_>>()
-                } else {
-                    vec![
-                        crate::dsl::verb_info::verb_info(target)
-                            .ok_or_else(|| miette!("Unknown DSL verb: {target}"))?,
-                    ]
-                };
-                filtered = GuideView {
-                    commands: verbs
-                        .into_iter()
-                        .map(|info| crate::guide::GuideEntry {
-                            name: info.verb.to_string(),
-                            short_help: info.help.to_string(),
-                            display_indent: None,
-                            display_gap: None,
-                        })
-                        .collect(),
-                    ..GuideView::default()
-                };
+                filtered = crate::dsl::verb_info::help_document(spec)?;
             }
             let stages = if dsl_help.is_some() { &[][..] } else { stages };
-            let output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
+            let mut output = crate::dsl::apply_output_pipeline(filtered.to_output_result(), stages)
                 .map_err(|error| miette!("failed to transform help output: {error}"))?;
-            let rendered = crate::ui::render_structured_output_with_source_guide(
+            output.meta.document_long_help = long_help;
+            let rendered = crate::ui::render(
                 &output,
-                stages.is_empty().then_some(&filtered),
-                &help_context.settings,
-                help_context.layout,
+                &crate::ui::RenderRequest {
+                    layout: Some(help_context.layout),
+                    ..crate::ui::RenderRequest::new(&help_context.settings)
+                },
             );
             sink.write_stdout(&rendered);
             Ok(0)
@@ -393,12 +515,16 @@ fn handle_clap_parse_error(
             if !stages.is_empty() {
                 return Err(miette!("version text does not support DSL pipeline stages"));
             }
+            let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
             sink.write_stdout(&err.to_string());
             Ok(0)
         }
-        _ => Err(report_std_error_with_context(
+        _ => Err(report_clap_error_with_context(
             err,
-            "failed to parse CLI arguments",
+            crate::app::host::ErrorContext::Operation("failed to parse CLI arguments"),
+            command.clone(),
+            scanned.argv.clone(),
+            None,
         )),
     }
 }
@@ -410,14 +536,20 @@ fn run(
     invocation: InvocationOptions,
     stages: &[String],
     sink: &mut dyn UiSink,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
+    timing: &mut TimingSummary,
 ) -> Result<i32> {
     let run_started = Instant::now();
     let PreparedHostRun {
         mut state,
         dispatch,
-        invocation_ui,
-    } = prepare_host_run(&mut cli, &invocation, app, run_started)?;
+        mut invocation_ui,
+    } = {
+        let _phase = tracing::info_span!(target: "osp_startup", "host startup").entered();
+        prepare_host_run(&mut cli, &invocation, app, run_started)?
+    };
+
+    sink.write_stderr(&state.runtime.config.resolved().ignored_keys_warning());
 
     if let Some(help) = crate::repl::completion::maybe_render_dsl_help(
         crate::repl::ReplViewContext::from_parts(&state.runtime, &state.session),
@@ -426,131 +558,115 @@ fn run(
         sink.write_stdout(&help);
         return Ok(0);
     }
-    if !stages.is_empty() && matches!(dispatch.action, RunAction::Repl) {
+    if !stages.is_empty()
+        && matches!(
+            dispatch.action,
+            RunAction::Repl | RunAction::ProductAction(_)
+        )
+    {
         return Err(miette!("a pipeline requires a command"));
     }
 
     let action_started = Instant::now();
     let is_repl = matches!(dispatch.action, RunAction::Repl);
     let action = dispatch.action;
-    let result = match action {
-        RunAction::Repl => {
-            state.runtime.ui = invocation_ui.ui.clone();
-            repl::run_plugin_repl(&mut state)
-        }
-        RunAction::External(tokens) => run_external_command(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &tokens,
-            &invocation_ui,
-            sink,
-        )
-        .and_then(|result| {
-            run_cli_command_with_ui(
-                state.runtime.config.resolved(),
-                &invocation_ui.ui,
-                result,
+    let result = {
+        let _phase = (!is_repl)
+            .then(|| tracing::info_span!(target: "osp_startup", "command execution").entered());
+        match action {
+            RunAction::ProductAction(name) => {
+                let flag = app
+                    .action_flags
+                    .iter()
+                    .find(|flag| flag.name == name)
+                    .ok_or_else(|| miette!("unknown product action: {name}"))?;
+                let diagnostics = crate::diagnostics::DiagnosticSink::default();
+                let _scope = diagnostics.enter();
+                match (flag.run)(&mut state.runtime) {
+                    Ok(message) => {
+                        let evidence = diagnostics.render(invocation_ui.ui.verbosity, false);
+                        sink.write_stderr(&evidence.0);
+                        if !message.is_empty() {
+                            sink.write_stdout(&format!("{message}\n"));
+                        }
+                        sink.write_stderr(&evidence.1);
+                        Ok(0)
+                    }
+                    Err(error) => Err(report_with_evidence(error, diagnostics)),
+                }
+            }
+            RunAction::Repl => {
+                state.runtime.ui = invocation_ui.ui.clone();
+                repl::run_plugin_repl(&mut state)
+            }
+            RunAction::External(tokens) => {
+                run_external_command(&mut state, &tokens, &invocation, &mut invocation_ui, sink)
+            }
+            RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
+                &mut state.runtime,
+                &mut state.session,
+                &state.clients,
+                &invocation_ui,
+                command,
+                stages,
                 sink,
-            )
-        }),
-        RunAction::Builtin(command) => super::run_cli_builtin_command_parts(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
-            &invocation_ui,
-            command,
-            stages,
-            sink,
-        ),
+            ),
+        }
     };
 
-    if !is_repl && invocation_ui.ui.debug_verbosity > 0 {
+    if !is_repl {
         let total = run_started.elapsed();
         let startup = action_started.saturating_duration_since(run_started);
-        let command = total.saturating_sub(startup);
-        let footer = right_align_timing_line(
-            TimingSummary {
-                total,
-                parse: if invocation_ui.ui.debug_verbosity >= 3 {
-                    Some(startup)
-                } else {
-                    None
-                },
-                execute: if invocation_ui.ui.debug_verbosity >= 3 {
-                    Some(command)
-                } else {
-                    None
-                },
-                render: None,
-            },
-            invocation_ui.ui.debug_verbosity,
-            &invocation_ui.ui.render_settings.resolve_render_settings(),
-        );
-        if !footer.is_empty() {
-            sink.write_stderr(&footer);
-        }
+        *timing = TimingSummary {
+            total,
+            parse: Some(startup),
+            execute: Some(total.saturating_sub(startup)),
+            render: None,
+        };
     }
 
-    result
+    tracing::info!(target: "osp::diagnostic", "debug: Command complete; exit={}; startup={} ms; dispatch={} ms.", result.as_ref().copied().unwrap_or(1), action_started.saturating_duration_since(run_started).as_millis(), action_started.elapsed().as_millis());
+    tracing::trace!(target: "osp::diagnostic", "trace: +{} ms dispatch.end; exit={}.", run_started.elapsed().as_millis(), result.as_ref().copied().unwrap_or(1));
+    result.map_err(|err| report_with_invocation(err, ErrorDisplaySettings::from(&invocation_ui.ui)))
 }
 
 // Startup is phase-based:
-// 1. bootstrap just enough config to understand profiles and dispatch
+// 1. choose the action from argv alone
 // 2. assemble the runtime/session layer for the chosen action
 // 3. apply startup-time side effects before handing off to execution
 fn prepare_host_run(
     cli: &mut Cli,
     invocation: &InvocationOptions,
-    app: &super::AppDefinition,
+    app: &std::sync::Arc<super::AppDefinition>,
     run_started: Instant,
 ) -> Result<PreparedHostRun> {
-    let normalized_profile = normalize_cli_profile(cli);
-    let runtime_load = cli.runtime_load_options();
-    let initial_config = resolve_runtime_config(
-        RuntimeConfigRequest::new(normalized_profile.clone(), Some("cli"))
-            .with_runtime_load(runtime_load)
-            .with_product_defaults(app.product_defaults.clone()),
-    )
-    .wrap_err("failed to resolve initial config for startup")?;
-    let known_profiles = initial_config.known_profiles().clone();
-    let dispatch = build_dispatch_plan(cli, &known_profiles)?;
+    let dispatch = {
+        let _phase = tracing::info_span!(target: "osp_startup", "dispatch planning").entered();
+        build_dispatch_plan(cli)?
+    };
     tracing::debug!(
         action = %dispatch.action.name(),
         profile_override = ?dispatch.profile_override,
-        known_profiles = known_profiles.len(),
         "built dispatch plan"
     );
 
     let terminal_kind = dispatch.action.terminal_kind();
-    let prepared = prepare_startup_host(
-        cli,
-        dispatch.profile_override.clone(),
-        terminal_kind,
-        run_started,
-        &app.product_defaults,
-    )?;
-    let mut state = crate::app::AppStateBuilder::from_host_inputs(
-        prepared.runtime_context,
-        prepared.config,
-        prepared.host_inputs,
-    )
-    .with_launch(prepared.launch_context)
-    .with_native_commands(app.native_commands.clone())
-    .build();
-    state
-        .runtime
-        .set_product_defaults(app.product_defaults.clone());
-    state.runtime.set_policy_context(app.policy_context.clone());
-    state
-        .runtime
-        .auth
-        .replace_builtin_policy(app.builtin_policy.clone());
-    state
-        .runtime
-        .set_access_recovery(app.access_recovery.clone());
-    if let Some(startup_hook) = &app.startup_hook {
-        startup_hook.prepare(&mut state.runtime)?;
+    let mut state = {
+        super::assembly::build_host(super::assembly::HostBuildRequest::Startup {
+            cli,
+            action: &dispatch.action,
+            profile_override: dispatch.profile_override.clone(),
+            terminal_kind,
+            started: run_started,
+            definition: app.clone(),
+        })?
+        .state()
+    };
+    {
+        let _phase = tracing::info_span!(target: "osp_startup", "startup hook").entered();
+        if let Some(policy) = &app.access_policy {
+            policy.startup(&mut state.runtime)?;
+        }
     }
     let invocation_ui = resolve_invocation_ui(
         state.runtime.config.resolved(),
@@ -559,11 +675,11 @@ fn prepare_host_run(
     );
     super::assembly::apply_runtime_side_effects(
         state.runtime.config.resolved(),
-        invocation_ui.ui.debug_verbosity,
+        invocation_ui.ui.debug_level,
         &state.runtime.themes,
     );
     tracing::debug!(
-        debug_count = invocation_ui.ui.debug_verbosity,
+        debug_level = invocation_ui.ui.debug_level,
         "developer logging initialized"
     );
     tracing::info!(
@@ -574,6 +690,23 @@ fn prepare_host_run(
         "osp session initialized"
     );
 
+    tracing::info!(target: "osp::diagnostic", "debug: Startup complete; profile={}.", crate::diagnostics::safe_text(state.runtime.config.resolved().active_profile()));
+    if invocation_ui.ui.debug_level >= 2 {
+        let config = state.runtime.config.resolved();
+        if let Some(path) =
+            crate::config::RuntimeConfigPaths::discover_with(state.runtime.launch.runtime_load)
+                .config_file
+        {
+            tracing::debug!(target: "osp::diagnostic", "debug: Config loaded; source={}; profile={}.", crate::diagnostics::safe_text(&path.display().to_string()), crate::diagnostics::safe_text(config.active_profile()));
+        }
+        for key in ["ui.verbosity", "debug.level"] {
+            if let Some(entry) = config.values().get(key) {
+                tracing::debug!(target: "osp::diagnostic", "debug: Config selected; key={key}; source={}.", entry.source);
+            }
+        }
+    }
+    tracing::debug!(target: "osp::diagnostic", "debug: Command scope resolved; scope=root.");
+    tracing::trace!(target: "osp::diagnostic", "trace: +{} ms startup.end; terminal={}.", run_started.elapsed().as_millis(), state.runtime.context.terminal_kind().as_config_terminal());
     Ok(PreparedHostRun {
         state,
         dispatch,
@@ -584,39 +717,38 @@ fn prepare_host_run(
 pub(crate) fn authorized_command_catalog_for(
     auth: &AuthState,
     clients: &AppClients,
-) -> Result<Vec<CommandCatalogEntry>> {
-    let mut all = clients.plugins().command_catalog();
+    native_catalog: Vec<CommandCatalogEntry>,
+) -> Vec<CommandCatalogEntry> {
+    let mut all = native_catalog;
+    let mut names = all
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<std::collections::HashSet<_>>();
     all.extend(
         clients
-            .native_commands()
-            .catalog()
+            .plugins()
+            .command_catalog()
             .into_iter()
-            .map(native_catalog_entry_to_command_catalog_entry),
+            .filter(|entry| {
+                !crate::cli::builtin_command_names().contains(&entry.name)
+                    && names.insert(entry.name.clone())
+            }),
     );
     all.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(all
-        .into_iter()
+    all.into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
-        .collect())
-}
-
-pub(crate) fn authorized_completion_command_catalog_for(
-    auth: &AuthState,
-    clients: &AppClients,
-) -> Result<Vec<CommandCatalogEntry>> {
-    let mut all = clients.plugins().command_catalog();
-    all.extend(
-        clients
-            .native_commands()
-            .completion_catalog()
-            .into_iter()
-            .map(native_catalog_entry_to_command_catalog_entry),
-    );
-    all.sort_by(|left, right| left.name.cmp(&right.name));
-    Ok(all
-        .into_iter()
-        .filter(|entry| auth.is_external_command_visible(&entry.name))
-        .collect())
+        .map(|mut entry| {
+            auth.filter_command_spec(&mut entry.completion, &[]);
+            entry.subcommands.retain(|name| {
+                entry
+                    .completion
+                    .children
+                    .values()
+                    .any(|child| child.name == *name)
+            });
+            entry
+        })
+        .collect()
 }
 
 pub(crate) fn resolve_invocation_ui(
@@ -645,41 +777,15 @@ pub(crate) fn resolve_invocation_ui(
         ui: UiState::new(
             render_settings,
             crate::ui::messages::adjust_verbosity(
-                ui.message_verbosity,
+                ui.verbosity,
                 invocation.verbose,
                 invocation.quiet,
             ),
-            if invocation.debug > 0 {
-                invocation.debug.min(3)
-            } else {
-                ui.debug_verbosity
-            },
-        )
-        .with_error_detail(adjust_error_detail(
-            ui.error_detail,
-            invocation.verbose,
-            invocation.quiet,
-        )),
-        plugin_provider: invocation.plugin_provider.clone(),
+            ui.debug_level.saturating_add(invocation.debug).min(3),
+        ),
         help_level: help_level(config, invocation.verbose, invocation.quiet),
     }
 }
-
-pub(crate) fn ensure_command_supports_dsl(spec: &ReplCommandSpec, stages: &[String]) -> Result<()> {
-    if stages.is_empty() || spec.supports_dsl {
-        return Ok(());
-    }
-
-    Err(miette!(
-        "`{}` does not support DSL pipeline stages",
-        spec.name
-    ))
-}
-
-pub(crate) fn enrich_dispatch_error(err: PluginDispatchError) -> miette::Report {
-    report_std_error_with_context(err, "plugin command failed")
-}
-
 /// Maps a reported error to the CLI exit code family used by OSP.
 pub fn classify_exit_code(err: &miette::Report) -> i32 {
     let known = KnownErrorChain::inspect(err);
@@ -690,147 +796,174 @@ pub fn classify_exit_code(err: &miette::Report) -> i32 {
     }
 }
 
-/// Renders a process-facing error message for one step of the host detail
-/// ladder.
-///
-/// The returned string is the final user-facing text for the chosen level.
-/// The ladder is intentionally qualitative rather than additive:
-///
-/// - `Terse`: concise summary plus hint when helpful
-/// - `Normal`: summary plus source-chain context
-/// - `Debug`: rich diagnostic report with snippets when available
-/// - `Forensic`: debug report plus stack backtrace
-///
-/// `RenderSettings` control whether diagnostic rendering is rich/plain and
-/// whether forensic output is colorized.
+/// Resolves recovery advice from error data before rendering either format.
+pub(crate) fn report_error_details(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
+    settings: &RenderSettings,
+) -> crate::core::CommandError {
+    use crate::core::MessageLevel;
+    let known = KnownErrorChain::inspect(err);
+    let detailed = level >= MessageLevel::Info;
+    let structured = find_error_in_chain::<crate::core::CommandError>(err);
+    let mut error = if let Some(error) = structured {
+        error.clone()
+    } else if let Some(clap) = known.clap {
+        crate::core::CommandError::new(
+            if let Some(name) = clap
+                .to_string()
+                .split("unrecognized subcommand '")
+                .nth(1)
+                .and_then(|s| s.split("'").next())
+            {
+                let path = known
+                    .boxed_context
+                    .and_then(|c| c.command_path.as_deref())
+                    .unwrap_or_default();
+                let command = settings
+                    .runtime
+                    .command_scope
+                    .command(&format!("{path} {name}"));
+                format!(
+                    "Unknown command '{}'.",
+                    command.strip_prefix("osp ").unwrap_or(&command)
+                )
+            } else if detailed {
+                clap.to_string()
+            } else {
+                terse_clap_error(clap)
+            },
+        )
+    } else {
+        base_error_message(err, &known)
+    };
+    if !detailed && error.action.is_none() {
+        error.action = known_error_hint(&known, &settings.runtime.command_scope)
+            .filter(|hint| !error.message.contains(hint));
+    }
+    error
+}
+
+/// Renders a concise failure below `Info`, or one detailed report at `Info` and above.
+/// Backtraces are diagnostics emitted separately by the debug axis.
 pub fn render_report_message(
     err: &miette::Report,
-    detail: ErrorDetail,
+    level: crate::core::MessageLevel,
     settings: &RenderSettings,
 ) -> String {
-    if detail >= ErrorDetail::Forensic {
-        return render_forensic_report_message(err, settings);
-    }
-    if detail >= ErrorDetail::Debug {
-        return render_debug_report_message(err, settings);
+    use crate::core::MessageLevel;
+    let detailed = level >= MessageLevel::Info;
+    let mut rendered = report_error_details(err, level, settings).render();
+    if !detailed {
+        return rendered;
     }
 
-    let known = KnownErrorChain::inspect(err);
-    let mut message = match (detail, known.clap) {
-        (ErrorDetail::Terse, Some(clap)) => terse_clap_error(clap),
-        _ => base_error_message(err, &known),
-    };
-
-    if detail >= ErrorDetail::Normal && known.clap.is_some() {
-        if let Some(context) = known.boxed_context
-            && context.context != "native command execution failed"
+    let mut seen = vec![rendered.clone()];
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+    while let Some(source) = current {
+        // Presentation metadata and backend data are not additional causes.
+        let metadata = source
+            .downcast_ref::<ReportContextError>()
+            .is_some_and(|context| context.context.is_none());
+        let backend = source.is::<super::command_output::CommandBackendDetails>();
+        let native = source
+            .downcast_ref::<BoxedContextError>()
+            .is_some_and(|context| context.context == ErrorContext::NativeExecution);
+        let text = source.to_string();
+        let clap_summary = source.is::<clap::Error>()
+            && find_error_in_chain::<crate::core::CommandError>(err)
+                .is_some_and(|error| text.trim().trim_start_matches("error: ") == error.message);
+        if !clap_summary
+            && !metadata
+            && !backend
+            && !native
+            && !text.is_empty()
+            && !seen.iter().any(|previous| previous.contains(&text))
         {
-            message.push_str("\nContext: ");
-            message.push_str(context.context);
+            rendered.push_str("\nCaused by: ");
+            rendered.push_str(&text);
+            seen.push(text);
         }
-    } else if detail >= ErrorDetail::Normal {
-        let mut next: Option<&(dyn std::error::Error + 'static)> = known
-            .boxed_context
-            .filter(|context| context.context == "native command execution failed")
-            .map(|context| context.source.as_ref() as &(dyn std::error::Error + 'static))
-            .or_else(|| Some(err.as_ref()));
-        while let Some(source) = next {
-            let source_text = source.to_string();
-            if !source_text.is_empty() && !message.contains(&source_text) {
-                message.push_str(": ");
-                message.push_str(&source_text);
-            }
-            next = source.source();
-        }
-        if let Some(access) = known.missing_capabilities {
-            let normal_detail = access.normal_detail();
-            if !message.contains(&normal_detail) {
-                message.push('\n');
-                message.push_str(&normal_detail);
-            }
-        }
+        current = source.source();
     }
-
-    if detail == ErrorDetail::Terse {
-        match known_error_hint(&known) {
-            Some(hint) if !message.contains(&hint) => {
-                message.push_str("\nTry: ");
-                message.push_str(&hint);
-            }
-            Some(_) => {}
-            None => {}
-        }
-    }
-
-    message
-}
-
-fn render_forensic_report_message(err: &miette::Report, settings: &RenderSettings) -> String {
-    let mut rendered = render_debug_report_message(err, settings);
-
-    let backtrace = find_error_in_chain::<BoxedContextError>(err)
-        .map(|error| error.backtrace.to_string())
-        .filter(|trace| !trace.trim().is_empty())
-        .unwrap_or_else(|| Backtrace::force_capture().to_string());
-    rendered.push_str("\n\n");
-    rendered.push_str(&format_backtrace(&backtrace, settings));
-
     rendered
 }
 
-fn render_debug_report_message(err: &miette::Report, settings: &RenderSettings) -> String {
-    let mut rendered = render_diagnostic_with_settings(err.as_ref(), settings);
-
-    if let Some(config_err) = find_error_in_chain::<crate::config::ConfigError>(err)
-        && <crate::config::ConfigError as miette::Diagnostic>::source_code(config_err).is_some()
-    {
-        let diagnostic = render_diagnostic_with_settings(config_err, settings);
-        if !rendered.contains(&diagnostic) {
-            rendered.push_str("\n\n");
-            rendered.push_str(&diagnostic);
-        }
-    }
-
-    rendered
-}
-
-fn render_diagnostic_with_settings(
-    diagnostic: &dyn miette::Diagnostic,
+pub(crate) fn has_report_detail(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
     settings: &RenderSettings,
-) -> String {
-    let handler = build_miette_handler(settings);
-    format!(
-        "{:?}",
-        HandlerDebug {
-            handler: &handler,
-            diagnostic,
-        }
-    )
+) -> bool {
+    if level >= crate::core::MessageLevel::Info {
+        return false;
+    }
+    let summary = render_report_message(err, crate::core::MessageLevel::Success, settings);
+    let detail = render_report_message(err, crate::core::MessageLevel::Info, settings);
+    detail.trim() != summary.trim()
 }
 
-fn build_miette_handler(settings: &RenderSettings) -> miette::MietteHandler {
-    let resolved = settings.resolve_render_settings();
-    let mut opts = miette::MietteHandlerOpts::new()
-        .with_cause_chain()
-        .context_lines(2);
+pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
+    report_backtrace(err)
+        .is_none()
+        .then(Backtrace::force_capture)
+}
 
-    if let Some(width) = resolved.width {
-        opts = opts.width(width);
+fn report_backtrace(err: &miette::Report) -> Option<&Backtrace> {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+    let mut captured = None;
+    while let Some(source) = current {
+        if let Some(error) = source.downcast_ref::<BoxedContextError>() {
+            return Some(&error.backtrace);
+        }
+        if let Some(error) = source.downcast_ref::<super::command_output::CommandBackendDetails>() {
+            return Some(&error.backtrace);
+        }
+        if let Some(error) = source.downcast_ref::<ReportContextError>()
+            && error.backtrace.is_some()
+        {
+            captured = error.backtrace.as_ref();
+        }
+        current = source.source();
     }
+    captured
+}
 
-    match resolved.backend {
-        RenderBackend::Rich => opts
-            .force_graphical(true)
-            .color(resolved.color)
-            .unicode(resolved.unicode)
-            .build(),
-        RenderBackend::Plain => opts.force_narrated(true).build(),
-    }
+pub(crate) fn render_backtrace(err: &miette::Report, settings: &RenderSettings) -> Option<String> {
+    report_backtrace(err).map(|trace| {
+        let mut causes = Vec::new();
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+        while let Some(source) = current {
+            let context = source
+                .downcast_ref::<BoxedContextError>()
+                .map(|error| error.context)
+                .or_else(|| {
+                    source
+                        .downcast_ref::<ReportContextError>()
+                        .and_then(|error| error.context)
+                });
+            if let Some(context) = context {
+                let text = context.to_string();
+                if !causes.contains(&text) {
+                    causes.push(text);
+                }
+            }
+            current = source.source();
+        }
+        let mut rendered = String::new();
+        if !causes.is_empty() {
+            rendered.push_str(&format!("debug: Error context: {}.\n", causes.join(" -> ")));
+        }
+        rendered.push_str(&format_backtrace(&trace.to_string(), settings));
+        rendered
+    })
 }
 
 fn format_backtrace(backtrace: &str, settings: &RenderSettings) -> String {
     let resolved = settings.resolve_render_settings();
-    let heading = if resolved.color {
+    let heading = if resolved.color && {
+        use std::io::IsTerminal;
+        std::io::stderr().is_terminal()
+    } {
         Style::new().bold().paint("Stack backtrace").to_string()
     } else {
         "Stack backtrace".to_string()
@@ -838,82 +971,90 @@ fn format_backtrace(backtrace: &str, settings: &RenderSettings) -> String {
     format!("{heading}:\n{backtrace}")
 }
 
-struct HandlerDebug<'a> {
-    handler: &'a dyn miette::ReportHandler,
-    diagnostic: &'a dyn miette::Diagnostic,
-}
-
-impl Debug for HandlerDebug<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.handler.debug(self.diagnostic, f)
-    }
-}
-
-pub(crate) fn adjust_error_detail(base: ErrorDetail, verbose: u8, quiet: u8) -> ErrorDetail {
-    let rank = match base {
-        ErrorDetail::Terse => 0,
-        ErrorDetail::Normal => 1,
-        ErrorDetail::Debug => 2,
-        ErrorDetail::Forensic => 3,
-    };
-    ErrorDetail::from_rank(rank + verbose as i8 - quiet as i8)
-}
-
-fn known_error_hint(known: &KnownErrorChain<'_>) -> Option<String> {
-    if let Some(plugin_err) = known.plugin {
-        return Some(match plugin_err {
-            PluginDispatchError::CommandNotFound { .. } => {
-                "run `osp plugins list` and set --plugin-dir or OSP_PLUGIN_PATH"
-            }
-            PluginDispatchError::CommandAmbiguous { .. } => {
-                "rerun with --plugin-provider <plugin-id> or persist a default with `osp plugins select-provider <command> <plugin-id>`"
-            }
-            PluginDispatchError::ProviderNotFound { .. } => {
-                "pick one of the available providers from `osp plugins commands` or `osp plugins doctor`"
-            }
-            PluginDispatchError::InvalidEnvironment { .. } => {
-                "inspect the colliding extensions.plugins.*.env keys and remove the normalization conflict"
-            }
-            PluginDispatchError::ExecuteFailed { .. } => {
-                "verify the plugin executable exists and is executable"
-            }
-            PluginDispatchError::TimedOut { .. } => {
-                "increase extensions.plugins.timeout_ms or inspect the plugin executable"
-            }
-            PluginDispatchError::OutputTooLarge { .. } => {
-                "reduce the plugin response size or return a narrower result"
-            }
-            PluginDispatchError::NonZeroExit { .. } => {
-                "inspect the plugin stderr output or rerun with -v/-vv for more context"
-            }
-            PluginDispatchError::InvalidJsonResponse { .. }
-            | PluginDispatchError::InvalidResponsePayload { .. } => {
-                "inspect the plugin response contract and stderr output"
-            }
-        }
-        .to_string());
-    }
-
+fn known_error_hint(
+    known: &KnownErrorChain<'_>,
+    scope: &crate::core::CommandScope,
+) -> Option<String> {
     if let Some(config_err) = known.config {
-        return Some(
-            match config_err {
-                crate::config::ConfigError::UnknownProfile { .. } => {
-                    "run `osp config explain profile.default` or choose a known profile"
-                }
-                crate::config::ConfigError::InsecureSecretsPermissions { .. } => {
-                    "restrict the secrets file permissions to 0600"
-                }
-                _ => "run `osp config explain <key>` to inspect config provenance",
+        if matches!(
+            config_err,
+            crate::config::ConfigError::UnknownProfile { .. }
+                | crate::config::ConfigError::FileRead { .. }
+        ) {
+            return None;
+        }
+        return Some(match config_err {
+            crate::config::ConfigError::UnknownProfile { .. } => {
+                format!(
+                    "run `{}` or choose a known profile",
+                    scope.command("config explain profile.default")
+                )
             }
-            .to_string(),
-        );
+            crate::config::ConfigError::InsecureSecretsPermissions { .. } => {
+                "restrict the secrets file permissions to 0600".to_string()
+            }
+            _ => format!(
+                "run `{}` to inspect config provenance",
+                scope.command("config explain <key>")
+            ),
+        });
     }
 
     if let Some(clap) = known.clap {
-        return Some(clap_error_action(clap));
+        let path = known
+            .boxed_context
+            .and_then(|context| context.command_path.as_deref());
+        let mut action = clap_error_action(clap, path, scope);
+        if action.starts_with("Did you mean ") {
+            action.pop();
+            if let Some(suffix) = known
+                .boxed_context
+                .and_then(|c| c.command_suffix.as_deref())
+            {
+                action.push(' ');
+                action.push_str(suffix);
+            }
+            action.push('?');
+        }
+        return Some(action);
     }
 
     None
+}
+
+pub(crate) fn report_hint_command(
+    err: &miette::Report,
+    verbosity: crate::core::MessageLevel,
+) -> Option<String> {
+    if let Some(hint) = find_error_in_chain::<crate::core::CommandHint>(err) {
+        return Some(hint.command.clone());
+    }
+    if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
+    {
+        return backend
+            .error
+            .details
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|command| !command.chars().any(char::is_control))
+            .map(str::to_string);
+    }
+    if verbosity >= crate::core::MessageLevel::Info {
+        return None;
+    }
+    let known = KnownErrorChain::inspect(err);
+    let error = known.clap?;
+    if error
+        .get(clap::error::ContextKind::SuggestedSubcommand)
+        .is_some()
+    {
+        return None;
+    }
+    let path = known
+        .boxed_context
+        .and_then(|context| context.command_path.as_deref())
+        .unwrap_or("");
+    Some(format!("{path} --help").trim_start().to_string())
 }
 
 fn terse_clap_error(error: &clap::Error) -> String {
@@ -940,69 +1081,91 @@ fn terse_clap_error(error: &clap::Error) -> String {
     terse
 }
 
-fn clap_error_action(error: &clap::Error) -> String {
-    let rendered = error.to_string();
-    let suggestions = rendered
-        .lines()
-        .find_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("tip: a similar subcommand exists:")
-                .or_else(|| line.strip_prefix("tip: some similar subcommands exist:"))
-        })
-        .into_iter()
-        .flat_map(|value| value.split(','))
-        .map(|value| value.trim().trim_matches(['`', '\'', '"']))
-        .filter(|value| !value.is_empty())
-        .collect::<Vec<_>>();
-    let prefix = rendered.lines().find_map(|line| {
-        let usage = line.trim().strip_prefix("Usage:")?.trim();
-        let words = usage
-            .split_whitespace()
-            .take_while(|word| !word.starts_with(['[', '<']))
-            .skip_while(|word| *word == "osp")
-            .collect::<Vec<_>>();
-        (!words.is_empty()).then(|| words.join(" "))
-    });
-    match (prefix, suggestions.as_slice()) {
-        (Some(prefix), [suggestion]) => format!("use `{prefix} {suggestion}`"),
+fn clap_error_action(
+    error: &clap::Error,
+    command_path: Option<&str>,
+    scope: &crate::core::CommandScope,
+) -> String {
+    let suggestions = match error.get(clap::error::ContextKind::SuggestedSubcommand) {
+        Some(clap::error::ContextValue::Strings(suggestions)) => suggestions.as_slice(),
+        _ => &[],
+    };
+    let prefix = command_path.filter(|path| !path.is_empty());
+    match (prefix, suggestions) {
+        (Some(prefix), [suggestion]) => {
+            format!(
+                "Did you mean {}?",
+                scope.command(&format!("{prefix} {suggestion}"))
+            )
+        }
         (Some(prefix), suggestions) if !suggestions.is_empty() => format!(
-            "use one of {}; run `{prefix} --help` to see every subcommand",
+            "use one of {}; run `{}` to see every subcommand",
             suggestions
                 .iter()
-                .map(|suggestion| format!("`{prefix} {suggestion}`"))
+                .map(|suggestion| format!("`{}`", scope.command(&format!("{prefix} {suggestion}"))))
                 .collect::<Vec<_>>()
-                .join(" or ")
+                .join(" or "),
+            scope.command(&format!("{prefix} --help"))
         ),
         (None, [suggestion]) => format!("use subcommand `{suggestion}`"),
-        (Some(prefix), _) => format!("use `{prefix} --help`"),
-        _ => "rerun this command with `--help` to inspect accepted values and options".to_string(),
+        (Some(prefix), _) => format!("Run {}.", scope.command(&format!("{prefix} --help"))),
+        _ => format!("Run {}.", scope.command("--help")),
     }
 }
 
-fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> String {
-    if let Some(plugin_err) = known.plugin {
-        return plugin_err.to_string();
-    }
-
+fn base_error_message(
+    err: &miette::Report,
+    known: &KnownErrorChain<'_>,
+) -> crate::core::CommandError {
     if let Some(config_err) = known.config {
-        return config_err.to_string();
+        if let crate::config::ConfigError::InvalidConfigValue { key, reason } = config_err
+            && key == "debug.level"
+        {
+            let path = crate::config::RuntimeConfigPaths::discover()
+                .config_file
+                .map(|path| format!(" ({})", path.display()))
+                .unwrap_or_default();
+            return crate::core::CommandError::new(format!("debug.level {reason}{path}."))
+                .with_action("Fix it, or run osp config set debug.level 0.");
+        }
+        if let crate::config::ConfigError::FileRead { path, .. } = config_err
+            && !std::path::Path::new(path).exists()
+        {
+            return crate::core::CommandError::new(format!("Config file {path} does not exist."));
+        }
+        if let crate::config::ConfigError::LayerLoad { path, inner } = config_err {
+            let message = inner.to_string();
+            let mut location = crate::diagnostics::safe_text(path);
+            if let crate::config::ConfigError::TomlParse(diagnostic) = inner.as_ref()
+                && let Some((line, column)) = diagnostic.location()
+            {
+                location.push_str(&format!(":{line}:{column}"));
+            }
+            return crate::core::CommandError::new(format!(
+                "{} ({}).",
+                message.lines().next().unwrap_or("Invalid config"),
+                location
+            ))
+            .with_action("Fix the config file.");
+        }
+        return crate::core::CommandError::new(config_err.to_string());
     }
 
     if let Some(clap_err) = known.clap {
-        return clap_err.to_string();
+        return crate::core::CommandError::new(clap_err.to_string());
     }
 
     if let Some(context) = known.boxed_context
-        && context.context == "native command execution failed"
+        && context.context == ErrorContext::NativeExecution
     {
-        return context.source.to_string();
+        return crate::core::CommandError::new(context.source.to_string());
     }
 
     if let Some(details) =
         find_error_in_chain::<crate::app::command_output::CommandBackendDetails>(err)
         && let Some(source) = std::error::Error::source(details)
     {
-        return source.to_string();
+        return crate::core::CommandError::new(source.to_string());
     }
 
     let outer = err.to_string();
@@ -1016,17 +1179,54 @@ fn base_error_message(err: &miette::Report, known: &KnownErrorChain<'_>) -> Stri
         current = source.source();
     }
 
-    match deepest_source {
+    crate::core::CommandError::new(match deepest_source {
         // Context wrappers are still useful for verbose output, but at default
         // message levels users usually need the concrete actionable cause.
-        Some(source) if outer.starts_with("failed to ") || outer.starts_with("unable to ") => {
-            source
-        }
+        Some(source) if find_error_in_chain::<ReportContextError>(err).is_some() => source,
         _ => outer,
-    }
+    })
 }
 
-pub(crate) fn report_std_error_with_context<E>(err: E, context: &'static str) -> miette::Report
+pub(crate) fn report_clap_error_with_context<I, T>(
+    err: clap::Error,
+    context: ErrorContext,
+    command: clap::Command,
+    args: I,
+    structured: Option<crate::core::CommandError>,
+) -> miette::Report
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let args = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
+    let command_suffix = args
+        .last()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        .map(str::to_owned);
+    let mut path = if command.get_name() == "osp" {
+        Vec::new()
+    } else {
+        vec![command.get_name().to_string()]
+    };
+    if let Ok(matches) = crate::cli::passive_command(command).try_get_matches_from(args) {
+        let mut current = &matches;
+        while let Some((name, child)) = current.subcommand() {
+            path.push(name.to_string());
+            current = child;
+        }
+    }
+    miette::Report::new(BoxedContextError {
+        context,
+        source: Box::new(err),
+        backtrace: Backtrace::force_capture(),
+        command_path: Some(path.join(" ")),
+        command_suffix,
+        structured,
+    })
+}
+
+pub(crate) fn report_std_error_with_context<E>(err: E, context: ErrorContext) -> miette::Report
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -1034,28 +1234,86 @@ where
         context,
         source: Box::new(err),
         backtrace: Backtrace::force_capture(),
+        command_path: None,
+        command_suffix: None,
+        structured: None,
     })
 }
 
 pub(crate) fn report_anyhow_with_context(
     err: anyhow::Error,
-    context: &'static str,
+    context: ErrorContext,
 ) -> miette::Report {
+    let structured = err.downcast_ref::<crate::core::CommandError>().cloned();
     miette::Report::new(BoxedContextError {
         context,
-        source: err.into_boxed_dyn_error(),
+        source: err.reallocate_into_boxed_dyn_error_without_backtrace(),
         backtrace: Backtrace::force_capture(),
+        command_path: None,
+        command_suffix: None,
+        structured,
     })
 }
 
 pub(crate) fn report_report_with_context(
     err: miette::Report,
-    context: &'static str,
+    context: ErrorContext,
 ) -> miette::Report {
     miette::Report::new(ReportContextError {
-        context,
+        context: Some(context),
         source: err,
+        error_display: None,
+        diagnostics: None,
+        backtrace: Some(Backtrace::force_capture()),
     })
+}
+
+pub(crate) fn report_with_invocation(
+    err: miette::Report,
+    settings: ErrorDisplaySettings,
+) -> miette::Report {
+    let backtrace = capture_missing_report_backtrace(&err);
+    miette::Report::new(ReportContextError {
+        context: None,
+        source: err,
+        error_display: Some(settings),
+        diagnostics: None,
+        backtrace,
+    })
+}
+
+pub(crate) fn report_with_evidence(
+    err: miette::Report,
+    diagnostics: crate::diagnostics::DiagnosticSink,
+) -> miette::Report {
+    miette::Report::new(ReportContextError {
+        context: None,
+        source: err,
+        error_display: None,
+        diagnostics: Some(diagnostics),
+        backtrace: None,
+    })
+}
+
+pub(crate) fn report_evidence(
+    err: &miette::Report,
+    level: crate::core::MessageLevel,
+) -> (String, String) {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(err.as_ref());
+    while let Some(source) = current {
+        if let Some(context) = source.downcast_ref::<ReportContextError>()
+            && let Some(diagnostics) = &context.diagnostics
+        {
+            return diagnostics.render(level, true);
+        }
+        current = source.source();
+    }
+    Default::default()
+}
+
+pub(crate) fn error_display_settings(err: &miette::Report) -> Option<&ErrorDisplaySettings> {
+    find_error_in_chain::<ReportContextError>(err)
+        .and_then(|context| context.error_display.as_ref())
 }
 
 pub(super) fn find_error_in_chain<E>(err: &miette::Report) -> Option<&E>
@@ -1067,66 +1325,66 @@ where
         if let Some(found) = source.downcast_ref::<E>() {
             return Some(found);
         }
+        if let Some(found) = source
+            .downcast_ref::<BoxedContextError>()
+            .and_then(|context| context.structured.as_ref())
+            .and_then(|error| (error as &dyn std::error::Error).downcast_ref::<E>())
+        {
+            return Some(found);
+        }
         current = source.source();
     }
     None
 }
 
-fn native_catalog_entry_to_command_catalog_entry(
-    entry: NativeCommandCatalogEntry,
-) -> CommandCatalogEntry {
-    CommandCatalogEntry {
-        name: entry.name,
-        about: entry.about,
-        auth: entry.auth,
-        subcommands: entry.subcommands,
-        completion: entry.completion,
-        provider: None,
-        providers: Vec::new(),
-        conflicted: false,
-        requires_selection: false,
-        selected_explicitly: false,
-        source: None,
-    }
-}
-
-fn add_native_command_help(view: &mut GuideView, native_commands: &NativeCommandRegistry) {
-    let catalog = native_commands.catalog();
-    if catalog.is_empty() {
+fn add_native_command_help(
+    view: &mut Document,
+    native_commands: &NativeCommandRegistry,
+    auth: &AuthState,
+) {
+    let entries = native_commands
+        .catalog()
+        .into_iter()
+        .filter(|entry| auth.is_external_command_visible(&entry.name))
+        .map(|entry| DocumentEntry {
+            name: entry.name,
+            description: entry.about.trim().to_string(),
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
         return;
     }
-
-    let mut section = GuideSection::new("Commands", GuideSectionKind::Commands);
-    for entry in catalog {
-        section = section.entry(entry.name, entry.about.trim());
-    }
-    let native_entries = section.entries;
-    view.commands.splice(0..0, native_entries.iter().cloned());
-    if let Some(commands) = view.sections.iter_mut().find(|section| {
-        section.kind == GuideSectionKind::Commands && section.is_canonical_builtin_section()
-    }) {
-        if commands.entries.is_empty() {
-            commands.entries = view.commands.clone();
-        } else {
-            commands.entries.splice(0..0, native_entries);
+    if let Some(DocBlock::Section { blocks, .. }) = view
+        .blocks
+        .iter_mut()
+        .find(|block| matches!(block, DocBlock::Section { title, .. } if title == "Commands"))
+    {
+        if let Some(DocBlock::Entries { entries: commands }) = blocks.first_mut() {
+            commands.splice(0..0, entries);
         }
     } else {
-        let mut commands = GuideSection::new("Commands", GuideSectionKind::Commands);
-        commands.entries = view.commands.clone();
-        view.sections.push(commands);
+        view.blocks.push(DocBlock::section(
+            "Commands",
+            vec![DocBlock::Entries { entries }],
+        ));
     }
 }
 
-fn add_product_option_help(view: &mut GuideView, options: &[(String, String)]) {
-    if options.is_empty() {
-        return;
+fn add_product_option_help(view: &mut Document, options: &[(String, String)]) {
+    if !options.is_empty() {
+        view.blocks.push(DocBlock::section(
+            "Product options",
+            vec![DocBlock::Entries {
+                entries: options
+                    .iter()
+                    .map(|(name, description)| DocumentEntry {
+                        name: name.clone(),
+                        description: description.clone(),
+                    })
+                    .collect(),
+            }],
+        ));
     }
-
-    let mut section = GuideSection::new("Product options", GuideSectionKind::Options);
-    for (syntax, help) in options {
-        section = section.entry(syntax, help);
-    }
-    view.sections.push(section);
 }
 
 pub(crate) fn resolve_render_settings_with_hint(

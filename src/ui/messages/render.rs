@@ -3,16 +3,15 @@
 //! The current surface stays plain and layout-focused, but it already sits on
 //! top of the same chrome boundary the terminal emitter uses.
 
-use crate::config::ResolvedConfig;
 use crate::ui::chrome::PLAIN_SECTION_CHROME;
 use crate::ui::section_chrome::{
     RuledSectionPolicy, SectionFrameStyle, SectionRenderContext, SectionStyleTokens,
-    render_section_block_with_overrides, render_section_divider_with_overrides,
+    render_section_block_with_overrides, render_section_divider,
 };
 use crate::ui::style::{StyleToken, ThemeStyler};
 use crate::ui::text::{sanitize_human_text, wrap_display_width};
 
-use super::{MessageBuffer, MessageLayout, MessageLevel, message_layout_from_config};
+use super::{MessageBuffer, MessageLayout, MessageLevel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RenderedSection {
@@ -40,108 +39,22 @@ impl Default for MessageChrome {
     }
 }
 
-/// Options controlling message rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MessageRenderOptions {
-    pub max_level: MessageLevel,
-    pub layout: MessageLayout,
-}
-
-impl MessageRenderOptions {
-    /// Creates full render options.
-    pub fn full(max_level: MessageLevel) -> Self {
-        Self {
-            max_level,
-            layout: MessageLayout::Grouped,
-        }
-    }
-
-    /// Creates compact render options.
-    #[cfg(test)]
-    pub fn compact(max_level: MessageLevel) -> Self {
-        Self {
-            max_level,
-            layout: MessageLayout::Compact,
-        }
-    }
-
-    /// Creates austere render options.
-    #[cfg(test)]
-    pub fn austere(max_level: MessageLevel) -> Self {
-        Self {
-            max_level,
-            layout: MessageLayout::Minimal,
-        }
-    }
-
-    /// Creates plain ungrouped render options.
-    #[cfg(test)]
-    pub fn plain(max_level: MessageLevel) -> Self {
-        Self {
-            max_level,
-            layout: MessageLayout::Plain,
-        }
-    }
-}
-
-/// Renders messages using the requested layout.
-#[cfg(test)]
-pub fn render_messages(buffer: &MessageBuffer, options: MessageRenderOptions) -> String {
-    render_messages_unstyled_with_chrome(buffer, options, MessageChrome::default())
-}
-
-/// Renders messages using the requested layout and semantic styling.
-#[cfg(test)]
-pub fn render_messages_with_styler(
-    buffer: &MessageBuffer,
-    options: MessageRenderOptions,
-    styler: &ThemeStyler<'_>,
-) -> String {
-    render_messages_internal(buffer, options, styler, MessageChrome::default())
-}
-
-pub(crate) fn render_messages_with_styler_and_chrome(
-    buffer: &MessageBuffer,
-    options: MessageRenderOptions,
-    styler: &ThemeStyler<'_>,
-    chrome: MessageChrome,
-) -> String {
-    render_messages_internal(buffer, options, styler, chrome)
-}
-
-/// Renders messages using config-driven layout selection and semantic styling.
-pub(crate) fn render_messages_with_styler_from_config(
-    buffer: &MessageBuffer,
-    config: &ResolvedConfig,
-    max_level: MessageLevel,
-    styler: &ThemeStyler<'_>,
-    chrome: MessageChrome,
-) -> String {
-    render_messages_internal(
-        buffer,
-        MessageRenderOptions {
-            max_level,
-            layout: message_layout_from_config(config),
-        },
-        styler,
-        chrome,
-    )
-}
-
-fn render_messages_internal(
-    buffer: &MessageBuffer,
-    options: MessageRenderOptions,
-    styler: &ThemeStyler<'_>,
-    chrome: MessageChrome,
-) -> String {
-    let buffer = sanitize_message_buffer(buffer);
-    let rendered = match options.layout {
-        MessageLayout::Minimal => render_austere(&buffer, options.max_level, styler),
-        MessageLayout::Plain => render_plain(&buffer, options.max_level, styler),
-        MessageLayout::Compact => render_compact(&buffer, options.max_level, styler),
-        MessageLayout::Grouped => render_full(&buffer, options.max_level, styler, chrome),
+pub(super) fn render_messages(buffer: &MessageBuffer, request: &super::MessageRequest) -> String {
+    let settings = &request.settings;
+    let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
+    let chrome = MessageChrome {
+        frame_style: settings.chrome_frame,
+        ruled_policy: request.ruled_policy,
+        unicode: settings.unicode,
+        width: settings.width,
     };
-
+    let buffer = sanitize_message_buffer(buffer);
+    let rendered = match request.layout {
+        MessageLayout::Minimal => render_austere(&buffer, request.max_level, &styler),
+        MessageLayout::Plain => render_plain(&buffer, request.max_level, &styler),
+        MessageLayout::Compact => render_compact(&buffer, request.max_level, &styler),
+        MessageLayout::Grouped => render_full(&buffer, request.max_level, &styler, chrome),
+    };
     if rendered.is_empty() || rendered.ends_with('\n') {
         rendered
     } else {
@@ -160,18 +73,6 @@ fn sanitize_message_buffer(buffer: &MessageBuffer) -> MessageBuffer {
     buffer
 }
 
-#[cfg(test)]
-fn render_messages_unstyled_with_chrome(
-    buffer: &MessageBuffer,
-    options: MessageRenderOptions,
-    chrome: MessageChrome,
-) -> String {
-    let theme = crate::ui::theme::resolve_theme("plain");
-    let overrides = crate::ui::style::StyleOverrides::default();
-    let styler = ThemeStyler::new(false, &theme, &overrides);
-    render_messages_internal(buffer, options, &styler, chrome)
-}
-
 fn render_austere(
     buffer: &MessageBuffer,
     max_level: MessageLevel,
@@ -180,7 +81,7 @@ fn render_austere(
     let mut lines = Vec::new();
     for level in MessageLevel::ordered().filter(|level| *level <= max_level) {
         for entry in buffer.entries_for_level(level) {
-            let prefix = paint(styler, level.as_env_str(), level.style_token());
+            let prefix = paint(styler, level.as_str(), level.style_token());
             let colon = paint(styler, ":", StyleToken::Punctuation);
             lines.push(format!("  {prefix}{colon} {}", entry.text));
         }
@@ -289,12 +190,15 @@ fn render_shared_full_sections(
     let width = chrome.width.or(Some(24));
     let mut lines = Vec::new();
     for section in sections {
-        lines.push(render_section_divider_with_overrides(
+        lines.push(render_section_divider(
             &section.title,
-            chrome.unicode,
-            width,
-            render,
-            SectionStyleTokens::same(section.level.style_token()),
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode: chrome.unicode,
+                width,
+                title_columns: 2,
+                render,
+                tokens: SectionStyleTokens::same(section.level.style_token()),
+            },
         ));
         lines.extend(message_body_lines(section, chrome.width, styler));
     }
@@ -303,12 +207,15 @@ fn render_shared_full_sections(
             .last()
             .map(|section| section.level.style_token())
             .unwrap_or(StyleToken::Border);
-        lines.push(render_section_divider_with_overrides(
+        lines.push(render_section_divider(
             "",
-            chrome.unicode,
-            width,
-            render,
-            SectionStyleTokens::same(token),
+            &crate::ui::section_chrome::SectionDividerRequest {
+                unicode: chrome.unicode,
+                width,
+                title_columns: 2,
+                render,
+                tokens: SectionStyleTokens::same(token),
+            },
         ));
     }
     lines.join("\n")
@@ -381,27 +288,92 @@ fn paint(styler: &ThemeStyler<'_>, text: &str, token: StyleToken) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        MessageChrome, MessageRenderOptions, render_messages, render_messages_internal,
-        render_messages_unstyled_with_chrome, render_messages_with_styler,
-        render_messages_with_styler_from_config,
-    };
+    use super::{MessageChrome, render_messages};
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};
     use crate::ui::ThemeStyler;
-    use crate::ui::messages::{MessageBuffer, MessageLevel};
+    use crate::ui::messages::MessageRequest;
+    use crate::ui::messages::{MessageBuffer, MessageLayout, MessageLevel};
     use crate::ui::section_chrome::{RuledSectionPolicy, SectionFrameStyle};
     use crate::ui::theme::resolve_theme;
     use unicode_width::UnicodeWidthStr;
 
+    /// Options controlling message rendering.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct MessageRenderOptions {
+        pub max_level: MessageLevel,
+        pub layout: MessageLayout,
+    }
+
+    impl MessageRenderOptions {
+        /// Creates full render options.
+        pub fn full(max_level: MessageLevel) -> Self {
+            Self {
+                max_level,
+                layout: MessageLayout::Grouped,
+            }
+        }
+
+        /// Creates compact render options.
+        #[cfg(test)]
+        pub fn compact(max_level: MessageLevel) -> Self {
+            Self {
+                max_level,
+                layout: MessageLayout::Compact,
+            }
+        }
+
+        /// Creates austere render options.
+        #[cfg(test)]
+        pub fn austere(max_level: MessageLevel) -> Self {
+            Self {
+                max_level,
+                layout: MessageLayout::Minimal,
+            }
+        }
+
+        /// Creates plain ungrouped render options.
+        #[cfg(test)]
+        pub fn plain(max_level: MessageLevel) -> Self {
+            Self {
+                max_level,
+                layout: MessageLayout::Plain,
+            }
+        }
+    }
+
+    fn request(
+        options: MessageRenderOptions,
+        styler: Option<&ThemeStyler<'_>>,
+        chrome: MessageChrome,
+    ) -> MessageRequest {
+        let mut request = MessageRequest::new(
+            &crate::ui::RenderSettings::test_plain(crate::core::output::OutputFormat::Auto),
+            options.max_level,
+        );
+        request.layout = options.layout;
+        request.settings.chrome_frame = chrome.frame_style;
+        request.ruled_policy = chrome.ruled_policy;
+        request.settings.unicode = chrome.unicode;
+        request.settings.width = chrome.width;
+        if let Some(styler) = styler {
+            request.settings.color = styler.enabled;
+            request.settings.theme = styler.theme.clone();
+            request.settings.style_overrides = styler.overrides.clone();
+        }
+        request
+    }
     fn resolved_config(entries: &[(&str, &str)]) -> crate::config::ResolvedConfig {
         let mut defaults = ConfigLayer::default();
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            defaults,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                defaults,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }
@@ -414,7 +386,14 @@ mod tests {
         buffer.success("done");
         buffer.info("hint");
 
-        let rendered = render_messages(&buffer, MessageRenderOptions::full(MessageLevel::Success));
+        let rendered = render_messages(
+            &buffer,
+            &request(
+                MessageRenderOptions::full(MessageLevel::Success),
+                None,
+                MessageChrome::default(),
+            ),
+        );
         assert!(rendered.contains("Error"));
         assert!(rendered.contains("\n  bad"));
         assert!(rendered.contains("Warning"));
@@ -432,7 +411,11 @@ mod tests {
 
         let rendered = render_messages(
             &buffer,
-            MessageRenderOptions::compact(MessageLevel::Warning),
+            &request(
+                MessageRenderOptions::compact(MessageLevel::Warning),
+                None,
+                MessageChrome::default(),
+            ),
         );
 
         assert!(rendered.contains("Error:"));
@@ -447,7 +430,14 @@ mod tests {
         buffer.error("bad");
         buffer.warning("careful");
 
-        let rendered = render_messages(&buffer, MessageRenderOptions::plain(MessageLevel::Warning));
+        let rendered = render_messages(
+            &buffer,
+            &request(
+                MessageRenderOptions::plain(MessageLevel::Warning),
+                None,
+                MessageChrome::default(),
+            ),
+        );
 
         assert!(!rendered.contains("Error"));
         assert!(!rendered.contains("Warning"));
@@ -461,15 +451,18 @@ mod tests {
         buffer.error("bad");
         buffer.warning("careful");
 
-        let rendered = render_messages_unstyled_with_chrome(
+        let rendered = render_messages(
             &buffer,
-            MessageRenderOptions::full(MessageLevel::Warning),
-            MessageChrome {
-                frame_style: SectionFrameStyle::TopBottom,
-                ruled_policy: RuledSectionPolicy::Shared,
-                unicode: false,
-                width: Some(16),
-            },
+            &request(
+                MessageRenderOptions::full(MessageLevel::Warning),
+                None,
+                MessageChrome {
+                    frame_style: SectionFrameStyle::TopBottom,
+                    ruled_policy: RuledSectionPolicy::Shared,
+                    unicode: false,
+                    width: Some(16),
+                },
+            ),
         );
 
         assert!(rendered.contains("- Error "));
@@ -484,15 +477,18 @@ mod tests {
             "capabilities_request_failed: Failed to fetch capabilities for provider 'vmware'.",
         );
 
-        let rendered = render_messages_unstyled_with_chrome(
+        let rendered = render_messages(
             &buffer,
-            MessageRenderOptions::full(MessageLevel::Error),
-            MessageChrome {
-                frame_style: SectionFrameStyle::TopBottom,
-                ruled_policy: RuledSectionPolicy::Shared,
-                unicode: true,
-                width: Some(40),
-            },
+            &request(
+                MessageRenderOptions::full(MessageLevel::Error),
+                None,
+                MessageChrome {
+                    frame_style: SectionFrameStyle::TopBottom,
+                    ruled_policy: RuledSectionPolicy::Shared,
+                    unicode: true,
+                    width: Some(40),
+                },
+            ),
         );
 
         assert!(
@@ -518,16 +514,18 @@ mod tests {
         let theme = resolve_theme("dracula");
         let overrides = crate::ui::StyleOverrides::default();
         let styler = ThemeStyler::new(true, &theme, &overrides);
-        let rendered = render_messages_internal(
+        let rendered = render_messages(
             &buffer,
-            MessageRenderOptions::full(MessageLevel::Success),
-            &styler,
-            MessageChrome {
-                frame_style: SectionFrameStyle::TopBottom,
-                ruled_policy: RuledSectionPolicy::PerSection,
-                unicode: false,
-                width: Some(12),
-            },
+            &request(
+                MessageRenderOptions::full(MessageLevel::Success),
+                Some(&styler),
+                MessageChrome {
+                    frame_style: SectionFrameStyle::TopBottom,
+                    ruled_policy: RuledSectionPolicy::PerSection,
+                    unicode: false,
+                    width: Some(12),
+                },
+            ),
         );
         let bottom = rendered
             .lines()
@@ -545,10 +543,13 @@ mod tests {
         let theme = resolve_theme("dracula");
         let overrides = crate::ui::StyleOverrides::default();
         let styler = ThemeStyler::new(true, &theme, &overrides);
-        let rendered = render_messages_with_styler(
+        let rendered = render_messages(
             &buffer,
-            MessageRenderOptions::austere(MessageLevel::Info),
-            &styler,
+            &request(
+                MessageRenderOptions::austere(MessageLevel::Info),
+                Some(&styler),
+                MessageChrome::default(),
+            ),
         );
 
         assert!(rendered.contains("  \x1b[38;2;139;233;253minfo\x1b[0m"));
@@ -564,12 +565,16 @@ mod tests {
         let styler = ThemeStyler::new(true, &theme, &overrides);
         let config = resolved_config(&[("ui.messages.layout", "compact")]);
 
-        let rendered = render_messages_with_styler_from_config(
+        let rendered = render_messages(
             &buffer,
-            &config,
-            MessageLevel::Error,
-            &styler,
-            MessageChrome::default(),
+            &request(
+                MessageRenderOptions {
+                    max_level: MessageLevel::Error,
+                    layout: crate::ui::messages::message_layout_from_config(&config),
+                },
+                Some(&styler),
+                MessageChrome::default(),
+            ),
         );
 
         assert!(rendered.contains("Error:"));
@@ -582,28 +587,34 @@ mod tests {
         let mut buffer = MessageBuffer::default();
         buffer.error("bad");
 
-        let bottom = render_messages_unstyled_with_chrome(
+        let bottom = render_messages(
             &buffer,
-            MessageRenderOptions::full(MessageLevel::Error),
-            MessageChrome {
-                frame_style: SectionFrameStyle::Bottom,
-                ruled_policy: RuledSectionPolicy::PerSection,
-                unicode: false,
-                width: Some(12),
-            },
+            &request(
+                MessageRenderOptions::full(MessageLevel::Error),
+                None,
+                MessageChrome {
+                    frame_style: SectionFrameStyle::Bottom,
+                    ruled_policy: RuledSectionPolicy::PerSection,
+                    unicode: false,
+                    width: Some(12),
+                },
+            ),
         );
         assert!(bottom.starts_with("Error:"));
         assert!(bottom.contains("\n------------"));
 
-        let round = render_messages_unstyled_with_chrome(
+        let round = render_messages(
             &buffer,
-            MessageRenderOptions::full(MessageLevel::Error),
-            MessageChrome {
-                frame_style: SectionFrameStyle::Round,
-                ruled_policy: RuledSectionPolicy::PerSection,
-                unicode: true,
-                width: Some(14),
-            },
+            &request(
+                MessageRenderOptions::full(MessageLevel::Error),
+                None,
+                MessageChrome {
+                    frame_style: SectionFrameStyle::Round,
+                    ruled_policy: RuledSectionPolicy::PerSection,
+                    unicode: true,
+                    width: Some(14),
+                },
+            ),
         );
         assert!(round.contains('╭'));
         assert!(round.contains('│'));

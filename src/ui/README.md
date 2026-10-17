@@ -2,16 +2,16 @@
 
 Turns structured output into text for a person or a pipe. Commands and the DSL
 decide *what* the data is; this module decides *how it looks*: table, key/value,
-guide, markdown or JSON, with theme, width, colour and unicode policy applied.
+documents, markdown or JSON, with theme, width, colour and unicode policy applied.
 
-Imports `core`, `config` (render settings) and `guide`. It does not re-run
+Imports `core` and `config` (render settings). It does not re-run
 commands, re-resolve config, or invent data. If a value is wrong here, it was
 wrong before it arrived.
 
 ## Flow
 
 ```text
-OutputResult / GuideView
+OutputResult / Document
    ▼ plan/     choose the effective format and settings
    ▼ lower.rs  convert to one document IR (doc.rs)
    ▼ emit/     write terminal, markdown or JSON text
@@ -28,7 +28,7 @@ OutputResult / GuideView
 | `theme/`, `theme_catalog.rs` | Builtin themes; loading custom theme files |
 | `style/` | Style tokens mapped to theme colours |
 | `messages/` | Buffered success/warning/error messages and their layout |
-| `section_chrome.rs`, `chrome/` | Section rules and frames shared by help, guides and messages |
+| `section_chrome.rs`, `chrome/` | Section rules and frames shared by help, documents and messages |
 | `clipboard/` | Copy-to-clipboard transport |
 | `prompt.rs` | Plain line input for command prompts and the basic REPL |
 
@@ -45,6 +45,12 @@ OutputResult / GuideView
 
 ```sh
 osp theme list
-osp plugins commands --format table --plain     # no colour, ASCII chrome
-osp plugins commands --json                     # the data before ui
+osp plugins list --format table --plain     # no colour, ASCII chrome
+osp plugins list --json                     # the data before ui
 ```
+
+Documents lower to the same UI blocks as ordinary data, including `EntriesBlock`.
+Direct and help layouts share the block traversal, with help spacing and entry
+hints applied before emission.
+Marked document rows render consecutive section runs in their current order.
+The renderer never infers document intent from ordinary row fields.

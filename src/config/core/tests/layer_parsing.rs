@@ -113,9 +113,9 @@ fn config_layer_from_toml_str_reports_invalid_sections_and_unknown_roots_unit() 
 fn config_layer_helpers_cover_insert_remove_and_profile_terminal_scope_unit() {
     let mut layer = ConfigLayer::default();
     layer.set("ui.format", "json");
-    layer.set_for_profile("ops", "ui.format", "table");
-    layer.set_for_terminal("repl", "ui.format", "md");
-    layer.set_for_profile_terminal("ops", "repl", "ui.format", "mreg");
+    layer.insert("ui.format", "table", crate::config::Scope::profile("ops"));
+    layer.insert("ui.format", "md", crate::config::Scope::terminal("repl"));
+    layer.insert("ui.format", "mreg", crate::config::Scope::profile_terminal("ops", "repl"));
     layer.insert_with_origin(
         "theme.name",
         "dracula",

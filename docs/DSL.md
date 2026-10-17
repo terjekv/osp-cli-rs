@@ -25,11 +25,11 @@ CLI help output also accepts stages, for example `osp --help '|' C`.
 Shell-completion scripts and version text are not structured command output;
 they reject pipe stages explicitly.
 
-For a product task list whose JSON exposes `id` and `status`:
+For a product task search whose JSON exposes `id` and `status.name`:
 
 ```bash
-osp --json orch task list '|' F status=running '|' C
-osp orch task list '|' P id,status,created_at '|' S -created_at
+osp --json orch task find '|' F status.name=running '|' C
+osp orch task find '|' P id,status.name,created_at '|' S -created_at
 ```
 
 Use the actual raw field path returned by your command. `status` is not an
@@ -49,12 +49,19 @@ terminal state. Filter the raw `stale` boolean to select stale tasks.
   pipeline produces a JSON array of the resulting rows, including `[]` and
   singleton arrays. Wrapper totals and cursors are discarded; they no longer
   describe the transformed result.
-- Structured help declares itself as a guide. Its entries and text lines
-  become rows for a pipeline; section headings remain presentation metadata.
-  Filtering and limiting operate on those entries, not on a singleton help
-  envelope. Human guide rendering restores surviving content into its sections.
-  Shape-changing stages, including field cleanup (`?`), instead display the
-  resulting rows without retaining the original guide layout.
+- Help and intro are semantic documents. Unstaged JSON emits `{"blocks": ...}`.
+  A pipeline consumes flat rows in document order: `{section, name, description}`
+  for entries and `{section, text}` for text lines. Preamble rows use an empty
+  section. Data blocks retain their fields, with `section` reserved for the
+  enclosing heading. Lists supply one row per text line.
+- Document rows are marked by producer metadata, never inferred from row shape.
+  `| L 2` selects the first two rows; `| S name` sorts entries across sections;
+  `| F name~json` filters entries. `section` is searchable like any other column.
+  Human rendering shows a heading where a run of rows with that section starts,
+  in current pipeline order. It never restores a document by matching values.
+- Row-preserving stages keep document-row metadata. Shape-changing stages
+  (`P`, `A`, `C`, `G`, `VALUE`, `JQ`, `U`, `Z`, or cleanup that changes fields)
+  clear it and render ordinary data. Every staged JSON result is a row array.
 
 `F`, bare search, `K`, `V`, and existence searches retain complete matching
 rows. They do not recursively remove members from arrays inside a row. For
@@ -75,8 +82,8 @@ distinct addresses.
 
 | Stage | Syntax and meaning | Example |
 | --- | --- | --- |
-| Bare search | Case-insensitive text search across keys and values; retains rows | `running` |
-| `F` | `F field OP value`; operators `=`, `==`, `!=`, `>`, `>=`, `<`, `<=`, `~` | `F status=running` |
+| Bare search | Case-insensitive key/value search; narrows one object or filters multiple objects | `running` |
+| `F` | `F field OP value`; operators `=`, `==`, `!=`, `>`, `>=`, `<`, `<=`, `~` | `F status.name=running` |
 | `P` | `P field[,field...] [!field...]`; keep/drop fields | `P id,status` |
 | `S` | `S field [asc\|desc] [AS num\|str\|ip] ...` | `S created_at desc id` |
 | `G` | `G field [AS alias] [field ...]`; partition by group keys | `G provider` |
@@ -101,26 +108,42 @@ ordinary unregistered words are quick-search text.
 Keys may use the column labels a table shows (`F state=failed` on a STATE
 column resolves to its field). A key that matches no field in any row is an
 error listing the columns, not an empty result or a single `null` group.
+`U` leaves rows unchanged when its target path finds no array.
 Shape-changing stages (`G`, `A`, `Z`) derive their columns from the result but
 keep field formatting such as relative times for fields that survive.
 
 ## Matching and selectors
 
+Quick search (`| term`) uses the number of rows entering that stage. With one
+object, it keeps fields whose names match. In every other field, it keeps only
+matching values and list items: scalar lists retain only matching items, and a
+value match inside a list of objects retains that whole object. With multiple
+objects, it filters rows and keeps each matching row whole.
+Negation (`| !term`) removes matching fields or list items from one object, or
+removes matching rows from multiple objects. Each group's member rows follow
+this rule independently, including after earlier pipeline stages.
+
+A term exactly naming a field projects only that field's complete value;
+selectors can also project addressed objects or list members. `?field` and
+`!?field` always filter by truthy presence or absence without narrowing fields.
+
 Quick search supports these prefixes, with or without intervening spaces:
 
 | Prefix | Meaning |
 | --- | --- |
-| `!text` | Exclude matching rows |
+| `!text` | Remove matching fields/items or rows |
 | `=text` | Case-insensitive equality |
 | `==text` | Case-sensitive equality |
 | `!=text` | Negated case-insensitive equality |
 | `%text` | Fuzzy text matching |
 | `?field` / `!?field` | Truthy presence / absence |
 
-`K` and `V` restrict the search to keys or values. `K !=field` selects rows
-having a key unequal to that name. All whitespace variants of `!=` have the
-same interpretation; predicate `F field != value` also permits attached forms.
-`F field text` means a contains comparison; `F field=value` means equality.
+`K` and `V` restrict the search to keys or values. `K !=field` keeps unequal
+keys in one object, or rows having a key unequal to that name. All whitespace
+variants of `!=` have the same interpretation; predicate `F field != value`
+also permits attached forms.
+`F field text` means a contains comparison; `F field=value` means
+case-insensitive equality and `F field==value` means case-sensitive equality.
 Array-valued fields match if an element satisfies the predicate.
 
 A bare literal field selector prefers the root field and its leaves, falling
@@ -135,7 +158,9 @@ an unrelated nested object.
 Projection keepers and droppers resolve against original addresses before
 compaction. A selected null remains null. Fanout columns use their leaf name;
 selecting two fanouts with the same name is an ambiguity error. Static parent
-fields repeat alongside projected member rows.
+fields repeat alongside projected member rows. Fanout columns join by member
+address, so a missing field stays absent rather than borrowing another member's
+value. Member rows follow their first appearance across the selectors.
 
 ## Sorting, dates and quoting
 
@@ -144,11 +169,16 @@ fields repeat alongside projected member rows.
 order, for example `S size desc AS num`. A missing sort field in a nonempty
 selection is an error. Empty input sorts successfully. Missing values sort
 last; numeric-looking values sort numerically under automatic casting.
+Text sorting uses the same Unicode case folding as case-insensitive filtering.
+Sorts, ordered filters and minimum/maximum compare supported integers exactly.
+Comparisons involving floating-point values use floating-point ordering.
 
 Ordered filters recognize RFC3339 timestamps and timezone-naive dates/times.
 Naive values use the machine's local timezone. Ambiguous or nonexistent local
 DST times are rejected with guidance to supply an offset. Prefer explicit
-RFC3339 offsets in scripts:
+RFC3339 offsets in scripts. Comparisons preserve fractional seconds. A
+date-only `<=` bound includes the whole local day; a `>=` bound starts at
+local midnight:
 
 ```text
 F created_at >= 2026-09-25T10:00:00+02:00
@@ -185,10 +215,13 @@ replace its member rows.
 ## Groups and empty selections
 
 `G` keeps group keys, aggregate values and member rows distinct. A field
-holding a list of plain values groups like `field[]`: each element is its own
-group, so a host with two siteadmins counts under both. Lists of objects still
-need a leaf field. Row operations
-such as `P`, `U`, `VALUE`, quick search and clean run within each partition.
+holding a list of plain values groups like `field[]`: each element is its
+own group, so a host with two siteadmins counts under both. A row joins each
+group once even if a list repeats an element. An empty list joins the
+null/missing-value group, as does explicit `field[]`. Group header names must
+be distinct after aliases resolve. Lists of objects still need a leaf field.
+Row operations such as `P`, `U`, `VALUE`, quick search and clean run within
+each partition.
 `F` tests matching header/aggregate fields first; otherwise it filters members
 and removes empty groups. `S` and `L` order/limit groups. `A` adds one aggregate
 per group; `Z` emits keys and aggregates as ordinary rows. Previously computed
@@ -200,6 +233,11 @@ group keys. `A count` follows the same empty-selection rule. Empty numeric
 sum/average are zero; minimum/maximum are null. `G` alone over empty input
 produces no groups.
 
+`A count field` and `A count(field)` count non-null field values. Use `AS`
+to name an aggregate, for example `A count AS total` to count all rows.
+Integer-only sums stay integers while their total fits the JSON i64/u64 range;
+larger totals and sums containing floating-point inputs use floating point.
+
 ## Human tables
 
 Null and empty arrays render blank; lists render as readable comma-separated
@@ -209,3 +247,9 @@ columns remain stable for zero, one or many rows. Use `--json` for complete
 machine data, or `P` to choose the fields needed for your task. Set
 `ui.table.overflow=wrap` to preserve complete cell values across lines; the
 explicit `none` setting disables width fitting.
+
+Ordered `F` comparisons accept `now` and `now-Ns`, `now-Nm`, `now-Nh`,
+`now-Nd`, for example `F created_at >= now-24h`. N is a nonnegative integer;
+a day is exactly 86400 seconds. Each compiled filter samples the clock once,
+and invalid or overflowing durations fail before filtering. These predicates
+filter fetched rows only: they do not change server pagination or fetch history.

@@ -4,35 +4,23 @@
 #[path = "support/temp.rs"]
 mod temp_support;
 
-#[path = "integration/aliases.rs"]
-mod aliases;
-
 #[path = "integration/app/mod.rs"]
 mod app;
-
-#[path = "integration/completion.rs"]
-mod completion;
-
-#[path = "integration/config/mod.rs"]
-mod config;
-
-#[path = "integration/diagnostics.rs"]
-mod diagnostics;
-
-#[path = "integration/dsl/mod.rs"]
-mod dsl;
 
 #[path = "integration/embedding_workflow.rs"]
 mod embedding_workflow;
 
-#[path = "integration/guide_ui.rs"]
-mod guide_ui;
-
-#[path = "integration/ui.rs"]
-mod ui;
-
-#[path = "integration/plugin_manager.rs"]
-mod plugin_manager;
-
 #[path = "integration/repl/mod.rs"]
 mod repl;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "support/pty.rs"]
+mod pty_support;
+
+#[path = "integration/config.rs"]
+mod config;
+
+#[path = "integration/dsl_output.rs"]
+mod dsl_output;

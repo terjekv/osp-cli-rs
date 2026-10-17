@@ -5,25 +5,23 @@
 //! a few small presentation-mode policies. It should shape REPL presentation,
 //! not command execution.
 
+use crate::app::DEFAULT_REPL_PROMPT;
 use crate::app::DebugTimingState;
 use crate::app::format_timing_badge;
 use crate::app::help::help_level;
 use crate::app::is_sensitive_key;
-use crate::app::{CMD_HELP, DEFAULT_REPL_PROMPT};
 use crate::config::ConfigValue;
 use crate::config::DEFAULT_REPL_HISTORY_MENU_ROWS;
 use crate::config::ResolvedConfig;
-use crate::guide::template::{GuideTemplateBlock, GuideTemplateInclude, parse_markdown_template};
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+use crate::core::document::{DocBlock, Document, DocumentEntry};
 use crate::native::NativeSessionContext;
+use crate::repl::ReplInputMode;
 use crate::repl::{ReplAppearance, ReplPrompt};
 use crate::ui::messages::MessageLevel;
-use crate::ui::render_structured_output_with_source_guide;
+use crate::ui::render;
 use crate::ui::style::{StyleToken, apply_style_with_theme, apply_style_with_theme_overrides};
-use serde_json::Value;
 use std::borrow::Cow;
 use std::sync::Arc;
-use unicode_width::UnicodeWidthStr;
 
 use super::ReplViewContext;
 use super::history;
@@ -37,14 +35,10 @@ pub(crate) enum ReplIntroStyle {
     Full,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReplInputMode {
-    Auto,
-    Interactive,
-    Basic,
-}
-
 impl ReplIntroStyle {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::None, Self::Minimal, Self::Compact, Self::Full];
+
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "off" => Some(Self::None),
@@ -54,15 +48,14 @@ impl ReplIntroStyle {
             _ => None,
         }
     }
-}
 
-impl ReplInputMode {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "interactive" | "full" => Some(Self::Interactive),
-            "basic" | "plain" => Some(Self::Basic),
-            _ => None,
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Compact => "compact",
+            Self::Full => "full",
         }
     }
 }
@@ -91,6 +84,9 @@ pub(crate) fn intro_style_with_verbosity(
     style: ReplIntroStyle,
     verbosity: MessageLevel,
 ) -> ReplIntroStyle {
+    if style == ReplIntroStyle::None {
+        return style;
+    }
     let mut rank = match style {
         ReplIntroStyle::None => 0_i8,
         ReplIntroStyle::Minimal => 1,
@@ -101,7 +97,7 @@ pub(crate) fn intro_style_with_verbosity(
         MessageLevel::Error | MessageLevel::Warning => -3,
         MessageLevel::Success => 0,
         MessageLevel::Info => 1,
-        MessageLevel::Trace => 2,
+        MessageLevel::Trace | MessageLevel::Evidence => 2,
     };
     rank = (rank + delta).clamp(0, 3);
     match rank {
@@ -150,14 +146,15 @@ Help: `| H` or `| H <verb>` e.g. `| H F`
 {{ help }}"#;
 
 pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface) -> String {
-    let intro_style =
-        intro_style_with_verbosity(intro_style(view.config), view.ui.message_verbosity);
+    let _phase = tracing::info_span!(target: "osp_startup", "REPL intro rendering").entered();
+    let intro_style = intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
-    let mut rendered = render_structured_output_with_source_guide(
-        &guide.to_output_result(),
-        Some(&guide),
-        &view.ui.render_settings,
-        crate::ui::help_layout_from_config(view.config),
+    let mut rendered = render(
+        &repl_document_output(&guide),
+        &crate::ui::RenderRequest {
+            layout: Some(crate::ui::help_layout_from_config(view.config)),
+            ..crate::ui::RenderRequest::new(&view.ui.render_settings)
+        },
     );
     if !rendered.is_empty() {
         rendered.insert(0, '\n');
@@ -166,18 +163,23 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
     rendered
 }
 
+pub(crate) fn repl_document_output(document: &Document) -> crate::core::output_model::OutputResult {
+    let mut output = document.to_output_result();
+    output.meta.document_entry_gap = Some(5);
+    output
+}
+
 pub(crate) fn build_repl_intro_payload(
     view: ReplViewContext<'_>,
     surface: &ReplSurface,
     override_style: Option<ReplIntroStyle>,
-) -> GuideView {
+) -> Document {
     let config = view.config;
-    let intro_style = override_style.unwrap_or_else(|| {
-        intro_style_with_verbosity(intro_style(config), view.ui.message_verbosity)
-    });
+    let intro_style = override_style
+        .unwrap_or_else(|| intro_style_with_verbosity(intro_style(config), view.ui.verbosity));
 
     if matches!(intro_style, ReplIntroStyle::None) {
-        return GuideView::default();
+        return Document::default();
     }
     let template = intro_template(view.config, intro_style);
     let expanded = expand_intro_template(view, &surface.intro_commands, template);
@@ -206,174 +208,20 @@ fn intro_template(config: &crate::config::ResolvedConfig, style: ReplIntroStyle)
     }
 }
 
-// Intro templates are authored like lightweight markdown, but the payload they
-// produce must stay semantic. Headings create explicit sections, `osp` fences
-// attach semantic data to the current section, and `{{ help }}` expands into
-// canonical help sections in template order instead of being re-derived later.
-fn parse_intro_template_payload(template: &str, help: &GuideView) -> GuideView {
-    let trimmed = template.trim();
-    if trimmed.is_empty() {
-        return GuideView::default();
-    }
-
-    let mut payload = GuideView::default();
-    let mut current_section: Option<GuideSection> = None;
-
-    for block in parse_markdown_template(trimmed) {
-        match block {
-            GuideTemplateBlock::Heading(title) => {
-                flush_intro_section(&mut payload, &mut current_section);
-                current_section = Some(GuideSection::new(title, GuideSectionKind::Custom));
-            }
-            GuideTemplateBlock::Include(GuideTemplateInclude::Help)
-            | GuideTemplateBlock::Include(GuideTemplateInclude::Overview) => {
-                flush_intro_section(&mut payload, &mut current_section);
-                append_template_include_payload(&mut payload, help);
-            }
-            GuideTemplateBlock::Paragraph(line) => {
-                let lines = line
-                    .lines()
-                    .map(str::trim_end)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_string)
-                    .collect::<Vec<_>>();
-                if let Some(section) = current_section.as_mut() {
-                    section.paragraphs.extend(lines);
-                } else {
-                    payload.preamble.extend(lines);
-                }
-            }
-            GuideTemplateBlock::Data(data) => {
-                // Fenced `osp` blocks attach semantic data to the current
-                // section so intro authoring can opt into list/key-value/grid
-                // rendering without hardcoding presentation cases here.
-                let section = current_section
-                    .get_or_insert_with(|| GuideSection::new("", GuideSectionKind::Custom));
-                attach_intro_data_block(section, data);
-            }
-        }
-    }
-
-    flush_intro_section(&mut payload, &mut current_section);
-    payload
-}
-
-fn flush_intro_section(payload: &mut GuideView, current: &mut Option<GuideSection>) {
-    let Some(section) = current.take() else {
-        return;
-    };
-    if intro_section_has_content(&section) {
-        payload.sections.push(section);
-    }
-}
-
-fn intro_section_has_content(section: &GuideSection) -> bool {
-    !section.paragraphs.is_empty()
-        || !section.entries.is_empty()
-        || !matches!(section.data, None | Some(Value::Null))
-}
-
-fn attach_intro_data_block(section: &mut GuideSection, data: Value) {
-    section.data = Some(match section.data.take() {
-        None => data,
-        // Keep repeated data fences inside the authored section instead of
-        // inventing sibling sections during parsing.
-        Some(Value::Array(mut existing)) => {
-            match data {
-                Value::Array(next) => existing.extend(next),
-                other => existing.push(other),
-            }
-            Value::Array(existing)
-        }
-        Some(existing) => match data {
-            Value::Array(mut next) => {
-                let mut merged = vec![existing];
-                merged.append(&mut next);
-                Value::Array(merged)
-            }
-            other => Value::Array(vec![existing, other]),
-        },
-    });
-}
-
-// Help/overview includes are expanded at parse time, in authored order. This
-// is the boundary where `{{ help }}` / `{{ overview }}` stop being placeholders
-// and become concrete builtin sections followed by any surrounding custom
-// sections, so later quick/filter/render code does not reorder them.
-fn append_template_include_payload(payload: &mut GuideView, included: &GuideView) {
-    payload.preamble.extend(included.preamble.iter().cloned());
-
-    if !included.usage.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Usage".to_string(),
-            kind: GuideSectionKind::Usage,
-            paragraphs: repl_intro_body_paragraphs(&included.usage),
-            entries: Vec::new(),
-            data: None,
-        });
-    }
-    if !included.commands.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Commands".to_string(),
-            kind: GuideSectionKind::Commands,
-            paragraphs: Vec::new(),
-            entries: included.commands.clone(),
-            data: None,
-        });
-    }
-    if !included.arguments.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Arguments".to_string(),
-            kind: GuideSectionKind::Arguments,
-            paragraphs: Vec::new(),
-            entries: included.arguments.clone(),
-            data: None,
-        });
-    }
-    if !included.options.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Options".to_string(),
-            kind: GuideSectionKind::Options,
-            paragraphs: Vec::new(),
-            entries: included.options.clone(),
-            data: None,
-        });
-    }
-    if !included.common_invocation_options.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Common Invocation Options".to_string(),
-            kind: GuideSectionKind::CommonInvocationOptions,
-            paragraphs: Vec::new(),
-            entries: included.common_invocation_options.clone(),
-            data: None,
-        });
-    }
-    if !included.notes.is_empty() {
-        payload.sections.push(GuideSection {
-            title: "Notes".to_string(),
-            kind: GuideSectionKind::Notes,
-            paragraphs: repl_intro_body_paragraphs(&included.notes),
-            entries: Vec::new(),
-            data: None,
-        });
-    }
-
-    payload.sections.extend(included.sections.iter().cloned());
-    payload.epilogue.extend(included.epilogue.iter().cloned());
-}
-
-fn repl_intro_body_paragraphs(paragraphs: &[String]) -> Vec<String> {
-    paragraphs
-        .iter()
-        .map(|line| format!("  {}", line.trim_start()))
-        .collect()
+fn parse_intro_template_payload(template: &str, help: &Document) -> Document {
+    Document::from_markdown_template(template, help)
 }
 
 /// Picks one entry from `repl.intro_tips`, the same one all day (UTC).
-fn tip_of_the_day(config: &crate::config::ResolvedConfig) -> String {
-    let tips = config
+fn tip_of_the_day(view: ReplViewContext<'_>, intro_commands: &[String]) -> String {
+    let tips = view
+        .config
         .get_string_list("repl.intro_tips")
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|tip| expand_intro_template(view, intro_commands, &tip).into_owned())
+        .filter(|tip| !tip.trim().is_empty())
+        .collect::<Vec<_>>();
     if tips.is_empty() {
         return String::new();
     }
@@ -402,6 +250,21 @@ fn expand_intro_template<'a>(
         };
         let close = open + 2 + close_rel;
         let key = template[open + 2..close].trim();
+        if let Some(command) = key.strip_prefix("#visible ")
+            && let Some(end_rel) = template[close + 2..].find("{{/visible}}")
+        {
+            let end = close + 2 + end_rel;
+            let path = crate::core::command_policy::CommandPath::new(command.split_whitespace());
+            if view.auth.external_command_path_access(&path).is_visible() {
+                out.push_str(&expand_intro_template(
+                    view,
+                    intro_commands,
+                    &template[close + 2..end],
+                ));
+            }
+            cursor = end + "{{/visible}}".len();
+            continue;
+        }
         if key.is_empty() {
             out.push_str("{{}}");
             cursor = close + 2;
@@ -419,37 +282,51 @@ fn expand_intro_template<'a>(
     }
 }
 
+fn effective_user(view: ReplViewContext<'_>) -> &str {
+    view.context
+        .authenticated_subject()
+        .or_else(|| view.config.get_string("user.name"))
+        .unwrap_or("anonymous")
+}
+
 fn resolve_intro_placeholder(
     view: ReplViewContext<'_>,
     intro_commands: &[String],
     key: &str,
 ) -> String {
-    let effective_user = || {
-        view.context
-            .authenticated_subject()
-            .or_else(|| view.config.get_string("user.name"))
-            .unwrap_or("anonymous")
-    };
     match key {
+        "actions" => {
+            return view
+                .actions
+                .iter()
+                .filter_map(|action| {
+                    action
+                        .key
+                        .map(|key| format!("`{key}` {}", action.label.to_ascii_lowercase()))
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+        }
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),
-        "user" => {
-            return effective_user().to_string();
-        }
-        "user.name" => {
-            return effective_user().to_string();
+        "user" | "user.name" => {
+            return effective_user(view).to_string();
         }
         "display_name" => {
-            let user = effective_user();
+            let user = effective_user(view);
             return view
-                .config
-                .get_string(&format!("user.display_names.{user}"))
+                .context
+                .display_name()
+                .or_else(|| {
+                    view.config
+                        .get_string(&format!("user.display_names.{user}"))
+                })
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or(user)
                 .to_string();
         }
         "session.user_label" => {
-            return if view.auth.policy_context().authenticated {
+            return if view.auth.session_facts().authenticated {
                 "Logged in as"
             } else {
                 "User"
@@ -457,8 +334,8 @@ fn resolve_intro_placeholder(
             .to_string();
         }
         "session.user_value" => {
-            return if view.auth.policy_context().authenticated {
-                effective_user()
+            return if view.auth.session_facts().authenticated {
+                effective_user(view)
             } else {
                 "Not authenticated"
             }
@@ -482,7 +359,7 @@ fn resolve_intro_placeholder(
                 .unwrap_or_else(|| theme_display_name(&view.ui.render_settings.theme_name));
         }
         "version" => return env!("CARGO_PKG_VERSION").to_string(),
-        "tip" => return tip_of_the_day(view.config),
+        "tip" => return tip_of_the_day(view, intro_commands),
         "intro.commands" => {
             return intro_commands
                 .iter()
@@ -491,11 +368,7 @@ fn resolve_intro_placeholder(
                 .join(", ");
         }
         "help_hint" => {
-            return if view.auth.is_builtin_visible(CMD_HELP) {
-                "See help for more.".to_string()
-            } else {
-                "Use completion to explore commands.".to_string()
-            };
+            return "See help for more.".to_string();
         }
         _ => {}
     }
@@ -529,46 +402,52 @@ pub(crate) fn render_repl_command_overview(
     view: ReplViewContext<'_>,
     surface: &ReplSurface,
 ) -> String {
-    let guide = build_repl_command_overview_view(surface).filtered_for_help_level(help_level(
-        view.config,
-        0,
-        0,
-    ));
-    render_structured_output_with_source_guide(
-        &guide.to_output_result(),
-        Some(&guide),
-        &view.ui.render_settings,
-        crate::ui::help_layout_from_config(view.config),
+    let guide = build_repl_help_view(surface, help_level(view.config, 0, 0));
+    render(
+        &repl_document_output(&guide),
+        &crate::ui::RenderRequest {
+            layout: Some(crate::ui::help_layout_from_config(view.config)),
+            ..crate::ui::RenderRequest::new(&view.ui.render_settings)
+        },
     )
 }
 
-pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> GuideView {
-    let name_width = surface
-        .overview_entries
-        .iter()
-        .map(|entry| UnicodeWidthStr::width(entry.name.as_str()))
-        .max()
-        .unwrap_or(0);
-    GuideView {
-        usage: vec!["[INVOCATION_OPTIONS] COMMAND [ARGS]...".to_string()],
-        commands: surface
-            .overview_entries
-            .iter()
-            .map(|entry| crate::guide::GuideEntry {
-                name: entry.name.clone(),
-                short_help: entry.summary.clone(),
-                display_indent: Some("  ".to_string()),
-                display_gap: Some(format!(
-                    "{}     ",
-                    " ".repeat(
-                        name_width.saturating_sub(UnicodeWidthStr::width(entry.name.as_str()))
-                    )
-                )),
-            })
-            .collect(),
-        epilogue: vec!["Pipe command output with `|`; use `| H` for in-band DSL help.".to_string()],
-        ..GuideView::default()
+pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> Document {
+    Document {
+        blocks: vec![
+            DocBlock::section(
+                "Usage",
+                vec![DocBlock::Paragraph {
+                    text: "[INVOCATION_OPTIONS] COMMAND [ARGS]...".into(),
+                }],
+            ),
+            DocBlock::section(
+                "Commands",
+                vec![DocBlock::Entries {
+                    entries: surface
+                        .overview_entries
+                        .iter()
+                        .map(|entry| DocumentEntry {
+                            name: entry.name.clone(),
+                            description: entry.summary.clone(),
+                        })
+                        .collect(),
+                }],
+            ),
+            DocBlock::Paragraph {
+                text: "Pipe command output with `|`; use `| H` for in-band DSL help.".into(),
+            },
+        ],
     }
+}
+
+pub(crate) fn build_repl_help_view(
+    surface: &ReplSurface,
+    level: crate::core::document::HelpLevel,
+) -> Document {
+    let mut document = build_repl_command_overview_view(surface);
+    crate::cli::invocation::extend_with_invocation_help(&mut document, level);
+    document.filtered_for_help_level(level)
 }
 
 pub(crate) fn theme_display_name(slug: &str) -> String {
@@ -595,14 +474,6 @@ pub(crate) fn theme_display_name(slug: &str) -> String {
 
 pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance {
     let resolved = view.ui.render_settings.resolve_render_settings();
-    if !resolved.color {
-        return ReplAppearance::default();
-    }
-    let theme = &resolved.theme;
-    let completion_text_style = theme.repl_completion_text_spec().to_string();
-    let completion_background_style = theme.repl_completion_background_spec().to_string();
-    let completion_highlight_style = theme.repl_completion_highlight_spec().to_string();
-    let command_highlight_style = theme.palette.success.to_string();
     let history_menu_rows = match view
         .config
         .get("repl.history.menu_rows")
@@ -612,14 +483,26 @@ pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance
         _ => DEFAULT_REPL_HISTORY_MENU_ROWS as u16,
     };
 
-    ReplAppearance::builder()
+    let appearance = ReplAppearance::builder()
+        .with_ansi_colors(resolved.color)
+        .with_history_menu_rows(history_menu_rows);
+    if !resolved.color {
+        return appearance.build();
+    }
+
+    let theme = &resolved.theme;
+    let completion_text_style = theme.repl_completion_text_spec().to_string();
+    let completion_background_style = theme.repl_completion_background_spec().to_string();
+    let completion_highlight_style = theme.repl_completion_highlight_spec().to_string();
+    let command_highlight_style = theme.palette.success.to_string();
+
+    appearance
         .with_completion_text_style(Some(completion_text_style))
         .with_completion_background_style(Some(completion_background_style))
         .with_completion_highlight_style(Some(completion_highlight_style))
         .with_command_highlight_style(Some(command_highlight_style))
         .with_error_highlight_style(Some(theme.palette.error.to_string()))
         .with_hint_style(Some(theme.palette.muted.to_string()))
-        .with_history_menu_rows(history_menu_rows)
         .build()
 }
 
@@ -636,12 +519,7 @@ impl ReplPromptState {
         Self {
             simple: repl_simple_prompt(view.config),
             profile: view.config.active_profile().to_string(),
-            user: view
-                .context
-                .authenticated_subject()
-                .or_else(|| view.config.get_string("user.name"))
-                .unwrap_or("anonymous")
-                .to_string(),
+            user: effective_user(view).to_string(),
             domain: view
                 .config
                 .get_string("domain")
@@ -697,6 +575,11 @@ pub(crate) fn build_repl_prompt(view: ReplViewContext<'_>) -> ReplPrompt {
                 .get_string("repl.prompt")
                 .unwrap_or(DEFAULT_REPL_PROMPT),
         );
+        let template = if resolved.unicode {
+            template
+        } else {
+            template.replace(['╭', '╰'], "+").replace('─', "-")
+        };
         render_prompt_template_styled(
             &template,
             &user_text,
@@ -716,35 +599,86 @@ pub(crate) fn build_repl_prompt(view: ReplViewContext<'_>) -> ReplPrompt {
 pub(crate) fn build_repl_prompt_right_renderer(
     view: ReplViewContext<'_>,
     timing: DebugTimingState,
+    product: Option<super::product::ReplStatusRenderer>,
 ) -> crate::repl::PromptRightRenderer {
     let resolved = view.ui.render_settings.resolve_render_settings();
-    let prompt_right_template = view
-        .config
-        .get_string("repl.prompt_right")
-        .map(str::to_string);
     let history_enabled = history::repl_history_enabled(view.config) && view.history_enabled;
     let native_context = view.native_context.clone();
+    let left_width = crate::ui::display_width(&build_repl_prompt(view).left);
     Arc::new(move || {
-        render_repl_prompt_right(
-            &resolved,
-            prompt_right_template.as_deref(),
-            history_enabled,
-            &timing,
-            &native_context,
-        )
+        let base = render_repl_prompt_right(&resolved, history_enabled, &timing, &native_context);
+        let status = product.as_ref().and_then(|render| render());
+        let emphasis = status.as_ref().map(|status| status.level);
+        let text = status
+            .as_ref()
+            .map(|status| status.text.as_str())
+            .unwrap_or_default();
+        let status = crate::ui::sanitize_human_text(text).replace('\n', " ");
+        let token = match emphasis {
+            Some(MessageLevel::Error) => Some(StyleToken::Error),
+            Some(MessageLevel::Warning) => Some(StyleToken::Warning),
+            _ => None,
+        };
+        let status = token.map_or_else(
+            || status.clone(),
+            |token| {
+                apply_style_with_theme_overrides(
+                    &status,
+                    token,
+                    resolved.color,
+                    &resolved.theme,
+                    &resolved.style_overrides,
+                )
+            },
+        );
+        if status.is_empty() {
+            if left_width + crate::ui::display_width(&base) + 3 > resolved.width.unwrap_or(80)
+                && !native_context.context_entries().is_empty()
+            {
+                format!("+{} ctx", native_context.context_entries().len())
+            } else {
+                base
+            }
+        } else {
+            let mut context = render_repl_prompt_context(&resolved, &native_context);
+            let incognito = render_repl_prompt_incognito(&resolved, history_enabled);
+            if left_width
+                + crate::ui::display_width(&context)
+                + crate::ui::display_width(&incognito)
+                + crate::ui::display_width(&status)
+                + 5
+                > resolved.width.unwrap_or(80)
+            {
+                context = format!("+{} ctx", native_context.context_entries().len());
+            }
+            let mut parts = [context, incognito, status]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            let timing = render_repl_prompt_timing(&resolved, &timing);
+            // Attention wins the fixed prompt budget; Reedline handles draft collisions.
+            if !timing.is_empty()
+                && left_width
+                    + crate::ui::display_width(&parts.join("  "))
+                    + crate::ui::display_width(&timing)
+                    + 3
+                    <= resolved.width.unwrap_or(80)
+            {
+                parts.push(timing);
+            }
+            parts.join("  ")
+        }
     })
 }
 
 #[cfg(test)]
 pub(crate) fn render_repl_prompt_right_for_test(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
 ) -> String {
     render_repl_prompt_right_for_test_with_context(
         resolved,
-        prompt_right_template,
         history_enabled,
         timing,
         &NativeSessionContext::default(),
@@ -754,23 +688,15 @@ pub(crate) fn render_repl_prompt_right_for_test(
 #[cfg(test)]
 pub(crate) fn render_repl_prompt_right_for_test_with_context(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
     native_context: &NativeSessionContext,
 ) -> String {
-    render_repl_prompt_right(
-        resolved,
-        prompt_right_template,
-        history_enabled,
-        timing,
-        native_context,
-    )
+    render_repl_prompt_right(resolved, history_enabled, timing, native_context)
 }
 
 fn render_repl_prompt_right(
     resolved: &crate::ui::ResolvedRenderSettings,
-    prompt_right_template: Option<&str>,
     history_enabled: bool,
     timing: &DebugTimingState,
     native_context: &NativeSessionContext,
@@ -780,15 +706,6 @@ fn render_repl_prompt_right(
         incognito: render_repl_prompt_incognito(resolved, history_enabled),
         timing: render_repl_prompt_timing(resolved, timing),
     };
-
-    if let Some(template) = prompt_right_template {
-        return render_repl_prompt_right_template(
-            &decode_repl_prompt_template(template),
-            &state.context,
-            &state.incognito,
-            &state.timing,
-        );
-    }
 
     let mut parts = Vec::new();
     if !state.context.is_empty() {
@@ -813,7 +730,7 @@ fn render_repl_prompt_context(
     }
     let rendered = entries
         .iter()
-        .map(|entry| format!("{}:{}", entry.label, entry.value))
+        .map(|entry| NativeSessionContext::render_context_token(&entry.label, &entry.value))
         .collect::<Vec<_>>()
         .join(" ");
     apply_style_with_theme_overrides(
@@ -856,18 +773,6 @@ fn render_repl_prompt_timing(
         .map(|badge| format_timing_badge(badge.summary, badge.level, resolved))
         .filter(|rendered| !rendered.is_empty())
         .unwrap_or_default()
-}
-
-fn render_repl_prompt_right_template(
-    template: &str,
-    context: &str,
-    incognito: &str,
-    timing: &str,
-) -> String {
-    let mut out = template.replace("{context}", context);
-    out = out.replace("{incognito}", incognito);
-    out = out.replace("{timing}", timing);
-    out
 }
 
 fn build_shell_indicator(view: ReplViewContext<'_>) -> String {

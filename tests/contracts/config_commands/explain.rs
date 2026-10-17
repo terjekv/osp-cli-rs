@@ -14,7 +14,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -62,7 +62,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -95,7 +95,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -137,7 +137,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -178,7 +178,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -221,7 +221,7 @@ profile.default = "tsd"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -265,7 +265,7 @@ ui.mode = "rich"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -308,7 +308,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -342,8 +342,8 @@ fn config_explain_reports_interpolation_trace_contract() {
         r#"
 [default]
 profile.default = "uio"
-base.dir = "/etc/osp"
-ui.prompt = "${profile.active}:${extensions.uio.ldap.url}:${base.dir}"
+extensions.site.base_dir = "/etc/osp"
+repl.prompt = "${profile.active}:${extensions.uio.ldap.url}:${extensions.site.base_dir}"
 extensions.site.retry_ratio = 1.5
 extensions.site.enabled = true
 extensions.site.request_url = "https://api.example/${profile.active}?ratio=${extensions.site.retry_ratio}&enabled=${extensions.site.enabled}&credential=${extensions.site.token}"
@@ -361,11 +361,11 @@ extensions.site.connection = "https://operator:credential@api.example/${profile.
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
-        .args(["--json", "config", "explain", "ui.prompt"])
+        .args(["--json", "config", "explain", "repl.prompt"])
         .assert()
         .success()
         .get_output()
@@ -374,7 +374,7 @@ extensions.site.connection = "https://operator:credential@api.example/${profile.
     let payload = parse_json_stdout(&output.stdout);
     assert_eq!(
         payload["interpolation"]["template"],
-        "${profile.active}:${extensions.uio.ldap.url}:${base.dir}"
+        "${profile.active}:${extensions.uio.ldap.url}:${extensions.site.base_dir}"
     );
     let steps = payload["interpolation"]["steps"]
         .as_array()
@@ -400,7 +400,7 @@ extensions.site.connection = "https://operator:credential@api.example/${profile.
         if show_secrets {
             args.push("--show-secrets");
         }
-        Command::new(assert_cmd::cargo::cargo_bin!("osp"))
+        crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"))
             .envs(crate::test_env::isolated_env(&home))
             .env("PATH", "/usr/bin:/bin")
             .args(args)
@@ -482,7 +482,7 @@ extensions.uio.ldap.bind_password = "file-secret"
 "#,
     );
 
-    let mut redacted = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut redacted = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let redacted_output = redacted
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -500,7 +500,7 @@ extensions.uio.ldap.bind_password = "file-secret"
     assert_eq!(redacted_payload["value"], "[REDACTED]");
     assert_eq!(redacted_payload["value_type"], "string");
 
-    let mut clear = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut clear = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let clear_output = clear
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -518,7 +518,7 @@ extensions.uio.ldap.bind_password = "file-secret"
     let clear_payload = parse_json_stdout(&clear_output.stdout);
     assert_eq!(clear_payload["value"], "file-secret");
 
-    let mut write = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut write = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     write
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -552,7 +552,7 @@ extensions.uio.ldap.bind_password = "file-secret"
     let redacted = redacted.assert().success().get_output().clone();
     assert_eq!(parse_json_stdout(&redacted.stdout)["value"], "[REDACTED]");
 
-    let mut unset = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut unset = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     unset
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -592,7 +592,7 @@ repl.history.exclude = ["confidential:*", "login *"]
 "#,
     );
 
-    let mut redacted = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut redacted = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let redacted_output = redacted
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -604,7 +604,7 @@ repl.history.exclude = ["confidential:*", "login *"]
     let redacted_payload = parse_json_stdout(&redacted_output.stdout);
     assert_eq!(redacted_payload["value"], "[REDACTED]");
 
-    let mut clear = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut clear = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let clear_output = clear
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -622,7 +622,7 @@ repl.history.exclude = ["confidential:*", "login *"]
     let clear_payload = parse_json_stdout(&clear_output.stdout);
     assert_eq!(clear_payload["value"], "sekrit");
 
-    let mut get_redacted = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut get_redacted = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let get_redacted_output = get_redacted
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -637,7 +637,7 @@ repl.history.exclude = ["confidential:*", "login *"]
     assert_eq!(row["value"], "[REDACTED]");
 
     let run = |args: &[&str]| {
-        Command::new(assert_cmd::cargo::cargo_bin!("osp"))
+        crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"))
             .envs(crate::test_env::isolated_env(&home))
             .env("PATH", "/usr/bin:/bin")
             .args(args)
@@ -771,7 +771,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -813,7 +813,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -858,7 +858,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -874,7 +874,7 @@ ui.format = "json"
         ]);
     let output = cmd.assert().failure().get_output().clone();
     let payload = parse_json_stdout(&output.stdout);
-    assert_eq!(payload["error"]["code"], "config key not found");
-    assert_eq!(payload["error"]["message"], "ui.formt");
+    assert_eq!(payload["error"]["code"], "command_failed");
+    assert_eq!(payload["error"]["message"], "Unknown config key 'ui.formt'.");
     assert!(output.stderr.is_empty());
 }

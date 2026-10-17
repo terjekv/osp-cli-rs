@@ -1,24 +1,16 @@
-//! Final command-result shaping and rendering helpers.
-//!
-//! App dispatch paths return a few different semantic result forms: structured
-//! output, plain text, JSON payloads, plugin response envelopes, and message
-//! buffers. This module normalizes those into the smaller result types the CLI
-//! and REPL host paths know how to render.
+//! One command output contract shared by CLI, REPL, progress and replay.
 
 use crate::config::ResolvedConfig;
+use crate::core::document::Document;
 use crate::core::output::OutputFormat;
-use crate::core::output_model::{OutputItems, OutputResult, RenderRecommendation, rows_from_value};
-use crate::core::plugin::{
-    ResponseErrorV1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
+use crate::core::output_model::{
+    DisplayRule, OutputDocument, OutputItems, OutputResult, RenderRecommendation,
 };
+use crate::core::plugin::{ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use crate::dsl::apply_output_pipeline;
-use crate::guide::GuideView;
 use crate::ui::clipboard::ClipboardService;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
-use crate::ui::{
-    copy_output_to_clipboard, render_json_value, render_output, render_structured_output,
-    render_structured_output_with_source_guide,
-};
+use crate::ui::{RenderRequest, RenderSettings, copy_output_to_clipboard};
 use miette::{Result, WrapErr, miette};
 use serde_json::Value;
 use terminal_size::{Height, terminal_size};
@@ -26,132 +18,246 @@ use terminal_size::{Height, terminal_size};
 use crate::app::resolve_render_settings_with_hint;
 use crate::app::sink::UiSink;
 use crate::app::{AppSession, UiState};
-use crate::cli::rows::output::{
-    output_to_rows, plugin_data_to_output_result, rows_to_output_result,
-};
+use crate::cli::rows::output::{plugin_data_to_output_result, rows_to_output_result};
 
+/// The mutually exclusive data returned by a command.
 #[derive(Debug, Clone)]
-pub(crate) enum ReplCommandOutput {
-    Output(Box<StructuredCommandOutput>),
-    Json(serde_json::Value),
+pub(crate) enum CommandBody {
+    None,
+    Output(Box<OutputResult>),
     Text(String),
+    Json(Value),
 }
 
-impl ReplCommandOutput {
-    /// Owns pipeline input conversion and producer hints across host surfaces.
-    fn into_staged(self, stages: &[String]) -> Result<StructuredCommandOutput> {
-        let (output, format_hint, source_guide) = match self {
-            Self::Output(structured) => {
-                let StructuredCommandOutput {
-                    output,
-                    format_hint,
-                    source_guide,
-                } = *structured;
-                (output, format_hint, source_guide)
-            }
-            Self::Text(text) => (text_output_to_rows(&text), Some(OutputFormat::Value), None),
-            Self::Json(payload) => (
-                rows_to_output_result(rows_from_value(payload)),
-                Some(OutputFormat::Value),
-                None,
-            ),
-        };
-        let (output, format_hint) = apply_output_stages(output, stages, format_hint)?;
-        Ok(StructuredCommandOutput {
-            source_guide: if stages.is_empty() {
-                source_guide
-            } else {
-                None
-            },
-            output,
-            format_hint,
-        })
+impl CommandBody {
+    fn into_output(self) -> Option<OutputResult> {
+        match self {
+            Self::None => None,
+            Self::Output(output) => Some(*output),
+            Self::Text(text) => Some(text_output_to_rows(&text)),
+            Self::Json(value) => Some(OutputResult::from_rows(
+                crate::core::output_model::rows_from_value(value),
+            )),
+        }
+    }
+
+    fn json_value(&self) -> Value {
+        match self {
+            Self::None => Value::Null,
+            Self::Output(output) => crate::ui::json_value(output),
+            Self::Text(text) => serde_json::from_str(text).unwrap_or(Value::Null),
+            Self::Json(value) => value.clone(),
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct StructuredCommandOutput {
-    pub(crate) source_guide: Option<GuideView>,
-    pub(crate) output: OutputResult,
-    pub(crate) format_hint: Option<OutputFormat>,
-}
-
 #[derive(Debug)]
-pub(crate) struct CliCommandResult {
+pub(crate) struct CommandOutput {
+    pub(crate) diagnostics: (String, String),
+    pub(crate) retained_evidence: String,
     pub(crate) exit_code: i32,
+    /// External process status must not replace captured output with an envelope.
+    pub(crate) preserve_process_output: bool,
     pub(crate) messages: MessageBuffer,
-    pub(crate) output: Option<ReplCommandOutput>,
-    pub(crate) stderr_text: Option<String>,
-    pub(crate) failure_report: Option<miette::Report>,
-}
-
-pub(crate) struct PreparedPluginOutput {
-    pub(crate) messages: MessageBuffer,
-    pub(crate) output: OutputResult,
+    pub(crate) body: CommandBody,
     pub(crate) format_hint: Option<OutputFormat>,
+    pub(crate) progress_replace: bool,
+    /// Passthrough stderr emitted alongside the body, without UI formatting.
+    pub(crate) stderr_text: String,
+    pub(crate) failure_report: Option<miette::Report>,
+    pub(crate) hint_command: Option<String>,
 }
 
-impl PreparedPluginOutput {
-    /// Normalizes producer data and metadata before final or transient rendering.
+impl CommandOutput {
+    pub(crate) fn exit(exit_code: i32) -> Self {
+        Self {
+            diagnostics: Default::default(),
+            retained_evidence: String::new(),
+            exit_code,
+            preserve_process_output: false,
+            messages: MessageBuffer::default(),
+            body: CommandBody::None,
+            format_hint: None,
+            progress_replace: false,
+            stderr_text: String::new(),
+            failure_report: None,
+            hint_command: None,
+        }
+    }
+
+    pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
+        Self {
+            body: CommandBody::Output(Box::new(output)),
+            format_hint,
+            ..Self::exit(0)
+        }
+    }
+
+    pub(crate) fn text(text: impl Into<String>) -> Self {
+        Self {
+            body: CommandBody::Text(text.into()),
+            format_hint: Some(OutputFormat::Value),
+            ..Self::exit(0)
+        }
+    }
+
+    pub(crate) fn json(payload: Value) -> Self {
+        Self {
+            body: CommandBody::Json(payload),
+            format_hint: Some(OutputFormat::Value),
+            ..Self::exit(0)
+        }
+    }
+
+    pub(crate) fn document(document: Document) -> Self {
+        Self::output(document.to_output_result(), None)
+    }
+
     pub(crate) fn from_data(
         data: Value,
         meta: &ResponseMetaV1,
         messages: &[ResponseMessageV1],
         stages: &[String],
-    ) -> Result<Self> {
-        let (output, format_hint) = apply_output_stages(
+    ) -> Self {
+        let mut result = Self::output(
             plugin_data_to_output_result(data, Some(meta)),
-            stages,
-            parse_output_format_hint(meta.format_hint.as_deref()),
-        )
-        .wrap_err("failed to prepare plugin response output")?;
-        let mut messages = plugin_response_messages(messages);
+            meta.format_hint.as_deref().and_then(OutputFormat::parse),
+        );
+        for message in messages {
+            result.messages.push(message.level, message.text.clone());
+        }
         if let Some(rest) = meta.partial_rows.as_deref().filter(|_| !stages.is_empty()) {
-            messages.warning(format!(
+            result.messages.warning(format!(
                 "Pipe stages ran over this page only, so counts and groups are partial; {rest}"
             ));
         }
-        Ok(Self {
-            messages,
-            output,
-            format_hint,
-        })
+        if let CommandBody::Output(output) = &result.body {
+            let data = crate::ui::json_value(output);
+            let data = meta
+                .row_path
+                .as_deref()
+                .and_then(|path| data.get(path))
+                .unwrap_or(&data);
+            let rows = data
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_else(|| std::slice::from_ref(data));
+            for (index, row) in rows.iter().enumerate() {
+                for column in &meta.detail_columns {
+                    if let Some(value) = column
+                        .split('.')
+                        .try_fold(row, |value, part| value.get(part))
+                    {
+                        let path = if rows.len() > 1 {
+                            format!("{index}.{column}")
+                        } else {
+                            column.clone()
+                        };
+                        render_detail_fields(&path, value, &mut result.stderr_text);
+                    }
+                }
+            }
+        }
+        result.progress_replace = meta.progress_replace;
+        result
+    }
+
+    /// Retains successful command data for replay without diagnostic ownership.
+    fn saved(&self) -> Self {
+        let mut body = self.body.clone();
+        if let CommandBody::Output(output) = &mut body {
+            output
+                .meta
+                .display_rules
+                .retain(|rule| !matches!(rule, DisplayRule::Hyperlink { .. }));
+        }
+        Self {
+            body,
+            format_hint: self.format_hint,
+            progress_replace: false,
+            ..Self::exit(0)
+        }
+    }
+
+    pub(crate) fn apply_stages(&mut self, stages: &[String]) -> Result<()> {
+        if stages.is_empty() {
+            return Ok(());
+        }
+        let Some(output) = std::mem::replace(&mut self.body, CommandBody::None).into_output()
+        else {
+            return Ok(());
+        };
+        let (output, format_hint) = apply_output_stages(output, stages, self.format_hint)?;
+        self.body = CommandBody::Output(Box::new(output));
+        self.format_hint = format_hint;
+        self.progress_replace = false;
+        Ok(())
+    }
+
+    fn render(&self, config: &ResolvedConfig, settings: &RenderSettings) -> String {
+        let mut effective = resolve_render_settings_with_hint(settings, self.format_hint);
+        let output = match &self.body {
+            CommandBody::None => return String::new(),
+            CommandBody::Text(text) => return text.clone(),
+            CommandBody::Output(output) => std::borrow::Cow::Borrowed(output.as_ref()),
+            CommandBody::Json(payload) => {
+                effective.format = OutputFormat::Json;
+                effective.format_explicit = true;
+                std::borrow::Cow::Owned(
+                    OutputResult::from_rows(Vec::new())
+                        .with_document(OutputDocument::Json(payload.clone())),
+                )
+            }
+        };
+        crate::ui::render(
+            &output,
+            &RenderRequest {
+                layout: Some(crate::ui::help_layout_from_config(config)),
+                ..RenderRequest::new(&effective)
+            },
+        )
     }
 }
 
-pub(crate) struct FailedPluginOutput {
-    pub(crate) messages: MessageBuffer,
-    pub(crate) output: OutputResult,
-    pub(crate) format_hint: Option<OutputFormat>,
-    pub(crate) report: miette::Report,
-}
-
-pub(crate) enum PreparedPluginResponse {
-    Output(PreparedPluginOutput),
-    Failure(FailedPluginOutput),
+fn render_detail_fields(path: &str, value: &Value, out: &mut String) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if !crate::config::is_sensitive_key(key) {
+                    render_detail_fields(&format!("{path}.{key}"), value, out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, value) in items.iter().enumerate() {
+                render_detail_fields(&format!("{path}.{index}"), value, out);
+            }
+        }
+        Value::Null => {}
+        value => out.push_str(&format!(
+            "detail: {}={}\n",
+            crate::diagnostics::safe_text(path),
+            crate::diagnostics::safe_text(
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+                    .as_str()
+            )
+        )),
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct CommandBackendDetails {
-    error: ResponseErrorV1,
+    pub(super) error: ResponseErrorV1,
     source: miette::Report,
+    pub(super) backtrace: std::backtrace::Backtrace,
 }
 
 impl std::fmt::Display for CommandBackendDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.error.details.is_null()
-            || self
-                .error
-                .details
-                .as_object()
-                .is_some_and(serde_json::Map::is_empty)
-        {
-            write!(f, "{}", self.source)
-        } else {
-            let details = serde_json::to_string_pretty(&self.error.details)
-                .unwrap_or_else(|_| self.error.details.to_string());
-            write!(f, "command failed\nBackend details:\n{details}")
-        }
+        std::fmt::Display::fmt(&self.source, f)
     }
 }
 
@@ -163,319 +269,255 @@ impl std::error::Error for CommandBackendDetails {
 
 impl miette::Diagnostic for CommandBackendDetails {}
 
-impl CliCommandResult {
-    pub(crate) fn exit(exit_code: i32) -> Self {
-        Self {
-            exit_code,
-            messages: MessageBuffer::default(),
-            output: None,
-            stderr_text: None,
-            failure_report: None,
+pub(crate) fn json_failure_error(
+    report: Option<&miette::Report>,
+    code: &str,
+    message: String,
+    settings: &crate::ui::RenderSettings,
+) -> Value {
+    if let Some(backend) =
+        report.and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
+    {
+        serde_json::json!(backend.error)
+    } else {
+        let error = report
+            .map(|report| {
+                super::host::report_error_details(report, MessageLevel::Success, settings)
+            })
+            .unwrap_or_else(|| crate::core::CommandError::new(message));
+        let mut details = serde_json::Map::new();
+        if let Some(action) = &error.action {
+            details.insert("action".into(), serde_json::json!(action));
         }
-    }
-
-    pub(crate) fn output(output: OutputResult, format_hint: Option<OutputFormat>) -> Self {
-        Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
-            output: Some(ReplCommandOutput::Output(Box::new(
-                StructuredCommandOutput {
-                    source_guide: None,
-                    output,
-                    format_hint,
-                },
-            ))),
-            stderr_text: None,
-            failure_report: None,
+        if let Some(id) = &error.request_id {
+            details.insert("request_id".into(), serde_json::json!(id));
         }
-    }
-
-    pub(crate) fn text(text: impl Into<String>) -> Self {
-        Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
-            output: Some(ReplCommandOutput::Text(text.into())),
-            stderr_text: None,
-            failure_report: None,
-        }
-    }
-
-    pub(crate) fn json(payload: serde_json::Value) -> Self {
-        Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
-            output: Some(ReplCommandOutput::Json(payload)),
-            stderr_text: None,
-            failure_report: None,
-        }
-    }
-
-    pub(crate) fn guide(guide: impl Into<GuideView>) -> Self {
-        let guide = guide.into();
-        let output = guide.to_output_result();
-        Self::guide_with_output(guide, output, None)
-    }
-
-    pub(crate) fn guide_with_output(
-        guide: impl Into<GuideView>,
-        mut output: OutputResult,
-        format_hint: Option<OutputFormat>,
-    ) -> Self {
-        let guide = guide.into();
-        output
-            .meta
-            .render_recommendation
-            .get_or_insert(RenderRecommendation::Guide);
-        Self {
-            exit_code: 0,
-            messages: MessageBuffer::default(),
-            output: Some(ReplCommandOutput::Output(Box::new(
-                StructuredCommandOutput {
-                    source_guide: Some(guide),
-                    output,
-                    format_hint,
-                },
-            ))),
-            stderr_text: None,
-            failure_report: None,
-        }
-    }
-
-    pub(crate) fn from_prepared_plugin_response(prepared: PreparedPluginResponse) -> Self {
-        match prepared {
-            PreparedPluginResponse::Failure(failure) => Self {
-                exit_code: 1,
-                messages: failure.messages,
-                output: Some(ReplCommandOutput::Output(Box::new(
-                    StructuredCommandOutput {
-                        source_guide: None,
-                        output: failure.output,
-                        format_hint: failure.format_hint,
-                    },
-                ))),
-                stderr_text: None,
-                failure_report: Some(failure.report),
-            },
-            PreparedPluginResponse::Output(prepared) => Self {
-                exit_code: 0,
-                messages: prepared.messages,
-                output: Some(ReplCommandOutput::Output(Box::new(
-                    StructuredCommandOutput {
-                        source_guide: None,
-                        output: prepared.output,
-                        format_hint: prepared.format_hint,
-                    },
-                ))),
-                stderr_text: None,
-                failure_report: None,
-            },
-        }
+        let details = if details.is_empty() {
+            Value::Null
+        } else {
+            Value::Object(details)
+        };
+        serde_json::json!({"code": code, "message": error.message, "details": details})
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct CommandRenderRuntime<'a> {
-    config: &'a ResolvedConfig,
-    ui: &'a UiState,
-}
-
-impl<'a> CommandRenderRuntime<'a> {
-    pub(crate) fn new(config: &'a ResolvedConfig, ui: &'a UiState) -> Self {
-        Self { config, ui }
-    }
-
-    pub(crate) fn ui(&self) -> &UiState {
-        self.ui
-    }
-
-    pub(crate) fn config(&self) -> &ResolvedConfig {
-        self.config
-    }
+pub(crate) fn render_json_failure(
+    error: Value,
+    exit_code: i32,
+    messages: Vec<Value>,
+    data: Value,
+) -> String {
+    let payload = serde_json::json!({
+        "ok": false,
+        "error": error,
+        "exit_code": exit_code,
+        "messages": messages,
+        "data": data,
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+    )
 }
 
 pub(crate) fn run_cli_command(
-    runtime: &CommandRenderRuntime<'_>,
-    result: CliCommandResult,
+    config: &ResolvedConfig,
+    ui: &UiState,
+    result: &CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<i32> {
-    if runtime.ui().render_settings.format == OutputFormat::Json && result.exit_code != 0 {
-        let data = result
-            .output
-            .as_ref()
-            .map(|output| render_repl_output_with_runtime(runtime, output))
-            .and_then(|rendered| serde_json::from_str(&rendered).ok())
-            .unwrap_or(Value::Null);
-        let messages = result
-            .messages
-            .entries()
-            .iter()
-            .filter(|entry| entry.level <= runtime.ui().message_verbosity)
-            .map(|entry| {
-                serde_json::json!({
-                    "level": entry.level.as_env_str(),
-                    "text": entry.text.as_str(),
-                })
-            })
-            .collect::<Vec<_>>();
-        let primary_error = result
+    super::sink::write_diagnostics(sink, &result.diagnostics.0, &ui.render_settings);
+    if ui.render_settings.format == OutputFormat::Json
+        && result.exit_code != 0
+        && !result.preserve_process_output
+    {
+        let data = result.body.json_value();
+        let messages = result.messages.entries().iter()
+            .map(|entry| serde_json::json!({"level": entry.level.as_str(), "text": entry.text.as_str()}))
+            .collect();
+        let message = result
             .messages
             .entries()
             .iter()
             .find(|entry| entry.level == MessageLevel::Error)
-            .map(|entry| entry.text.as_str());
-        let error = if let Some(backend) = result
-            .failure_report
-            .as_ref()
-            .and_then(super::host::find_error_in_chain::<CommandBackendDetails>)
-        {
-            serde_json::json!(backend.error)
-        } else {
-            let (code, message) = primary_error
-                .and_then(|text| text.split_once(": "))
-                .map(|(code, message)| (code.to_string(), message.to_string()))
-                .unwrap_or_else(|| {
-                    (
-                        "command_failed".to_string(),
-                        primary_error
-                            .map(str::to_string)
-                            .or_else(|| result.failure_report.as_ref().map(ToString::to_string))
-                            .unwrap_or_else(|| "command failed".to_string()),
+            .map(|entry| entry.text.clone())
+            .or_else(|| {
+                result.failure_report.as_ref().map(|report| {
+                    super::host::render_report_message(
+                        report,
+                        MessageLevel::Success,
+                        &ui.render_settings,
                     )
-                });
-            serde_json::json!({"code": code, "message": message})
-        };
-        let payload = serde_json::json!({
-            "ok": false,
-            "error": error,
-            "messages": messages,
-            "data": data,
-        });
-        sink.write_stdout(&format!(
-            "{}\n",
-            serde_json::to_string_pretty(&payload)
-                .unwrap_or_else(|_| {
-                    r#"{"ok":false,"error":{"code":"serialization_error","message":"failed to serialize command failure"}}"#
-                        .to_string()
                 })
+            })
+            .unwrap_or_else(|| "command failed".to_string());
+        let code = if result.exit_code == super::host::EXIT_CODE_USAGE {
+            "usage_error"
+        } else if result.messages.entries().is_empty()
+            && result.failure_report.as_ref().is_some_and(|report| {
+                super::host::find_error_in_chain::<CommandBackendDetails>(report).is_none()
+            })
+        {
+            "command_error"
+        } else {
+            "command_failed"
+        };
+        let error = json_failure_error(
+            result.failure_report.as_ref(),
+            code,
+            message,
+            &ui.render_settings,
+        );
+        sink.write_stdout(&render_json_failure(
+            error,
+            result.exit_code,
+            messages,
+            data,
         ));
+        if let Some(report) = &result.failure_report
+            && ui.debug_level >= 2
+            && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
+        {
+            sink.write_stderr(&format!("{backtrace}\n"));
+        }
+        if !result.stderr_text.is_empty() {
+            sink.write_stderr(&result.stderr_text);
+        }
+        super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
         return Ok(result.exit_code);
     }
-
     if !result.messages.is_empty() {
-        emit_messages_with_runtime(
-            runtime,
-            &result.messages,
-            runtime.ui().message_verbosity,
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+    }
+    if let Some(report) = &result.failure_report
+        && !result.messages.entries().iter().any(|entry| {
+            entry.level == MessageLevel::Error
+                && entry.text
+                    == super::host::report_error_details(report, ui.verbosity, &ui.render_settings)
+                        .render()
+        })
+    {
+        super::sink::write_diagnostics(
             sink,
+            &super::render_process_error(report, &ui.render_settings, ui.verbosity, false),
+            &ui.render_settings,
         );
     }
-    // Keep structured backend details behind the normal verbose diagnostic gate.
-    if let Some(output) = result.output
-        && (result.failure_report.is_none() || runtime.ui().message_verbosity >= MessageLevel::Info)
-    {
-        if result.failure_report.is_some()
-            || result
-                .messages
-                .entries()
-                .iter()
-                .any(|entry| entry.level == MessageLevel::Error)
+    if result.failure_report.is_none() {
+        let rendered = result.render(config, &ui.render_settings);
+        if result
+            .messages
+            .entries()
+            .iter()
+            .any(|entry| entry.level == MessageLevel::Error)
         {
-            // Human failure details must not contaminate redirected command data.
-            // Explicit JSON failures keep their stdout envelope above.
-            sink.write_stderr(&render_repl_output_with_runtime(runtime, &output));
+            sink.write_stderr(&rendered);
         } else {
-            render_cli_output(runtime, output, sink);
+            if let Some(pager) = pager_for_output(config, ui, result, &rendered) {
+                sink.write_stdout_paged(&rendered, &pager);
+            } else {
+                sink.write_stdout(&rendered);
+            }
+            if let CommandBody::Output(output) = &result.body {
+                maybe_copy_output(config, ui, output, sink);
+            }
         }
     }
-    if let Some(stderr_text) = result.stderr_text
-        && !stderr_text.is_empty()
+    if ui.debug_level >= 2
+        && let Some(report) = &result.failure_report
+        && let Some(backtrace) = super::host::render_backtrace(report, &ui.render_settings)
     {
-        sink.write_stderr(&stderr_text);
+        sink.write_stderr(&format!("{backtrace}\n"));
     }
+    if !result.stderr_text.is_empty() {
+        sink.write_stderr(&result.stderr_text);
+    }
+    super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
     Ok(result.exit_code)
 }
 
-pub(crate) fn run_cli_command_with_ui(
-    config: &ResolvedConfig,
-    ui: &UiState,
-    result: CliCommandResult,
-    sink: &mut dyn UiSink,
-) -> Result<i32> {
-    run_cli_command(&CommandRenderRuntime::new(config, ui), result, sink)
-}
-
-/// Renders one native progress event through stderr without touching stdout.
-///
-/// The result has already passed through the invocation pipeline. Empty
-/// transformed results are intentionally silent so a filter does not produce
-/// a per-event "no results" message.
+/// Renders transient progress on stderr at normal verbosity and above.
+/// Quiet output suppresses replaceable progress while retaining durable notices.
 pub(crate) fn run_progress_command_with_ui(
     config: &ResolvedConfig,
     ui: &UiState,
-    result: PreparedPluginOutput,
+    result: CommandOutput,
     sink: &mut dyn UiSink,
+    stream: bool,
 ) -> Result<()> {
-    let PreparedPluginOutput {
-        messages,
-        output,
-        format_hint,
-    } = result;
-    let runtime = CommandRenderRuntime::new(config, ui);
-    let json_output = resolve_render_settings_with_hint(&ui.render_settings, format_hint).format
+    let CommandBody::Output(output) = &result.body else {
+        return Ok(());
+    };
+    let json_output = resolve_render_settings_with_hint(&ui.render_settings, result.format_hint)
+        .format
         == OutputFormat::Json;
-    // A redrawn frame owns its messages: written separately, they would stay
-    // above every redraw and go stale.
-    let framed = output.meta.progress_replace
-        && !json_output
-        && sink.stderr_is_terminal()
-        && !progress_output_is_empty(&output);
-    if !messages.is_empty() && !framed {
-        emit_messages_with_runtime(&runtime, &messages, ui.message_verbosity, sink);
-    }
-    if progress_output_is_empty(&output) {
+    if stream && json_output {
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+        if progress_output_is_empty(output) {
+            return Ok(());
+        }
+        let data = crate::ui::json_value(output);
+        let events = data
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_else(|| std::slice::from_ref(&data));
+        for event in events {
+            let line = serde_json::to_string(event).map_err(|err| miette!("{err}"))?;
+            sink.write_stdout(&format!("{line}\n"));
+        }
         return Ok(());
     }
-
-    let append_lines = !sink.stderr_is_terminal() || json_output;
-    let mut rendered = if append_lines && !output.meta.progress_append.is_empty() {
-        render_progress_lines_with_runtime(&runtime, &output.meta.progress_append, sink)
+    let show_body = !result.progress_replace || ui.verbosity >= MessageLevel::Success;
+    let framed = show_body
+        && result.progress_replace
+        && !json_output
+        && sink.stderr_is_terminal()
+        && !progress_output_is_empty(output);
+    if !result.messages.is_empty() && !framed {
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+    }
+    if !show_body || progress_output_is_empty(output) {
+        return Ok(());
+    }
+    let mut settings = ui.render_settings.clone();
+    if let Some(width) = sink.stderr_width() {
+        settings.width = Some(width);
+        settings.runtime.width = Some(width);
+    }
+    let mut rendered = if !json_output && sink.stderr_is_terminal() {
+        result.render(config, &settings)
     } else {
-        render_progress_output_with_runtime(&runtime, &output, format_hint, json_output, sink)
+        plain_progress_settings(&mut settings);
+        crate::ui::render(
+            output,
+            &RenderRequest {
+                layout: Some(crate::ui::help_layout_from_config(config)),
+                ..RenderRequest::new(&settings)
+            },
+        )
     };
-    if framed && !messages.is_empty() {
+    if framed && !result.messages.is_empty() {
         rendered.insert_str(
             0,
-            &crate::ui::render_messages(
-                config,
-                &ui.render_settings,
-                &messages,
-                ui.message_verbosity,
-            ),
+            &crate::ui::render_messages(&result.messages, &{
+                let mut request = crate::ui::MessageRequest::new(&ui.render_settings, ui.verbosity);
+                request.layout = crate::ui::messages::message_layout_from_config(config);
+                request
+            }),
         );
     }
     if !rendered.is_empty() {
-        let replace = output.meta.progress_replace && !json_output;
-        sink.write_progress(&rendered, replace);
+        sink.write_progress(&rendered, result.progress_replace && !json_output);
     }
     Ok(())
 }
 
-fn render_progress_lines_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    lines: &[String],
-    sink: &dyn UiSink,
-) -> String {
-    let mut settings = runtime.ui().render_settings.clone();
+fn plain_progress_settings(settings: &mut RenderSettings) {
     settings.format = OutputFormat::Value;
     settings.format_explicit = true;
     settings.mode = crate::core::output::RenderMode::Plain;
     settings.color = crate::core::output::ColorMode::Never;
     settings.unicode = crate::core::output::UnicodeMode::Never;
-    if let Some(width) = sink.stderr_width() {
-        settings.width = Some(width);
-        settings.runtime.width = Some(width);
-    }
-    crate::ui::render_presentation_lines(lines, &settings)
 }
 
 fn progress_output_is_empty(output: &OutputResult) -> bool {
@@ -484,77 +526,25 @@ fn progress_output_is_empty(output: &OutputResult) -> bool {
             rows.is_empty()
                 || rows.iter().all(|row| {
                     row.is_empty()
-                        || (row.len() == 1
-                            && row.get("value").is_some_and(serde_json::Value::is_null))
+                        || (row.len() == 1 && row.get("value").is_some_and(Value::is_null))
                 })
         }
         OutputItems::Groups(groups) => groups.is_empty(),
     }
 }
 
-fn render_progress_output_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    output: &OutputResult,
-    format_hint: Option<OutputFormat>,
-    json_output: bool,
-    sink: &dyn UiSink,
-) -> String {
-    let mut settings = runtime.ui().render_settings.clone();
-    if let Some(width) = sink.stderr_width() {
-        settings.width = Some(width);
-        settings.runtime.width = Some(width);
-    }
-    if !json_output && sink.stderr_is_terminal() {
-        return render_structured_repl_output(
-            runtime.config(),
-            &settings,
-            output,
-            format_hint,
-            None,
-        );
-    }
-
-    settings.format = OutputFormat::Value;
-    settings.format_explicit = true;
-    settings.mode = crate::core::output::RenderMode::Plain;
-    settings.color = crate::core::output::ColorMode::Never;
-    settings.unicode = crate::core::output::UnicodeMode::Never;
-    render_structured_repl_output(runtime.config(), &settings, output, None, None)
-}
-
-pub(crate) fn cli_result_from_plugin_response(
-    response: ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    let prepared = prepare_plugin_response(response, stages)?;
-    Ok(CliCommandResult::from_prepared_plugin_response(prepared))
-}
-
-/// Applies trailing DSL stages to an already-produced builtin command result.
-///
-/// Builtin commands executed inline on the CLI surface (`osp "theme list | C"`)
-/// produce their result before the pipe stages run, unlike plugin/native
-/// responses where stages are applied during response preparation. This is the
-/// missing half of that contract: without it, validated stages were silently
-/// dropped for builtins.
 pub(crate) fn apply_stages_to_cli_result(
-    mut result: CliCommandResult,
+    mut result: CommandOutput,
     stages: &[String],
-) -> Result<CliCommandResult> {
-    if stages.is_empty() {
-        return Ok(result);
-    }
-    let Some(output) = result.output.take() else {
-        return Ok(result);
+) -> Result<CommandOutput> {
+    let context = match &result.body {
+        CommandBody::Text(_) => "failed to apply DSL stages to textual command output",
+        CommandBody::Json(_) => "failed to apply DSL stages to JSON command output",
+        CommandBody::None | CommandBody::Output(_) => {
+            "failed to apply DSL stages to builtin command output"
+        }
     };
-    let context = match &output {
-        ReplCommandOutput::Output(_) => "failed to apply DSL stages to builtin command output",
-        ReplCommandOutput::Text(_) => "failed to apply DSL stages to textual command output",
-        ReplCommandOutput::Json(_) => "failed to apply DSL stages to JSON command output",
-    };
-    result.output = Some(ReplCommandOutput::Output(Box::new(
-        output.into_staged(stages).wrap_err(context)?,
-    )));
+    result.apply_stages(stages).wrap_err(context)?;
     Ok(result)
 }
 
@@ -572,7 +562,7 @@ pub(crate) fn emit_messages_for_ui(
             .filter(|entry| entry.level <= verbosity)
             .map(|entry| {
                 serde_json::json!({
-                    "level": entry.level.as_env_str(),
+                    "level": entry.level.as_str(),
                     "text": entry.text.as_str(),
                 })
             })
@@ -587,71 +577,96 @@ pub(crate) fn emit_messages_for_ui(
         return;
     }
 
-    let rendered = crate::ui::render_messages(config, &ui.render_settings, messages, verbosity);
-    if !rendered.is_empty() {
-        sink.write_stderr(&rendered);
+    let _ = config;
+    for entry in messages
+        .entries()
+        .iter()
+        .filter(|entry| entry.level <= verbosity)
+    {
+        let prefix = match entry.level {
+            MessageLevel::Error => "error",
+            MessageLevel::Warning => "warning",
+            MessageLevel::Success => "success",
+            MessageLevel::Info => "info",
+            MessageLevel::Trace => "detail",
+            MessageLevel::Evidence => "evidence",
+        };
+        let (prefix, text) = if entry.level == MessageLevel::Info {
+            entry
+                .text
+                .strip_prefix("hint: ")
+                .map(|hint| ("hint", hint))
+                .unwrap_or((prefix, entry.text.as_str()))
+        } else {
+            (prefix, entry.text.as_str())
+        };
+        super::sink::write_diagnostics(
+            sink,
+            &format!("{prefix}: {}\n", crate::ui::sanitize_human_text(text)),
+            &ui.render_settings,
+        );
     }
 }
 
-pub(crate) fn emit_messages_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    messages: &MessageBuffer,
-    verbosity: MessageLevel,
-    sink: &mut dyn UiSink,
-) {
-    emit_messages_for_ui(runtime.config(), runtime.ui(), messages, verbosity, sink);
-}
-
-pub(crate) fn maybe_copy_output_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
+fn maybe_copy_output(
+    config: &ResolvedConfig,
+    ui: &UiState,
     output: &OutputResult,
     sink: &mut dyn UiSink,
 ) {
     if !output.meta.wants_copy {
         return;
     }
-    let clipboard = ClipboardService::new();
-    if let Err(err) = copy_output_to_clipboard(output, &runtime.ui().render_settings, &clipboard) {
-        let mut messages = MessageBuffer::default();
-        messages.warning(format!("clipboard copy failed: {err}"));
-        emit_messages_with_runtime(runtime, &messages, runtime.ui().message_verbosity, sink);
+    let mut messages = MessageBuffer::default();
+    match copy_output_to_clipboard(output, &ui.render_settings, &ClipboardService::new()) {
+        Ok(()) if ui.render_settings.format == OutputFormat::Json => return,
+        Ok(()) => {
+            let (count, noun) = match &output.items {
+                OutputItems::Rows(rows) => (rows.len(), "row"),
+                OutputItems::Groups(groups) => (groups.len(), "group"),
+            };
+            messages.success(format!(
+                "Copied {count} {noun}{}.",
+                if count == 1 { "" } else { "s" }
+            ));
+        }
+        Err(err) => messages.warning(format!("clipboard copy failed: {err}")),
     }
+    emit_messages_for_ui(config, ui, &messages, ui.verbosity, sink);
 }
 
-pub(crate) fn prepare_plugin_response(
+pub(crate) fn cli_result_from_plugin_response(
     response: ResponseV1,
     stages: &[String],
-) -> Result<PreparedPluginResponse> {
-    let PreparedPluginOutput {
-        mut messages,
-        output,
-        format_hint,
-    } = PreparedPluginOutput::from_data(response.data, &response.meta, &response.messages, stages)?;
+) -> Result<CommandOutput> {
+    let messages = response
+        .messages
+        .into_iter()
+        .filter(|message| response.ok || message.level != MessageLevel::Success)
+        .collect::<Vec<_>>();
+    let mut result = CommandOutput::from_data(response.data, &response.meta, &messages, stages);
     if !response.ok {
         let report = if let Some(error) = response.error {
-            messages.error(format!("{}: {}", error.code, error.message));
-            let report = miette!("{}: {}", error.code, error.message);
+            let action = error.details.get("action").and_then(Value::as_str);
+            let request_id = error.details.get("request_id").and_then(Value::as_str);
+            let report = miette::Report::new(crate::core::CommandError {
+                message: error.message.clone(),
+                action: action.map(str::to_owned),
+                request_id: request_id.map(crate::diagnostics::safe_text),
+            });
             miette::Report::new(CommandBackendDetails {
                 error,
                 source: report,
+                backtrace: std::backtrace::Backtrace::force_capture(),
             })
         } else {
-            messages.error("command failed");
+            result.messages.error("command failed");
             miette!("command failed")
         };
-        return Ok(PreparedPluginResponse::Failure(FailedPluginOutput {
-            messages,
-            output,
-            format_hint,
-            report,
-        }));
+        result.exit_code = 1;
+        result.failure_report = Some(report);
     }
-
-    Ok(PreparedPluginResponse::Output(PreparedPluginOutput {
-        messages,
-        output,
-        format_hint,
-    }))
+    Ok(result)
 }
 
 pub(crate) fn apply_output_stages(
@@ -666,16 +681,22 @@ pub(crate) fn apply_output_stages(
     }
 
     if !stages.is_empty() {
+        output
+            .meta
+            .display_rules
+            .retain(|rule| !matches!(rule, DisplayRule::Hyperlink { .. }));
         tracing::trace!(stage_count = stages.len(), "applying DSL output pipeline");
         // This is the central fan-in for staged structured output. Keep all
         // callers on the canonical DSL entrypoint so semantic/output policy
         // stays consistent across CLI, REPL, and plugin flows.
+        let context = output.meta.context.clone();
         output = apply_output_pipeline(output, stages).map_err(|err| {
-            crate::app::report_anyhow_with_context(err, "failed to apply DSL output pipeline")
+            crate::app::report_anyhow_with_context(
+                err,
+                crate::app::host::ErrorContext::Operation("failed to apply DSL output pipeline"),
+            )
         })?;
-        output.meta.presentation_lines.clear();
-        output.meta.progress_append.clear();
-        output.meta.progress_replace = false;
+        output.meta.context = context;
         output.meta.display_limit = None;
         // Once a DSL pipeline runs, producer-side format hints stop being an
         // out-of-band override. Any surviving recommendation now lives on the
@@ -686,82 +707,35 @@ pub(crate) fn apply_output_stages(
     Ok((output, format_hint))
 }
 
-fn plugin_response_messages(messages: &[ResponseMessageV1]) -> MessageBuffer {
-    let mut out = MessageBuffer::default();
-    for message in messages {
-        let level = match message.level {
-            ResponseMessageLevelV1::Error => MessageLevel::Error,
-            ResponseMessageLevelV1::Warning => MessageLevel::Warning,
-            ResponseMessageLevelV1::Success => MessageLevel::Success,
-            ResponseMessageLevelV1::Info => MessageLevel::Info,
-            ResponseMessageLevelV1::Trace => MessageLevel::Trace,
-        };
-        out.push(level, message.text.clone());
-    }
-    out
-}
-
-pub(crate) fn parse_output_format_hint(value: Option<&str>) -> Option<OutputFormat> {
-    let normalized = value?.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "auto" => Some(OutputFormat::Auto),
-        "guide" => Some(OutputFormat::Guide),
-        "json" => Some(OutputFormat::Json),
-        "table" => Some(OutputFormat::Table),
-        "md" | "markdown" => Some(OutputFormat::Markdown),
-        "mreg" => Some(OutputFormat::Mreg),
-        "value" => Some(OutputFormat::Value),
-        _ => None,
-    }
-}
-
-fn render_cli_output(
-    runtime: &CommandRenderRuntime<'_>,
-    output: ReplCommandOutput,
-    sink: &mut dyn UiSink,
-) {
-    let rendered = render_repl_output_with_runtime(runtime, &output);
-    if let Some(pager) = pager_for_output(runtime, &output, &rendered) {
-        sink.write_stdout_paged(&rendered, &pager);
-    } else {
-        sink.write_stdout(&rendered);
-    }
-    if let ReplCommandOutput::Output(structured) = output {
-        maybe_copy_output_with_runtime(runtime, &structured.output, sink);
-    }
-}
-
 fn pager_for_output(
-    runtime: &CommandRenderRuntime<'_>,
-    output: &ReplCommandOutput,
+    config: &ResolvedConfig,
+    ui: &UiState,
+    output: &CommandOutput,
     rendered: &str,
 ) -> Option<String> {
-    if runtime.config().get_string("ui.pager") != Some("auto")
-        || !runtime.ui().render_settings.runtime.stdout_is_tty
-        || output_uses_json(runtime, output)
+    if matches!(
+        resolve_render_settings_with_hint(&ui.render_settings, output.format_hint).format,
+        OutputFormat::Csv | OutputFormat::Tsv
+    ) || config.get_string("ui.pager") != Some("auto")
+        || !ui.render_settings.runtime.stdout_is_tty
+        || match &output.body {
+            CommandBody::Json(_) => true,
+            CommandBody::Text(_) => ui.render_settings.format == OutputFormat::Json,
+            CommandBody::None | CommandBody::Output(_) => {
+                resolve_render_settings_with_hint(&ui.render_settings, output.format_hint).format
+                    == OutputFormat::Json
+            }
+        }
         || rendered.lines().count() <= terminal_height()?
     {
         return None;
     }
-
     Some(
         std::env::var("PAGER")
             .ok()
             .filter(|pager| !pager.trim().is_empty())
             .unwrap_or_else(|| "less -RFX".to_string()),
     )
-}
-
-fn output_uses_json(runtime: &CommandRenderRuntime<'_>, output: &ReplCommandOutput) -> bool {
-    match output {
-        ReplCommandOutput::Json(_) => true,
-        ReplCommandOutput::Output(structured) => {
-            resolve_render_settings_with_hint(&runtime.ui().render_settings, structured.format_hint)
-                .format
-                == OutputFormat::Json
-        }
-        ReplCommandOutput::Text(_) => runtime.ui().render_settings.format == OutputFormat::Json,
-    }
 }
 
 fn terminal_height() -> Option<usize> {
@@ -776,192 +750,98 @@ fn terminal_height() -> Option<usize> {
         })
 }
 
-pub(crate) fn render_repl_output_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    output: &ReplCommandOutput,
-) -> String {
-    match output {
-        ReplCommandOutput::Output(structured) => render_structured_repl_output(
-            runtime.config(),
-            &runtime.ui().render_settings,
-            &structured.output,
-            structured.format_hint,
-            structured.source_guide.as_ref(),
-        ),
-        ReplCommandOutput::Json(payload) => {
-            let effective = resolve_render_settings_with_hint(
-                &runtime.ui().render_settings,
-                Some(OutputFormat::Json),
-            );
-            render_json_value(payload, &effective)
-        }
-        ReplCommandOutput::Text(text) => text.clone(),
-    }
-}
-
-pub(crate) fn render_saved_repl_output_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    output: &ReplCommandOutput,
-    stages: &[String],
-) -> Result<String> {
-    match output {
-        ReplCommandOutput::Output(_) => {
-            let StructuredCommandOutput {
-                source_guide,
-                output,
-                format_hint,
-            } = output
-                .clone()
-                .into_staged(stages)
-                .wrap_err("failed to replay staged structured output")?;
-            let render_settings =
-                resolve_render_settings_with_hint(&runtime.ui().render_settings, format_hint);
-            Ok(if stages.is_empty() {
-                render_structured_repl_output(
-                    runtime.config(),
-                    &render_settings,
-                    &output,
-                    format_hint,
-                    source_guide.as_ref(),
-                )
-            } else {
-                render_structured_output(runtime.config(), &render_settings, &output)
-            })
-        }
-        ReplCommandOutput::Text(_) | ReplCommandOutput::Json(_) => {
-            if stages.is_empty() && !runtime.ui().render_settings.format_explicit {
-                return Ok(render_repl_output_with_runtime(runtime, output));
-            }
-            let context = if matches!(output, ReplCommandOutput::Text(_)) {
-                "failed to replay staged textual output"
-            } else {
-                "failed to replay staged JSON output"
-            };
-            let staged = output.clone().into_staged(stages).wrap_err(context)?;
-            let render_settings = resolve_render_settings_with_hint(
-                &runtime.ui().render_settings,
-                staged.format_hint,
-            );
-            Ok(render_output(&staged.output, &render_settings))
-        }
-    }
-}
-
-pub(crate) fn render_repl_command_with_runtime(
-    runtime: &CommandRenderRuntime<'_>,
-    session: &mut AppSession,
-    line: &str,
-    stages: &[String],
-    result: CliCommandResult,
-    sink: &mut dyn UiSink,
-) -> Result<String> {
-    let CliCommandResult {
-        exit_code,
-        messages,
-        output,
-        stderr_text,
-        failure_report,
-        ..
-    } = result;
-
-    let saved_output = output.clone();
-
-    if exit_code != 0
-        && let Some(report) = failure_report
-    {
-        return Err(report);
-    }
-
-    if !messages.is_empty() {
-        emit_messages_with_runtime(runtime, &messages, runtime.ui().message_verbosity, sink);
-    }
-
-    let rendered = match output {
-        Some(ReplCommandOutput::Output(structured)) => {
-            render_repl_structured_command(runtime, session, line, stages, structured, sink)?
-        }
-        Some(raw @ (ReplCommandOutput::Text(_) | ReplCommandOutput::Json(_))) => {
-            if stages.is_empty() {
-                render_repl_output_with_runtime(runtime, &raw)
-            } else {
-                let context = if matches!(&raw, ReplCommandOutput::Text(_)) {
-                    "failed to apply staged textual output pipeline"
-                } else {
-                    "failed to apply staged JSON output pipeline"
-                };
-                let staged = raw.into_staged(stages).wrap_err(context)?;
-                let render_settings = resolve_render_settings_with_hint(
-                    &runtime.ui().render_settings,
-                    staged.format_hint,
-                );
-                let rendered = render_output(&staged.output, &render_settings);
-                session.record_result(line, output_to_rows(&staged.output));
-                maybe_copy_output_with_runtime(runtime, &staged.output, sink);
-                rendered
-            }
-        }
-        None => String::new(),
-    };
-
-    if let Some(stderr_text) = stderr_text
-        && !stderr_text.is_empty()
-    {
-        sink.write_stderr(&stderr_text);
-    }
-
-    if let Some(output) = saved_output.as_ref() {
-        session.record_success_output(line, output, stages);
-    }
-
-    Ok(rendered)
-}
-
-pub(crate) fn render_structured_repl_output(
+pub(crate) fn render_saved_repl_output(
     config: &ResolvedConfig,
-    render_settings: &crate::ui::RenderSettings,
-    output: &OutputResult,
-    format_hint: Option<OutputFormat>,
-    source_guide: Option<&GuideView>,
-) -> String {
-    let effective = resolve_render_settings_with_hint(render_settings, format_hint);
-    render_structured_output_with_source_guide(
-        output,
-        source_guide,
-        &effective,
-        crate::ui::help_layout_from_config(config),
-    )
+    ui: &UiState,
+    output: &CommandOutput,
+    stages: &[String],
+    sink: Option<&mut dyn UiSink>,
+) -> Result<String> {
+    if let Some(recording) = crate::repl::recording::current() {
+        recording.observe(&output.body.json_value());
+    }
+    let mut staged = output.saved();
+    let context = match &staged.body {
+        CommandBody::Text(_) | CommandBody::Json(_)
+            if stages.is_empty() && !ui.render_settings.format_explicit =>
+        {
+            return Ok(staged.render(config, &ui.render_settings));
+        }
+        CommandBody::Text(_) => "failed to replay staged textual output",
+        CommandBody::Json(_) => "failed to replay staged JSON output",
+        CommandBody::None | CommandBody::Output(_) => "failed to replay staged structured output",
+    };
+    staged.body = match staged.body.into_output() {
+        Some(output) => CommandBody::Output(Box::new(output)),
+        None => CommandBody::None,
+    };
+    staged.apply_stages(stages).wrap_err(context)?;
+    if let (Some(sink), CommandBody::Output(output)) = (sink, &staged.body) {
+        maybe_copy_output(config, ui, output, sink);
+    }
+    Ok(staged.render(config, &ui.render_settings))
 }
 
-fn render_repl_structured_command(
-    runtime: &CommandRenderRuntime<'_>,
+pub(crate) fn render_repl_command(
+    config: &ResolvedConfig,
+    ui: &UiState,
     session: &mut AppSession,
     line: &str,
     stages: &[String],
-    structured: Box<StructuredCommandOutput>,
+    mut result: CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
-    let StructuredCommandOutput {
-        source_guide,
-        output,
-        format_hint,
-    } = ReplCommandOutput::Output(structured)
-        .into_staged(stages)
-        .wrap_err("failed to apply staged structured output pipeline")?;
-    let render_settings =
-        resolve_render_settings_with_hint(&runtime.ui().render_settings, format_hint);
-    let rendered = if stages.is_empty() {
-        render_structured_repl_output(
-            runtime.config(),
-            &render_settings,
-            &output,
-            format_hint,
-            source_guide.as_ref(),
-        )
-    } else {
-        render_structured_output(runtime.config(), &render_settings, &output)
+    if let Some(recording) = crate::repl::recording::current() {
+        recording.observe(&result.body.json_value());
+    }
+    if let Some(command) = &result.hint_command {
+        session.repl_feedback.remember_hint(command.clone());
+    }
+    if result.failure_report.is_some() {
+        if let Some(command) = result
+            .failure_report
+            .as_ref()
+            .and_then(|report| super::host::report_hint_command(report, ui.verbosity))
+        {
+            session.repl_feedback.remember_hint(command);
+        }
+        run_cli_command(config, ui, &result, sink)?;
+        if let Some(report) = result.failure_report.take() {
+            session.record_failure_report(
+                line,
+                std::sync::Arc::new(report),
+                ui.render_settings.plain_copy_settings(),
+            );
+            if let Some(last) = session.last_failure.as_mut() {
+                last.command_evidence = result.retained_evidence.clone();
+            }
+        }
+        return Ok(String::new());
+    }
+    super::sink::write_diagnostics(sink, &result.diagnostics.0, &ui.render_settings);
+    if !result.messages.is_empty() {
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+    }
+    let saved = result.saved();
+    let context = match &result.body {
+        CommandBody::Text(_) => "failed to apply staged textual output pipeline",
+        CommandBody::Json(_) => "failed to apply staged JSON output pipeline",
+        CommandBody::None | CommandBody::Output(_) => {
+            "failed to apply staged structured output pipeline"
+        }
     };
-    session.record_result(line, output_to_rows(&output));
-    maybe_copy_output_with_runtime(runtime, &output, sink);
+    result.apply_stages(stages).wrap_err(context)?;
+    let rendered = result.render(config, &ui.render_settings);
+    if let CommandBody::Output(output) = &result.body {
+        maybe_copy_output(config, ui, output, sink);
+    }
+    if !result.stderr_text.is_empty() {
+        sink.write_stderr(&result.stderr_text);
+    }
+    if !matches!(saved.body, CommandBody::None) {
+        session.record_success_output(line, saved, stages);
+    }
+    super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
     Ok(rendered)
 }
 

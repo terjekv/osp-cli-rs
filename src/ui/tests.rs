@@ -1,34 +1,28 @@
+use crate::core::document::{DocBlock, Document, DocumentEntry, HelpLevel};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocument, OutputDocumentKind, OutputItems, OutputMeta,
-    OutputResult,
+    ColumnAlignment, Group, OutputDocument, OutputItems, OutputMeta, OutputResult,
 };
-use crate::guide::{GuideSection, GuideSectionKind, GuideView};
+
 use crate::row;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use super::doc::{Block, SectionTitleChrome};
-use super::settings::TableBorderOverride;
-use super::{
-    GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderProfile, RenderSettings,
-    StructuredGuideRenderOptions, plan_output, render_guide_with_layout, render_output,
-    render_output_for_copy, render_structured_output_with_guide_options, resolve_settings,
-};
+use super::{HelpLayout, RenderProfile, RenderSettings, plan_output, render, resolve_settings};
 
 #[test]
 fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
-    let output = GuideView::from_text("Usage: osp history <COMMAND>\n\nCommands:\n  list  Show\n")
-        .to_output_result();
+    let output =
+        Document::from_help_text("Usage: osp history <COMMAND>\n\nCommands:\n  list  Show\n")
+            .to_output_result();
 
     let mut inherited_json = RenderSettings::test_plain(OutputFormat::Json);
-    inherited_json.guide_default_format = GuideDefaultFormat::Inherit;
     inherited_json.format_explicit = false;
     let inherited_plan = plan_output(&output, &inherited_json, super::RenderProfile::Normal);
-    assert_eq!(inherited_plan.format, OutputFormat::Guide);
+    assert_eq!(inherited_plan.format, OutputFormat::Auto);
 
     let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
-    explicit_json.guide_default_format = GuideDefaultFormat::Guide;
     explicit_json.format_explicit = true;
     let explicit_plan = plan_output(&output, &explicit_json, super::RenderProfile::Normal);
     assert_eq!(explicit_plan.format, OutputFormat::Json);
@@ -43,10 +37,88 @@ fn ui2_renders_generic_rows_as_markdown_table_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
     assert!(rendered.contains("| uid"));
     assert!(rendered.contains("alice"));
     assert!(rendered.contains("bob"));
+}
+
+#[test]
+fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
+    let document = Document {
+        blocks: vec![
+            DocBlock::Section {
+                title: "Options".to_string(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "--json".to_string(),
+                        description: "Emit JSON".to_string(),
+                    }],
+                }],
+            },
+            DocBlock::List {
+                items: vec!["first".to_string(), "second".to_string()],
+            },
+        ],
+    };
+    let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
+    settings.format_explicit = true;
+
+    let rendered = render(
+        &document.to_output_result(),
+        &crate::ui::RenderRequest::new(&settings),
+    );
+
+    assert!(rendered.contains("## Options"));
+    assert!(rendered.contains("- `--json` Emit JSON"));
+    assert!(rendered.contains("- first\n- second"));
+    let document = Document {
+        blocks: vec![
+            DocBlock::Section {
+                title: "First".into(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "zebra".into(),
+                        description: "same".into(),
+                    }],
+                }],
+            },
+            DocBlock::Section {
+                title: "Second".into(),
+                level: HelpLevel::Normal,
+                blocks: vec![DocBlock::Entries {
+                    entries: vec![DocumentEntry {
+                        name: "apple".into(),
+                        description: "same".into(),
+                    }],
+                }],
+            },
+        ],
+    };
+    let output = crate::dsl::apply_output_pipeline(
+        document.to_output_result(),
+        &["S name".into(), "L 1".into(), "F name=apple".into()],
+    )
+    .unwrap();
+    assert!(output.meta.document_rows);
+    assert!(output.document.is_none());
+    assert_eq!(output.as_rows().unwrap()[0]["section"], "Second");
+    let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
+    settings.format_explicit = true;
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
+    assert!(rendered.contains("## Second"));
+    assert!(!rendered.contains("First"));
+    let projected = crate::dsl::apply_output_pipeline(output, &["P name".into()]).unwrap();
+    assert!(!projected.meta.document_rows);
+    assert!(
+        render(
+            &projected,
+            &crate::ui::RenderRequest::new(&RenderSettings::test_plain(OutputFormat::Markdown))
+        )
+        .contains("| name")
+    );
 }
 
 #[test]
@@ -67,7 +139,7 @@ fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
         settings.width = Some(48);
         settings.table_overflow = overflow;
 
-        let rendered = render_output(&output, &settings);
+        let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
         assert!(rendered.contains(expected), "{overflow:?}: {rendered}");
         assert!(
@@ -81,18 +153,17 @@ fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
 
 #[test]
 fn ui2_structured_guide_options_are_owned_by_one_entrypoint_unit() {
-    let guide = GuideView::from_text("Usage: osp history <COMMAND>\n");
+    let guide = Document::from_help_text("Usage: osp history <COMMAND>\n");
     let output = guide.to_output_result();
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let rendered = render_structured_output_with_guide_options(
+    let rendered = render(
         &output,
-        &settings,
-        StructuredGuideRenderOptions {
-            source_guide: Some(&guide),
-            layout: HelpLayout::Compact,
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Compact),
             title_prefix: Some("Demo"),
             show_footer_rule: Some(false),
+            ..crate::ui::RenderRequest::new(&settings)
         },
     );
 
@@ -111,7 +182,7 @@ fn ui2_renders_single_row_output_as_aligned_key_value_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
     assert_eq!(
         rendered,
         "uid:          alice\ndisplay_name: Alice Example\n"
@@ -143,7 +214,7 @@ fn ui2_mreg_renders_scalar_array_fields_as_multiline_lists_unit() {
     settings.format_explicit = true;
     settings.width = Some(70);
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("uid:"));
     assert!(rendered.contains("oistes\n"));
@@ -170,7 +241,7 @@ fn ui2_mreg_multiline_scalar_arrays_keep_continuation_alignment_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert_eq!(
         rendered,
@@ -188,7 +259,7 @@ fn ui2_markdown_renders_single_row_scalar_arrays_as_multiline_key_values_unit() 
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("- uid: oistes"));
     assert!(rendered.contains("- filegroups (4):"));
@@ -211,7 +282,7 @@ fn ui2_rich_mreg_multiline_lists_keep_key_and_value_styling_unit() {
     settings.runtime.stdout_is_tty = true;
     settings.theme_name = "dracula".to_string();
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("\x1b[38;2;189;147;249meduPersonAffiliation (3)\x1b[0m"));
     assert!(rendered.contains("\x1b[38;2;248;248;242memployee\x1b[0m"));
@@ -233,7 +304,7 @@ fn ui2_mreg_renders_nested_object_fields_recursively_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("uid:"));
     assert!(rendered.contains("profile:"));
@@ -298,7 +369,7 @@ fn ui2_mreg_renders_nested_object_arrays_as_tables_unit() {
     settings.width_max = 0;
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("name:       it-usit-gsd-drift"));
     assert!(rendered.contains("siteadmins:"));
@@ -323,7 +394,7 @@ fn ui2_markdown_renders_nested_object_fields_recursively_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("- uid: alice"));
     assert!(rendered.contains("- profile:"));
@@ -341,7 +412,7 @@ fn ui2_table_output_switches_between_ascii_and_unicode_unit() {
 
     let mut ascii = RenderSettings::test_plain(OutputFormat::Table);
     ascii.format_explicit = true;
-    let ascii_rendered = render_output(&output, &ascii);
+    let ascii_rendered = render(&output, &crate::ui::RenderRequest::new(&ascii));
     assert!(ascii_rendered.contains('+'));
     assert!(ascii_rendered.contains('|'));
 
@@ -350,7 +421,7 @@ fn ui2_table_output_switches_between_ascii_and_unicode_unit() {
     unicode.mode = crate::core::output::RenderMode::Rich;
     unicode.unicode = crate::core::output::UnicodeMode::Always;
     unicode.runtime.stdout_is_tty = true;
-    let unicode_rendered = render_output(&output, &unicode);
+    let unicode_rendered = render(&output, &crate::ui::RenderRequest::new(&unicode));
     assert!(unicode_rendered.contains('┏'));
     assert!(unicode_rendered.contains('┃'));
 }
@@ -366,7 +437,7 @@ fn ui2_rich_table_output_styles_headers_and_numeric_values_unit() {
     settings.runtime.stdout_is_tty = true;
     settings.theme_name = "dracula".to_string();
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
     assert!(rendered.contains("\x1b[38;2;189;147;249mcount\x1b[0m"));
     assert!(rendered.contains("\x1b[38;2;189;147;249mname\x1b[0m"));
     assert!(rendered.contains("\x1b[38;2;255;121;198m42\x1b[0m"));
@@ -382,6 +453,8 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            display_notes: Vec::new(),
+            context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
@@ -394,17 +467,17 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
             ],
             wants_copy: false,
             grouped: false,
+            document_rows: false,
+            document_entry_gap: None,
+            document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };
     let mut settings = RenderSettings::test_plain(OutputFormat::Table);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("| name  | count | state |"));
     assert!(rendered.contains("| alice |    42 |  ok   |"));
@@ -420,6 +493,8 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            display_notes: Vec::new(),
+            context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
@@ -432,17 +507,17 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
             ],
             wants_copy: false,
             grouped: false,
+            document_rows: false,
+            document_entry_gap: None,
+            document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };
     let mut settings = RenderSettings::test_plain(OutputFormat::Markdown);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("| :----- | -----: | :-----: |"));
     assert!(rendered.contains("| alice |    42 |  ok   |"));
@@ -454,7 +529,13 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
 
-    let rendered = render_output_for_copy(&output, &settings);
+    let rendered = render(
+        &output,
+        &crate::ui::RenderRequest {
+            profile: crate::ui::RenderProfile::CopySafe,
+            ..crate::ui::RenderRequest::new(&settings)
+        },
+    );
     assert!(rendered.ends_with('\n'));
     assert!(rendered.contains("\"uid\": \"alice\""));
 }
@@ -462,7 +543,10 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
 #[test]
 fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]).with_document(
-        OutputDocument::new(OutputDocumentKind::Guide, json!({"usage": ["osp history"]})),
+        OutputDocument::Semantic(
+            serde_json::from_value(json!({"blocks": [{"text": "osp history"}]}))
+                .expect("semantic document"),
+        ),
     );
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
@@ -475,7 +559,7 @@ fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     };
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&json.text).unwrap(),
-        json!([{"usage": ["osp history"]}])
+        json!({"blocks": [{"text": "osp history"}]})
     );
 }
 
@@ -489,11 +573,11 @@ fn ui2_json_block_preserves_an_explicit_json_document_unit() {
         "mreg" => json!({"name": "db01.uio.no"}),
         "ldap" => json!({"host": "db01.uio.no"}),
     }])
-    .with_document(OutputDocument::new(OutputDocumentKind::Json, value.clone()));
+    .with_document(OutputDocument::Json(value.clone()));
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
 
-    let rendered = render_output(&output, &settings);
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&rendered).expect("valid JSON"),
@@ -503,9 +587,10 @@ fn ui2_json_block_preserves_an_explicit_json_document_unit() {
 
 #[test]
 fn ui2_resolves_theme_catalog_from_caller_theme_name_unit() {
-    let settings = RenderSettings::builder()
-        .with_theme_name(" Rose_Pine Moon ")
-        .build();
+    let settings = RenderSettings {
+        theme_name: " Rose_Pine Moon ".into(),
+        ..RenderSettings::default()
+    };
 
     let resolved = resolve_settings(&settings, RenderProfile::Normal);
     assert_eq!(resolved.theme_name, "rose-pine-moon");
@@ -515,50 +600,70 @@ fn ui2_resolves_theme_catalog_from_caller_theme_name_unit() {
 
 #[test]
 fn ui2_full_help_layout_keeps_usage_inline_with_explicit_margin_unit() {
-    let guide = GuideView::from_text("Usage: osp history <COMMAND>\n");
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let guide = Document::from_help_text("Usage: osp history <COMMAND>\n");
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(60);
     settings.margin = 2;
 
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Full);
+    let rendered = render(
+        &guide.to_output_result(),
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Full),
+            ..crate::ui::RenderRequest::new(&settings)
+        },
+    );
 
     assert!(rendered.starts_with("  Usage: osp history <COMMAND>\n"));
 }
 
 #[test]
 fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
-    let guide = GuideView {
-        sections: vec![GuideSection {
-            title: "OSP".to_string(),
-            kind: GuideSectionKind::Custom,
-            paragraphs: vec!["Welcome Demo!".to_string()],
-            entries: Vec::new(),
-            data: Some(serde_json::json!({
-                "Logged in as": "oistes",
-                "Theme": "Rose Pine Moon",
-            })),
-        }],
-        ..Default::default()
+    let guide = Document {
+        blocks: vec![DocBlock::section(
+            "OSP".to_string(),
+            vec![
+                DocBlock::Paragraph {
+                    text: "Welcome Demo!".to_string(),
+                },
+                DocBlock::Data {
+                    value: serde_json::json!({
+                        "Logged in as": "oistes",
+                        "Theme": "Rose Pine Moon",
+                    }),
+                },
+            ],
+        )],
     };
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
 
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Full);
+    let rendered = render(
+        &guide.to_output_result(),
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Full),
+            ..crate::ui::RenderRequest::new(&settings)
+        },
+    );
 
-    assert!(rendered.contains("Welcome Demo!\n\n  Logged in as"));
+    assert!(rendered.contains("  Welcome Demo!\n\n  Logged in as"));
     assert!(rendered.contains("Theme"));
 }
 
 #[test]
 fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
-    let output = GuideView::from_text(
+    let output = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     )
     .to_output_result();
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(80);
 
-    let rendered =
-        super::render_structured_output_with_layout(&output, &settings, HelpLayout::Full);
+    let rendered = super::render(
+        &output,
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Full),
+            ..crate::ui::RenderRequest::new(&settings)
+        },
+    );
 
     assert!(rendered.contains("- Commands "));
     assert!(rendered.contains("\n  list  List history entries\n"));
@@ -566,39 +671,31 @@ fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
 }
 
 #[test]
-fn ui2_structured_guide_output_prefers_source_guide_hints_unit() {
-    let guide = crate::guide::GuideView {
-        preamble: vec!["Usage: osp history <COMMAND>".to_string()],
-        commands: vec![crate::guide::GuideEntry {
-            name: "list".to_string(),
-            short_help: "List history entries".to_string(),
-            display_indent: Some(">>".to_string()),
-            display_gap: Some(" -> ".to_string()),
-        }],
-        ..Default::default()
-    };
-    let output = guide.to_output_result();
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
-
-    let rendered = super::render_structured_output_with_source_guide(
+fn ui2_structured_document_output_uses_presentation_metadata_unit() {
+    let document = Document::from_help_text("Commands:\n  list  List history entries\n");
+    let mut output = document.to_output_result();
+    output.meta.document_entry_gap = Some(4);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
+    let rendered = super::render(
         &output,
-        Some(&guide),
-        &settings,
-        HelpLayout::Full,
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Full),
+            ..crate::ui::RenderRequest::new(&settings)
+        },
     );
-
-    assert!(rendered.contains("\n>>list -> List history entries\n"));
+    assert!(rendered.contains("\n  list    List history entries\n"));
 }
 
 #[test]
 fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
-    let guide = GuideView::from_text(
+    let guide = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
 
-    let compact = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Compact, false);
+    let compact =
+        super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(usage) = &compact.blocks[0] else {
         panic!("expected usage section");
@@ -623,13 +720,13 @@ fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
 
 #[test]
 fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
-    let guide = GuideView::from_text(
+    let guide = Document::from_help_text(
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
 
-    let full = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Full, true);
+    let full = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, true);
 
     let Some(Block::Rule) = full.blocks.last() else {
         panic!("expected lowered footer rule block");
@@ -638,36 +735,37 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
 
 #[test]
 fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
-    let guide = GuideView::from_text("Commands:\n  list   List history entries\n");
-    let settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let guide = Document::from_help_text("Commands:\n  list   List history entries\n");
+    let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
-    let doc = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Compact, false);
+    let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(block) = &doc.blocks[0] else {
         panic!("expected help section block");
     };
-    let Block::GuideEntries(entries) = &block.blocks[0] else {
+    let Block::Entries(entries) = &block.blocks[0] else {
         panic!("expected guide entries block");
     };
 
-    assert_eq!(entries.default_indent, "  ");
+    assert_eq!(entries.default_indent, "");
     assert_eq!(entries.default_gap, None);
 }
 
 #[test]
 fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Notes", GuideSectionKind::Notes)
-                .paragraph("Use `osp history list` for recent commands."),
-        ],
-        ..Default::default()
+    let guide = Document {
+        blocks: vec![DocBlock::section(
+            "Notes",
+            vec![DocBlock::Paragraph {
+                text: ("Use `osp history list` for recent commands.").into(),
+            }],
+        )],
     };
     let output = guide.to_output_result();
 
     let guide_plan = plan_output(
         &output,
-        &RenderSettings::test_plain(OutputFormat::Guide),
+        &RenderSettings::test_plain(OutputFormat::Auto),
         RenderProfile::Normal,
     );
     let guide_doc = super::lower::lower_output(&output, &guide_plan);
@@ -696,39 +794,6 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 }
 
 #[test]
-fn ui2_help_chrome_settings_override_indent_gap_and_spacing_unit() {
-    let guide = crate::guide::GuideView {
-        commands: vec![crate::guide::GuideEntry {
-            name: "show".to_string(),
-            short_help: "Display current value".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        options: vec![crate::guide::GuideEntry {
-            name: "-h, --help".to_string(),
-            short_help: "Print help".to_string(),
-            display_indent: None,
-            display_gap: None,
-        }],
-        ..Default::default()
-    };
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
-    settings.help_chrome = HelpChromeSettings {
-        table_chrome: TableBorderOverride::None,
-        entry_indent: Some(4),
-        entry_gap: Some(3),
-        section_spacing: Some(0),
-    };
-
-    let rendered = render_guide_with_layout(&guide, &settings, HelpLayout::Compact);
-
-    assert_eq!(
-        rendered,
-        "Commands:\n    show   Display current value\nOptions:\n    -h, --help   Print help\n"
-    );
-}
-
-#[test]
 fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
     let output = OutputResult {
         items: OutputItems::Groups(vec![
@@ -745,6 +810,8 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         ]),
         document: None,
         meta: OutputMeta {
+            display_notes: Vec::new(),
+            context: Default::default(),
             key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],
             unix_timestamp_columns: Vec::new(),
             display_rules: Vec::new(),
@@ -753,10 +820,10 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
             column_align: Vec::new(),
             wants_copy: false,
             grouped: true,
+            document_rows: false,
+            document_entry_gap: None,
+            document_long_help: false,
             render_recommendation: None,
-            presentation_lines: Vec::new(),
-            progress_append: Vec::new(),
-            progress_replace: false,
             display_limit: None,
         },
     };
@@ -778,7 +845,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
 
     let mut json_settings = RenderSettings::test_plain(OutputFormat::Json);
     json_settings.format_explicit = true;
-    let rendered_json = render_output(&output, &json_settings);
+    let rendered_json = render(&output, &crate::ui::RenderRequest::new(&json_settings));
     assert!(rendered_json.contains("\"groups\""));
     assert!(rendered_json.contains("\"aggregates\""));
     assert!(rendered_json.contains("\"rows\""));
@@ -786,35 +853,54 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
 
 #[test]
 fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit() {
-    let guide = GuideView {
-        sections: vec![
-            GuideSection::new("Session", GuideSectionKind::Custom).data(json!({
-                "profile": "prod",
-                "theme": "rose-pine-moon"
-            })),
-            GuideSection::new("Examples", GuideSectionKind::Custom).data(json!([
-                "osp history list",
-                "osp history clear",
-                "osp history last",
-                "osp history search",
-                "osp history export",
-                "osp history import"
-            ])),
-            GuideSection::new("Shortcuts", GuideSectionKind::Custom).data(json!([
-                {"name": "list", "short_help": "List history"},
-                {"name": "clear", "short_help": "Clear history"}
-            ])),
-            GuideSection::new("Matrix", GuideSectionKind::Custom).data(json!([
-                {"uid": "alice", "state": "ok"},
-                {"uid": "bob", "state": "warn"}
-            ])),
+    let guide = Document {
+        blocks: vec![
+            DocBlock::section(
+                "Session",
+                vec![DocBlock::Data {
+                    value: json!({
+                        "profile": "prod",
+                        "theme": "rose-pine-moon"
+                    }),
+                }],
+            ),
+            DocBlock::section(
+                "Examples",
+                vec![DocBlock::Data {
+                    value: json!([
+                        "osp history list",
+                        "osp history clear",
+                        "osp history last",
+                        "osp history search",
+                        "osp history export",
+                        "osp history import"
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Shortcuts",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"name": "list", "description": "List history"},
+                        {"name": "clear", "description": "Clear history"}
+                    ]),
+                }],
+            ),
+            DocBlock::section(
+                "Matrix",
+                vec![DocBlock::Data {
+                    value: json!([
+                        {"uid": "alice", "state": "ok"},
+                        {"uid": "bob", "state": "warn"}
+                    ]),
+                }],
+            ),
         ],
-        ..Default::default()
     };
-    let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
+    let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(40);
     let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
-    let doc = super::lower::lower_guide_help_layout(&guide, &plan, HelpLayout::Full, false);
+    let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, false);
 
     let Block::Section(session) = &doc.blocks[0] else {
         panic!("expected session section");
@@ -830,7 +916,7 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     let Block::Section(shortcuts) = &doc.blocks[4] else {
         panic!("expected shortcuts section");
     };
-    assert!(matches!(shortcuts.blocks[0], Block::GuideEntries(_)));
+    assert!(matches!(shortcuts.blocks[0], Block::Entries(_)));
     let Block::Section(matrix) = &doc.blocks[6] else {
         panic!("expected matrix section");
     };
@@ -838,10 +924,12 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
 
     // Verify the lowered grid reaches the terminal with every copyable example
     // intact, rather than checking only the intermediate block types.
-    let rendered = super::render_structured_output_with_layout(
+    let rendered = super::render(
         &guide.to_output_result(),
-        &settings,
-        HelpLayout::Full,
+        &crate::ui::RenderRequest {
+            layout: Some(HelpLayout::Full),
+            ..crate::ui::RenderRequest::new(&settings)
+        },
     );
     for example in ["list", "clear", "last", "search", "export", "import"] {
         assert!(
@@ -856,3 +944,49 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
             .all(|line| unicode_width::UnicodeWidthStr::width(line) <= 40)
     );
 }
+
+mod integration;
+
+#[path = "../../tests/support/output.rs"]
+mod output_support;
+#[test]
+fn contextual_messages_preserve_event_order_and_theme_controls() {
+    use crate::core::MessageLevel;
+    use crate::ui::messages::MessageBuffer;
+    let mut messages = MessageBuffer::new();
+    messages.warning("Task still running.");
+    messages.push_titled(
+        MessageLevel::Error,
+        "Host lookup failed",
+        "No matching host found.",
+    );
+    let mut settings = RenderSettings {
+        theme_name: "dracula".into(),
+        color: ColorMode::Always,
+        unicode: UnicodeMode::Always,
+        width: Some(72),
+        chrome_frame: crate::ui::SectionFrameStyle::TopBottom,
+        ruled_section_policy: crate::ui::RuledSectionPolicy::PerSection,
+        ..Default::default()
+    };
+    let rendered = crate::ui::render_messages(
+        &messages,
+        &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),
+    );
+    let plain = crate::ui::tests::output_support::strip_ansi(&rendered);
+    assert!(plain.find("Warning").unwrap() < plain.find("Host lookup failed").unwrap());
+    assert!(!plain.contains("Errors") && !plain.contains("Warnings"));
+    assert!(rendered.contains("\x1b[38;2;241;250;140m"));
+    assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
+    assert!(rendered.contains("\x1b[38;2;248;248;242m  No matching host found."));
+    settings.color = ColorMode::Never;
+    settings.unicode = UnicodeMode::Never;
+    let uncolored = crate::ui::render_messages(
+        &messages,
+        &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),
+    );
+    assert!(uncolored.contains("Host lookup failed") && !uncolored.contains('\x1b'));
+}
+
+#[path = "tests/guide.rs"]
+mod guide;

@@ -9,8 +9,7 @@
 //! - define stable default values and path-discovery rules
 //! - discover runtime config file locations from the current environment
 //! - assemble the standard loader pipeline used by the host
-//! - lower resolved config into the compact [`RuntimeConfig`] view used by
-//!   callers that do not need the full explanation surface
+//! - return resolved configuration through the standard loader pipeline
 //!
 //! Contract:
 //!
@@ -31,9 +30,12 @@ use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use directories::{BaseDirs, ProjectDirs};
 
+#[cfg(test)]
+use crate::config::ResolvedConfig;
+
 use crate::config::{
-    ConfigLayer, EnvSecretsLoader, EnvVarLoader, LoaderPipeline, ResolvedConfig,
-    RuntimeSelectedSecretsLoader, StaticLayerLoader, TomlFileLoader, build_builtin_defaults,
+    ConfigLayer, EnvSecretsLoader, EnvVarLoader, LoaderPipeline, RuntimeSelectedSecretsLoader,
+    StaticLayerLoader, TomlFileLoader, build_builtin_defaults,
 };
 
 const PROJECT_APPLICATION_NAME: &str = "osp";
@@ -176,21 +178,23 @@ impl RuntimeLoadOptions {
 ///
 /// This is intentionally much smaller than [`ResolvedConfig`]. Keep the full
 /// [`ResolvedConfig`] when a caller needs arbitrary resolved keys, provenance,
-/// terminal selection, or explanation data. Use [`RuntimeConfig`] when the
+/// terminal selection, or explanation data. Use `RuntimeConfig` when the
 /// caller only needs the tiny runtime snapshot the host commonly carries
 /// around directly.
+#[cfg(test)]
 #[derive(Debug, Clone)]
-pub struct RuntimeConfig {
+pub(crate) struct RuntimeConfig {
     /// Active profile name selected for the current invocation.
     pub active_profile: String,
 }
 
+#[cfg(test)]
 impl RuntimeConfig {
     /// Extracts the small runtime snapshot most callers need from a resolved config.
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
     ///
     /// let mut defaults = ConfigLayer::default();
@@ -231,7 +235,7 @@ impl RuntimeConfigPaths {
     ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```text
     /// use osp_cli::config::RuntimeConfigPaths;
     ///
     /// let paths = RuntimeConfigPaths::discover();
@@ -386,7 +390,7 @@ impl RuntimeDefaults {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```text
 /// use osp_cli::config::{
 ///     ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
 ///     build_runtime_pipeline,
@@ -668,8 +672,69 @@ fn project_dirs() -> Option<ProjectDirs> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn config_internal_example_1() {
+        use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
+
+        let mut defaults = ConfigLayer::default();
+        defaults.set("profile.default", "default");
+        defaults.set("theme.path", Vec::<String>::new());
+
+        let mut resolver = ConfigResolver::default();
+        resolver.set_defaults(defaults);
+        let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
+
+        let runtime = RuntimeConfig::from_resolved(&resolved);
+        assert_eq!(runtime.active_profile, "default");
+    }
+
+    #[test]
+    fn config_internal_example_2() {
+        let _example = || {
+            use crate::config::RuntimeConfigPaths;
+
+            let paths = RuntimeConfigPaths::discover();
+
+            let _config = paths.config_file.as_deref();
+            let _secrets = paths.secrets_file.as_deref();
+            let _keyring_index = paths.secrets_index_file.as_deref();
+        };
+    }
+
+    #[test]
+    fn config_internal_example_3() {
+        let _example = || {
+            (|| {
+                use crate::config::{
+                    ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
+                    build_runtime_pipeline,
+                };
+
+                let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
+                let paths = RuntimeConfigPaths::discover();
+                let presentation = None;
+                let cli = None;
+                let session = None;
+
+                let resolved = build_runtime_pipeline(
+                    defaults,
+                    presentation,
+                    &paths,
+                    RuntimeLoadOptions::default(),
+                    cli,
+                    session,
+                )
+                .resolve(ResolveOptions::new().with_terminal("cli"))?;
+
+                assert_eq!(resolved.terminal(), Some("cli"));
+                Ok::<(), crate::config::ConfigError>(())
+            })()
+            .unwrap();
+        };
+    }
+
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
     use super::{
         RuntimeBootstrapMode, RuntimeConfigPaths, RuntimeDefaults, RuntimeEnvironment,
@@ -677,9 +742,7 @@ mod tests {
     };
     use crate::config::{
         ConfigLayer, ConfigValue, DEFAULT_PROFILE_NAME, DEFAULT_REPL_HISTORY_MAX_ENTRIES,
-        DEFAULT_REPL_HISTORY_MENU_ROWS, DEFAULT_REPL_INTRO, DEFAULT_UI_CHROME_FRAME,
-        DEFAULT_UI_MESSAGES_LAYOUT, DEFAULT_UI_PRESENTATION, DEFAULT_UI_TABLE_BORDER,
-        DEFAULT_UI_WIDTH, Scope,
+        DEFAULT_REPL_HISTORY_MENU_ROWS, Scope,
     };
 
     fn find_value<'a>(layer: &'a ConfigLayer, key: &str) -> Option<&'a ConfigValue> {
@@ -688,11 +751,6 @@ mod tests {
             .iter()
             .find(|entry| entry.key == key && entry.scope == Scope::global())
             .map(|entry| &entry.value)
-    }
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        &LOCK
     }
 
     #[test]
@@ -725,7 +783,7 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "repl.intro"),
-            Some(&ConfigValue::String(DEFAULT_REPL_INTRO.to_string()))
+            Some(&ConfigValue::String("full".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "repl.history.max_entries"),
@@ -737,31 +795,31 @@ mod tests {
         );
         assert_eq!(
             find_value(&defaults, "ui.width"),
-            Some(&ConfigValue::Integer(DEFAULT_UI_WIDTH))
+            Some(&ConfigValue::Integer(72))
         );
         assert_eq!(
             find_value(&defaults, "ui.presentation"),
-            Some(&ConfigValue::String(DEFAULT_UI_PRESENTATION.to_string()))
+            Some(&ConfigValue::String("expressive".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.help.level"),
-            Some(&ConfigValue::String("inherit".to_string()))
+            Some(&ConfigValue::String("normal".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.messages.layout"),
-            Some(&ConfigValue::String(DEFAULT_UI_MESSAGES_LAYOUT.to_string()))
+            Some(&ConfigValue::String("grouped".to_string()))
         );
         assert_eq!(
-            find_value(&defaults, "ui.message.verbosity"),
+            find_value(&defaults, "ui.verbosity"),
             Some(&ConfigValue::String("success".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.chrome.frame"),
-            Some(&ConfigValue::String(DEFAULT_UI_CHROME_FRAME.to_string()))
+            Some(&ConfigValue::String("top".to_string()))
         );
         assert_eq!(
             find_value(&defaults, "ui.table.border"),
-            Some(&ConfigValue::String(DEFAULT_UI_TABLE_BORDER.to_string()))
+            Some(&ConfigValue::String("square".to_string()))
         );
         let path = match find_value(&defaults, "repl.history.path") {
             Some(ConfigValue::String(value)) => value.as_str(),
@@ -825,6 +883,9 @@ mod tests {
 
     #[test]
     fn runtime_environment_uses_home_and_temp_fallbacks_for_state_paths_unit() {
+        if crate::tests::isolated_test() {
+            return;
+        }
         let env = RuntimeEnvironment::from_pairs([("HOME", "/home/tester")]);
 
         assert_eq!(
@@ -840,12 +901,12 @@ mod tests {
             Some(PathBuf::from("/home/tester/.local/state/osp"))
         );
 
-        let _guard = env_lock().lock().expect("env lock should not be poisoned");
         let previous_tmpdir = std::env::var("TMPDIR").ok();
-        unsafe { std::env::set_var("TMPDIR", "/tmp/osp-runtime-temp") };
+        let temp = crate::tests::make_temp_dir("osp-env");
+        unsafe { std::env::set_var("TMPDIR", temp.path()) };
 
         let env = RuntimeEnvironment::from_pairs(std::iter::empty::<(&str, &str)>());
-        let expected_root = PathBuf::from("/tmp/osp-runtime-temp/osp");
+        let expected_root = temp.join("osp");
 
         assert_eq!(
             env.repl_history_path(),

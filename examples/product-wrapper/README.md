@@ -30,10 +30,10 @@ Copy-and-adapt order:
 1. Rename `site_*` symbols to your product name.
 2. Replace `SiteStatusCommand` with one real native command.
 3. Move your defaults under `extensions.<product>.*`.
-4. Keep `src/main.rs` thin and let `SiteApp::builder()` own the host wiring.
+4. Keep `src/main.rs` thin and let `SiteApp::new()` own the host wiring.
 
-`SiteApp::builder()` injects `site_defaults()` directly into the host
-bootstrap through `App::builder().with_product_defaults(...)`, so native
+`SiteApp::new()` injects `site_defaults()` directly into the host
+bootstrap through `App::new().with_product_defaults(...)`, so native
 commands and `config` commands see the same wrapper-owned keys. The separate
 `site_runtime_config_for(terminal)` helper is optional; it exists for
 product-owned validation, tooling, and tests that need the same merged

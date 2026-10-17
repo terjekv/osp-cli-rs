@@ -10,9 +10,7 @@ Use this when your product wants:
 - site-specific commands, policy, auth, or integrations
 
 Do not use this guide if you are only writing external plugins. That path is
-covered by [USING_PLUGINS.md](USING_PLUGINS.md),
-[WRITING_PLUGINS.md](WRITING_PLUGINS.md), and
-[PLUGIN_PROTOCOL.md](PLUGIN_PROTOCOL.md).
+covered by [PLUGINS.md](PLUGINS.md).
 
 If you want the shortest copy-and-adapt path, read `Recommended Shape` first
 and then jump straight to `Worked Recipe`.
@@ -29,33 +27,60 @@ If you want the shortest successful wrapper:
 2. Rename `site_*` and `SiteApp` to your product name.
 3. Move defaults under `extensions.<product>.*`.
 4. Replace `SiteStatusCommand` with one real native command.
-5. Keep `main.rs` thin and let `SiteApp::builder()` own host wiring.
+5. Keep `main.rs` thin and let `SiteApp::new()` own host wiring.
 
 You can ignore for now:
 
-- [`osp_cli::app::AppStateBuilder`]
 - manual runtime/session assembly
 - the optional `site_runtime_config_for(...)` helper if you do not need
   wrapper-owned tooling/tests outside the host
 
-## Development API cutover (2026-09-14)
+## API migration
 
-Update product wrappers alongside the core checkout. Development uses one
-current API; there is no compatibility shim or release-version bump for this
-cutover. The unpublished UiO companion uses the sibling path dependency.
+Update wrappers alongside the library checkout. Configure the host through
+`App`, and use the narrow `AppRuntime` getters in access-policy hooks.
+Host state, editor engines and plugin discovery remain owned by the host.
+The unpublished UiO companion uses the sibling path dependency.
 
-| Previous access | Current API |
+| Previous API | Current API |
 | --- | --- |
-| Public `AppRuntime` fields | `context()`, `config_state()`, `ui()`, `auth()`, `launch()` |
-| `auth_mut().set_policy_context(...)` | `set_policy_context(...)`, preserving the resolved profile |
-| `config_state_mut()` / `ui_mut()` | Change configuration through host configuration/rebuild paths |
-| `AppStateBuilder::new(...)` | `AppStateBuilder::from_resolved_config(...)` |
-| Wrapper-owned bootstrap scanning | `Cli::bootstrap_from(...)` with product root options |
+| `command_policy::*` | `core::command_policy::*` |
+| `core::{output,output_model,runtime,row,command_scope,document}::*` | Flat `core::*` types, including semantic documents |
+| `core::fuzzy` matchers, env constants, value helpers, `quote_for_shell` | Internal; supported helpers remain `core::{fold_case,escape_for_shell}` |
+| `core::command_policy::CommandPath` | Internal host lookup key |
+| `completion::{model,engine,parse,suggest,tree}::*` | Flat `completion::*`; analysis details are internal |
+| `Cli.command`, CLI argument enums and parsers | `cli::Cli::has_command()`; parse `cli::Cli` through clap |
+| `Cli` / `NativeCommandContext` struct literals | clap parsing / `NativeCommandContext::new()`; both are non-exhaustive |
+| `AppRuntime::config_state().resolved()` | `AppRuntime::config()` |
+| `AppRuntime::context().is_repl()` | `AppRuntime::is_repl()` |
+| `AppRuntime::ui().render_settings.runtime.command_scope` | `AppRuntime::command_scope()` |
+| Other host state getters, `AppState*`, session/client builders | Internal; configure the host through `App::new().with_*()` |
+| Free `app::run_process_with_sink` | `App::run_process_with_sink` |
+| Plugin manager and registry catalogs | Internal; register native commands or use the plugin wire protocol |
+| Config schema, explanation model, `RuntimeConfig`, secret-store internals and default constants | Internal; use public loaders, `ResolvedConfig`, runtime bootstrap and TOML editing helpers |
+| `ui::section_chrome::{SectionFrameStyle,RuledSectionPolicy}`, `ui::style::StyleOverrides` | Flat `ui::{SectionFrameStyle,RuledSectionPolicy,StyleOverrides}` |
+| UI theme, message, clipboard and resolved-settings engines | Internal; use `ui::render`, `RenderSettings`, and `RenderRequest` |
+| DSL parsing and verb metadata | Internal; use `apply_pipeline`, `apply_output_pipeline`, or `execute_pipeline` |
+| REPL engine, history and debug APIs | Internal; use `App` and the native-command REPL hooks |
+| `context::KINDS` | Internal; public context contracts, resolution and session APIs remain available |
+
+Native command contexts retain `may_prompt()` and `can_present()`. Terminal
+confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.
+`AppRuntime::input_is_replay()` identifies sourced commands and redirected stdin; `NativeCommandContext::may_prompt()` rejects both.
+`ui::prompt::read_path(label)` opens a history-free REPL file editor; its `completion::path_candidates` lookup also serves `source` and `--from-file`, with tilde paths and explicit dotfile prefixes.
+Access hooks can call `AppRuntime::store_secret(key, value)` to use `config set --secrets` storage and reload the host before the pending command runs.
+`core::CommandError` carries recovery advice, `ResponseV1::ok` constructs
+successful wire responses, and `config::is_sensitive_key` classifies secret
+names. Public context contracts and native REPL hooks remain available.
 
 Native commands can implement `configure(&ResolvedConfig)` to select their
 local session before help, completion, policy, or execution reads it. Remote
 refresh still belongs to execution or completion refresh. Derived UI and auth
-state remain owned by the host.
+state remain owned by the host. Cloned registries share their command instances,
+so invocations using `configure` to select mutable session state must be
+serialized from configuration through completion. Parallel embedded runs need
+independent command instances in separate registries, or service selection
+derived from each execution context.
 
 ## Ownership Split
 
@@ -90,7 +115,7 @@ To build a wrapper:
 3. Build a `NativeCommandRegistry` for your site-specific commands.
 4. Build one `ConfigLayer` containing your product-owned defaults under
    `extensions.<site>.*`.
-5. Inject both through `App::builder()`.
+5. Inject both through `App::new()`.
 6. Expose a small product API such as `run_process`, `builder`, or
    `assembly`.
 
@@ -102,7 +127,7 @@ use std::ffi::OsString;
 fn site_defaults() -> osp_cli::config::ConfigLayer {
     let mut defaults = osp_cli::config::ConfigLayer::default();
     defaults.set("extensions.site.enabled", true);
-    defaults.set_for_terminal("cli", "extensions.site.banner", "cli-wrapper");
+    defaults.insert("extensions.site.banner", "cli-wrapper", osp_cli::config::Scope::terminal("cli"));
     defaults
 }
 
@@ -112,15 +137,15 @@ pub struct SiteApp {
 }
 
 impl SiteApp {
-    pub fn builder() -> osp_cli::AppBuilder {
-        osp_cli::App::builder()
+    pub fn builder() -> osp_cli::App {
+        osp_cli::App::new()
             .with_native_commands(site_native_registry())
             .with_product_defaults(site_defaults())
     }
 
     pub fn new() -> Self {
         Self {
-            inner: Self::builder().build(),
+            inner: Self::builder(),
         }
     }
 
@@ -183,14 +208,14 @@ use osp_cli::config::{
     RuntimeDefaults, RuntimeLoadOptions, build_runtime_pipeline,
 };
 use osp_cli::{
-    App, AppBuilder, NativeCommand, NativeCommandContext, NativeCommandOutcome,
+    App, NativeCommand, NativeCommandContext, NativeCommandOutcome,
     NativeCommandRegistry,
 };
 
 fn site_defaults() -> ConfigLayer {
     let mut layer = ConfigLayer::default();
     layer.set("extensions.site.enabled", true);
-    layer.set_for_terminal("cli", "extensions.site.banner", "cli-wrapper");
+    layer.insert("extensions.site.banner", "cli-wrapper", osp_cli::config::Scope::terminal("cli"));
     layer
 }
 
@@ -242,15 +267,15 @@ pub struct SiteApp {
 }
 
 impl SiteApp {
-    pub fn builder() -> AppBuilder {
-        App::builder()
+    pub fn builder() -> App {
+        App::new()
             .with_native_commands(site_native_registry())
             .with_product_defaults(site_defaults())
     }
 
     pub fn new() -> Self {
         Self {
-            inner: Self::builder().build(),
+            inner: Self::builder(),
         }
     }
 
@@ -282,7 +307,7 @@ Notes:
 - `site_runtime_config_for(terminal)` is optional and meant for product-owned
   tests, validation, and adjacent tooling that need the same merged defaults
   outside the host
-- `SiteApp::builder()` gives callers one place to construct the configured host
+- `SiteApp::new()` gives callers one place to construct the configured host
 - if the product does not need its own preflight config step, keep the wrapper
   thinner and only inject the native registry and product defaults
 
@@ -325,11 +350,27 @@ in the host's help, completion, policy checks, and dispatch.
 When implementing native commands:
 
 - command implementations should consume a `NativeCommandContext`
+- write follow-up commands with `context.command("orch task wait 42")`, using
+  root-form input so terminal and REPL readers receive the appropriate spelling
 - long-running commands should emit `NativeProgressEvent` values through the
   context rather than writing directly to stdio
-- use `presentation_lines` with `progress_replace: true` for transient status;
-  a single rendered line animates on interactive stderr and clears when the
-  command finishes or presents another document
+- streaming endpoints call `context.emit_stream(event)` with one typed JSON
+  object in `event.data`; human output uses the shared renderer and `--json`
+  writes each event as a compact JSON line on stdout before the final result
+  document. DSL stages apply to each event and to the final result separately;
+  filtered-out events emit nothing. Events are never coalesced, including replay
+  events, and quiet mode does not suppress machine-readable events
+- use `event.with_meta(...)` for event columns/labels/format and optionally
+  `event.with_frame(snapshot, meta)` for an accumulated structured terminal
+  frame. The shared renderer renders that snapshot only on an unfiltered human
+  terminal; JSON, redirected output and DSL always consume the original event.
+  Set `progress_replace: true` on the frame metadata to replace it safely
+- `emit_progress` remains preliminary human progress on stderr, independent of
+  the streaming endpoint contract. Return the final document through the normal
+  `NativeCommandOutcome` path; stream metadata never replaces that document
+- use structured data and `progress_replace: true` for preliminary status;
+  interactive stderr clears it when the command finishes or presents another
+  document
 - call `context.flush_progress()` before blocking for input, and use
   `context.present(...)` for notices and confirmations that must remain visible
   outside result-stream DSL filters; contexts without a progress sink make
@@ -341,9 +382,10 @@ When implementing native commands:
 - use `NativeCommand::configure` to select local service/session state from the
   resolved host config before help, policy, completion, and execution inspect
   it; keep remote refresh out of this hook
-- authentication recovery updates product facts through
-  `AppRuntime::set_policy_context`; resolved configuration and derived UI state
-  are read-only to wrappers and change through host configuration workflows
+- Keep credentials in the product's shared credential owner. Return current
+  authentication and credential facts from `AccessPolicy::session_facts`; use
+  `AppRuntime::set_authenticated_subject` to publish the validated subject.
+  See [AUTH.md](AUTH.md#product-hook) for the acquisition lifecycle.
 - registration should happen in one place, usually a product integrations
   module
 
@@ -377,3 +419,67 @@ For code-level entrypoints, start with:
 - [`src/native.rs`](../src/native.rs)
 - [`src/config/mod.rs`](../src/config/mod.rs)
 - [`src/config/runtime.rs`](../src/config/runtime.rs)
+
+## Config loader composition
+
+`osp_cli::config` exposes a generic loader interface so each source can be wired
+without custom host loading code:
+
+- `config::ConfigLoader` trait (`load() -> Result<ConfigLayer, ConfigError>`)
+- `StaticLayerLoader` for in-memory defaults/session layers
+- `TomlFileLoader` for file-backed layers (optional or required)
+- `EnvVarLoader` for `OSP__...` environment overrides
+- `SecretsTomlLoader` for file-backed secrets with strict permissions checks
+- `EnvSecretsLoader` for `OSP_SECRET__...` secret overrides
+- `ChainedLoader` for combining multiple backends within one precedence stage
+- `LoaderPipeline` for assembling all loaders in precedence order
+
+## REPL product hooks
+
+### Background notices
+
+Products can use `osp_cli::repl::post_notice` for a short informational line
+computed after startup. The editor prints it above the prompt; work posted
+before the editor starts is queued. The basic reader also displays notices on
+stderr, although it cannot redraw a partially typed line. Notice delivery does
+not wait for network work or block the prompt.
+
+### Product status
+
+Native commands may supply `repl_status()` as cached status text in a separate
+right-prompt slot. Rendering never performs network I/O. The host sanitizes
+control sequences and line breaks; Reedline measures terminal cells and omits
+the right prompt when it collides with input. Context and incognito remain;
+product attention takes priority over timing. Basic and JSON sessions omit it.
+Product `repl_status` hooks return `ReplStatus` text and a message level.
+The host strips terminal controls before applying the active theme's error
+or warning colour. `NO_COLOR`, `--no-color` and plain rendering suppress colour.
+A cached update is visible at the next editor paint. The pinned Reedline reader
+blocks on terminal input: cache changes and queued
+transition notices appear at the next input event, rather than waking an idle
+reader. No fake input events or worker ANSI writes are used.
+
+### Product actions and terminal ownership
+
+Internally, the editor distinguishes ordinary lines, global history selections
+that bypass shell scope, and named actions. Products use native-command hooks
+to register `repl::ReplAction`s and implement
+`NativeCommand::execute_repl_action`; the host uses ordinary elevation without
+running an interactive login hook. Actions bypass user history, alias expansion,
+shell navigation, last-command expansion and pagination reset. The same editor
+retains its draft and byte cursor across normal return, cancellation and errors.
+
+Bindings accept F2–F12, Alt+Enter or `none`; duplicate bindings are rejected.
+Products supply a default and a human label. Basic and JSON
+sessions have no product shortcuts. Existing Ctrl+R, Ctrl+L and pagination keys
+keep their meanings.
+
+`NativeCommand::start_repl(config, Some(ReplSession))` supplies a cancellable
+rich-editor lifetime.
+Basic selection and fallback report `None` for legacy startup behavior only;
+recurring attention and sound remain disabled.
+Workers use its bounded, sanitized `post_notice(text)` sink and
+`wait(duration)` cancellation point. Reedline queues delivery while foreground
+commands, line prompts, raw menus, pagers or the history picker own the terminal.
+Rebuild, fallback and exit cancel the handle and discard queued product output.
+Workers must also validate their own credential generation before publication.

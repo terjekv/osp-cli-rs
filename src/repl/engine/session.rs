@@ -1,16 +1,12 @@
 use super::adapter::{ReplCompleter, build_repl_highlighter, color_from_style_spec};
-use super::config::{
-    LineProjector, ReplAppearance, ReplLineResult, ReplReloadKind, ReplRunResult, ReplTabMode,
-};
-use super::editor::{
-    AutoCompleteEmacs, BasicInputReason, OspPrompt, PaintedLine, is_cursor_position_error,
-    mark_cursor_position_unsupported,
-};
+use super::config::{LineProjector, ReplAppearance, ReplResult, ReplTabMode};
+use super::editor::{AutoCompleteEmacs, OspPrompt, PaintedLine};
 use super::hint::ReplHinter;
-use super::overlay::{build_completion_menu, launch_history_picker};
+use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
 use super::{
-    COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_PAGE_NEXT,
-    HOST_COMMAND_PAGE_PREVIOUS, SharedHistory,
+    COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_LAST_ARGUMENT,
+    HOST_COMMAND_PAGE_NEXT, HOST_COMMAND_PAGE_PREVIOUS, HOST_COMMAND_PREVIOUS_ARGUMENT,
+    SharedHistory,
 };
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
@@ -29,57 +25,48 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) appearance: ReplAppearance,
     pub(crate) tab_mode: ReplTabMode,
     pub(crate) line_projector: Option<LineProjector>,
-}
-
-pub(crate) enum SubmissionResult {
-    Noop,
-    Print(String),
-    ReplaceInput(String),
-    Exit(i32),
-    Restart {
-        output: String,
-        reload: ReplReloadKind,
-    },
+    pub(crate) actions: Vec<crate::repl::ReplAction>,
 }
 
 pub(crate) struct SubmissionContext<'a, F> {
     pub(crate) history_store: &'a SharedHistory,
+    pub(crate) root_input: bool,
+    pub(crate) exit_on_interrupt: bool,
     pub(crate) execute: &'a mut F,
 }
 
 pub(crate) fn evaluate_repl_submission<F>(
     raw: &str,
     ctx: &mut SubmissionContext<'_, F>,
-) -> Result<SubmissionResult>
+) -> ReplResult
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Ok(SubmissionResult::Noop);
+    let raw = raw.trim_end();
+    if raw.trim().is_empty() {
+        return ReplResult::Continue;
     }
-    let result = match (ctx.execute)(raw, ctx.history_store) {
-        Ok(ReplLineResult::Continue(output)) => SubmissionResult::Print(output),
-        Ok(ReplLineResult::ReplaceInput(buffer)) => SubmissionResult::ReplaceInput(buffer),
-        Ok(ReplLineResult::Exit(code)) => SubmissionResult::Exit(code),
-        Ok(ReplLineResult::Restart { output, reload }) => {
-            SubmissionResult::Restart { output, reload }
-        }
+    let event = if std::mem::take(&mut ctx.root_input) {
+        crate::repl::ReplEvent::RootLine(raw)
+    } else {
+        crate::repl::ReplEvent::Line(raw)
+    };
+    match (ctx.execute)(event, ctx.history_store) {
+        Ok(result) => result,
         Err(err) => {
             eprintln!("{err}");
-            SubmissionResult::Noop
+            ReplResult::Continue
         }
-    };
-    Ok(result)
+    }
 }
 
 pub(crate) fn run_repl_interactive<F>(
     config: InteractiveLoopConfig<'_>,
     history_store: SharedHistory,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     let InteractiveLoopConfig {
         prompt,
@@ -87,23 +74,47 @@ where
         appearance,
         tab_mode,
         line_projector,
+        actions,
     } = config;
 
-    let mut editor = build_interactive_editor(
-        completion_tree,
-        &appearance,
-        tab_mode,
-        line_projector,
-        history_store.clone(),
-    );
+    let mut bindings = build_repl_keybindings();
+    if submission.exit_on_interrupt {
+        bindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::CtrlD);
+    }
+    for action in &actions {
+        if let Some(key) = action.key {
+            let (modifiers, code) = match key {
+                crate::repl::ReplActionKey::Function(key) => (KeyModifiers::NONE, KeyCode::F(key)),
+                crate::repl::ReplActionKey::AltEnter => (KeyModifiers::ALT, KeyCode::Enter),
+            };
+            anyhow::ensure!(
+                bindings.find_binding(modifiers, code).is_none(),
+                "conflicting action key {key}"
+            );
+            bindings.add_binding(
+                modifiers,
+                code,
+                ReedlineEvent::ExecuteHostCommand(format!("\0osp-action:{}", action.id)),
+            );
+        }
+    }
+    let mut editor = {
+        let _phase = tracing::info_span!(target: "osp_startup", "editor construction").entered();
+        build_interactive_editor(
+            completion_tree,
+            &appearance,
+            tab_mode,
+            line_projector,
+            history_store.clone(),
+            Some(bindings),
+        )
+    };
     drive_interactive_editor(
-        prompt,
         &appearance,
         &history_store,
         submission,
         &mut editor,
         |editor| editor.read_line(prompt),
-        run_repl_basic,
     )
 }
 
@@ -113,6 +124,7 @@ pub(super) fn build_interactive_editor(
     tab_mode: ReplTabMode,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
+    bindings: Option<reedline::Keybindings>,
 ) -> Reedline {
     let tree = completion_tree;
     let completer = Box::new(
@@ -121,10 +133,16 @@ pub(super) fn build_interactive_editor(
     );
     let completion_menu = SharedCompletionMenu::new(build_completion_menu(appearance));
     let painted = PaintedLine::default();
-    let hinter = build_repl_hinter(&tree, appearance, line_projector.clone(), painted.clone());
+    let hinter = build_repl_hinter(
+        &tree,
+        appearance,
+        line_projector.clone(),
+        painted.clone(),
+        &history_store,
+    );
     let highlighter = build_repl_highlighter(&tree, appearance, line_projector);
     let edit_mode = Box::new(AutoCompleteEmacs::new(
-        Emacs::new(build_repl_keybindings()),
+        Emacs::new(bindings.unwrap_or_else(build_repl_keybindings)),
         completion_menu.clone(),
         tab_mode,
         painted,
@@ -136,6 +154,7 @@ pub(super) fn build_interactive_editor(
         .with_completer(completer)
         .with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)))
         .with_partial_completions(true)
+        .with_ansi_colors(appearance.ansi_colors)
         .with_hinter(Box::new(hinter))
         .with_edit_mode(edit_mode);
     if let Some(highlighter) = highlighter {
@@ -146,38 +165,43 @@ pub(super) fn build_interactive_editor(
     editor
         .with_external_printer(printer)
         .with_history(Box::new(history_store))
+        .with_history_exclusion_prefix(Some(" ".to_string()))
 }
 
-pub(super) fn drive_interactive_editor<F, R, B>(
-    prompt: &OspPrompt,
+pub(super) fn drive_interactive_editor<F, R>(
     appearance: &ReplAppearance,
     history_store: &SharedHistory,
     submission: &mut SubmissionContext<'_, F>,
     editor: &mut Reedline,
     mut read_signal: R,
-    mut run_basic_fn: B,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
     R: FnMut(&mut Reedline) -> io::Result<Signal>,
-    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplRunResult>,
 {
+    crate::startup_trace::begin_first_prompt();
+    let mut last_argument = None;
     loop {
-        let signal = match read_signal(editor) {
-            Ok(signal) => signal,
-            Err(err) => {
-                if is_cursor_position_error(&err) {
-                    mark_cursor_position_unsupported();
-                    super::warn_basic_input_once(BasicInputReason::CursorProbeUnsupported);
-                    return run_basic_fn(prompt, submission);
-                }
-                return Err(err.into());
-            }
-        };
+        let signal = read_signal(editor)?;
 
-        if let Some(result) =
-            handle_interactive_signal(signal, editor, history_store, appearance, submission)?
+        if let Signal::HostCommand(command) = &signal
+            && matches!(
+                command.as_str(),
+                HOST_COMMAND_LAST_ARGUMENT | HOST_COMMAND_PREVIOUS_ARGUMENT
+            )
         {
+            if command == HOST_COMMAND_LAST_ARGUMENT {
+                last_argument = None;
+            }
+            insert_last_argument(editor, history_store, &mut last_argument)?;
+            continue;
+        }
+
+        crate::repl::notices::begin_foreground();
+        let result =
+            handle_interactive_signal(signal, editor, history_store, appearance, submission)?;
+        crate::repl::notices::finish_foreground();
+        if let Some(result) = result {
             return Ok(result);
         }
     }
@@ -186,24 +210,29 @@ where
 pub(crate) fn run_repl_basic<F>(
     prompt: &OspPrompt,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<ReplRunResult>
+) -> Result<ReplResult>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     crate::repl::notices::attach_basic();
+    crate::startup_trace::begin_first_prompt();
     loop {
         print!("{}{}", prompt.left(), prompt.indicator());
         io::stdout().flush()?;
+        crate::startup_trace::first_prompt_rendered();
 
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;
         if read == 0 {
-            return Ok(ReplRunResult::Exit(0));
+            return Ok(ReplResult::Exit(0));
         }
 
-        match apply_basic_submission(evaluate_repl_submission(&line, submission)?) {
-            BasicSubmissionAction::Continue => continue,
-            BasicSubmissionAction::Return(result) => return Ok(result),
+        submission
+            .history_store
+            .with(|store| store.stage_command_line(&line))
+            .map_err(anyhow::Error::msg)??;
+        if let Some(result) = apply_submission(evaluate_repl_submission(&line, submission), None) {
+            return Ok(result);
         }
     }
 }
@@ -213,20 +242,26 @@ fn build_repl_hinter(
     appearance: &ReplAppearance,
     line_projector: Option<LineProjector>,
     painted: PaintedLine,
+    history: &SharedHistory,
 ) -> ReplHinter {
     let color = |spec: &Option<String>| spec.as_deref().and_then(color_from_style_spec);
     let error_color = color(&appearance.error_highlight_style).unwrap_or(Color::Red);
+    let error_style = appearance.ansi_colors.then(|| Style::new().fg(error_color));
     ReplHinter::new(
-        ReplCompleter::new(tree.clone(), line_projector.clone()),
+        ReplCompleter::new(tree.clone(), line_projector.clone()).with_history(history.clone()),
         ReplHighlighter::new(tree.clone(), Color::Default, error_color, line_projector),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),
-        Style::new().fg(error_color),
+        error_style,
     )
 }
 
 fn build_repl_keybindings() -> reedline::Keybindings {
     let mut keybindings = default_emacs_keybindings();
+    // Lines are single-line commands; Alt+Enter is free for a host action.
+    for modifiers in [KeyModifiers::ALT, KeyModifiers::SHIFT] {
+        keybindings.remove_binding(modifiers, KeyCode::Enter);
+    }
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Enter,
@@ -260,6 +295,11 @@ fn build_repl_keybindings() -> reedline::Keybindings {
         KeyCode::Char('r'),
         ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_HISTORY_PICKER.to_string()),
     );
+    keybindings.add_binding(
+        KeyModifiers::ALT,
+        KeyCode::Char('.'),
+        ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_LAST_ARGUMENT.to_string()),
+    );
     // Step through paginated results in both directions without retyping
     // `prev` / `next`, which any other command would otherwise reset.
     for (modifiers, previous, next) in [
@@ -280,21 +320,111 @@ fn build_repl_keybindings() -> reedline::Keybindings {
     keybindings
 }
 
+struct LastArgument {
+    next_entry: usize,
+    inserted: std::ops::Range<usize>,
+}
+
+fn insert_last_argument(
+    editor: &mut Reedline,
+    history: &SharedHistory,
+    cycle: &mut Option<LastArgument>,
+) -> Result<()> {
+    let cursor = editor.current_insertion_point();
+    let cycle = cycle.get_or_insert(LastArgument {
+        next_entry: 0,
+        inserted: cursor..cursor,
+    });
+    let entries = history
+        .with(|store| store.list_entries_for(store.shell_prefix().as_deref()))
+        .map_err(anyhow::Error::msg)?;
+    let Some(entry) = entries.iter().rev().nth(cycle.next_entry) else {
+        return Ok(());
+    };
+    let Some(argument) = last_shell_word(&entry.command) else {
+        return Ok(());
+    };
+    editor.run_edit_commands(&[
+        EditCommand::MoveToPosition {
+            position: cycle.inserted.start,
+            select: false,
+        },
+        EditCommand::MoveToPosition {
+            position: cycle.inserted.end,
+            select: true,
+        },
+        EditCommand::InsertString(argument.to_string()),
+    ]);
+    cycle.inserted.end = cycle.inserted.start + argument.len();
+    cycle.next_entry += 1;
+    Ok(())
+}
+
+fn last_shell_word(line: &str) -> Option<&str> {
+    use crate::core::shell_words::{LexEventKind, scan_shell};
+
+    let mut start = None;
+    let mut last = None;
+    // Keep the original quotes and escapes so inserting the word preserves it.
+    scan_shell(line, |event| {
+        if event.kind == LexEventKind::Separator {
+            start = None;
+        } else {
+            let start = *start.get_or_insert(event.index);
+            last = Some(start..event.end);
+        }
+    });
+    last.map(|span| &line[span])
+}
+
 fn handle_interactive_signal<F>(
     signal: Signal,
     editor: &mut Reedline,
     history_store: &SharedHistory,
     appearance: &ReplAppearance,
     submission: &mut SubmissionContext<'_, F>,
-) -> Result<Option<ReplRunResult>>
+) -> Result<Option<ReplResult>>
 where
-    F: FnMut(&str, &SharedHistory) -> Result<ReplLineResult>,
+    F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     match signal {
-        Signal::Success(line) if line == HOST_COMMAND_HISTORY_PICKER => {
+        Signal::HostCommand(line) if line.starts_with("\0osp-action:") => {
+            let draft = editor.current_buffer_contents().to_string();
+            let cursor = editor.current_insertion_point();
+            let id = line.trim_start_matches("\0osp-action:");
+            let result =
+                match (submission.execute)(crate::repl::ReplEvent::Action(id), history_store) {
+                    Ok(ReplResult::Print(output)) => {
+                        print!("{output}");
+                        None
+                    }
+                    Ok(ReplResult::ReplaceInput(command)) if id == "hint.insert" => {
+                        editor.run_edit_commands(&[
+                            EditCommand::Clear,
+                            EditCommand::InsertString(command),
+                        ]);
+                        return Ok(None);
+                    }
+                    Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
+                    Ok(result) => Some(result),
+                    Err(error) => {
+                        eprintln!("{error}");
+                        None
+                    }
+                };
+            if editor.current_buffer_contents() != draft {
+                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(draft)]);
+            }
+            editor.run_edit_commands(&[EditCommand::MoveToPosition {
+                position: cursor,
+                select: false,
+            }]);
+            Ok(result)
+        }
+        Signal::HostCommand(line) if line == HOST_COMMAND_HISTORY_PICKER => {
             // `Ctrl-R` leaves reedline through a private host command so we
             // can temporarily hand terminal ownership to skim. Once skim
-            // returns, restore the chosen command into the live editor buffer.
+            // returns, submit the selected command or restore it for editing.
             let current_line = editor.current_buffer_contents().to_string();
             let selected = match launch_history_picker(history_store, appearance, &current_line) {
                 Ok(selected) => selected,
@@ -303,12 +433,34 @@ where
                     return Ok(None);
                 }
             };
-            if let Some(command) = selected {
-                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(command)]);
+            match selected {
+                Some(HistorySelection::Run { command, root }) => {
+                    submission.root_input = root;
+                    eprintln!("{command}");
+                    history_store
+                        .with(|store| store.stage_command_line(&command))
+                        .map_err(anyhow::Error::msg)??;
+                    editor.run_edit_commands(&[EditCommand::Clear]);
+                    return handle_interactive_signal(
+                        Signal::Success(command),
+                        editor,
+                        history_store,
+                        appearance,
+                        submission,
+                    );
+                }
+                Some(HistorySelection::Edit { command, root }) => {
+                    submission.root_input = root;
+                    editor.run_edit_commands(&[
+                        EditCommand::Clear,
+                        EditCommand::InsertString(command),
+                    ]);
+                }
+                None => {}
             }
             Ok(None)
         }
-        Signal::Success(line)
+        Signal::HostCommand(line)
             if line == HOST_COMMAND_PAGE_PREVIOUS || line == HOST_COMMAND_PAGE_NEXT =>
         {
             let previous = line == HOST_COMMAND_PAGE_PREVIOUS;
@@ -322,36 +474,22 @@ where
                 return Ok(None);
             }
             let command = if previous { "prev" } else { "next" };
-            apply_interactive_submission(evaluate_repl_submission(command, submission)?, editor)
+            Ok(apply_submission(
+                evaluate_repl_submission(command, submission),
+                Some(editor),
+            ))
         }
-        Signal::Success(line) => {
-            apply_interactive_submission(evaluate_repl_submission(&line, submission)?, editor)
+        Signal::Success(line) => Ok(apply_submission(
+            evaluate_repl_submission(&line, submission),
+            Some(editor),
+        )),
+        Signal::CtrlD => Ok(Some(ReplResult::Exit(0))),
+        Signal::CtrlC => {
+            submission.root_input = false;
+            Ok(submission.exit_on_interrupt.then_some(ReplResult::Exit(0)))
         }
-        Signal::CtrlD => Ok(Some(ReplRunResult::Exit(0))),
-        Signal::CtrlC => Ok(None),
-    }
-}
-
-enum BasicSubmissionAction {
-    Continue,
-    Return(ReplRunResult),
-}
-
-fn apply_basic_submission(result: SubmissionResult) -> BasicSubmissionAction {
-    match result {
-        SubmissionResult::Noop => BasicSubmissionAction::Continue,
-        SubmissionResult::Print(output) => {
-            print!("{output}");
-            BasicSubmissionAction::Continue
-        }
-        SubmissionResult::ReplaceInput(buffer) => {
-            println!("{buffer}");
-            BasicSubmissionAction::Continue
-        }
-        SubmissionResult::Exit(code) => BasicSubmissionAction::Return(ReplRunResult::Exit(code)),
-        SubmissionResult::Restart { output, reload } => {
-            BasicSubmissionAction::Return(ReplRunResult::Restart { output, reload })
-        }
+        // No other host commands are bound and no external break is wired.
+        _ => Ok(None),
     }
 }
 
@@ -362,41 +500,81 @@ fn render_history_picker_failure(err: &anyhow::Error) -> String {
     )
 }
 
-fn apply_interactive_submission(
-    result: SubmissionResult,
-    editor: &mut Reedline,
-) -> Result<Option<ReplRunResult>> {
+fn apply_submission(result: ReplResult, editor: Option<&mut Reedline>) -> Option<ReplResult> {
     match result {
-        SubmissionResult::Noop => Ok(None),
-        SubmissionResult::Print(output) => {
+        ReplResult::Continue => None,
+        ReplResult::Print(output) => {
             print!("{output}");
-            Ok(None)
+            None
         }
-        SubmissionResult::ReplaceInput(buffer) => {
-            editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(buffer)]);
-            Ok(None)
+        ReplResult::ReplaceInput(buffer) => {
+            if let Some(editor) = editor {
+                editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(buffer)]);
+            } else {
+                println!("{buffer}");
+            }
+            None
         }
-        SubmissionResult::Exit(code) => Ok(Some(ReplRunResult::Exit(code))),
-        SubmissionResult::Restart { output, reload } => {
-            Ok(Some(ReplRunResult::Restart { output, reload }))
+        result @ (ReplResult::Exit(_) | ReplResult::Restart { .. }) => Some(result),
+    }
+}
+
+/// Standalone file input shares the REPL's completion menu and navigation.
+pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
+    use reedline::{Completer, CompletionResult, Span, Suggestion};
+    struct Paths;
+    impl Completer for Paths {
+        fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+            CompletionResult::fresh(
+                crate::completion::path_candidates(&line[..pos])
+                    .into_iter()
+                    .map(|(value, directory)| Suggestion {
+                        value,
+                        span: Span::new(0, pos),
+                        append_whitespace: false,
+                        description: Some(if directory { "dir" } else { "file" }.into()),
+                        ..Suggestion::default()
+                    })
+                    .collect::<Vec<_>>(),
+            )
         }
+    }
+    let menu = SharedCompletionMenu::new(build_completion_menu(&ReplAppearance::default()));
+    let mut bindings = build_repl_keybindings();
+    bindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::CtrlC);
+    let mode = AutoCompleteEmacs::new(
+        Emacs::new(bindings),
+        menu.clone(),
+        ReplTabMode::Always,
+        PaintedLine::default(),
+    );
+    let mut editor = Reedline::create()
+        .with_completer(Box::new(Paths))
+        .with_menu(ReedlineMenu::EngineCompleter(Box::new(menu)))
+        .with_partial_completions(true)
+        .with_edit_mode(Box::new(mode));
+    match editor
+        .read_line(&OspPrompt::new(label.into(), String::new(), None))
+        .map_err(io::Error::other)?
+    {
+        Signal::Success(path) => Ok(Some(path)),
+        _ => Ok(None),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repl::engine::HistoryConfig;
+    use crate::repl::engine::{HistoryConfig, ReplReloadKind};
     use reedline::{KeyCode, KeyModifiers, ReedlineEvent};
     use std::sync::{Arc, Mutex};
 
     fn disabled_history() -> SharedHistory {
-        SharedHistory::new(
-            HistoryConfig::builder()
-                .with_enabled(false)
-                .with_max_entries(0)
-                .build(),
-        )
+        SharedHistory::new(HistoryConfig {
+            enabled: false,
+            max_entries: 0,
+            ..HistoryConfig::default()
+        })
     }
 
     fn test_appearance() -> ReplAppearance {
@@ -435,48 +613,36 @@ mod tests {
     }
 
     #[test]
-    fn apply_interactive_submission_covers_editor_update_and_terminal_outcomes_unit() {
+    fn apply_submission_covers_editor_update_and_terminal_outcomes_unit() {
         let mut editor = Reedline::create();
 
+        assert!(apply_submission(ReplResult::Continue, Some(&mut editor)).is_none());
         assert!(
-            apply_interactive_submission(SubmissionResult::Noop, &mut editor)
-                .expect("noop should succeed")
-                .is_none()
-        );
-        assert!(
-            apply_interactive_submission(
-                SubmissionResult::Print("printed".to_string()),
-                &mut editor
-            )
-            .expect("print should succeed")
-            .is_none()
+            apply_submission(ReplResult::Print("printed".to_string()), Some(&mut editor)).is_none()
         );
 
         assert!(
-            apply_interactive_submission(
-                SubmissionResult::ReplaceInput("config show".to_string()),
-                &mut editor,
+            apply_submission(
+                ReplResult::ReplaceInput("config show".to_string()),
+                Some(&mut editor),
             )
-            .expect("replace should succeed")
             .is_none()
         );
         assert_eq!(editor.current_buffer_contents(), "config show");
 
         assert!(matches!(
-            apply_interactive_submission(SubmissionResult::Exit(7), &mut editor)
-                .expect("exit should succeed"),
-            Some(ReplRunResult::Exit(7))
+            apply_submission(ReplResult::Exit(7), Some(&mut editor)),
+            Some(ReplResult::Exit(7))
         ));
         assert!(matches!(
-            apply_interactive_submission(
-                SubmissionResult::Restart {
+            apply_submission(
+                ReplResult::Restart {
                     output: "reload".to_string(),
                     reload: ReplReloadKind::Default,
                 },
-                &mut editor,
-            )
-            .expect("restart should succeed"),
-            Some(ReplRunResult::Restart { output, reload: ReplReloadKind::Default })
+                Some(&mut editor),
+            ),
+            Some(ReplResult::Restart { output, reload: ReplReloadKind::Default })
                 if output == "reload"
         ));
     }
@@ -490,20 +656,25 @@ mod tests {
 
         let executed = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&executed);
-        let mut execute = move |line: &str, _: &SharedHistory| {
+        let mut execute = move |event: crate::repl::ReplEvent<'_>, _: &SharedHistory| {
+            let crate::repl::ReplEvent::Line(line) = event else {
+                unreachable!()
+            };
             seen.lock()
                 .expect("executed command log should not be poisoned")
                 .push(line.to_string());
-            Ok(ReplLineResult::Continue(String::new()))
+            Ok(ReplResult::Continue)
         };
         let mut submission = SubmissionContext {
+            root_input: false,
+            exit_on_interrupt: false,
             history_store: &history,
             execute: &mut execute,
         };
 
         assert!(
             handle_interactive_signal(
-                Signal::Success(HOST_COMMAND_HISTORY_PICKER.to_string()),
+                Signal::HostCommand(HOST_COMMAND_HISTORY_PICKER.to_string()),
                 &mut editor,
                 &history,
                 &appearance,
@@ -541,7 +712,7 @@ mod tests {
                 &mut submission,
             )
             .expect("ctrl-d should succeed"),
-            Some(ReplRunResult::Exit(0))
+            Some(ReplResult::Exit(0))
         ));
         assert!(
             handle_interactive_signal(

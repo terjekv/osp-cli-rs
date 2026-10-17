@@ -403,7 +403,7 @@ mod tests {
     fn explain_interpolation_reports_recursive_steps_once_unit() {
         let pre = BTreeMap::from([
             (
-                "ui.prompt".to_string(),
+                "repl.prompt".to_string(),
                 resolved_value(ConfigValue::String("${ui.user}@${ui.host}".to_string())),
             ),
             (
@@ -422,7 +422,7 @@ mod tests {
         let mut final_values = pre.clone();
         interpolate_all(&mut final_values).expect("interpolation should succeed");
 
-        let explain = explain_interpolation("ui.prompt", &pre, &final_values)
+        let explain = explain_interpolation("repl.prompt", &pre, &final_values)
             .expect("explain should succeed")
             .expect("template should be explained");
 

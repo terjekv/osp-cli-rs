@@ -5,7 +5,7 @@ A command produces rows; this module filters, projects, sorts, groups and
 limits them. The same stages work in the CLI, the REPL, and on JSON piped in
 from a file.
 
-Imports `core` for rows and output, `guide` and `ui` for in-band help (`| H`),
+Imports `core` for rows and documents, and `ui` for in-band help (`| H`),
 and one `cli` row adapter in `value.rs`. It never runs commands or reads config.
 
 ## Layout
@@ -24,6 +24,7 @@ and one `cli` row adapter in `value.rs`. It never runs commands or reads config.
 ## Rules worth knowing
 
 - Verbs see canonical rows. Display formatting happens later, in `ui`.
+- Value and addressed-path resolution share one borrowed structural traversal.
 - Group keys and aggregates are metadata on the result; member rows stay intact.
 - Unknown fields in a non-empty result are errors, not silent empty columns.
 
@@ -40,7 +41,11 @@ and one `cli` row adapter in `value.rs`. It never runs commands or reads config.
 ## Debugging
 
 ```sh
-osp plugins commands | H            # verb list
-osp plugins commands | H F          # one verb's syntax
-osp plugins commands --json | P name about
+osp plugins list | H            # verb list
+osp plugins list | H F          # one verb's syntax
+osp plugins list --json | P name about
 ```
+
+Document producers supply flat sectioned rows before selector validation. The
+engine preserves their order and marker through row-preserving stages, and
+clears the marker through the existing semantic-effect flags on shape changes.

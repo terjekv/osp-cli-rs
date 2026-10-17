@@ -1,6 +1,5 @@
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
-use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[cfg(unix)]
@@ -24,7 +23,7 @@ ui.format = "json"
     let plugin_dir = make_temp_dir("osp-cli-profile-plugin");
     write_hello_plugin(&plugin_dir);
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .env("OSP_PLUGIN_PATH", &plugin_dir)
@@ -52,13 +51,13 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--profile", "tsd", "plugins", "list"]);
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("No plugins discovered."));
+        .stdout(predicate::str::contains("[]"));
 }
 
 #[cfg(unix)]
@@ -79,13 +78,13 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["prod", "plugins", "list"]);
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("unknown command prod"));
+        .stderr(predicate::str::contains("Unknown command 'prod'"));
 }
 
 #[cfg(unix)]
@@ -106,13 +105,13 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--profile", "uio", "tsd", "plugins", "list"]);
     cmd.assert()
         .failure()
-        .stderr(predicate::str::contains("unknown command tsd"));
+        .stderr(predicate::str::contains("Unknown command 'tsd'"));
 }
 
 #[cfg(unix)]
@@ -129,9 +128,9 @@ fn write_hello_plugin(dir: &std::path::Path) -> std::path::PathBuf {
     let plugin_path = dir.join("osp-hello");
     let plugin_script = r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"hello","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"hello","about":"hello plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"hello plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi

@@ -13,4 +13,5 @@
 mod context;
 pub mod flatten;
 pub mod matchers;
+pub(crate) mod numeric;
 pub mod resolve;

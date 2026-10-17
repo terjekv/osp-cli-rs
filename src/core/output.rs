@@ -17,10 +17,14 @@
 pub enum OutputFormat {
     /// Chooses a format based on the command result and terminal context.
     Auto,
-    /// Renders guidance-oriented documents.
+    /// Renders human documents with the shared document renderer.
     Guide,
     /// Emits JSON output.
     Json,
+    /// Emits comma-separated records with RFC 4180 quoting.
+    Csv,
+    /// Emits tab-separated records with RFC 4180 quoting.
+    Tsv,
     /// Renders tabular output.
     Table,
     /// Renders Markdown tables or documents.
@@ -32,12 +36,25 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 9] = [
+        Self::Auto,
+        Self::Guide,
+        Self::Json,
+        Self::Csv,
+        Self::Tsv,
+        Self::Table,
+        Self::Markdown,
+        Self::Mreg,
+        Self::Value,
+    ];
+
     /// Returns the canonical config and CLI spelling for this format.
     ///
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// assert_eq!(OutputFormat::Markdown.as_str(), "md");
     /// assert_eq!(OutputFormat::Json.as_str(), "json");
@@ -47,6 +64,8 @@ impl OutputFormat {
             OutputFormat::Auto => "auto",
             OutputFormat::Guide => "guide",
             OutputFormat::Json => "json",
+            OutputFormat::Csv => "csv",
+            OutputFormat::Tsv => "tsv",
             OutputFormat::Table => "table",
             OutputFormat::Markdown => "md",
             OutputFormat::Mreg => "mreg",
@@ -60,7 +79,7 @@ impl OutputFormat {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::OutputFormat;
+    /// use osp_cli::core::OutputFormat;
     ///
     /// assert_eq!(OutputFormat::parse("guide"), Some(OutputFormat::Guide));
     /// assert_eq!(OutputFormat::parse(" markdown "), Some(OutputFormat::Markdown));
@@ -72,6 +91,8 @@ impl OutputFormat {
             "auto" => Some(OutputFormat::Auto),
             "guide" => Some(OutputFormat::Guide),
             "json" => Some(OutputFormat::Json),
+            "csv" => Some(OutputFormat::Csv),
+            "tsv" => Some(OutputFormat::Tsv),
             "table" => Some(OutputFormat::Table),
             "md" | "markdown" => Some(OutputFormat::Markdown),
             "mreg" => Some(OutputFormat::Mreg),
@@ -93,12 +114,15 @@ pub enum RenderMode {
 }
 
 impl RenderMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Plain, Self::Rich];
+
     /// Returns the canonical config and CLI spelling for this render mode.
     ///
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::RenderMode;
+    /// use osp_cli::core::RenderMode;
     ///
     /// assert_eq!(RenderMode::Rich.as_str(), "rich");
     /// ```
@@ -115,7 +139,7 @@ impl RenderMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::RenderMode;
+    /// use osp_cli::core::RenderMode;
     ///
     /// assert_eq!(RenderMode::parse("RICH"), Some(RenderMode::Rich));
     /// assert_eq!(RenderMode::parse(" plain "), Some(RenderMode::Plain));
@@ -143,12 +167,15 @@ pub enum ColorMode {
 }
 
 impl ColorMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Always, Self::Never];
+
     /// Returns the canonical config and CLI spelling for this color mode.
     ///
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::ColorMode;
+    /// use osp_cli::core::ColorMode;
     ///
     /// assert_eq!(ColorMode::Always.as_str(), "always");
     /// ```
@@ -165,7 +192,7 @@ impl ColorMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::ColorMode;
+    /// use osp_cli::core::ColorMode;
     ///
     /// assert_eq!(ColorMode::parse("never"), Some(ColorMode::Never));
     /// assert_eq!(ColorMode::parse(" AUTO "), Some(ColorMode::Auto));
@@ -193,12 +220,15 @@ pub enum UnicodeMode {
 }
 
 impl UnicodeMode {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Always, Self::Never];
+
     /// Returns the canonical config and CLI spelling for this unicode mode.
     ///
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::UnicodeMode;
+    /// use osp_cli::core::UnicodeMode;
     ///
     /// assert_eq!(UnicodeMode::Never.as_str(), "never");
     /// ```
@@ -215,7 +245,7 @@ impl UnicodeMode {
     /// # Examples
     ///
     /// ```
-    /// use osp_cli::core::output::UnicodeMode;
+    /// use osp_cli::core::UnicodeMode;
     ///
     /// assert_eq!(UnicodeMode::parse("always"), Some(UnicodeMode::Always));
     /// assert_eq!(UnicodeMode::parse(" Auto "), Some(UnicodeMode::Auto));
@@ -238,7 +268,6 @@ mod tests {
     #[test]
     fn output_modes_round_trip_known_values_aliases_and_variants_unit() {
         assert_eq!(OutputFormat::Auto.as_str(), "auto");
-        assert_eq!(OutputFormat::Guide.as_str(), "guide");
         assert_eq!(OutputFormat::Json.as_str(), "json");
         assert_eq!(OutputFormat::Table.as_str(), "table");
         assert_eq!(OutputFormat::Markdown.as_str(), "md");

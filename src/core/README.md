@@ -1,7 +1,7 @@
 # core
 
 Small shared types that must mean the same thing everywhere: a row, a command
-result, a command description, the plugin wire DTOs, shell quoting and fuzzy
+result, a command description, the plugin wire DTOs, shell syntax and fuzzy
 matching. Everything else builds on these.
 
 Imports nothing else from the crate, and must stay that way. A type belongs
@@ -13,19 +13,24 @@ one feature. `core` is not a place for helpers without a home.
 | File | Owns |
 |---|---|
 | `row.rs` | `Row`, the record type commands, the DSL and the UI pass around |
-| `output_model.rs` | `OutputResult`: rows, documents, groups and render hints |
+| `document.rs` | Ordered semantic blocks shared by help, intro, and UI rendering |
+| `output_model.rs` | `OutputResult`, JSON/row conversion, group context and render hints |
 | `output.rs` | Output format and mode enums shared by flags, config and UI |
-| `command_def.rs` | `CommandDef`, `FlagDef`, `ArgDef`: commands as data for help, completion and catalogs |
 | `command_policy.rs` | Whether a command is visible or allowed in the current context |
-| `plugin.rs` | Plugin protocol DTOs (`DescribeV1`, `ResponseV1`) and validation |
+| `plugin.rs` | Plugin protocol DTOs (`PluginDescribe`, `ResponseV1`) and validation |
 | `runtime.rs` | Runtime hints passed to native and plugin commands |
-| `shell_words.rs`, `fuzzy.rs` | Quoting for display; the fuzzy matcher used by completion |
+| `shell_words.rs`, `fuzzy.rs` | Shell scanning and quoting; the fuzzy matcher used by completion |
 
 ## Common changes
 
-- **Protocol change:** `plugin.rs` together with `docs/PLUGIN_PROTOCOL.md`.
+- **Protocol change:** `plugin.rs` together with `docs/PLUGINS.md`.
   Additive fields with defaults keep old plugins working; anything else needs
   a protocol version bump.
-- **New command metadata (e.g. a flag property):** add it to `command_def.rs`,
-  then carry it through `completion/tree.rs` and `guide` as needed. Clap-built
-  commands get it from the clap conversion in the same file.
+- **New command metadata (e.g. a flag property):** declare it in clap for
+  native commands and builtins. Update the direct projections in
+  `completion/tree.rs` and `document.rs`; protocol metadata belongs in
+  `plugin.rs` at the plugin boundary.
+
+`Document` is the semantic help/intro model. Its clap metadata adapter, external
+text parser, and Markdown template parser produce ordered blocks. Its row
+projection carries section context explicitly, with no guide buckets or restore.

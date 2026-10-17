@@ -63,7 +63,7 @@ pub(crate) fn visible_inline_text(value: &str) -> String {
 
     while i < chars.len() {
         let ch = chars[i];
-        if ch == '\\' && i + 1 < chars.len() {
+        if ch == '\\' && i + 1 < chars.len() && is_markdown_escapable(chars[i + 1]) {
             out.push(chars[i + 1]);
             i += 2;
             continue;
@@ -135,6 +135,33 @@ pub(crate) fn visible_inline_text(value: &str) -> String {
     out
 }
 
+pub(crate) fn escape_markdown_table_cell(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\n' => out.push_str("<br>"),
+            '&' => out.push_str("&amp;"),
+            _ if is_markdown_table_special(ch) => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn is_markdown_table_special(ch: char) -> bool {
+    matches!(
+        ch,
+        '\\' | '`' | '*' | '_' | '[' | ']' | '(' | ')' | '!' | '<' | '>' | '|' | '~'
+    )
+}
+
+fn is_markdown_escapable(ch: char) -> bool {
+    ch.is_ascii_punctuation()
+}
+
 pub(crate) fn crop_display_width(raw: &str, width: usize) -> String {
     let mut rendered = String::new();
     let mut rendered_width = 0;
@@ -195,11 +222,12 @@ fn split_display_width(raw: &str, width: usize) -> Vec<String> {
     let mut remaining = raw;
     while !remaining.is_empty() {
         let part = crop_display_width(remaining, width);
-        if part.is_empty() {
-            break;
-        }
-        let bytes = part.len();
-        parts.push(part);
+        let bytes = if part.is_empty() {
+            remaining.chars().next().map(char::len_utf8).unwrap_or(0)
+        } else {
+            part.len()
+        };
+        parts.push(remaining[..bytes].to_string());
         remaining = &remaining[bytes..];
     }
     parts

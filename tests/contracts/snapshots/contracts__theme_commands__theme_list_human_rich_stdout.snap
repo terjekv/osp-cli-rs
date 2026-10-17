@@ -2,15 +2,15 @@
 source: tests/contracts/theme_commands.rs
 expression: sanitized
 ---
-+----------------+---------+-----------------+
-| name           | source  | status          |
-+----------------+---------+-----------------+
-| Catppuccin     | builtin |                 |
-| Dracula        | builtin |                 |
-| Gruvbox        | builtin |                 |
-| Molokai        | builtin |                 |
-| Nord           | builtin |                 |
-| Plain          | builtin |                 |
-| Rose Pine Moon | builtin | active, default |
-| Tokyo Night    | builtin |                 |
-+----------------+---------+-----------------+
++----------------+---------+---------+---------+---------+---------+---------+---------+---------+---------+---------+-----------------+
+| name           | type    | text    | accent  | info    | warning | success | error   | border  | muted   | title   | status          |
++----------------+---------+---------+---------+---------+---------+---------+---------+---------+---------+---------+-----------------+
+| Catppuccin     | builtin | #cdd6f4 | #fab387 | #89dceb | #f9e2af | #a6e3a1 | #f38ba8 | #89dceb | #89b4fa | #89dceb |                 |
+| Dracula        | builtin | #f8f8f2 | #bd93f9 | #8be9fd | #f1fa8c | #50fa7b | #ff5555 | #ff79c6 | #6879ad | #bd93f9 |                 |
+| Gruvbox        | builtin | #ebdbb2 | #8ec07c | #83a598 | #fe8019 | #b8bb26 | #fb4934 | #fabd2f | #a89984 | #fabd2f |                 |
+| Molokai        | builtin | #F8F8F2 | #FD971F | #66D9EF | #E6DB74 | #A6E22E | #F92672 | #E6DB74 | #75715E | #E6DB74 |                 |
+| Nord           | builtin | #d8dee9 | #88c0d0 | #81a1c1 | #ebcb8b | #a3be8c | #bf616a | #81a1c1 | #6d7688 | #81a1c1 |                 |
+| Plain          | builtin |         |         |         |         |         |         |         |         |         |                 |
+| Rose Pine Moon | builtin | #e0def4 | #c4a7e7 | #9ccfd8 | #f6c177 | #8bd5ca | #eb6f92 | #e8dff6 | #908caa | #e8dff6 | active, default |
+| Tokyo Night    | builtin | #c0caf5 | #7aa2f7 | #7dcfff | #e0af68 | #9ece6a | #f7768e | #e0af68 | #9aa5ce | #e0af68 |                 |
++----------------+---------+---------+---------+---------+---------+---------+---------+---------+---------+---------+-----------------+

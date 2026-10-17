@@ -9,14 +9,12 @@
 //!
 //! Rough map:
 //!
-//! - [`crate::core::command_def`] describes commands as semantic metadata for help and
-//!   catalogs
 //! - [`crate::core::command_policy`] answers whether a command should be visible or allowed
-//! - [`crate::core::output`] and [`crate::core::output_model`] define the crate's canonical output
+//! - `crate::core::output` and `crate::core::output_model` define the crate's canonical output
 //!   shapes
 //! - [`crate::core::plugin`] defines the stable wire DTOs shared with external plugins
-//! - [`crate::core::row`] is the common row representation used by commands, DSL, and UI
-//! - [`crate::core::shell_words`] and [`crate::core::fuzzy`] provide small reusable
+//! - `crate::core::row` is the common row representation used by commands, DSL, and UI
+//! - `crate::core::shell_words` and `crate::core::fuzzy` provide small reusable
 //!   parsing/matching
 //!   primitives
 //!
@@ -30,21 +28,39 @@
 //! - `core` can be depended on widely, but it should avoid depending on
 //!   higher-level modules like `app`, `repl`, or `ui`
 
-/// Declarative command metadata used for help and policy resolution.
-pub mod command_def;
+pub(crate) mod clap_metadata;
+pub(crate) mod command_error;
+pub use command_error::CommandError;
+/// Reader-relative command suggestions.
+pub(crate) mod command_scope;
+pub use command_scope::{CommandHint, CommandScope};
 /// Visibility and access-policy evaluation for commands.
 pub mod command_policy;
+/// Ordered semantic document blocks shared by producers and renderers.
+pub(crate) mod document;
 /// Shared Unicode-aware fuzzy matching helpers.
-pub mod fuzzy;
+pub(crate) mod fuzzy;
 /// Output-mode and presentation enums shared across the crate.
-pub mod output;
+pub(crate) mod output;
 /// Structured row/group/document output types.
-pub mod output_model;
+pub(crate) mod output_model;
 /// Plugin protocol DTOs shared across plugin boundaries.
 pub mod plugin;
 /// Shared row representation used by the DSL and services.
-pub mod row;
+pub(crate) mod row;
 /// Runtime-mode and verbosity primitives.
-pub mod runtime;
+pub(crate) mod runtime;
 /// Shell-like tokenization helpers.
-pub mod shell_words;
+pub(crate) mod shell_words;
+pub(crate) mod style;
+
+pub use document::{DocBlock, Document, DocumentEntry, HelpLevel};
+pub use fuzzy::fold_case;
+pub use output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
+pub use output_model::{
+    ColumnAlignment, DisplayPart, DisplayRule, Group, OutputDocument, OutputItems, OutputMeta,
+    OutputResult, RenderRecommendation,
+};
+pub use row::Row;
+pub use runtime::{MessageLevel, RuntimeHints, RuntimeTerminalKind};
+pub use shell_words::escape_for_shell;

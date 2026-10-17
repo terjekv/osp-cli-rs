@@ -16,7 +16,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -56,7 +56,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -93,7 +93,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -132,7 +132,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args(["--json", "--no-config-file", "config", "get", "ui.mode"]);
@@ -153,7 +153,7 @@ theme.name = "dracula"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -165,7 +165,7 @@ theme.name = "dracula"
         .clone();
 
     let payload = parse_json_stdout(&output.stdout);
-    assert_eq!(payload["value"], osp_cli::ui::DEFAULT_THEME_NAME);
+    assert_eq!(payload["value"], osp_cli::ui::RenderSettings::default().theme_name);
     assert_eq!(payload["source"], "defaults");
     assert!(
         output.stderr.is_empty(),
@@ -195,7 +195,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut positional = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut positional = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let positional_out = positional
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -206,7 +206,7 @@ ui.mode = "plain"
         .stdout
         .clone();
 
-    let mut explicit = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut explicit = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let explicit_out = explicit
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -234,7 +234,7 @@ ui.format = "table"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")

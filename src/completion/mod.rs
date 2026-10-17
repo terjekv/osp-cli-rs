@@ -23,7 +23,7 @@
 //!
 //! - `tree` exposes builder/factory-style entrypoints such as
 //!   [`crate::completion::CompletionTreeBuilder`] and
-//!   [`crate::completion::CommandSpec`]
+//!   [`crate::completion::CompletionNode`]
 //! - `model` stays mostly plain semantic data so parsers, suggesters, and
 //!   embedders can exchange completion state without hauling builder objects
 //!   around
@@ -31,25 +31,32 @@
 
 mod context;
 /// High-level orchestration that combines parsing, context resolution, and suggestion ranking.
-pub mod engine;
+mod engine;
 /// Shared completion data structures passed between the parser and suggester.
-pub mod model;
+pub(crate) mod paths;
+pub use paths::path_candidates;
+mod model;
 /// Tokenization and cursor-aware command-line parsing.
-pub mod parse;
+mod parse;
 /// Suggestion ranking and output shaping from parsed cursor state.
-pub mod suggest;
+mod suggest;
 /// Declarative completion-tree builders derived from command and config metadata.
-pub mod tree;
+mod tree;
 
-pub use context::{ProviderNarrowing, narrow_provider_candidates};
 pub use engine::CompletionEngine;
 pub use model::{
-    ArgNode, CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
-    CompletionTree, ContextScope, CursorState, FlagHints, FlagNode, FlagOccurrence, MatchKind,
-    OsVersions, ParsedLine, PlanningHints, PlanningNumericColumn, PlanningRow, PlanningTable,
-    PlanningValue, QuoteStyle, RequestHintSet, RequestHints, Suggestion, SuggestionEntry,
-    SuggestionOutput, TailItem, ValueType,
+    ArgNode, CommandLine, CompletionNode, CompletionTree, ContextScope, CursorState,
+    DynamicCompletion, FlagCompletions, FlagHints, FlagNode, FlagOccurrence, QuoteStyle,
+    Suggestion, SuggestionEntry, SuggestionOutput, TailItem, ValueCatalog, ValueType,
 };
-pub use parse::{CommandLineParser, ParsedCursorLine, TokenSpan};
-pub use suggest::{SuggestionEngine, closest_values};
-pub use tree::{CommandSpec, CompletionTreeBuildError, CompletionTreeBuilder, ConfigKeySpec};
+pub use parse::CommandLineParser;
+pub use suggest::closest_values;
+pub use tree::{CompletionTreeBuildError, CompletionTreeBuilder};
+
+pub(crate) use model::{CompletionAnalysis, CompletionRequest};
+pub(crate) use parse::TokenSpan;
+pub(crate) use tree::ConfigKeySpec;
+
+#[cfg(test)]
+#[path = "tests/integration.rs"]
+mod integration_tests;

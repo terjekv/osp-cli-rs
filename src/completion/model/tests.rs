@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{CommandLine, FlagOccurrence, SuggestionEntry, TailItem};
+use super::{CommandLine, FlagOccurrence, TailItem};
 
 #[test]
 fn command_line_and_node_data_structs_preserve_internal_state_unit() {
@@ -44,12 +44,6 @@ fn command_line_and_node_data_structs_preserve_internal_state_unit() {
     assert_eq!(command.pipes(), &["V ip".to_string()]);
     assert!(command.has_pipe());
 
-    let mut flag = super::FlagNode::default();
-    flag.suggestions_by_provider
-        .insert("alpha".to_string(), vec![SuggestionEntry::from("red")]);
-    flag.os_provider_map
-        .insert("red".to_string(), vec!["alpha".to_string()]);
-
     let mut node = super::CompletionNode::default();
     node.prefilled_flags
         .insert("--provider".to_string(), vec!["alpha".to_string()]);
@@ -57,14 +51,30 @@ fn command_line_and_node_data_structs_preserve_internal_state_unit() {
     node.flag_hints = Some(Default::default());
 
     assert_eq!(
-        flag.suggestions_by_provider["alpha"],
-        vec![SuggestionEntry::from("red")]
-    );
-    assert_eq!(flag.os_provider_map["red"], vec!["alpha".to_string()]);
-    assert_eq!(
         node.prefilled_flags,
         BTreeMap::from([("--provider".to_string(), vec!["alpha".to_string()])])
     );
     assert_eq!(node.prefilled_positionals, vec!["tenant-a".to_string()]);
     assert!(node.flag_hints.is_some());
+}
+
+#[test]
+fn internal_example_1() {
+    use crate::completion::model::MatchKind;
+
+    let labels = [
+        MatchKind::Pipe,
+        MatchKind::Flag,
+        MatchKind::Command,
+        MatchKind::Subcommand,
+        MatchKind::Value,
+    ]
+    .into_iter()
+    .map(MatchKind::as_str)
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        labels,
+        vec!["pipe", "flag", "command", "subcommand", "value"]
+    );
 }

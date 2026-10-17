@@ -5,17 +5,9 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
 
-fn first_row<'a>(payload: &'a Value, context: &str) -> &'a Value {
-    payload
-        .as_array()
-        .unwrap_or_else(|| panic!("{context} should render a JSON array"))
-        .first()
-        .unwrap_or_else(|| panic!("{context} should render at least one row"))
-}
-
 #[cfg(unix)]
 fn osp_command(home: &std::path::Path) -> Command {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(home))
         .env("PATH", "/usr/bin:/bin");
     cmd
@@ -91,65 +83,6 @@ fn theme_list_human_rich_snapshot_contract() {
 
 #[cfg(unix)]
 #[test]
-fn theme_show_contract() {
-    let home = make_temp_dir("osp-cli-theme-show");
-    let output = osp_command(&home)
-        .args(["--json", "theme", "show", "dracula"])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-
-    assert!(
-        output.stderr.is_empty(),
-        "stderr should stay empty: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let payload: Value =
-        serde_json::from_slice(&output.stdout).expect("theme show stdout should be valid json");
-    let row = first_row(&payload, "theme show");
-    assert_eq!(row.get("id"), Some(&Value::String("dracula".to_string())));
-    assert_eq!(row.get("name"), Some(&Value::String("Dracula".to_string())));
-    assert_eq!(
-        row.get("accent"),
-        Some(&Value::String("#bd93f9".to_string()))
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn theme_show_plain_snapshot_contract() {
-    let home = make_temp_dir("osp-cli-theme-show-plain");
-    let output = osp_command(&home)
-        .args([
-            "--render-mode",
-            "plain",
-            "--color",
-            "never",
-            "--unicode",
-            "never",
-            "theme",
-            "show",
-            "dracula",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .clone();
-    assert!(
-        output.stderr.is_empty(),
-        "stderr should stay empty: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_snapshot_text!(
-        "theme_show_plain_stdout",
-        String::from_utf8(output.stdout).expect("stdout should be utf-8"),
-    );
-}
-
-#[cfg(unix)]
-#[test]
 fn cli_theme_override_contract() {
     let home = make_temp_dir("osp-cli-theme-override");
     write_config(
@@ -162,7 +95,7 @@ theme.name = "nord"
     );
 
     let output = osp_command(&home)
-        .args(["--json", "--theme", "dracula", "theme", "show"])
+        .args(["--json", "--theme", "dracula", "theme", "list"])
         .assert()
         .success()
         .get_output()
@@ -173,8 +106,13 @@ theme.name = "nord"
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value =
-        serde_json::from_slice(&output.stdout).expect("theme show stdout should be valid json");
-    let row = first_row(&payload, "theme show override");
+        serde_json::from_slice(&output.stdout).expect("theme list stdout should be valid json");
+    let row = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["active"] == true)
+        .unwrap();
     assert_eq!(row.get("id"), Some(&Value::String("dracula".to_string())));
 }
 
@@ -192,7 +130,7 @@ theme.name = "nord"
     );
 
     let output = osp_command(&home)
-        .args(["--json", "theme", "show"])
+        .args(["--json", "theme", "list"])
         .assert()
         .success()
         .get_output()
@@ -203,8 +141,13 @@ theme.name = "nord"
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value =
-        serde_json::from_slice(&output.stdout).expect("theme show stdout should be valid json");
-    let row = first_row(&payload, "theme show from config");
+        serde_json::from_slice(&output.stdout).expect("theme list stdout should be valid json");
+    let row = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["active"] == true)
+        .unwrap();
     assert_eq!(row.get("id"), Some(&Value::String("nord".to_string())));
 }
 
@@ -245,7 +188,7 @@ warning = "#abcdef"
     .expect("child theme should be written");
 
     let output = osp_command(&home)
-        .args(["--json", "theme", "show"])
+        .args(["--json", "theme", "list"])
         .assert()
         .success()
         .get_output()
@@ -256,8 +199,13 @@ warning = "#abcdef"
         String::from_utf8_lossy(&output.stderr)
     );
     let payload: Value =
-        serde_json::from_slice(&output.stdout).expect("theme show stdout should be valid json");
-    let row = first_row(&payload, "custom theme show");
+        serde_json::from_slice(&output.stdout).expect("theme list stdout should be valid json");
+    let row = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["active"] == true)
+        .unwrap();
     assert_eq!(
         row.get("id"),
         Some(&Value::String("brand-child".to_string()))

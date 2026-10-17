@@ -2,21 +2,21 @@
 //!
 //! Host-facing REPL configuration lives in [`super::config`]. This module
 //! translates that semantic surface into reedline-specific behavior such as
-//! prompt rendering, menu reopening, and terminal capability probing.
+//! prompt rendering and menu reopening.
 
 use std::borrow::Cow;
-use std::io::{self, IsTerminal, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-#[cfg(unix)]
-use std::time::{Duration, Instant};
+use std::io::{self, IsTerminal};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use reedline::{
     EditCommand, EditMode, Emacs, Menu, MenuEvent, Prompt, PromptEditMode, PromptHistorySearch,
     PromptHistorySearchStatus, ReedlineEvent, ReedlineRawEvent,
 };
 
-use super::{PromptRightRenderer, ReplInputMode, ReplTabMode};
+use super::{
+    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer, ReplInputMode,
+    ReplTabMode,
+};
 use crate::repl::menu::SharedCompletionMenu;
 
 /// The input line and cursor as reedline last painted them.
@@ -58,6 +58,7 @@ pub(crate) struct AutoCompleteEmacs {
     painted: PaintedLine,
     painted_revision: u64,
     pending_word_len: Option<usize>,
+    last_argument: bool,
 }
 
 impl AutoCompleteEmacs {
@@ -75,7 +76,13 @@ impl AutoCompleteEmacs {
             painted,
             painted_revision,
             pending_word_len: Some(pending_word_len),
+            last_argument: false,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn opens_menu(&self, commands: &[EditCommand]) -> bool {
+        self.opens_menu_at(commands, Some(self.painted.word_len_before_cursor().0))
     }
 
     /// Whether typing these commands should open a closed menu.
@@ -83,10 +90,6 @@ impl AutoCompleteEmacs {
     /// Starting a flag always does; a `-` inside a word such as a hostname
     /// does not. Otherwise `tab_mode` decides. A space only opens in `Always`
     /// mode and is handled with the token commit below.
-    pub(crate) fn opens_menu(&self, commands: &[EditCommand]) -> bool {
-        self.opens_menu_at(commands, Some(self.painted.word_len_before_cursor().0))
-    }
-
     fn opens_menu_at(&self, commands: &[EditCommand], word_len: Option<usize>) -> bool {
         let [EditCommand::InsertChar(ch)] = commands else {
             return false;
@@ -169,6 +172,23 @@ impl EditMode for AutoCompleteEmacs {
     fn parse_event(&mut self, event: ReedlineRawEvent) -> ReedlineEvent {
         let word_len = self.sync_painted_word_len();
         let parsed = self.inner.parse_event(event);
+        if matches!(&parsed, ReedlineEvent::ExecuteHostCommand(name) if name == HOST_COMMAND_LAST_ARGUMENT)
+        {
+            let command = if self.last_argument {
+                HOST_COMMAND_PREVIOUS_ARGUMENT
+            } else {
+                HOST_COMMAND_LAST_ARGUMENT
+            };
+            self.last_argument = true;
+            self.pending_word_len = None;
+            return ReedlineEvent::Multiple(vec![
+                ReedlineEvent::Esc,
+                ReedlineEvent::ExecuteHostCommand(command.to_string()),
+            ]);
+        }
+        if !matches!(parsed, ReedlineEvent::Resize(..)) {
+            self.last_argument = false;
+        }
         // Selection moves become buffer edits here, before reedline paints;
         // see `OspCompletionMenu::navigate`.
         if let Some(commands) =
@@ -214,21 +234,10 @@ impl EditMode for AutoCompleteEmacs {
     }
 }
 
-pub(crate) fn is_cursor_position_error(err: &io::Error) -> bool {
-    if matches!(err.raw_os_error(), Some(6 | 25)) {
-        return true;
-    }
-    let message = err.to_string().to_ascii_lowercase();
-    message.contains("cursor position could not be read")
-        || message.contains("no such device or address")
-        || message.contains("inappropriate ioctl")
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BasicInputReason {
     Explicit,
     NotATerminal,
-    CursorProbeUnsupported,
 }
 
 pub(crate) fn basic_input_reason(input_mode: ReplInputMode) -> Option<BasicInputReason> {
@@ -240,118 +249,8 @@ pub(crate) fn basic_input_reason(input_mode: ReplInputMode) -> Option<BasicInput
         return Some(BasicInputReason::NotATerminal);
     }
 
-    if matches!(input_mode, ReplInputMode::Auto)
-        && (CURSOR_POSITION_FAILED.load(Ordering::Relaxed)
-            || !*CURSOR_POSITION_SUPPORTED.get_or_init(probe_cursor_position_reports))
-    {
-        return Some(BasicInputReason::CursorProbeUnsupported);
-    }
-
     None
 }
-
-static CURSOR_POSITION_SUPPORTED: OnceLock<bool> = OnceLock::new();
-static CURSOR_POSITION_FAILED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn mark_cursor_position_unsupported() {
-    CURSOR_POSITION_FAILED.store(true, Ordering::Relaxed);
-}
-
-#[cfg(not(unix))]
-fn probe_cursor_position_reports() -> bool {
-    true
-}
-
-#[cfg(unix)]
-fn probe_cursor_position_reports() -> bool {
-    use std::mem::MaybeUninit;
-    use std::os::fd::AsRawFd;
-
-    const CURSOR_PROBE_TIMEOUT: Duration = Duration::from_millis(75);
-
-    struct RawModeGuard {
-        fd: i32,
-        original: libc::termios,
-        active: bool,
-    }
-
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            if self.active {
-                unsafe {
-                    libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
-                }
-            }
-        }
-    }
-
-    let stdin = io::stdin();
-    let fd = stdin.as_raw_fd();
-    let mut original = MaybeUninit::<libc::termios>::uninit();
-    if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
-        return true;
-    }
-    let original = unsafe { original.assume_init() };
-    let mut raw = original;
-    unsafe {
-        libc::cfmakeraw(&mut raw);
-    }
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
-        return true;
-    }
-    let _guard = RawModeGuard {
-        fd,
-        original,
-        active: true,
-    };
-
-    let mut stdout = io::stdout();
-    if stdout.write_all(b"\x1b[6n").is_err() || stdout.flush().is_err() {
-        return true;
-    }
-
-    // Probe early so we can choose basic input before reedline owns the
-    // terminal, instead of surfacing a cursor-request failure mid-session.
-    let start = Instant::now();
-    let mut buffer = Vec::with_capacity(32);
-    while start.elapsed() < CURSOR_PROBE_TIMEOUT {
-        let remaining = CURSOR_PROBE_TIMEOUT
-            .saturating_sub(start.elapsed())
-            .as_millis()
-            .min(i32::MAX as u128) as i32;
-        let mut pollfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let ready = unsafe { libc::poll(&mut pollfd, 1, remaining) };
-        if ready <= 0 {
-            break;
-        }
-        let mut chunk = [0u8; 64];
-        let read = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
-        if read <= 0 {
-            break;
-        }
-        buffer.extend_from_slice(&chunk[..read as usize]);
-        if contains_cursor_position_report(&buffer) {
-            return true;
-        }
-        if buffer.len() >= 256 {
-            break;
-        }
-    }
-
-    false
-}
-
-pub(crate) fn contains_cursor_position_report(bytes: &[u8]) -> bool {
-    bytes.windows(2).enumerate().any(|(start, window)| {
-        window == b"\x1b[" && parse_cursor_position_report(&bytes[start..]).is_some()
-    })
-}
-
-pub(crate) use crate::ui::prompt::parse_cursor_position_report;
 
 pub(crate) struct OspPrompt {
     left: String,
@@ -390,6 +289,7 @@ impl Prompt for OspPrompt {
     }
 
     fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
+        crate::startup_trace::first_prompt_rendered();
         Cow::Borrowed(self.indicator.as_str())
     }
 
@@ -411,11 +311,11 @@ impl Prompt for OspPrompt {
         ))
     }
 
-    fn get_prompt_color(&self) -> reedline::Color {
-        reedline::Color::Reset
+    fn get_prompt_color(&self) -> nu_ansi_term::Color {
+        nu_ansi_term::Color::Default
     }
 
-    fn get_indicator_color(&self) -> reedline::Color {
-        reedline::Color::Reset
+    fn get_indicator_color(&self) -> nu_ansi_term::Color {
+        nu_ansi_term::Color::Default
     }
 }

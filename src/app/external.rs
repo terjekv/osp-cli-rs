@@ -9,138 +9,155 @@ use std::cell::RefCell;
 
 use miette::{Result, WrapErr, miette};
 
-use crate::app::{AppClients, AppRuntime, AppSession};
-use crate::app::{RuntimeContext, TerminalKind, UiState};
-use crate::cli::invocation::extend_with_invocation_help;
-use crate::cli::pipeline::parse_command_tokens_with_aliases;
-use crate::cli::{Commands, parse_inline_command_tokens};
-use crate::guide::GuideView;
+use crate::app::{AppRuntime, AppSession};
+use crate::app::{TerminalKind, UiState};
+use crate::cli::Commands;
+use crate::cli::invocation::{InvocationOptions, extend_with_invocation_help, scan_command_tokens};
+use crate::cli::pipeline::{ParsedCommandLine, parse_command_tokens_with_aliases};
+use crate::core::document::Document;
 use crate::native::{
     InvocationElevation, NativeCommandContext, NativeCommandOutcome, NativeProgressEvent,
     NativeProgressSink, NativeSessionContext,
 };
-use crate::plugin::PluginManager;
-use crate::repl::ReplViewContext;
 use crate::repl::completion;
 use crate::repl::is_repl_shellable_command;
 
-use super::command_output::PreparedPluginOutput;
 use super::dispatch::{
-    ExternalCommandSource, ExternalPathAccessRequirement, canonical_external_command_name,
-    ensure_external_path_access, ensure_external_path_access_with_policy,
-    resolve_external_command_source,
+    ExternalCommandSource, ExternalPathAccessRequirement, before_external_dispatch,
+    before_external_execution, before_external_run, canonical_external_command_name,
+    ensure_external_access, resolve_external_command_source,
 };
 use super::sink::{ProgressUiSink, UiSink};
 use super::{
-    CliCommandResult, ResolvedInvocation, cli_result_from_plugin_response, enrich_dispatch_error,
+    CommandOutput, ResolvedInvocation, cli_result_from_plugin_response,
     plugin_dispatch_context_for, run_inline_builtin_command, run_progress_command_with_ui,
     runtime_hints_for_invocation,
 };
 
-pub(super) struct ExternalCommandRuntime<'a> {
-    pub(super) context: &'a RuntimeContext,
-    pub(super) config_state: &'a crate::app::ConfigState,
-    pub(super) ui: &'a UiState,
-    pub(super) clients: &'a AppClients,
-    pub(super) plugins: &'a PluginManager,
-}
-
-impl<'a> ExternalCommandRuntime<'a> {
-    pub(super) fn from_parts(runtime: &'a AppRuntime, clients: &'a AppClients) -> Self {
-        Self {
-            context: &runtime.context,
-            config_state: &runtime.config,
-            ui: &runtime.ui,
-            clients,
-            plugins: clients.plugins(),
-        }
-    }
-}
-
 struct ParsedExternalInvocation {
     tokens: Vec<String>,
     stages: Vec<String>,
+    apply_output_stages: bool,
     inline_command: Option<Commands>,
     elevation: InvocationElevation,
 }
 
+impl ParsedExternalInvocation {
+    fn finish(&self, result: CommandOutput) -> Result<CommandOutput> {
+        if self.apply_output_stages {
+            super::command_output::apply_stages_to_cli_result(result, &self.stages)
+        } else {
+            Ok(result)
+        }
+    }
+}
+
 enum ExternalParse {
-    Handled(Box<CliCommandResult>),
-    Invocation(ParsedExternalInvocation),
+    Handled(Box<CommandOutput>),
+    Invocation(Box<ParsedExternalInvocation>),
 }
 
 pub(super) fn run_external_command(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     tokens: &[String],
-    invocation: &ResolvedInvocation,
+    options: &InvocationOptions,
+    invocation: &mut ResolvedInvocation,
     sink: &mut dyn UiSink,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress(
-        runtime,
-        session,
-        clients,
-        tokens,
+) -> Result<i32> {
+    let expanded = expand_external_tokens(&state.runtime, tokens);
+    // Report expansion failures during dispatch, with the same command context
+    // as the REPL. Invocation conflicts still fail before inline parsing.
+    let scanned = match &expanded {
+        Ok((parsed, _)) => Some(scan_command_tokens(&parsed.tokens)?),
+        Err(_) => None,
+    };
+    if let Some(scanned) = &scanned
+        && scanned.invocation != InvocationOptions::default()
+    {
+        let mut options = options.clone();
+        options.merge(scanned.invocation.clone())?;
+        *invocation = super::resolve_invocation_ui(
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
+            &options,
+        );
+    }
+    if let (Ok((parsed, _)), Some(scanned)) = (&expanded, &scanned)
+        && crate::cli::is_help_all(&scanned.tokens)
+    {
+        let result = super::help::help_all_output(state);
+        let result = super::command_output::apply_stages_to_cli_result(result, &parsed.stages)?;
+        return super::run_cli_command(
+            state.runtime.config.resolved(),
+            &invocation.ui,
+            &result,
+            sink,
+        );
+    }
+    let parsed = expanded
+        .and_then(|(mut parsed, elevation)| {
+            if let Some(scanned) = scanned {
+                parsed.tokens = scanned.tokens;
+            }
+            plan_external_invocation(
+                &state.runtime,
+                &state.session,
+                parsed,
+                elevation,
+                invocation,
+            )
+        })
+        .wrap_err_with(|| external_parse_context(tokens))?;
+    let result = dispatch_external_invocation(
+        state,
+        parsed,
         invocation,
         |stdout| {
-            let mut guide = GuideView::from_text(stdout);
+            let mut guide = Document::from_help_text(stdout);
             extend_with_invocation_help(&mut guide, invocation.help_level);
             guide.filtered_for_help_level(invocation.help_level)
         },
         Some(sink),
+        None,
+    )?;
+    super::run_cli_command(
+        state.runtime.config.resolved(),
+        &invocation.ui,
+        &result,
+        sink,
     )
 }
 
 pub(crate) fn run_external_command_with_help_renderer(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     tokens: &[String],
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress(
-        runtime, session, clients, tokens, invocation, guide_help, None,
-    )
-}
-
-pub(crate) fn run_external_command_with_help_renderer_and_progress(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    tokens: &[String],
-    invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress_inner(
-        runtime,
-        session,
-        clients,
-        tokens,
-        invocation,
-        guide_help,
-        progress_sink,
-        None,
-    )
+) -> Result<CommandOutput> {
+    let parsed =
+        parse_external_invocation(&state.runtime, &state.session, tokens, invocation, &[])?;
+    dispatch_external_invocation(state, parsed, invocation, guide_help, progress_sink, None)
 }
 
-pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    tokens: &[String],
+pub(crate) fn run_external_command_for_repl(
+    state: &mut crate::app::AppState,
+    command: ParsedCommandLine,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
     accepted: &mut bool,
-) -> Result<CliCommandResult> {
-    run_external_command_with_help_renderer_and_progress_inner(
-        runtime,
-        session,
-        clients,
-        tokens,
+) -> Result<CommandOutput> {
+    let parsed = parse_external_invocation(
+        &state.runtime,
+        &state.session,
+        &command.tokens,
+        invocation,
+        &command.stages,
+    )?;
+    dispatch_external_invocation(
+        state,
+        parsed,
         invocation,
         guide_help,
         progress_sink,
@@ -148,23 +165,15 @@ pub(crate) fn run_external_command_with_help_renderer_and_progress_for_repl(
     )
 }
 
-fn run_external_command_with_help_renderer_and_progress_inner(
-    runtime: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
-    tokens: &[String],
+fn dispatch_external_invocation(
+    state: &mut crate::app::AppState,
+    parsed: ExternalParse,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     progress_sink: Option<&mut dyn UiSink>,
     mut accepted: Option<&mut bool>,
-) -> Result<CliCommandResult> {
-    let mut parsed = match parse_external_invocation(runtime, session, tokens, invocation)
-        .wrap_err_with(|| {
-            format!(
-                "failed to parse external command invocation for `{}`",
-                tokens.first().map(String::as_str).unwrap_or("external")
-            )
-        })? {
+) -> Result<CommandOutput> {
+    let mut parsed = match parsed {
         ExternalParse::Handled(result) => {
             mark_repl_command_accepted(&mut accepted);
             return Ok(*result);
@@ -187,14 +196,14 @@ fn run_external_command_with_help_renderer_and_progress_inner(
             mark_repl_command_accepted(&mut accepted);
         }
         if let Some(result) = run_inline_builtin_command(
-            runtime,
-            session,
-            clients,
+            &mut state.runtime,
+            &mut state.session,
+            &state.clients,
             Some(invocation),
             command,
             &parsed.stages,
         )? {
-            return crate::app::command_output::apply_stages_to_cli_result(result, &parsed.stages);
+            return parsed.finish(result);
         }
     }
     if !parsed.stages.is_empty() {
@@ -206,195 +215,29 @@ fn run_external_command_with_help_renderer_and_progress_inner(
         .tokens
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
-    let command = canonical_external_command_name(&runtime.auth, clients, command)?;
-    match resolve_external_command_source(
-        &runtime.auth,
-        clients,
+    let command = canonical_external_command_name(&state.runtime.auth, &state.clients, command)?;
+    let result = match resolve_external_command_source(
+        &state.runtime.auth,
+        &state.clients,
         &command,
-        invocation.plugin_provider.as_deref(),
+        &invocation.ui.render_settings.runtime.command_scope,
     )? {
         ExternalCommandSource::Native => {
-            let native_command = clients
+            let native_command = state
+                .clients
                 .native_commands()
                 .command(&command)
+                .cloned()
                 .ok_or_else(|| miette!("no native command provides `{command}`"))?;
-            if parsed.elevation.is_elevated() && !native_command.supports_invocation_elevation() {
-                return Err(miette!(
-                    "elevation prefix is unsupported for native command `{command}`"
-                ));
-            }
-            let mut canonical_args = native_command.normalize_args(args).map_err(|err| {
-                crate::app::report_anyhow_with_context(
-                    err,
-                    "failed to normalize native command arguments",
-                )
-            })?;
-            let mut description = native_command.describe();
-            let mut native_parse = native_command.command().try_get_matches_from(
-                std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
-            );
-            let mut refreshed_policy = None;
-            if native_parse
-                .as_ref()
-                .is_err_and(|error| !is_native_help_error(error.kind()))
-                && args.first().is_none_or(|arg| arg != "help")
-                && !args
-                    .iter()
-                    .take_while(|arg| arg.as_str() != "--")
-                    .any(|arg| matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V"))
-            {
-                ensure_external_path_access(
-                    runtime,
-                    session,
-                    &crate::command_policy::CommandPath::new([command.clone()]),
-                    ExternalPathAccessRequirement::Runnable,
-                    "command",
-                )?;
-                if native_command
-                    .prepare_invocation_metadata(args, runtime.config.resolved())
-                    .map_err(|err| {
-                        crate::app::report_anyhow_with_context(
-                            err,
-                            "failed to prepare native invocation metadata",
-                        )
-                    })?
-                {
-                    canonical_args = native_command.normalize_args(args).map_err(|err| {
-                        crate::app::report_anyhow_with_context(
-                            err,
-                            "failed to normalize native command arguments",
-                        )
-                    })?;
-                    description = native_command.describe();
-                    native_parse = native_command.command().try_get_matches_from(
-                        std::iter::once(command.clone()).chain(canonical_args.iter().cloned()),
-                    );
-                    refreshed_policy = Some(clients.native_commands().command_policy_registry());
-                }
-            }
-            let parsed_args = canonical_args.as_slice();
-            // A successful clap parse is authoritative for aliases, option
-            // values, and the selected nested command. The describe payload
-            // is only a conservative fallback for non-help errors. Clap does
-            // not return matches for help, so retry the parse without help
-            // markers to preserve canonical aliases on that path too.
-            let (path, path_ambiguous) = match native_parse.as_ref() {
-                Ok(matches) => (native_path_from_matches(&command, matches), false),
-                Err(error) if is_native_help_error(error.kind()) => (
-                    native_help_path(native_command.as_ref(), &command, parsed_args, &description),
-                    false,
-                ),
-                Err(_) => {
-                    let resolved = description.resolve_invocation(parsed_args);
-                    (resolved.path, resolved.ambiguous)
-                }
-            };
-            let invocation_ends_at_command = parsed_args.len() + 1 == path.as_slice().len();
-            if let Err(err) = native_parse {
-                if is_native_help_error(err.kind()) {
-                    mark_repl_command_accepted(&mut accepted);
-                    ensure_external_path_access(
-                        runtime,
-                        session,
-                        &path,
-                        ExternalPathAccessRequirement::Visible,
-                        "command",
-                    )?;
-                    if let Some(policy) = &refreshed_policy {
-                        ensure_external_path_access_with_policy(
-                            runtime,
-                            session,
-                            &path,
-                            ExternalPathAccessRequirement::Visible,
-                            "command",
-                            policy,
-                        )?;
-                    }
-                    let mut help = err.to_string();
-                    match native_command
-                        .prepare_invocation_metadata(args, runtime.config.resolved())
-                    {
-                        Ok(true) => match native_command.normalize_args(args) {
-                            Ok(refreshed_args) => {
-                                let refreshed_description = native_command.describe();
-                                let refreshed_parse =
-                                    native_command.command().try_get_matches_from(
-                                        std::iter::once(command.clone())
-                                            .chain(refreshed_args.iter().cloned()),
-                                    );
-                                if let Err(refreshed_error) = refreshed_parse
-                                    && is_native_help_error(refreshed_error.kind())
-                                {
-                                    let refreshed_path = native_help_path(
-                                        native_command.as_ref(),
-                                        &command,
-                                        &refreshed_args,
-                                        &refreshed_description,
-                                    );
-                                    let policy =
-                                        clients.native_commands().command_policy_registry();
-                                    ensure_external_path_access_with_policy(
-                                        runtime,
-                                        session,
-                                        &refreshed_path,
-                                        ExternalPathAccessRequirement::Visible,
-                                        "command",
-                                        &policy,
-                                    )?;
-                                    help = refreshed_error.to_string();
-                                }
-                            }
-                            Err(error) => tracing::debug!(
-                                command = %command,
-                                error = %error,
-                                "refreshed native help arguments could not be normalized"
-                            ),
-                        },
-                        Ok(false) => {}
-                        Err(error) => tracing::debug!(
-                            command = %command,
-                            error = %error,
-                            "native help metadata refresh failed; using cached help"
-                        ),
-                    }
-                    return Ok(CliCommandResult::guide(guide_help(&help)));
-                }
-                if path_ambiguous
-                    || described_path_has_subcommands(&description, &path)
-                    || invocation_ends_at_command
-                {
-                    return Err(crate::app::report_std_error_with_context(
-                        err,
-                        "native command syntax is invalid",
-                    ));
-                }
-            }
-            mark_repl_command_accepted(&mut accepted);
-            ensure_external_path_access(
-                runtime,
-                session,
-                &path,
-                ExternalPathAccessRequirement::Runnable,
-                "command",
-            )?;
-            if let Some(policy) = &refreshed_policy {
-                ensure_external_path_access_with_policy(
-                    runtime,
-                    session,
-                    &path,
-                    ExternalPathAccessRequirement::Runnable,
-                    "command",
-                    policy,
-                )?;
-            }
-            run_native_command(
+            run_native_invocation(
                 native_command.as_ref(),
-                runtime,
-                session,
+                state,
                 NativeRunInput {
-                    args: parsed_args,
+                    args,
+                    action: None,
                     stages: &parsed.stages,
                     invocation,
+                    command_path: command.clone(),
                     elevation: parsed.elevation,
                     progress_sink,
                 },
@@ -409,9 +252,7 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 ));
             }
             run_external_plugin_command(
-                runtime,
-                session,
-                clients,
+                state,
                 &command,
                 &parsed,
                 invocation,
@@ -419,6 +260,254 @@ fn run_external_command_with_help_renderer_and_progress_inner(
                 &mut accepted,
             )
         }
+    }?;
+    parsed.finish(result)
+}
+
+struct NativeParse {
+    args: Vec<String>,
+    grammar: clap::Command,
+    matches: std::result::Result<clap::ArgMatches, clap::Error>,
+    path: crate::core::command_policy::CommandPath,
+    render_help: bool,
+}
+
+impl NativeParse {
+    fn new(
+        command: &dyn crate::native::NativeCommand,
+        name: &str,
+        args: &[String],
+    ) -> Result<Self> {
+        let args = command.normalize_args(args).map_err(|error| {
+            crate::app::report_anyhow_with_context(
+                error,
+                crate::app::host::ErrorContext::Operation(
+                    "failed to normalize native command arguments",
+                ),
+            )
+        })?;
+        let grammar = command.command();
+        let matches = grammar
+            .clone()
+            .try_get_matches_from(std::iter::once(name.to_string()).chain(args.iter().cloned()));
+        let path = native_resolved_path(&grammar, name, &args, matches.as_ref().ok());
+        let render_help = matches
+            .as_ref()
+            .is_err_and(|error| crate::native::is_clap_help_error(error.kind()));
+        Ok(Self {
+            args,
+            grammar,
+            matches,
+            path,
+            render_help,
+        })
+    }
+}
+
+struct NativeIntent {
+    requirement: ExternalPathAccessRequirement,
+    render_help: bool,
+    refresh_metadata: bool,
+}
+
+impl NativeIntent {
+    fn from_parse(parsed: &NativeParse) -> Self {
+        let render_help = parsed.render_help;
+        let help_requested = render_help
+            || parsed.args.first().is_some_and(|arg| arg == "help")
+            || parsed
+                .args
+                .iter()
+                .take_while(|arg| arg.as_str() != "--")
+                .any(|arg| matches!(arg.as_str(), "-h" | "--help" | "-V" | "--version"));
+        Self {
+            requirement: if help_requested {
+                ExternalPathAccessRequirement::Visible
+            } else {
+                ExternalPathAccessRequirement::Runnable
+            },
+            render_help,
+            refresh_metadata: parsed.matches.is_err(),
+        }
+    }
+}
+
+fn refresh_native_parse(
+    command: &dyn crate::native::NativeCommand,
+    session_context: &crate::native::NativeSessionContext,
+    args: &[String],
+    config: &crate::config::ResolvedConfig,
+    parsed: NativeParse,
+    intent: &NativeIntent,
+    scope: &crate::core::CommandScope,
+) -> Result<NativeParse> {
+    if !intent.refresh_metadata {
+        return Ok(parsed);
+    }
+    let name = parsed.grammar.get_name().to_string();
+    let refreshed = command.prepare_invocation_metadata(args, config, scope);
+    if matches!(refreshed, Ok(true)) {
+        session_context.request_completion_refresh();
+    }
+    if intent.requirement == ExternalPathAccessRequirement::Visible && parsed.render_help {
+        match refreshed {
+            Ok(true) => match NativeParse::new(command, &name, args) {
+                Ok(parsed) => return Ok(parsed),
+                Err(error) => {
+                    tracing::debug!(command = %name, error = %error, "refreshed native help arguments could not be normalized; using cached help")
+                }
+            },
+            Ok(false) => {}
+            Err(error) => {
+                tracing::debug!(command = %name, error = %error, "native help metadata refresh failed; using cached help")
+            }
+        }
+        return Ok(parsed);
+    }
+    if refreshed.map_err(|error| {
+        crate::app::report_anyhow_with_context(
+            error,
+            crate::app::host::ErrorContext::Operation(
+                "failed to prepare native invocation metadata",
+            ),
+        )
+    })? {
+        NativeParse::new(command, &name, args)
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn run_native_invocation(
+    command: &dyn crate::native::NativeCommand,
+    state: &mut crate::app::AppState,
+    input: NativeRunInput<'_, '_, '_, '_>,
+    guide_help: impl Fn(&str) -> Document,
+    accepted: &mut Option<&mut bool>,
+) -> Result<CommandOutput> {
+    let diagnostics = crate::diagnostics::DiagnosticSink::default();
+    let _scope = diagnostics.enter();
+    let level = input.invocation.ui.verbosity;
+    let result: Result<CommandOutput> = (|| {
+        let name = input.command_path.as_str();
+        let args = input.args;
+        let invocation = input.invocation;
+        if input.elevation.is_elevated() && !command.supports_invocation_elevation() {
+            return Err(miette!(
+                "elevation prefix is unsupported for native command `{name}`"
+            ));
+        }
+        let input_path = crate::core::command_policy::CommandPath::new(
+            std::iter::once(name.to_string()).chain(args.iter().cloned()),
+        );
+        before_external_dispatch(&mut state.runtime, &input_path, "command")?;
+        state.reload_config_after_access_hook()?;
+        let parsed = NativeParse::new(command, name, args)?;
+        let intent = NativeIntent::from_parse(&parsed);
+        before_external_execution(
+            &mut state.runtime,
+            &parsed.path,
+            intent.requirement,
+            "command",
+        )?;
+        state.reload_config_after_access_hook()?;
+        let parsed = refresh_native_parse(
+            command,
+            &state.session.native_context,
+            args,
+            state.runtime.config.resolved(),
+            parsed,
+            &intent,
+            &invocation.ui.render_settings.runtime.command_scope,
+        )?;
+        state.runtime.auth.refresh_native_auth(&command.describe());
+        ensure_external_access(&state.runtime, &parsed.path, intent.requirement, "command")?;
+
+        if intent.render_help || parsed.render_help {
+            mark_repl_command_accepted(accepted);
+            if let Err(error) = &parsed.matches
+                && error.kind() == clap::error::ErrorKind::DisplayVersion
+            {
+                return Ok(CommandOutput::document(guide_help(&error.to_string())));
+            }
+            let tokens = std::iter::once(name.to_string())
+                .chain(parsed.args.iter().cloned())
+                .collect::<Vec<_>>();
+            let (document, _, _) = crate::cli::command_help_document(
+                state.runtime.auth.visible_help_command(parsed.grammar, &[]),
+                &tokens,
+                &invocation.ui.render_settings.runtime.command_scope,
+            );
+            return Ok(CommandOutput::document(document));
+        }
+        if let Err(error) = parsed.matches {
+            state.session.native_context.activate(&state.runtime);
+            let selected_context = if state.runtime.context.terminal_kind() == TerminalKind::Repl {
+                state
+                    .session
+                    .native_context
+                    .for_service(command.command().get_name())
+            } else {
+                NativeSessionContext::default()
+            };
+            let resolved =
+                crate::context::resolve(command.command(), &parsed.args, &selected_context)
+                    .map_err(|e| {
+                        super::host::report_anyhow_with_context(
+                            e,
+                            super::host::ErrorContext::NativeExecution,
+                        )
+                    })?;
+            let resolves_missing = resolved.args != parsed.args;
+            let mut selected = &parsed.grammar;
+            for segment in parsed.path.as_slice().iter().skip(1) {
+                if let Some(child) = selected.find_subcommand(segment) {
+                    selected = child;
+                }
+            }
+            if !resolves_missing
+                && (selected.has_subcommands()
+                    || parsed.args.len() + 1 == parsed.path.as_slice().len())
+            {
+                return Err(super::host::report_clap_error_with_context(
+                    error,
+                    crate::app::host::ErrorContext::Operation("native command syntax is invalid"),
+                    parsed.grammar,
+                    std::iter::once(name).chain(parsed.args.iter().map(String::as_str)),
+                    None,
+                ));
+            }
+        }
+        mark_repl_command_accepted(accepted);
+        run_native_command(
+            command,
+            &mut state.runtime,
+            &mut state.session,
+            NativeRunInput {
+                args: &parsed.args,
+                action: None,
+                stages: input.stages,
+                invocation,
+                command_path: parsed.path.as_slice().join(" "),
+                elevation: input.elevation,
+                progress_sink: input.progress_sink,
+            },
+            guide_help,
+            accepted,
+        )
+    })();
+    match result {
+        Ok(mut output) => {
+            output.retained_evidence = diagnostics
+                .render(crate::core::MessageLevel::Evidence, output.exit_code != 0)
+                .0;
+            output.diagnostics = diagnostics.render(level, output.exit_code != 0);
+            Ok(output)
+        }
+        Err(error) if super::host::classify_exit_code(&error) == super::host::EXIT_CODE_USAGE => {
+            Err(error)
+        }
+        Err(error) => Err(super::host::report_with_evidence(error, diagnostics)),
     }
 }
 
@@ -437,67 +526,91 @@ fn mark_repl_command_rejected(accepted: &mut Option<&mut bool>) {
 fn native_path_from_matches(
     command: &str,
     matches: &clap::ArgMatches,
-) -> crate::command_policy::CommandPath {
+) -> crate::core::command_policy::CommandPath {
     let mut segments = vec![command.to_string()];
     let mut current = matches;
     while let Some((subcommand, submatches)) = current.subcommand() {
         segments.push(subcommand.to_string());
         current = submatches;
     }
-    crate::command_policy::CommandPath::new(segments)
+    crate::core::command_policy::CommandPath::new(segments)
 }
 
-fn is_native_help_error(kind: clap::error::ErrorKind) -> bool {
-    matches!(
-        kind,
-        clap::error::ErrorKind::DisplayHelp
-            | clap::error::ErrorKind::DisplayVersion
-            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            | clap::error::ErrorKind::MissingSubcommand
-    )
-}
-
-fn native_help_path(
-    command: &dyn crate::native::NativeCommand,
+fn native_resolved_path(
+    grammar: &clap::Command,
     name: &str,
     args: &[String],
-    description: &crate::core::plugin::DescribeCommandV1,
-) -> crate::command_policy::CommandPath {
-    let without_help = args
-        .iter()
-        .filter(|arg| !matches!(arg.as_str(), "--help" | "-h"))
-        .cloned();
-    let parsed = command
-        .command()
-        .try_get_matches_from(std::iter::once(name.to_string()).chain(without_help));
-    parsed
-        .as_ref()
-        .map(|matches| native_path_from_matches(name, matches))
-        .unwrap_or_else(|_| description.resolve_invocation(args).path)
+    matches: Option<&clap::ArgMatches>,
+) -> crate::core::command_policy::CommandPath {
+    if let Some(matches) = matches {
+        return native_path_from_matches(name, matches);
+    }
+    let mut tokens = args.iter().map(String::as_str).collect::<Vec<_>>();
+    // Clap's help subcommand names a command path rather than executing it.
+    if tokens.first() == Some(&"help") {
+        tokens.remove(0);
+    }
+    tokens.retain(|arg| !matches!(*arg, "--help" | "-h"));
+    crate::cli::passive_command(grammar.clone())
+        .try_get_matches_from(std::iter::once(name).chain(tokens))
+        .map(|matches| native_path_from_matches(name, &matches))
+        .unwrap_or_else(|_| crate::core::command_policy::CommandPath::new([name]))
 }
 
-fn described_path_has_subcommands(
-    command: &crate::core::plugin::DescribeCommandV1,
-    path: &crate::command_policy::CommandPath,
-) -> bool {
-    let mut current = command;
-    for segment in path.as_slice().iter().skip(1) {
-        let Some(child) = current
-            .subcommands
+pub(crate) fn run_repl_action(
+    state: &mut crate::app::AppState,
+    id: &str,
+) -> Result<crate::repl::ReplResult> {
+    let invocation = super::resolve_invocation_ui(
+        state.runtime.config.resolved(),
+        &state.runtime.ui,
+        &crate::cli::invocation::InvocationOptions::default(),
+    );
+    let commands = super::runtime::visible_native_commands(&state.runtime.auth, &state.clients)
+        .map(|(entry, command)| (entry, command.clone()))
+        .collect::<Vec<_>>();
+    for (entry, command) in commands {
+        if command
+            .repl_actions(state.runtime.config.resolved())
+            .map_err(|e| miette!("{e:#}"))?
             .iter()
-            .find(|child| child.name.eq_ignore_ascii_case(segment))
-        else {
-            return false;
-        };
-        current = child;
+            .any(|action| action.id == id && action.key.is_some())
+        {
+            let mut sink = super::sink::StdIoUiSink;
+            let result = run_native_command(
+                command.as_ref(),
+                &mut state.runtime,
+                &mut state.session,
+                NativeRunInput {
+                    args: &[],
+                    action: Some(id),
+                    stages: &[],
+                    invocation: &invocation,
+                    command_path: entry.name.clone(),
+                    elevation: InvocationElevation::Ordinary,
+                    progress_sink: Some(&mut sink),
+                },
+                Document::from_help_text,
+                &mut None,
+            )?;
+            super::run_cli_command(
+                state.runtime.config.resolved(),
+                &invocation.ui,
+                &result,
+                &mut sink,
+            )?;
+            return Ok(crate::repl::ReplResult::Continue);
+        }
     }
-    !current.subcommands.is_empty()
+    Err(miette!("Editor action is unavailable: {id}"))
 }
 
 struct NativeRunInput<'args, 'stages, 'invocation, 'sink> {
     args: &'args [String],
+    action: Option<&'args str>,
     stages: &'stages [String],
     invocation: &'invocation ResolvedInvocation,
+    command_path: String,
     elevation: InvocationElevation,
     progress_sink: Option<&'sink mut dyn UiSink>,
 }
@@ -507,10 +620,75 @@ fn run_native_command(
     runtime: &mut AppRuntime,
     session: &mut AppSession,
     input: NativeRunInput<'_, '_, '_, '_>,
-    guide_help: impl Fn(&str) -> GuideView,
+    guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
-) -> Result<CliCommandResult> {
-    session.native_context.clear_pagination();
+) -> Result<CommandOutput> {
+    tracing::info!(target: "osp::diagnostic", "debug: Dispatch selected; handler=native:{}.", command.command().get_name());
+    if input.action.is_none() {
+        session.native_context.clear_pagination();
+    }
+    let repl = runtime.context.terminal_kind() == TerminalKind::Repl;
+    session.native_context.activate(runtime);
+    let service = command.command().get_name().to_string();
+    session.native_context.register_context(
+        &service,
+        command.context_origin(runtime.config.resolved()),
+        command.persisted_context_kinds(),
+        &command.command(),
+        command.context_kinds(),
+    );
+    let selected_context = session.native_context.for_service(&service).for_command(
+        std::iter::once(service.clone())
+            .chain(input.args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+    let empty_context = NativeSessionContext::default();
+    let resolution = if input.action.is_none() {
+        Some(
+            crate::context::resolve(
+                command.command(),
+                input.args,
+                if repl {
+                    &selected_context
+                } else {
+                    &empty_context
+                },
+            )
+            .map_err(|e| {
+                super::host::report_anyhow_with_context(
+                    e,
+                    super::host::ErrorContext::NativeExecution,
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+    let args = resolution
+        .as_ref()
+        .map(|r| r.args.as_slice())
+        .unwrap_or(input.args);
+    if let Some(resolution) = &resolution
+        && let Some(line) = resolution
+            .record_history(&session.native_context, &service, input.args)
+            .map_err(|e| miette!("{e:#}"))?
+    {
+        let elevation = if input.elevation.is_elevated() {
+            "sudo "
+        } else {
+            ""
+        };
+        let mut messages = crate::ui::messages::MessageBuffer::default();
+        messages.success(format!("→ {elevation}{line}"));
+        super::command_output::emit_messages_for_ui(
+            runtime.config.resolved(),
+            &input.invocation.ui,
+            &messages,
+            input.invocation.ui.verbosity,
+            &mut super::StdIoUiSink,
+        );
+    }
     let progress_renderer = input.progress_sink.map(|sink| NativeProgressRenderer {
         config: runtime.config.resolved(),
         ui: &input.invocation.ui,
@@ -524,62 +702,131 @@ fn run_native_command(
                 .resolve_render_settings()
                 .unicode,
         )),
+        can_present: std::cell::Cell::new(false),
         pending: RefCell::new(None),
         last_draw: std::cell::Cell::new(None),
     });
+    let diagnostics = crate::diagnostics::DiagnosticSink::current().unwrap_or_default();
+    let _diagnostic_scope = diagnostics.enter();
     let mut context = NativeCommandContext::new(
         runtime.config.resolved(),
         runtime_hints_for_invocation(runtime, input.invocation),
     )
+    .with_command_scope(
+        input
+            .invocation
+            .ui
+            .render_settings
+            .runtime
+            .command_scope
+            .clone(),
+    )
+    .with_diagnostic_sink(&diagnostics)
     .with_invocation_elevation(input.elevation)
-    .with_session_context(session.native_context.clone());
+    .with_session_context(
+        if input.action.is_some() {
+            session.native_context.for_editor_action()
+        } else {
+            session.native_context.clone()
+        }
+        .for_service(&service)
+        .for_command(input.command_path.as_str()),
+    );
+    context.repl_feedback = session.repl_feedback.clone();
+    context.output_pipeline = !input.stages.is_empty();
     if let Some(renderer) = progress_renderer.as_ref() {
         context = context.with_progress_sink(renderer);
+        renderer.can_present.set(context.can_present());
     }
 
-    let execution =
-        command
-            .execute(input.args, &context)
-            .map_err(|err| match err.downcast::<clap::Error>() {
-                Ok(err) => {
-                    mark_repl_command_rejected(accepted);
-                    crate::app::report_std_error_with_context(
-                        err,
-                        "native command execution failed",
-                    )
-                }
-                Err(err) => {
-                    crate::app::report_anyhow_with_context(err, "native command execution failed")
-                }
-            });
+    let execution = match input.action {
+        Some(action) => command.execute_repl_action(action, &context),
+        None => command.execute(args, &context),
+    }
+    .map_err(|err| {
+        let structured = err.downcast_ref::<crate::core::CommandError>().cloned();
+        match err.downcast::<clap::Error>() {
+            Ok(err) => {
+                mark_repl_command_rejected(accepted);
+                super::host::report_clap_error_with_context(
+                    err,
+                    crate::app::host::ErrorContext::NativeExecution,
+                    command.command(),
+                    std::iter::once(command.command().get_name().to_string())
+                        .chain(input.args.iter().cloned()),
+                    structured,
+                )
+            }
+            Err(err) => crate::app::report_anyhow_with_context(
+                err,
+                crate::app::host::ErrorContext::NativeExecution,
+            ),
+        }
+    });
     drop(context);
     if let Some(renderer) = progress_renderer.as_ref() {
         renderer.clear();
     }
 
-    match execution? {
-        NativeCommandOutcome::Help(text) => Ok(CliCommandResult::guide(guide_help(&text))),
-        NativeCommandOutcome::Exit(code) => Ok(CliCommandResult::exit(code)),
-        NativeCommandOutcome::Response(response) => render_native_response_with_context(
-            *response,
-            input.stages,
-            session,
-            runtime.context.terminal_kind() == TerminalKind::Repl,
-        ),
-        NativeCommandOutcome::ResponseWithExit {
-            response,
-            exit_code,
-        } => {
-            let mut result = render_native_response_with_context(
+    let execution = execution.and_then(|mut outcome| {
+        if repl && let Some(resolution) = &resolution {
+            match &mut outcome {
+                NativeCommandOutcome::Response(response)
+                | NativeCommandOutcome::ResponseWithExit { response, .. } => {
+                    resolution.finish(response, &selected_context);
+                }
+                _ => {}
+            }
+            selected_context
+                .save_context()
+                .map_err(|e| miette!("{e:#}"))?;
+        }
+        Ok(outcome)
+    });
+    let mut output = match execution {
+        Ok(outcome) => match outcome {
+            NativeCommandOutcome::Help(text) => {
+                let mut document = guide_help(&text);
+                let path = input
+                    .command_path
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                runtime.auth.filter_help_document(&mut document, &path);
+                Ok(CommandOutput::document(document))
+            }
+            NativeCommandOutcome::Exit(code) => Ok(CommandOutput::exit(code)),
+            NativeCommandOutcome::Response(response) => render_native_response_with_context(
                 *response,
                 input.stages,
                 session,
-                runtime.context.terminal_kind() == TerminalKind::Repl,
-            )?;
-            result.exit_code = exit_code;
-            Ok(result)
+                input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
+            ),
+            NativeCommandOutcome::ResponseWithExit {
+                response,
+                exit_code,
+            } => {
+                let mut result = render_native_response_with_context(
+                    *response,
+                    input.stages,
+                    session,
+                    input.action.is_none() && runtime.context.terminal_kind() == TerminalKind::Repl,
+                )?;
+                result.exit_code = exit_code;
+                Ok(result)
+            }
+        },
+        Err(report) => {
+            let mut output = CommandOutput::exit(super::host::classify_exit_code(&report));
+            output.failure_report = Some(report);
+            Ok(output)
         }
-    }
+    }?;
+    output.retained_evidence = diagnostics
+        .render(crate::core::MessageLevel::Evidence, output.exit_code != 0)
+        .0;
+    output.diagnostics = diagnostics.render(input.invocation.ui.verbosity, output.exit_code != 0);
+    Ok(output)
 }
 
 struct NativeProgressRenderer<'config, 'sink> {
@@ -587,6 +834,7 @@ struct NativeProgressRenderer<'config, 'sink> {
     ui: &'config UiState,
     stages: &'config [String],
     sink: RefCell<ProgressUiSink<'sink>>,
+    can_present: std::cell::Cell<bool>,
     pending: RefCell<Option<NativeProgressEvent>>,
     last_draw: std::cell::Cell<Option<std::time::Instant>>,
 }
@@ -597,30 +845,67 @@ impl NativeProgressRenderer<'_, '_> {
         self.sink.borrow_mut().clear_progress();
     }
 
-    fn draw(&self, event: NativeProgressEvent, stages: &[String]) -> anyhow::Result<()> {
-        let result =
-            PreparedPluginOutput::from_data(event.data, &event.meta, &event.messages, stages)
-                .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
+    fn draw(
+        &self,
+        mut event: NativeProgressEvent,
+        stages: &[String],
+        stream: bool,
+    ) -> anyhow::Result<()> {
+        let json = self.ui.render_settings.format == crate::core::OutputFormat::Json;
+        if stream {
+            event.meta.preserve_json_document = true;
+            event.meta.row_path = None;
+            if !json
+                && stages.is_empty()
+                && self.can_present.get()
+                && let Some(frame) = event.frame.take()
+            {
+                event.data = frame.data;
+                event.meta = frame.meta;
+            }
+        }
+        let mut result = CommandOutput::from_data(event.data, &event.meta, &event.messages, stages);
+        result
+            .apply_stages(stages)
+            .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
         let mut sink = self.sink.borrow_mut();
-        run_progress_command_with_ui(self.config, self.ui, result, &mut *sink)
+        run_progress_command_with_ui(self.config, self.ui, result, &mut *sink, stream)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
         Ok(())
     }
 }
 
 impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
+    fn stderr_is_terminal(&self) -> bool {
+        self.sink.borrow().stderr_is_terminal()
+    }
+
+    fn emit_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
+        self.flush()?;
+        self.draw(event, self.stages, false)?;
+        Ok(self.sink.borrow().can_replace())
+    }
+
     fn present(&self, document: NativeProgressEvent) -> anyhow::Result<()> {
         self.flush()?;
-        self.draw(document, &[])
+        self.draw(document, &[], false)
+    }
+
+    fn emit_stream(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        self.flush()?;
+        self.draw(event, self.stages, true)
+    }
+
+    fn emit_stream_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
+        self.emit_stream(event)?;
+        Ok(self.can_present.get() && self.sink.borrow().can_replace())
     }
 
     fn emit(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
-        let tree = event.meta.progress_replace
-            && self.stages.is_empty()
-            && self.sink.borrow().stderr_is_terminal()
-            && self.ui.render_settings.format != crate::core::output::OutputFormat::Json;
+        let tree = event.meta.progress_replace && self.can_present.get();
         if !tree {
-            return self.draw(event, self.stages);
+            return self.draw(event, self.stages, false);
         }
         let replay = event.replay;
         *self.pending.borrow_mut() = Some(event);
@@ -646,18 +931,11 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
             {
                 std::thread::sleep(delay);
             }
-            self.draw(event, self.stages)?;
+            self.draw(event, self.stages, false)?;
             self.last_draw.set(Some(std::time::Instant::now()));
         }
         Ok(())
     }
-}
-
-fn render_native_response(
-    response: crate::core::plugin::ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    cli_result_from_plugin_response(response, stages)
 }
 
 fn render_native_response_with_context(
@@ -665,11 +943,13 @@ fn render_native_response_with_context(
     stages: &[String],
     session: &mut AppSession,
     show_pagination_hint: bool,
-) -> Result<CliCommandResult> {
-    let mut result = match render_native_response(response, stages) {
+) -> Result<CommandOutput> {
+    let mut result = match cli_result_from_plugin_response(response, stages) {
         Ok(result) => result,
         Err(error) => {
-            session.native_context.clear_pagination();
+            if show_pagination_hint {
+                session.native_context.clear_pagination();
+            }
             return Err(error);
         }
     };
@@ -679,7 +959,7 @@ fn render_native_response_with_context(
     Ok(result)
 }
 
-fn add_native_pagination_hint(result: &mut CliCommandResult, context: &NativeSessionContext) {
+fn add_native_pagination_hint(result: &mut CommandOutput, context: &NativeSessionContext) {
     let Some(pagination) = context.pagination() else {
         return;
     };
@@ -696,58 +976,105 @@ fn add_native_pagination_hint(result: &mut CliCommandResult, context: &NativeSes
     result.messages.success(text);
 }
 
+/// Returns invocation flags that only appear after alias or quoted-line
+/// expansion, so the host can apply them like flags typed on the command line.
+fn expand_external_tokens(
+    runtime: &AppRuntime,
+    tokens: &[String],
+) -> Result<(ParsedCommandLine, InvocationElevation)> {
+    let (tokens, elevation) = parse_invocation_elevation(tokens)?;
+    // REPL text has already separated pipes while quote information was present.
+    let parsed = if runtime.context.terminal_kind() == TerminalKind::Repl {
+        crate::cli::pipeline::finalize_command_with_aliases(
+            tokens,
+            Vec::new(),
+            runtime.config.resolved(),
+        )?
+    } else {
+        parse_command_tokens_with_aliases(&tokens, runtime.config.resolved())?
+    };
+    Ok((parsed, elevation))
+}
+
+fn external_parse_context(tokens: &[String]) -> String {
+    format!(
+        "failed to parse external command invocation for `{}`",
+        tokens.first().map(String::as_str).unwrap_or("external")
+    )
+}
+
 fn parse_external_invocation(
     runtime: &AppRuntime,
     session: &AppSession,
     tokens: &[String],
     invocation: &ResolvedInvocation,
+    stages: &[String],
 ) -> Result<ExternalParse> {
-    let (command_tokens, elevation) = parse_invocation_elevation(tokens)?;
-    let parsed = parse_command_tokens_with_aliases(&command_tokens, runtime.config.resolved())?;
+    expand_external_tokens(runtime, tokens)
+        .and_then(|(mut parsed, elevation)| {
+            parsed.tokens = scan_command_tokens(&parsed.tokens)?.tokens;
+            parsed.stages.extend_from_slice(stages);
+            plan_external_invocation(runtime, session, parsed, elevation, invocation)
+        })
+        .wrap_err_with(|| external_parse_context(tokens))
+}
+
+fn plan_external_invocation(
+    runtime: &AppRuntime,
+    _session: &AppSession,
+    parsed: ParsedCommandLine,
+    elevation: InvocationElevation,
+    invocation: &ResolvedInvocation,
+) -> Result<ExternalParse> {
+    let apply_output_stages = runtime.context.terminal_kind() == TerminalKind::Cli;
     if parsed.tokens.is_empty() {
         return Err(miette!("missing external command"));
     }
-    if let Some(help) = completion::maybe_render_dsl_help(
-        ReplViewContext::from_parts(runtime, session),
-        &parsed.stages,
-    ) {
-        return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
-            GuideView::from_text(&help),
+    if let Some(spec) = parsed.stages.iter().find_map(|raw| {
+        let parsed = crate::dsl::parse::pipeline::parse_stage(raw).ok()?;
+        crate::cli::is_cli_help_stage(&parsed).then_some(parsed.spec)
+    }) {
+        return Ok(ExternalParse::Handled(Box::new(CommandOutput::document(
+            crate::dsl::verb_info::help_document(&spec)?,
         ))));
     }
 
-    let inline_command = match parse_inline_command_tokens(&parsed.tokens) {
-        Ok(command) => command,
-        Err(err) => {
-            if matches!(
-                err.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
-                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-            ) {
-                let mut view = GuideView::from_text(&err.to_string());
-                extend_with_invocation_help(&mut view, invocation.help_level);
-                return Ok(ExternalParse::Handled(Box::new(CliCommandResult::guide(
-                    view.filtered_for_help_level(invocation.help_level),
-                ))));
-            }
-            return Err(crate::app::report_std_error_with_context(
-                err,
-                "failed to parse external inline command",
-            ));
+    let inline_command = match super::command_plan::parse_inline_command(
+        &parsed.tokens,
+        super::command_plan::CommandSurface::External,
+    )? {
+        super::command_plan::InlineCommandPlan::Command(command) => command,
+        super::command_plan::InlineCommandPlan::Help(_) => {
+            let (mut view, long_help) = crate::cli::inline_help_document(
+                &parsed.tokens,
+                &invocation.ui.render_settings.runtime.command_scope,
+            );
+            extend_with_invocation_help(&mut view, invocation.help_level);
+            let mut output = view
+                .filtered_for_help_level(invocation.help_level)
+                .to_output_result();
+            output.meta.document_long_help = long_help;
+            let result = super::command_output::apply_stages_to_cli_result(
+                CommandOutput::output(output, None),
+                if apply_output_stages {
+                    &parsed.stages
+                } else {
+                    &[]
+                },
+            )?;
+            return Ok(ExternalParse::Handled(Box::new(result)));
         }
     };
 
-    Ok(ExternalParse::Invocation(ParsedExternalInvocation {
-        tokens: rewrite_shellable_root_help_tokens(
-            parsed.tokens,
-            runtime.config.resolved(),
-            invocation.plugin_provider.as_deref(),
-        ),
-        stages: parsed.stages,
-        inline_command,
-        elevation,
-    }))
+    Ok(ExternalParse::Invocation(Box::new(
+        ParsedExternalInvocation {
+            tokens: rewrite_shellable_root_help_tokens(parsed.tokens, runtime.config.resolved()),
+            stages: parsed.stages,
+            apply_output_stages,
+            inline_command,
+            elevation,
+        },
+    )))
 }
 
 fn parse_invocation_elevation(tokens: &[String]) -> Result<(Vec<String>, InvocationElevation)> {
@@ -766,12 +1093,7 @@ fn parse_invocation_elevation(tokens: &[String]) -> Result<(Vec<String>, Invocat
 fn rewrite_shellable_root_help_tokens(
     tokens: Vec<String>,
     config: &crate::config::ResolvedConfig,
-    provider_override: Option<&str>,
 ) -> Vec<String> {
-    if provider_override.is_some() {
-        return tokens;
-    }
-
     if tokens.len() == 1
         && let Some(command) = tokens.first()
         && is_repl_shellable_command(config, command)
@@ -782,118 +1104,309 @@ fn rewrite_shellable_root_help_tokens(
 }
 
 fn run_external_plugin_command(
-    runtime_state: &mut AppRuntime,
-    session: &mut AppSession,
-    clients: &AppClients,
+    state: &mut crate::app::AppState,
     command: &str,
     parsed: &ParsedExternalInvocation,
     invocation: &ResolvedInvocation,
-    guide_help: impl Fn(&str) -> GuideView,
+    _guide_help: impl Fn(&str) -> Document,
     accepted: &mut Option<&mut bool>,
-) -> Result<CliCommandResult> {
-    let (_, args) = parsed
-        .tokens
-        .split_first()
-        .ok_or_else(|| miette!("missing external command"))?;
-    let (path, dispatch_policy, help_requested) = clients
+) -> Result<CommandOutput> {
+    let plugin = state
+        .clients
         .plugins()
-        .resolved_command_path_and_policy(command, args, invocation.plugin_provider.as_deref())
-        .map_err(|error| miette!(error.to_string()))?;
-    mark_repl_command_accepted(accepted);
-    let access_requirement = if help_requested {
+        .find(command)
+        .ok_or_else(|| miette!("unknown plugin `{command}`"))?;
+    let args = &parsed.tokens[1..];
+    let help = args
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"));
+    let resolved = plugin.command().resolve_invocation(args);
+    if resolved.ambiguous && !help {
+        return Err(miette!(
+            "cannot resolve plugin command `{command}`: describe metadata does not cover its arguments"
+        ));
+    }
+    let path = resolved.path;
+    let requirement = if help {
         ExternalPathAccessRequirement::Visible
     } else {
         ExternalPathAccessRequirement::Runnable
     };
-    ensure_external_path_access_with_policy(
-        runtime_state,
-        session,
-        &path,
-        access_requirement,
-        "plugin command",
-        &dispatch_policy,
-    )?;
-    let runtime = ExternalCommandRuntime::from_parts(runtime_state, clients);
-
-    tracing::debug!(
-        command = %path.as_slice().join(" "),
-        "dispatching external command"
-    );
-
-    if access_requirement == ExternalPathAccessRequirement::Visible {
-        let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-        let raw = runtime
-            .plugins
-            .dispatch_passthrough(command, args, &dispatch_context)
-            .map_err(enrich_dispatch_error)?;
-        let mut result = if !raw.stdout.is_empty() {
-            CliCommandResult::guide(guide_help(&raw.stdout))
-        } else {
-            CliCommandResult::exit(raw.status_code)
-        };
-        if !raw.stderr.is_empty() {
-            result.stderr_text = Some(raw.stderr);
+    before_external_run(&mut state.runtime, &path, requirement, "plugin command")?;
+    state.reload_config_after_access_hook()?;
+    ensure_external_access(&state.runtime, &path, requirement, "plugin command")?;
+    mark_repl_command_accepted(accepted);
+    let capture = !help
+        && (plugin
+            .describe
+            .as_ref()
+            .is_some_and(|d| d.output.as_deref() == Some("json"))
+            || !parsed.stages.is_empty()
+            || invocation.ui.render_settings.format_explicit);
+    let mut context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
+    let selected_context = state
+        .session
+        .native_context
+        .for_service(command)
+        .for_command(path.as_slice().join(" "));
+    let resolution = if state.runtime.context.terminal_kind() == TerminalKind::Repl && !help {
+        state.session.native_context.activate(&state.runtime);
+        Some(
+            crate::context::resolve(
+                crate::context::plugin_grammar(&plugin.command()),
+                args,
+                &selected_context,
+            )
+            .map_err(|e| {
+                super::host::report_anyhow_with_context(
+                    e,
+                    super::host::ErrorContext::Operation("failed to resolve plugin context"),
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+    if let Some(resolution) = &resolution {
+        for consume in &resolution.contract.consumes {
+            if let Some(value) = selected_context.context_value(&consume.kind) {
+                context.shared_env.push((
+                    format!("OSP_CTX_{}", consume.kind.to_ascii_uppercase()),
+                    value,
+                ));
+            }
         }
-        result.exit_code = raw.status_code;
-        return Ok(result);
     }
-
-    let dispatch_context = plugin_dispatch_context_for(&runtime, Some(invocation));
-    let response = runtime
-        .plugins
-        .dispatch(command, args, &dispatch_context)
-        .map_err(enrich_dispatch_error)?;
-
-    render_external_plugin_response(response, &parsed.stages)
-}
-
-fn render_external_plugin_response(
-    response: crate::core::plugin::ResponseV1,
-    stages: &[String],
-) -> Result<CliCommandResult> {
-    cli_result_from_plugin_response(response, stages)
+    if let Some(resolution) = &resolution
+        && let Some(line) = resolution
+            .record_history(&state.session.native_context, command, args)
+            .map_err(|e| miette!("{e:#}"))?
+    {
+        let mut messages = crate::ui::messages::MessageBuffer::default();
+        messages.success(format!("→ {line}"));
+        super::command_output::emit_messages_for_ui(
+            state.runtime.config.resolved(),
+            &invocation.ui,
+            &messages,
+            invocation.ui.verbosity,
+            &mut super::StdIoUiSink,
+        );
+    }
+    let args = resolution
+        .as_ref()
+        .map(|r| r.args.as_slice())
+        .unwrap_or(args);
+    tracing::info!(target: "osp::diagnostic", "debug: Dispatch selected; handler=plugin:{}.", plugin.name);
+    let diagnostics = crate::diagnostics::DiagnosticSink::default();
+    let started = std::time::Instant::now();
+    let raw = crate::plugin::run::run(&plugin, args, &context, capture)?;
+    let elapsed_ms = started.elapsed().as_millis();
+    let bytes = raw.stdout.as_ref().map(Vec::len);
+    let mut result = if let Some(bytes) = raw.stdout {
+        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(value) => {
+                let mut response = if value.get("protocol_version").is_some() {
+                    let response: crate::core::plugin::ResponseV1 = serde_json::from_value(value)
+                        .map_err(|_| {
+                        miette::Report::new(
+                            invocation
+                                .ui
+                                .render_settings
+                                .runtime
+                                .command_scope
+                                .run_hint(
+                                    "Invalid plugin response metadata.",
+                                    "doctor plugins",
+                                    ".",
+                                ),
+                        )
+                    })?;
+                    response.validate_v1().map_err(|_| {
+                        miette::Report::new(
+                            invocation
+                                .ui
+                                .render_settings
+                                .runtime
+                                .command_scope
+                                .run_hint(
+                                    "Invalid plugin response metadata.",
+                                    "doctor plugins",
+                                    ".",
+                                ),
+                        )
+                    })?;
+                    response
+                } else {
+                    crate::core::plugin::ResponseV1 {
+                        protocol_version: 1,
+                        ok: true,
+                        data: value,
+                        error: None,
+                        messages: Vec::new(),
+                        context: None,
+                        meta: Default::default(),
+                    }
+                };
+                crate::context::protect_response_context(&mut response, &context.secrets);
+                if let Some(resolution) = &resolution {
+                    resolution.finish(&mut response, &selected_context);
+                    selected_context
+                        .save_context()
+                        .map_err(|e| miette!("{e:#}"))?;
+                }
+                let plugin_text = |raw: &str| {
+                    let mut text = raw.to_owned();
+                    for secret in &context.secrets {
+                        text = text.replace(secret, "[redacted]");
+                    }
+                    crate::ui::sanitize_human_text(&text)
+                        .replace('\n', " ")
+                        .chars()
+                        .take(512)
+                        .collect::<String>()
+                };
+                for message in &mut response.messages {
+                    message.text = plugin_text(&message.text);
+                }
+                if !response.ok
+                    && let Some(error) = response.error.as_mut()
+                {
+                    error.code = plugin_text(&error.code);
+                    if error.code.len() > 80
+                        || !error
+                            .code
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+                    {
+                        error.code = "plugin_error".into();
+                    }
+                    let mut details = serde_json::Map::new();
+                    if let Some(attempt) = error.details["attempt"].as_u64() {
+                        details.insert("attempt".into(), attempt.into());
+                    }
+                    if let Some(backend) = error.details["backend"]
+                        .as_str()
+                        .map(plugin_text)
+                        .filter(|backend| {
+                            !backend.is_empty()
+                                && backend.len() <= 80
+                                && backend.bytes().all(|byte| {
+                                    byte.is_ascii_lowercase()
+                                        || byte.is_ascii_digit()
+                                        || matches!(byte, b'_' | b'-')
+                                })
+                        })
+                    {
+                        details.insert("backend".into(), backend.into());
+                    }
+                    error.message = format!(
+                        "Plugin {} failed: {}.",
+                        plugin.name,
+                        plugin_text(&error.message).trim_end_matches('.')
+                    );
+                    if invocation.ui.verbosity < crate::core::MessageLevel::Info {
+                        details.insert(
+                            "action".into(),
+                            serde_json::json!("Rerun with -v for the plugin's details."),
+                        );
+                    }
+                    error.details = details.into();
+                }
+                for text in response
+                    .meta
+                    .column_labels
+                    .iter_mut()
+                    .chain(response.meta.partial_rows.iter_mut())
+                {
+                    *text = plugin_text(text);
+                }
+                for rule in &mut response.meta.display_rules {
+                    if let crate::core::output_model::DisplayRule::SuffixWhenTrue {
+                        suffix, ..
+                    } = rule
+                    {
+                        *suffix = plugin_text(suffix);
+                    }
+                }
+                let mut result = cli_result_from_plugin_response(response, &[])?;
+                result.stderr_text = plugin_text(&result.stderr_text);
+                result
+            }
+            Err(_) if !parsed.stages.is_empty() => {
+                return Err(miette!(
+                    "`{command}` printed text, not JSON; pipes need JSON output"
+                ));
+            }
+            Err(_) => CommandOutput::text(String::from_utf8_lossy(&bytes)),
+        }
+    } else {
+        CommandOutput::exit(raw.status)
+    };
+    if raw.status != 0 {
+        result.exit_code = raw.status;
+        result.preserve_process_output = result.failure_report.is_none();
+        if result.failure_report.is_none() {
+            result.hint_command = Some("doctor plugins".into());
+            result.stderr_text.push_str(&format!("error: Plugin {command} crashed (exit status {}).\nhint: Run osp doctor plugins.\n", raw.status));
+        }
+    }
+    let backend = result
+        .failure_report
+        .as_ref()
+        .and_then(super::host::find_error_in_chain::<super::command_output::CommandBackendDetails>);
+    let details = backend.map(|backend| &backend.error.details);
+    diagnostics.emit(crate::diagnostics::DiagnosticEvent::PluginOutcome {
+        plugin: plugin.name,
+        exit_code: raw.status,
+        elapsed_ms,
+        error_code: backend.map(|backend| backend.error.code.clone()),
+        attempt: details.and_then(|details| details["attempt"].as_u64()),
+        backend: details
+            .and_then(|details| details["backend"].as_str())
+            .map(str::to_owned),
+        bytes,
+    });
+    result.retained_evidence = diagnostics
+        .render(crate::core::MessageLevel::Evidence, result.exit_code != 0)
+        .0;
+    result.diagnostics = diagnostics.render(invocation.ui.verbosity, result.exit_code != 0);
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ExternalParse, add_native_pagination_hint, parse_external_invocation,
-        render_external_plugin_response, run_external_command_with_help_renderer,
-        run_external_command_with_help_renderer_and_progress,
+        ExternalParse, add_native_pagination_hint, cli_result_from_plugin_response,
+        parse_external_invocation, run_external_command_with_help_renderer,
     };
     use crate::app::{
         AppClients, AppRuntime, AppSession, AuthState, ConfigState, LaunchContext, RuntimeContext,
         TerminalKind, UiState, resolve_invocation_ui,
     };
-    use crate::app::{BufferedUiSink, CliCommandResult, ReplCommandOutput};
+    use crate::app::{BufferedUiSink, CommandOutput};
     use crate::cli::invocation::InvocationOptions;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
-    use crate::core::command_policy::CommandPolicyContext;
+    use crate::core::MessageLevel;
+    use crate::core::document::Document;
     use crate::core::output::OutputFormat;
     use crate::core::plugin::{
         DescribeCommandAuthV1, DescribeCommandV1, DescribeVisibilityModeV1, PLUGIN_PROTOCOL_V1,
-        ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
+        ResponseMessageV1, ResponseMetaV1, ResponseV1,
     };
-    use crate::guide::GuideView;
     use crate::native::{
         NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
         NativePagination, NativeProgressEvent, NativeSessionContext,
     };
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
-    use crate::ui::messages::MessageLevel;
     use clap::Command;
     #[cfg(unix)]
-    use std::fs;
     #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
-    use std::path::Path;
     #[cfg(all(unix, miri))]
     use std::sync::atomic::{AtomicU64, Ordering};
     #[cfg(all(unix, not(miri)))]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     #[derive(Clone, Copy)]
     enum NativeOutcomeKind {
         Help,
@@ -938,10 +1451,14 @@ mod tests {
                         data: serde_json::json!([{ "command": "ldap", "args": args }]),
                         error: None,
                         messages: vec![ResponseMessageV1 {
-                            level: ResponseMessageLevelV1::Info,
+                            level: MessageLevel::Info,
                             text: "native ok".to_string(),
                         }],
+                        context: None,
                         meta: ResponseMetaV1 {
+                            context_not_found: false,
+                            detail_columns: Vec::new(),
+                            context: Default::default(),
                             format_hint: Some("json".to_string()),
                             columns: None,
                             column_align: Vec::new(),
@@ -950,8 +1467,6 @@ mod tests {
                             unix_timestamp_columns: Vec::new(),
                             display_rules: Vec::new(),
                             preserve_json_document: false,
-                            presentation_lines: Vec::new(),
-                            progress_append: Vec::new(),
                             progress_replace: false,
                             display_limit: None,
                             partial_rows: None,
@@ -965,7 +1480,10 @@ mod tests {
                         data: serde_json::json!({"status": "waiting_approval"}),
                         error: None,
                         messages: Vec::new(),
+                        context: None,
                         meta: ResponseMetaV1 {
+                            context_not_found: false,
+                            context: Default::default(),
                             format_hint: Some("json".to_string()),
                             unix_timestamp_columns: Vec::new(),
                             display_rules: Vec::new(),
@@ -1004,6 +1522,8 @@ mod tests {
                     "message": "creating virtual machine",
                 }))
                 .with_meta(ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
@@ -1017,7 +1537,10 @@ mod tests {
                 data: serde_json::json!({"status": "completed"}),
                 error: None,
                 messages: Vec::new(),
+                context: None,
                 meta: ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
@@ -1055,7 +1578,11 @@ mod tests {
                 }),
                 error: None,
                 messages: Vec::new(),
+                context: None,
                 meta: ResponseMetaV1 {
+                    context_not_found: false,
+                    detail_columns: Vec::new(),
+                    context: Default::default(),
                     format_hint: Some("json".to_string()),
                     columns: None,
                     column_align: Vec::new(),
@@ -1064,8 +1591,6 @@ mod tests {
                     unix_timestamp_columns: Vec::new(),
                     display_rules: Vec::new(),
                     preserve_json_document: false,
-                    presentation_lines: Vec::new(),
-                    progress_append: Vec::new(),
                     progress_replace: false,
                     display_limit: None,
                     partial_rows: None,
@@ -1076,7 +1601,7 @@ mod tests {
 
     fn make_test_state_with_registry(
         native_commands: NativeCommandRegistry,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    ) -> crate::app::AppState {
         make_test_state_with_parts(
             PluginManager::new(Vec::new())
                 .with_bundled_roots(false)
@@ -1088,7 +1613,7 @@ mod tests {
     fn make_test_state_with_parts(
         plugins: PluginManager,
         native_commands: NativeCommandRegistry,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    ) -> crate::app::AppState {
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", "default");
         defaults.set("theme.path", Vec::<String>::new());
@@ -1098,8 +1623,7 @@ mod tests {
             .resolve(ResolveOptions::default())
             .expect("test config should resolve");
         let themes = crate::ui::theme_catalog::load_theme_catalog(&config);
-        let mut auth = AuthState::from_resolved(&config);
-        auth.replace_external_policy(native_commands.command_policy_registry());
+        let auth = AuthState::from_commands(&plugins, &native_commands);
         let runtime = AppRuntime::new(
             RuntimeContext::new(None, TerminalKind::Cli, None),
             ConfigState::new(config.clone()),
@@ -1114,12 +1638,14 @@ mod tests {
         );
         let session = AppSession::default();
         let clients = AppClients::new(plugins, native_commands);
-        (runtime, session, clients)
+        crate::app::AppState {
+            runtime,
+            session,
+            clients,
+        }
     }
 
-    fn make_test_state_with_native(
-        kind: Option<NativeOutcomeKind>,
-    ) -> (AppRuntime, AppSession, AppClients) {
+    fn make_test_state_with_native(kind: Option<NativeOutcomeKind>) -> crate::app::AppState {
         make_test_state_with_registry(
             kind.map(|kind| NativeCommandRegistry::new().with_command(TestNativeCommand { kind }))
                 .unwrap_or_default(),
@@ -1152,7 +1678,7 @@ mod tests {
                 ..DescribeCommandAuthV1::default()
             });
             root.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+                visibility: Some(DescribeVisibilityModeV1::Authenticated),
                 required_capabilities: vec!["ldap.user.read".to_string()],
                 feature_flags: Vec::new(),
                 ..DescribeCommandAuthV1::default()
@@ -1182,7 +1708,7 @@ mod tests {
                 ..DescribeCommandAuthV1::default()
             });
             root.subcommands[0].auth = Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
+                visibility: Some(DescribeVisibilityModeV1::Authenticated),
                 required_capabilities: vec!["lookup.user.read".to_string()],
                 ..DescribeCommandAuthV1::default()
             });
@@ -1197,77 +1723,27 @@ mod tests {
             panic!("aliased nested command should not execute when auth denies it")
         }
     }
-
-    #[cfg(unix)]
-    fn make_temp_dir(prefix: &str) -> std::path::PathBuf {
-        #[cfg(not(miri))]
-        let unique = format!(
-            "{prefix}-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock should be after epoch")
-                .as_nanos()
-        );
-        #[cfg(miri)]
-        let unique = {
-            static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-            format!(
-                "{prefix}-{}-{}",
-                std::process::id(),
-                NEXT_ID.fetch_add(1, Ordering::Relaxed)
-            )
-        };
-        let dir = std::env::temp_dir().join(unique);
-        fs::create_dir_all(&dir).expect("temp dir should be created");
-        dir
-    }
-
-    #[cfg(unix)]
-    fn write_provider_test_plugin(dir: &Path, plugin_id: &str, command: &str) {
-        let plugin_path = dir.join(format!("osp-{plugin_id}"));
-        let script = format!(
-            r#"#!/bin/sh
-if [ "$1" = "--describe" ]; then
-  cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":null,"commands":[{{"name":"{command}","about":"{plugin_id} provider","args":[],"flags":{{}},"subcommands":[]}}]}}
-JSON
-  exit 0
-fi
-
-cat <<'JSON'
-{{"protocol_version":1,"ok":true,"data":{{"provider":"{plugin_id}"}},"error":null,"messages":[],"meta":{{"format_hint":"json","columns":["provider"]}}}}
-JSON
-"#
-        );
-        fs::write(&plugin_path, script).expect("plugin script should be written");
-        let mut perms = fs::metadata(&plugin_path)
-            .expect("plugin metadata should be readable")
-            .permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&plugin_path, perms).expect("plugin should be executable");
-    }
-
     #[test]
     fn external_builtin_help_passthrough_is_handled_unit() {
-        let (runtime, session, _) = make_test_state_with_native(None);
+        let state = make_test_state_with_native(None);
         let tokens = ["config", "--help"]
             .into_iter()
             .map(str::to_string)
             .collect::<Vec<_>>();
 
         let invocation = crate::app::resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &Default::default(),
         );
-        let parsed = parse_external_invocation(&runtime, &session, &tokens, &invocation)
-            .expect("help should parse");
+        let parsed =
+            parse_external_invocation(&state.runtime, &state.session, &tokens, &invocation, &[])
+                .expect("help should parse");
         assert!(matches!(
             parsed,
-            ExternalParse::Handled(result) if matches!(*result, CliCommandResult {
+            ExternalParse::Handled(result) if matches!(*result, CommandOutput {
                 exit_code: 0,
-                output: Some(ReplCommandOutput::Output(_)),
+                body: crate::app::CommandBody::Output(_),
                 ..
             })
         ));
@@ -1281,10 +1757,14 @@ JSON
             data: serde_json::json!({ "message": "hello" }),
             error: None,
             messages: vec![ResponseMessageV1 {
-                level: ResponseMessageLevelV1::Warning,
+                level: MessageLevel::Warning,
                 text: "warning from plugin".to_string(),
             }],
+            context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: None,
                 column_align: Vec::new(),
@@ -1293,8 +1773,6 @@ JSON
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -1302,14 +1780,14 @@ JSON
         };
 
         let result =
-            render_external_plugin_response(response, &[]).expect("response should prepare");
+            cli_result_from_plugin_response(response, &[]).expect("response should prepare");
         assert!(!result.messages.is_empty());
     }
 
     #[test]
     fn native_pagination_hint_describes_available_directions_unit() {
         let context = NativeSessionContext::default();
-        let mut result = CliCommandResult::exit(0);
+        let mut result = CommandOutput::exit(0);
         add_native_pagination_hint(&mut result, &context);
         assert!(result.messages.is_empty());
 
@@ -1323,7 +1801,7 @@ JSON
             "More results are available. Type `next` or press Shift+→ for the next page."
         );
 
-        let mut result = CliCommandResult::exit(0);
+        let mut result = CommandOutput::exit(0);
         context.step_page(true);
         context.set_pagination(NativePagination {
             current: vec!["orch".to_string(), "2".to_string()],
@@ -1342,48 +1820,42 @@ JSON
             NativeOutcomeKind::Response,
             NativeOutcomeKind::ResponseWithExit,
         ] {
-            let (mut runtime, mut session, clients) = make_test_state_with_native(Some(kind));
+            let mut state = make_test_state_with_native(Some(kind));
             let invocation = resolve_invocation_ui(
-                runtime.config.resolved(),
-                &runtime.ui,
+                state.runtime.config.resolved(),
+                &state.runtime.ui,
                 &InvocationOptions::default(),
             );
             let result = run_external_command_with_help_renderer(
-                &mut runtime,
-                &mut session,
-                &clients,
+                &mut state,
                 &["ldap".to_string(), "user".to_string()],
                 &invocation,
-                |text| GuideView::from_text(&format!("HELP::{text}")),
+                |text| Document::from_help_text(&format!("HELP::{text}")),
+                None,
             )
             .expect("native command should dispatch");
 
             match kind {
                 NativeOutcomeKind::Help => {
                     assert!(matches!(
-                        result.output,
-                        Some(ReplCommandOutput::Output(guide))
+                        result.body,
+                        crate::app::CommandBody::Output(guide)
                             if guide
-                                .source_guide
-                                .as_ref()
-                                .expect("expected semantic guide payload")
-                                .preamble
-                                .iter()
-                                .any(|line| line.contains("HELP::Usage: osp ldap"))
+                                .document.as_ref().expect("expected document").json_value().to_string().contains("HELP::Usage: osp ldap")
                     ));
                 }
                 NativeOutcomeKind::Exit => {
                     assert_eq!(result.exit_code, 7);
-                    assert!(result.output.is_none());
+                    assert!(matches!(result.body, crate::app::CommandBody::None));
                 }
                 NativeOutcomeKind::Response => {
                     assert_eq!(result.exit_code, 0);
                     assert!(!result.messages.is_empty());
-                    assert!(matches!(result.output, Some(ReplCommandOutput::Output(_))));
+                    assert!(!matches!(result.body, crate::app::CommandBody::None));
                 }
                 NativeOutcomeKind::ResponseWithExit => {
                     assert_eq!(result.exit_code, 3);
-                    assert!(matches!(result.output, Some(ReplCommandOutput::Output(_))));
+                    assert!(!matches!(result.body, crate::app::CommandBody::None));
                 }
             }
         }
@@ -1391,23 +1863,21 @@ JSON
 
     #[test]
     fn external_native_progress_renders_to_stderr_without_corrupting_final_output_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(ProgressNativeCommand),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let mut sink = BufferedUiSink::default();
 
-        let result = run_external_command_with_help_renderer_and_progress(
-            &mut runtime,
-            &mut session,
-            &clients,
+        let result = run_external_command_with_help_renderer(
+            &mut state,
             &["progress".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
             Some(&mut sink),
         )
         .expect("native command should emit progress and return");
@@ -1415,34 +1885,34 @@ JSON
         assert!(sink.stdout.is_empty());
         assert!(sink.stderr.contains("creating virtual machine"));
         assert_eq!(result.exit_code, 0);
-        assert!(matches!(result.output, Some(ReplCommandOutput::Output(_))));
+        assert!(!matches!(result.body, crate::app::CommandBody::None));
     }
 
     #[test]
     fn external_native_command_receives_invocation_verbosity_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(VerbosityNativeCommand),
         );
         let options = InvocationOptions {
             verbose: 1,
             ..InvocationOptions::default()
         };
-        let invocation = resolve_invocation_ui(runtime.config.resolved(), &runtime.ui, &options);
+        let invocation =
+            resolve_invocation_ui(state.runtime.config.resolved(), &state.runtime.ui, &options);
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["verbosity".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect("native command should dispatch");
 
-        let Some(ReplCommandOutput::Output(output)) = result.output else {
+        let crate::app::CommandBody::Output(output) = result.body else {
             panic!("expected structured output");
         };
-        let rows = output.output.as_rows().expect("rows");
+        let rows = output.as_rows().expect("rows");
         assert_eq!(
             rows[0].get("ui_verbosity"),
             Some(&serde_json::json!("info"))
@@ -1451,109 +1921,94 @@ JSON
 
     #[test]
     fn external_bare_shellable_root_rewrites_to_help_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string()],
             &invocation,
-            |text| GuideView::from_text(&format!("HELP::{text}")),
+            |text| Document::from_help_text(&format!("HELP::{text}")),
+            None,
         )
         .expect("bare shellable root should rewrite to help");
 
         assert!(matches!(
-            result.output,
-            Some(ReplCommandOutput::Output(guide))
+            result.body,
+            crate::app::CommandBody::Output(guide)
                 if guide
-                    .source_guide
-                    .as_ref()
-                    .expect("expected semantic guide payload")
-                    .preamble
-                    .iter()
-                    .any(|line| line.contains("HELP::") || line.contains("Directory lookup"))
+                    .document.as_ref().expect("expected document").json_value().to_string().contains("HELP::")
         ));
     }
 
     #[test]
     fn external_dispatch_matches_native_commands_case_insensitively_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["LDAP".to_string()],
             &invocation,
-            |text| GuideView::from_text(&format!("HELP::{text}")),
+            |text| Document::from_help_text(&format!("HELP::{text}")),
+            None,
         )
         .expect("mixed-case native command should dispatch");
 
         assert!(matches!(
-            result.output,
-            Some(ReplCommandOutput::Output(guide))
+            result.body,
+            crate::app::CommandBody::Output(guide)
                 if guide
-                    .source_guide
-                    .as_ref()
-                    .expect("expected semantic guide payload")
-                    .preamble
-                    .iter()
-                    .any(|line| line.contains("HELP::Usage: osp ldap"))
+                    .document.as_ref().expect("expected document").json_value().to_string().contains("HELP::Usage: osp ldap")
         ));
     }
 
     #[test]
     fn external_dispatch_suggests_nearby_native_command_unit() {
-        let (mut runtime, mut session, clients) =
-            make_test_state_with_native(Some(NativeOutcomeKind::Help));
+        let mut state = make_test_state_with_native(Some(NativeOutcomeKind::Help));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["lpad".to_string(), "user".to_string(), "oistes".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect_err("misspelled command should fail with a suggestion");
 
-        assert!(err.to_string().contains("unknown command `lpad`"));
-        assert!(err.to_string().contains("Try: use command `ldap`"));
+        assert!(err.to_string().contains("Unknown command 'lpad'"));
+        assert_eq!(
+            super::super::host::find_error_in_chain::<crate::core::CommandError>(&err)
+                .expect("structured suggestion")
+                .action
+                .as_deref(),
+            Some("Did you mean osp ldap?")
+        );
     }
 
     #[test]
     fn external_dispatch_enforces_nested_native_command_auth_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
-        runtime
-            .auth
-            .set_policy_context(CommandPolicyContext::default().authenticated(true));
 
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &[
                 "ldap".to_string(),
                 "--format".to_string(),
@@ -1562,265 +2017,112 @@ JSON
                 "alice".to_string(),
             ],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect_err("nested auth should block native external dispatch");
 
-        assert!(err.to_string().contains("command `ldap user`"));
-        assert!(err.to_string().contains("capability `ldap.user.read`"));
-        assert!(err.to_string().contains("Try: authenticate"));
+        assert!(err.to_string().contains("command ldap user"));
+        assert!(err.to_string().contains("requires authentication"));
+        assert_eq!(
+            super::super::host::find_error_in_chain::<crate::core::CommandError>(&err)
+                .expect("structured recovery")
+                .action
+                .as_deref(),
+            Some("authenticate, then retry")
+        );
     }
 
     #[test]
     fn native_path_uses_clap_canonical_subcommand_for_aliases_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(AliasedNestedAuthNativeCommand),
         );
-        runtime
-            .auth
-            .set_policy_context(CommandPolicyContext::default().authenticated(true));
 
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
         let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["lookup".to_string(), "u".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect_err("the canonical aliased child policy should deny execution");
 
-        assert!(err.to_string().contains("command `lookup user`"));
-        assert!(err.to_string().contains("lookup.user.read"));
+        assert!(err.to_string().contains("command lookup user"));
+        assert!(err.to_string().contains("requires authentication"));
     }
 
     #[test]
     fn external_native_help_requires_visibility_but_not_runnability_unit() {
-        let (mut runtime, mut session, clients) = make_test_state_with_registry(
+        let mut state = make_test_state_with_registry(
             NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
 
         let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string(), "help".to_string(), "user".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect("visible nested help should not require its run capability");
 
-        assert!(matches!(result.output, Some(ReplCommandOutput::Output(_))));
+        assert!(!matches!(result.body, crate::app::CommandBody::None));
 
         let denied = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
+            &mut state,
             &["ldap".to_string(), "user".to_string(), "alice".to_string()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
         .expect_err("real execution should still require runnability");
         assert!(denied.to_string().contains("requires authentication"));
     }
 
     #[test]
-    fn external_native_help_keeps_hidden_profile_and_feature_gates_unit() {
-        use crate::core::command_policy::{CommandPath, CommandPolicy, VisibilityMode};
-
-        let policies = [
-            CommandPolicy::new(CommandPath::new(["ldap", "user"]))
-                .visibility(VisibilityMode::Hidden),
-            CommandPolicy::new(CommandPath::new(["ldap", "user"])).allow_profiles(["other"]),
-            CommandPolicy::new(CommandPath::new(["ldap", "user"])).feature_flag("ldap-user"),
-        ];
-
-        for policy in policies {
-            let (mut runtime, mut session, clients) = make_test_state_with_registry(
-                NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
-            );
-            runtime.auth.external_policy_mut().register(policy);
-            let invocation = resolve_invocation_ui(
-                runtime.config.resolved(),
-                &runtime.ui,
-                &InvocationOptions::default(),
-            );
-
-            run_external_command_with_help_renderer(
-                &mut runtime,
-                &mut session,
-                &clients,
-                &["ldap".to_string(), "user".to_string(), "--help".to_string()],
-                &invocation,
-                GuideView::from_text,
-            )
-            .expect_err("hidden command help must remain inaccessible");
+    fn external_native_help_obeys_product_visibility_unit() {
+        struct ProductAccess;
+        impl crate::app::AccessPolicy for ProductAccess {
+            fn visibility(&self, path: &[String]) -> crate::app::Visibility {
+                if path == ["ldap", "user"] {
+                    crate::app::Visibility::Hidden(Some(
+                        "Use the product's operator profile".into(),
+                    ))
+                } else {
+                    crate::app::Visibility::Shown
+                }
+            }
         }
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_rejects_native_plugin_source_collisions_unit() {
-        let root = make_temp_dir("osp-cli-external-native-collision");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
-
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::new().with_command(TestNativeCommand {
-                kind: NativeOutcomeKind::Response,
-            }),
+        let mut state = make_test_state_with_registry(
+            NativeCommandRegistry::new().with_command(NestedAuthNativeCommand),
         );
+        state
+            .runtime
+            .set_access_policy(Some(std::sync::Arc::new(ProductAccess)));
         let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
+            state.runtime.config.resolved(),
+            &state.runtime.ui,
             &InvocationOptions::default(),
         );
-
-        let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
-            &["ldap".to_string()],
+        let error = run_external_command_with_help_renderer(
+            &mut state,
+            &["ldap".into(), "user".into(), "--help".into()],
             &invocation,
-            GuideView::from_text,
+            Document::from_help_text,
+            None,
         )
-        .expect_err("native/plugin collision should fail");
-
-        assert!(err.to_string().contains("ambiguous across command sources"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_requires_provider_selection_before_plugin_run_unit() {
-        let root = make_temp_dir("osp-cli-external-provider-selection");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "shared");
-        write_provider_test_plugin(&plugins_dir, "beta", "shared");
-
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::default(),
-        );
-        let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
-            &InvocationOptions::default(),
-        );
-
-        let err = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
-            &["shared".to_string()],
-            &invocation,
-            GuideView::from_text,
-        )
-        .expect_err("ambiguous plugin command should fail before dispatch");
-
-        assert!(err.to_string().contains("requires provider selection"));
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_provider_override_routes_plugin_over_native_unit() {
-        let root = make_temp_dir("osp-cli-external-provider-override");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "ldap");
-
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::new().with_command(TestNativeCommand {
-                kind: NativeOutcomeKind::Response,
-            }),
-        );
-        let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
-            &InvocationOptions {
-                plugin_provider: Some("alpha".to_string()),
-                ..InvocationOptions::default()
-            },
-        );
-
-        let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
-            &["ldap".to_string()],
-            &invocation,
-            GuideView::from_text,
-        )
-        .expect("provider override should route to plugin");
-
-        let rows = match result.output {
-            Some(ReplCommandOutput::Output(output)) => output
-                .output
-                .as_rows()
-                .expect("expected row output")
-                .to_vec(),
-            other => panic!("expected structured output, got {other:?}"),
-        };
-        assert_eq!(rows, vec![crate::row! { "provider" => "alpha" }]);
-        fs::remove_dir_all(root).ok();
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(miri, ignore = "external plugin filesystem/process test")]
-    #[test]
-    fn external_dispatch_matches_plugin_commands_case_insensitively_unit() {
-        let root = make_temp_dir("osp-cli-external-plugin-case-insensitive");
-        let plugins_dir = root.join("plugins");
-        fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-        write_provider_test_plugin(&plugins_dir, "alpha", "shared");
-
-        let (mut runtime, mut session, clients) = make_test_state_with_parts(
-            PluginManager::new(vec![plugins_dir]),
-            NativeCommandRegistry::default(),
-        );
-        let invocation = resolve_invocation_ui(
-            runtime.config.resolved(),
-            &runtime.ui,
-            &InvocationOptions::default(),
-        );
-
-        let result = run_external_command_with_help_renderer(
-            &mut runtime,
-            &mut session,
-            &clients,
-            &["SHARED".to_string()],
-            &invocation,
-            GuideView::from_text,
-        )
-        .expect("mixed-case plugin command should dispatch");
-
-        let rows = match result.output {
-            Some(ReplCommandOutput::Output(output)) => output
-                .output
-                .as_rows()
-                .expect("expected row output")
-                .to_vec(),
-            other => panic!("expected structured output, got {other:?}"),
-        };
-        assert_eq!(rows, vec![crate::row! { "provider" => "alpha" }]);
-        fs::remove_dir_all(root).ok();
+        .expect_err("hidden command help must remain inaccessible");
+        assert_eq!(error.to_string(), "Use the product's operator profile");
     }
 }

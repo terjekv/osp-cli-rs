@@ -21,7 +21,7 @@ impl NativeCommand for CompletionAugmentingCommand {
         Command::new("deploy").arg(clap::Arg::new("provider").long("provider"))
     }
 
-    fn augment_completion(&self, completion: &mut crate::completion::CommandSpec) {
+    fn augment_completion(&self, completion: &mut crate::completion::CompletionNode) {
         completion.flags.insert(
             "--flavor".to_string(),
             crate::completion::FlagNode::new()
@@ -102,7 +102,7 @@ fn native_completion_refresh_is_background_and_filtered_unit() {
             release: Arc::clone(&release),
         });
 
-    registry.refresh_completion_in_background(|name| name == "visible");
+    registry.refresh_completion_in_background(|name, _| name == "visible");
 
     assert_eq!(observed.recv_timeout(Duration::from_secs(1)), Ok("visible"));
     assert!(observed.try_recv().is_err());
@@ -215,6 +215,7 @@ impl NativeCommand for TestNativeCommand {
             data: json!([{ "args": args }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1::default(),
         })))
     }
@@ -250,28 +251,28 @@ fn registry_catalog_and_policy_projection_cover_lookup_completion_and_root_auth_
             .as_ref()
             .and_then(|auth| auth.hint())
             .as_deref(),
-        Some("feature: uio")
+        None
     );
     assert_eq!(catalog[0].subcommands, vec!["user".to_string()]);
     assert!(
         catalog[0]
             .completion
-            .subcommands
-            .iter()
+            .children
+            .values()
             .any(|child| child.name == "user")
     );
 
     assert!(registry.command("LDAP").is_some());
     assert!(registry.command(" ldap ").is_some());
 
-    let policy = registry.command_policy_registry();
-    assert!(policy.contains(&CommandPath::new(["ldap"])));
+    let policy = registry.command_auth();
+    assert!(policy.contains_key(&CommandPath::new(["ldap"])));
     let user_policy = policy
-        .resolved_policy(&CommandPath::new(["ldap", "user"]))
+        .get(&CommandPath::new(["ldap", "user"]))
         .expect("child commands inherit the native root policy");
     assert_eq!(
         user_policy.feature_flags,
-        ["uio".to_string()].into_iter().collect()
+        ["uio".to_string()].into_iter().collect::<Vec<_>>()
     );
 }
 
@@ -380,23 +381,56 @@ impl NativeCommand for TestNativeCommandWithNestedAuth {
 #[test]
 fn registry_collects_nested_auth_policies_when_describe_is_overridden_unit() {
     let default_registry = NativeCommandRegistry::new().with_command(TestNativeCommand);
-    let inherited_policy = default_registry
-        .command_policy_registry()
-        .resolved_policy(&CommandPath::new(["ldap", "user"]))
+    let inherited_auth = default_registry.command_auth();
+    let inherited_policy = inherited_auth
+        .get(&CommandPath::new(["ldap", "user"]))
         .expect("default child policy should inherit the root auth contract");
     assert_eq!(
         inherited_policy.feature_flags,
-        ["uio".to_string()].into_iter().collect()
+        ["uio".to_string()].into_iter().collect::<Vec<_>>()
     );
 
     let overridden_registry =
         NativeCommandRegistry::new().with_command(TestNativeCommandWithNestedAuth);
-    let user_policy = overridden_registry
-        .command_policy_registry()
-        .resolved_policy(&CommandPath::new(["ldap", "user"]))
+    let overridden_auth = overridden_registry.command_auth();
+    let user_policy = overridden_auth
+        .get(&CommandPath::new(["ldap", "user"]))
         .expect("nested native policy should exist");
     assert_eq!(
         user_policy.required_capabilities,
-        ["ldap.user.read".to_string()].into_iter().collect()
+        ["ldap.user.read".to_string()]
+            .into_iter()
+            .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn internal_example_1() {
+    use crate::{NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry};
+    use anyhow::Result;
+    use clap::Command;
+
+    struct VersionCommand;
+
+    impl NativeCommand for VersionCommand {
+        fn command(&self) -> Command {
+            Command::new("version").about("Show version")
+        }
+
+        fn execute(
+            &self,
+            _args: &[String],
+            _context: &NativeCommandContext<'_>,
+        ) -> Result<NativeCommandOutcome> {
+            Ok(NativeCommandOutcome::Exit(0))
+        }
+    }
+
+    let registry = NativeCommandRegistry::new().with_command(VersionCommand);
+    let catalog = registry.catalog();
+
+    assert!(registry.command(" VERSION ").is_some());
+    assert_eq!(catalog[0].name, "version");
+    assert_eq!(catalog[0].about, "Show version");
+    assert!(catalog[0].auth.is_none());
 }

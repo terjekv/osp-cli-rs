@@ -69,8 +69,8 @@ osp plugins list
 REPL:
 
 ```text
-osp> plugins commands
-osp> plugins commands | P name about
+osp> plugins list
+osp> plugins list | P name about
 osp> config explain ui.format
 osp> help config
 ```
@@ -91,13 +91,13 @@ See [docs/COMPLETION.md](docs/COMPLETION.md).
 Per-invocation flags work the same in the CLI and REPL:
 
 ```bash
-osp plugins commands --json
-osp plugins commands --format table -v
+osp plugins list --json
+osp plugins list --format table -v
 ```
 
 ```text
-plugins commands --json
-plugins commands --format table -v
+plugins list --json
+plugins list --format table -v
 ```
 
 ## Capabilities
@@ -126,7 +126,7 @@ Default paths:
 On Linux, `XDG_CONFIG_HOME` overrides the base config directory when set.
 
 Invocation flags such as `--json`, `--format`, `--color`,
-`--plugin-provider`, `-v`, `-q`, and `-d` affect only the current
+`-v`, `-q`, and `-d` affect only the current
 command. They do not mutate stored config.
 
 See:
@@ -136,13 +136,11 @@ See:
 
 ## Plugins
 
-`osp-cli` can discover external commands from configured plugin
-directories and invoke them through a documented JSON protocol.
+Drop an executable named `osp-NAME` on PATH or in a plugin directory.
+It runs as `osp NAME`; optional metadata adds JSON rendering and completion.
 
 See:
-- [docs/USING_PLUGINS.md](docs/USING_PLUGINS.md)
-- [docs/WRITING_PLUGINS.md](docs/WRITING_PLUGINS.md)
-- [docs/PLUGIN_PROTOCOL.md](docs/PLUGIN_PROTOCOL.md)
+- [docs/PLUGINS.md](docs/PLUGINS.md)
 - [docs/AUTH.md](docs/AUTH.md)
 
 ## Documentation
@@ -160,15 +158,14 @@ Core operator guides:
 - [docs/CONFIG.md](docs/CONFIG.md)
 - [docs/FORMATTING.md](docs/FORMATTING.md)
 - [docs/DSL.md](docs/DSL.md)
-- [docs/USING_PLUGINS.md](docs/USING_PLUGINS.md)
+- [docs/PLUGINS.md](docs/PLUGINS.md)
 
 If you are building a product wrapper on top of `osp-cli`, read these:
 - [docs/EMBEDDING.md](docs/EMBEDDING.md)
 
 If you are writing plugin executables or other extension-side integrations,
 read these:
-- [docs/WRITING_PLUGINS.md](docs/WRITING_PLUGINS.md)
-- [docs/PLUGIN_PROTOCOL.md](docs/PLUGIN_PROTOCOL.md)
+- [docs/PLUGINS.md](docs/PLUGINS.md)
 
 If you are working on the repo itself, read:
 - [CONTRIBUTING.md](CONTRIBUTING.md)

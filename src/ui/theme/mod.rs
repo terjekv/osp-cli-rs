@@ -65,6 +65,30 @@ pub struct ThemeOverrides {
 }
 
 impl ThemeDefinition {
+    /// Applies configured role overrides after theme inheritance is resolved.
+    pub(crate) fn with_color_overrides(&self, config: &crate::config::ResolvedConfig) -> Self {
+        use crate::core::style::ColorRole;
+        let mut theme = (**self).clone();
+        for role in ColorRole::ALL {
+            let Some(value) = config.get_string(role.key()) else {
+                continue;
+            };
+            let field = match role {
+                ColorRole::Text => &mut theme.palette.text,
+                ColorRole::Muted => &mut theme.palette.muted,
+                ColorRole::Accent => &mut theme.palette.accent,
+                ColorRole::Info => &mut theme.palette.info,
+                ColorRole::Warning => &mut theme.palette.warning,
+                ColorRole::Success => &mut theme.palette.success,
+                ColorRole::Error => &mut theme.palette.error,
+                ColorRole::Border => &mut theme.palette.border,
+                ColorRole::Title => &mut theme.palette.title,
+            };
+            *field = value.to_owned();
+        }
+        Self(Arc::new(theme))
+    }
+
     /// Builds a theme definition from palette data and optional overrides.
     pub fn new(
         id: impl Into<String>,
@@ -318,7 +342,7 @@ pub fn builtin_themes() -> Vec<ThemeDefinition> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::ui::theme::normalize_theme_name;
 ///
 /// assert_eq!(normalize_theme_name(" Rose Pine Moon "), "rose-pine-moon");
@@ -345,7 +369,7 @@ pub fn normalize_theme_name(value: &str) -> String {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::ui::theme::display_name_from_id;
 ///
 /// assert_eq!(display_name_from_id("rose-pine-moon"), "Rose Pine Moon");
@@ -380,11 +404,13 @@ pub fn display_name_from_id(value: &str) -> String {
 ///
 /// This mirrors [`builtin_themes`] but makes the intent clearer at call sites
 /// that treat the shipped theme catalog as the full available set.
+#[cfg(test)]
 pub fn all_themes() -> Vec<ThemeDefinition> {
     builtin_theme_defs().to_vec()
 }
 
 /// Returns the normalized identifiers of all available built-in themes.
+#[cfg(test)]
 pub fn available_theme_names() -> Vec<String> {
     all_themes()
         .into_iter()
@@ -420,7 +446,7 @@ pub fn find_theme(name: &str) -> Option<ThemeDefinition> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```text
 /// use osp_cli::ui::theme::{DEFAULT_THEME_NAME, resolve_theme};
 ///
 /// assert_eq!(resolve_theme("dracula").id, "dracula");
@@ -458,12 +484,38 @@ fn default_theme_fallback() -> ThemeDefinition {
 }
 
 /// Returns whether a theme name resolves to a known theme.
+#[cfg(test)]
 pub fn is_known_theme(name: &str) -> bool {
     find_theme(name).is_some()
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn render_internal_example_1() {
+        use crate::ui::theme::normalize_theme_name;
+
+        assert_eq!(normalize_theme_name(" Rose Pine Moon "), "rose-pine-moon");
+        assert_eq!(normalize_theme_name("tokyo_night"), "tokyo-night");
+    }
+
+    #[test]
+    fn render_internal_example_2() {
+        use crate::ui::theme::display_name_from_id;
+
+        assert_eq!(display_name_from_id("rose-pine-moon"), "Rose Pine Moon");
+        assert_eq!(display_name_from_id("dracula"), "Dracula");
+    }
+
+    #[test]
+    fn render_internal_example_3() {
+        use crate::ui::theme::{DEFAULT_THEME_NAME, resolve_theme};
+
+        assert_eq!(resolve_theme("dracula").id, "dracula");
+        assert_eq!(resolve_theme("missing-theme").id, DEFAULT_THEME_NAME);
+    }
+
     use std::hint::black_box;
 
     use super::{

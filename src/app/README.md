@@ -2,7 +2,7 @@
 
 The host. It loads config, builds the command catalog from builtins, native
 commands and plugins, decides who handles a command, runs it, applies the
-pipeline and renders the result. `App` and `App::builder` are the public
+pipeline and renders the result. `App` is the public
 entry points; a product crate builds an `App` with its own defaults and native
 commands.
 
@@ -14,23 +14,26 @@ modules should not import `app`; the one current exception is
 
 | File | Owns |
 |---|---|
-| `mod.rs`, `host.rs` | `App`, `AppBuilder`, the top-level run path, builtin `CMD_…` names |
+| `mod.rs`, `host.rs` | `App`, the top-level run path, builtin `CMD_…` names |
 | `bootstrap.rs`, `assembly.rs` | Startup: config, logging, catalog assembly |
 | `runtime.rs`, `session.rs` | State that lives for the process vs for one logical run |
-| `rebuild.rs`, `repl_lifecycle.rs` | Rebuilding state after config or auth changes |
+| `assembly.rs` | Full state, presentation bootstrap and REPL rebuilds |
 | `dispatch.rs` | Choosing builtin, native or plugin for a command line |
-| `builtin.rs` | Running builtins after an access check |
+| `command_plan.rs` | Shared inline parse/help classification and command pipeline policy |
+| `builtin.rs` | Running public builtin commands |
 | `external.rs` | Native and plugin commands, including help and progress |
 | `command_output.rs` | Shaping the final result before rendering |
 | `help.rs`, `config_explain.rs` | Help rendering policy; `config explain` output |
-| `access_recovery.rs` | Hooks a wrapper uses to recover from missing access (e.g. log in) |
+| `access.rs` | Product visibility, startup, acquisition and live session facts |
 | `facts.rs` | Pure facts derived from host state, shared by several surfaces |
 | `sink.rs`, `timing.rs`, `logging.rs` | Output sinks, timing badges, developer logging |
 
 ## Rules worth knowing
 
-- Visibility and access are decided once, from command policy, before
+- Visibility and access combine declared auth with the product hook before
   dispatch. Handlers do not re-check them their own way.
+- Runtime config loads source layers once per request, then derives presentation
+  defaults on that snapshot. Process error display settings are derived on failure.
 - Output leaves `app` through a `UiSink`. Tests use `BufferedUiSink` to capture
   one-shot output; REPL prompts still use the real terminal.
 - Site-specific auth and integrations belong in the wrapper crate, not here.
@@ -38,6 +41,10 @@ modules should not import `app`; the one current exception is
 ## Common changes
 
 - **Wrapper needs a new hook:** prefer a small trait or builder option here
-  over the wrapper reaching into internals; `access_recovery.rs` is the model.
-- **Command chosen wrongly:** `dispatch.rs`, then `osp plugins doctor` for
-  provider conflicts.
+  over the wrapper reaching into internals; `access.rs` is the model.
+- **Command chosen wrongly:** `dispatch.rs`, then `osp plugins list` for
+  disabled or shadowed executables.
+
+Help results use `CommandOutput::document`. Builtins supply clap metadata;
+native commands also use clap metadata; plugins retain their text-help boundary. Doctor attaches its presentation document to the same result while retaining
+its canonical data rows.

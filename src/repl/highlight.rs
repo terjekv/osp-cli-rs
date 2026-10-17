@@ -1,12 +1,11 @@
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use crate::completion::{CommandLineParser, CompletionNode, CompletionTree, TokenSpan};
 use nu_ansi_term::Color;
 use reedline::{Highlighter, StyledText};
 use serde::Serialize;
 
-use crate::repl::LineProjection;
+use crate::repl::{LineProjection, LineProjector};
 
 /// Highlighting intentionally stays small and opinionated:
 /// - color only the visible command path the tree can resolve
@@ -59,8 +58,6 @@ pub struct HighlightDebugSpan {
     /// RGB color used for the span, when highlighting applied a literal color.
     pub rgb: Option<[u8; 3]>,
 }
-
-pub(crate) type LineProjector = Arc<dyn Fn(&str) -> LineProjection + Send + Sync>;
 
 pub(crate) struct ReplHighlighter {
     tree: CompletionTree,
@@ -229,6 +226,17 @@ fn walk_line(
     projected_line: &str,
     cursor: usize,
 ) -> LineWalk {
+    if crate::repl::history_store::split_bang_request(projected_line).is_some() {
+        return LineWalk {
+            commands: parser
+                .tokenize_with_spans(projected_line)
+                .into_iter()
+                .filter(|span| span.value == "sudo" || span.value.starts_with('!'))
+                .map(|span| (span.start, span.end))
+                .collect(),
+            problem: None,
+        };
+    }
     let mut walk = LineWalk::default();
     let mut path = Vec::new();
     let mut scopes = vec![root];

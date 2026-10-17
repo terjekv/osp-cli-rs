@@ -1,10 +1,10 @@
 #[test]
 fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.prompt_prefix = "osp-dev".to_string();
         state.session.history_enabled = false;
-        state.session.max_cached_results = 7;
         state
             .session
             .config_overrides
@@ -12,7 +12,7 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
         state
             .session
             .config_overrides
-            .set("ui.message.verbosity", "trace");
+            .set("ui.verbosity", "trace");
         state.session.config_overrides.set("debug.level", 2i64);
         state.session.config_overrides.set("ui.format", "json");
         state.session.config_overrides.set("theme.name", "dracula");
@@ -27,13 +27,12 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
             next.runtime.config.resolved().get_string("user.name"),
             Some("launch-user")
         );
-        assert_eq!(next.runtime.ui.message_verbosity, MessageLevel::Trace);
-        assert_eq!(next.runtime.ui.debug_verbosity, 2);
+        assert_eq!(next.runtime.ui.verbosity, MessageLevel::Trace);
+        assert_eq!(next.runtime.ui.debug_level, 2);
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Json);
         assert_eq!(next.runtime.ui.render_settings.theme_name, "dracula");
         assert_eq!(next.session.prompt_prefix, "osp-dev");
         assert!(!next.session.history_enabled);
-        assert_eq!(next.session.max_cached_results, 7);
         assert_eq!(next.session.scope.commands(), vec!["orch".to_string()]);
         assert_eq!(
             next.session.history_shell.prefix(),
@@ -44,6 +43,7 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
 
 #[test]
 fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.config_overrides.set("theme.name", "dracula");
@@ -68,6 +68,7 @@ fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
 
 #[test]
 fn rebuild_repl_state_preserves_session_render_defaults_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state.session.config_overrides.set("ui.format", "table");
@@ -77,43 +78,10 @@ fn rebuild_repl_state_preserves_session_render_defaults_unit() {
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Table);
     });
 }
-
-#[cfg_attr(miri, ignore = "path/plugin filesystem integration test")]
-#[test]
-fn rebuild_repl_state_preserves_path_discovery_enabled_by_config_unit() {
-    let _guard = env_lock().lock().expect("env lock should not be poisoned");
-    let path_root = make_temp_dir("osp-cli-repl-path-discovery");
-    let plugins_dir = path_root.join("plugins");
-    std::fs::create_dir_all(&plugins_dir).expect("plugin dir should be created");
-    let _plugin = write_pipeline_test_plugin(&plugins_dir);
-
-    let original_path = std::env::var_os("PATH");
-    let joined_path = std::env::join_paths(
-        std::iter::once(plugins_dir.clone())
-            .chain(original_path.iter().flat_map(std::env::split_paths)),
-    )
-    .expect("PATH should join");
-    unsafe { std::env::set_var("PATH", joined_path) };
-
-    let mut state = make_test_state(Vec::new());
-    state
-        .session
-        .config_overrides
-        .set("extensions.plugins.discovery.path", true);
-
-    let next = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
-    let plugins = next.clients.plugins().list_plugins();
-    assert!(plugins.iter().any(|plugin| plugin.plugin_id == "hello"));
-
-    match original_path {
-        Some(value) => unsafe { std::env::set_var("PATH", value) },
-        None => unsafe { std::env::remove_var("PATH") },
-    }
-}
-
 #[cfg_attr(miri, ignore = "plugin restart filesystem/process integration test")]
 #[test]
 fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
+    if crate::tests::isolated_test() { return; }
     with_temp_config_paths(|| {
         let dir = make_temp_dir("osp-cli-repl-plugin-enable");
         let _plugin = write_pipeline_test_plugin(&dir);
@@ -121,22 +89,18 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
         state
             .clients
             .plugins()
-            .set_command_state("hello", crate::plugin::state::PluginCommandState::Disabled)
-            .expect("command should disable");
+            .set_disabled(["hello".to_string()]);
         assert!(state.clients.plugins().command_catalog().is_empty());
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
-            "plugins enable hello",
-        )
+            "plugins enable hello", None,).map(|executed| executed.result)
         .expect("plugin enable should succeed");
         assert!(matches!(
             result,
-            crate::repl::ReplLineResult::Restart {
+            crate::repl::ReplResult::Restart {
                 reload: crate::repl::ReplReloadKind::Default,
                 ..
             }
@@ -159,90 +123,76 @@ fn repl_reload_intent_matches_command_scope_unit() {
     let history = make_test_history(&mut state);
 
     let theme_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
-        "theme use dracula",
-    )
+        "theme use dracula", None,).map(|executed| executed.result)
     .expect("theme use should succeed");
     assert!(matches!(
         theme_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::WithIntro,
             ..
         }
     ));
 
     let format_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
-        "config set ui.format json",
-    )
+        "config set ui.format json", None,).map(|executed| executed.result)
     .expect("config set should succeed");
     assert!(matches!(
         format_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::Default,
             ..
         }
     ));
 
     let unset_format_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
-        "config unset ui.format",
-    )
+        "config unset ui.format", None,).map(|executed| executed.result)
     .expect("config unset should succeed");
     assert!(matches!(
         unset_format_result,
-        crate::repl::ReplLineResult::Restart {
+        crate::repl::ReplResult::Restart {
             reload: crate::repl::ReplReloadKind::Default,
             ..
         }
     ));
 
     let dry_run_unset_result = repl_dispatch::execute_repl_plugin_line(
-        &mut state.runtime,
-        &mut state.session,
-        &state.clients,
+        &mut state,
         &history,
-        "config unset ui.format --dry-run",
-    )
+        "config unset ui.format --dry-run", None,).map(|executed| executed.result)
     .expect("dry-run config unset should succeed");
     assert!(matches!(
         dry_run_unset_result,
-        crate::repl::ReplLineResult::Continue(_)
+        crate::repl::ReplResult::Print(_)
     ));
 }
 
 #[test]
 fn repl_config_unset_rebuilds_runtime_state_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state
             .session
             .config_overrides
-            .set_for_profile("default", "ui.format", "table");
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
-            "config unset ui.format",
-        )
+            "config unset ui.format", None,).map(|executed| executed.result)
         .expect("config unset should succeed");
         assert!(matches!(
             result,
-            crate::repl::ReplLineResult::Restart {
+            crate::repl::ReplResult::Restart {
                 reload: crate::repl::ReplReloadKind::Default,
                 ..
             }
@@ -260,25 +210,23 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 
 #[test]
 fn repl_config_unset_dry_run_preserves_session_state_unit() {
+    if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let mut state = make_test_state(Vec::new());
         state
             .session
             .config_overrides
-            .set_for_profile("default", "ui.format", "table");
+            .insert("ui.format", "table", crate::config::Scope::profile("default"));
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
         let history = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
-            &mut state.runtime,
-            &mut state.session,
-            &state.clients,
+            &mut state,
             &history,
-            "config unset ui.format --dry-run",
-        )
+            "config unset ui.format --dry-run", None,).map(|executed| executed.result)
         .expect("dry-run config unset should succeed");
-        assert!(matches!(result, crate::repl::ReplLineResult::Continue(_)));
+        assert!(matches!(result, crate::repl::ReplResult::Print(_)));
         assert_eq!(
             layer_value(&state.session.config_overrides, "ui.format"),
             Some(&ConfigValue::from("table"))

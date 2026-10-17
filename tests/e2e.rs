@@ -13,17 +13,11 @@ mod output_support;
 #[path = "e2e/support.rs"]
 mod support;
 
-#[path = "e2e/binary_surface.rs"]
-mod binary_surface;
-
-#[path = "e2e/cli_invocation.rs"]
-mod cli_invocation;
+#[path = "e2e/history.rs"]
+mod history;
 
 #[path = "e2e/json_output.rs"]
 mod json_output;
-
-#[path = "e2e/plugin_processes.rs"]
-mod plugin_processes;
 
 #[path = "e2e/repl_completion.rs"]
 mod repl_completion;
@@ -45,3 +39,12 @@ mod repl_prompt;
 
 #[path = "e2e/repl_smoke.rs"]
 mod repl_smoke;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "support/pty.rs"]
+mod pty_support;
+
+#[path = "support/process.rs"]
+mod process_support;

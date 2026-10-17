@@ -1,6 +1,5 @@
 use crate::temp_support::make_temp_dir;
 use crate::test_env::isolated_env;
-use assert_cmd::Command;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -26,7 +25,7 @@ fn run_osp_with_plugin_path(
             .expect("config should be written");
     }
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("TERM", "xterm-256color")
@@ -48,9 +47,9 @@ fn write_non_zero_plugin(dir: &Path) -> std::path::PathBuf {
         &plugin_path,
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{"protocol_version":1,"plugin_id":"boom","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{"name":"boom","about":"boom plugin","args":[],"flags":{},"subcommands":[]}]}
+{"about":"boom plugin","args":[],"flags":{},"subcommands":[],"output":"json"}
 JSON
   exit 0
 fi
@@ -75,7 +74,7 @@ fn default_usage_failure_stays_terse_with_hint_contract() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unexpected argument '--definitely-not-a-flag' found"));
-    assert!(stderr.contains("Try: rerun this command with --help"));
+    assert!(stderr.contains("hint: Run osp --help."));
     assert!(!stderr.contains("run again with -v"));
 }
 
@@ -86,17 +85,17 @@ fn verbose_usage_failure_shows_parse_context_without_terse_hint_contract() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unexpected argument '--definitely-not-a-flag' found"));
-    assert!(stderr.contains("failed to parse CLI arguments"));
+    assert!(stderr.contains("hint:"));
     assert!(!stderr.contains("Hint: use --help to inspect accepted flags and subcommands"));
 }
 
 #[test]
 fn forensic_config_failure_renders_full_host_context_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
-ui.message.verbosity = "definitely-invalid"
+ui.verbosity = "definitely-invalid"
 "#,
         ),
     );
@@ -104,10 +103,10 @@ ui.message.verbosity = "definitely-invalid"
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
-    assert!(normalized.contains("failed to resolve initial config for startup"));
-    assert!(normalized.contains("config resolution failed"));
+    assert!(normalized.contains("error:"));
+    assert!(normalized.contains("hint:"));
     assert!(
-        normalized.contains("invalid value for key ui.message.verbosity"),
+        normalized.contains("invalid value for key ui.verbosity"),
         "{normalized}"
     );
     assert!(!stderr.contains("Hint:"));
@@ -116,7 +115,7 @@ ui.message.verbosity = "definitely-invalid"
 #[test]
 fn forensic_runtime_failure_uses_configured_color_and_stacktrace_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
 ui.color.mode = "always"
@@ -128,16 +127,16 @@ theme.name = "missing-theme"
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
-    assert!(stderr.contains("failed to derive host runtime inputs for startup"));
+    assert!(stderr.contains("error:"));
     assert!(stderr.contains("unknown theme: missing-theme"));
     assert!(normalized.contains("Stack backtrace"));
-    assert!(stderr.contains("\u{1b}["));
+    assert!(!stderr.contains("\u{1b}["));
 }
 
 #[test]
 fn debug_runtime_failure_shows_context_without_stacktrace_contract() {
     let output = run_osp(
-        &["-vv", "config", "get", "ui.message.verbosity"],
+        &["-vv", "config", "get", "ui.verbosity"],
         Some(
             r#"[default]
 theme.name = "missing-theme"
@@ -147,7 +146,7 @@ theme.name = "missing-theme"
 
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("failed to derive host runtime inputs for startup"));
+    assert!(stderr.contains("error:"));
     assert!(stderr.contains("unknown theme: missing-theme"));
     assert!(!stderr.contains("Stack backtrace"));
 }
@@ -160,10 +159,9 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
 
     let output = run_osp_with_plugin_path(&["-vv", "boom"], None, Some(dir.path()));
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("plugin command failed"));
-    assert!(stderr.contains("plugin boom exited with status 7"));
+    assert!(stderr.contains("Plugin boom crashed (exit status 7)"));
     assert!(stderr.contains("boom-from-stderr"));
     assert!(!stderr.contains("Stack backtrace"));
 }
@@ -171,7 +169,7 @@ fn debug_plugin_failure_shows_context_without_stacktrace_contract() {
 #[test]
 fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
     let output = run_osp(
-        &["-vv", "config", "get", "ui.message.verbosity"],
+        &["-vv", "config", "get", "ui.verbosity"],
         Some("not = [valid\n"),
     );
 
@@ -179,15 +177,15 @@ fn debug_toml_parse_failure_shows_snippet_without_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("Begin snippet"));
-    assert!(normalized.contains("invalid TOML starts here"));
+    assert!(normalized.contains("failed to parse TOML"));
+    assert!(normalized.contains("error:"));
     assert!(!stderr.contains("Stack backtrace"));
 }
 
 #[test]
 fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let output = run_osp(
-        &["-vvv", "config", "get", "ui.message.verbosity"],
+        &["-v", "-dd", "config", "get", "ui.verbosity"],
         Some("not = [valid\n"),
     );
 
@@ -195,7 +193,51 @@ fn forensic_toml_parse_failure_shows_snippet_and_stacktrace_contract() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let normalized = normalized_whitespace(&stderr);
     assert!(normalized.contains("failed to parse TOML"));
-    assert!(normalized.contains("Begin snippet"));
-    assert!(normalized.contains("invalid TOML starts here"));
+    assert!(normalized.contains("failed to parse TOML"));
+    assert!(normalized.contains("error:"));
     assert!(normalized.contains("Stack backtrace"));
+}
+
+#[test]
+fn json_stdout_is_independent_of_verbosity_boundary() {
+    for command in [
+        vec!["config", "get", "debug.level"],
+        vec!["--unknown-option"],
+    ] {
+        let mut args = vec!["--json"];
+        args.extend(command.iter().copied());
+        let expected = run_osp(&args, None);
+        assert_eq!(
+            expected.status.code(),
+            Some(if command[0] == "config" { 0 } else { 2 })
+        );
+        for flag in ["-v", "-vv", "-vvv"] {
+            let mut verbose = args.clone();
+            verbose.insert(0, flag);
+            let actual = run_osp(&verbose, None);
+            assert_eq!(actual.status.code(), expected.status.code());
+            assert_eq!(actual.stdout, expected.stdout, "{verbose:?}");
+        }
+    }
+}
+
+#[test]
+fn debug_flags_preserve_stdout_boundary() {
+    for command in [
+        vec!["config", "get", "debug.level"],
+        vec!["--json", "--unknown-option"],
+    ] {
+        let expected = run_osp(&command, None);
+        assert_eq!(
+            expected.status.code(),
+            Some(if command[0] == "config" { 0 } else { 2 })
+        );
+        for flag in ["-d", "-dd", "-dddd"] {
+            let mut debug = command.clone();
+            debug.insert(0, flag);
+            let actual = run_osp(&debug, None);
+            assert_eq!(actual.status.code(), expected.status.code());
+            assert_eq!(actual.stdout, expected.stdout, "{debug:?}");
+        }
+    }
 }

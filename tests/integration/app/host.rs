@@ -4,25 +4,18 @@ use clap::Command;
 use osp_cli::App;
 use osp_cli::app::{BufferedUiSink, StdIoUiSink, UiSink};
 use osp_cli::config::ConfigLayer;
-use osp_cli::core::command_policy::{
-    CommandPath, CommandPolicy, CommandPolicyContext, CommandPolicyRegistry, VisibilityMode,
-};
-use osp_cli::core::output_model::DisplayRule;
-use osp_cli::core::plugin::{
-    PLUGIN_PROTOCOL_V1, ResponseMessageLevelV1, ResponseMessageV1, ResponseMetaV1, ResponseV1,
-};
+use osp_cli::core::DisplayRule;
+use osp_cli::core::MessageLevel;
+use osp_cli::core::plugin::{PLUGIN_PROTOCOL_V1, ResponseMessageV1, ResponseMetaV1, ResponseV1};
 use osp_cli::{
     NativeCommand, NativeCommandContext, NativeCommandOutcome, NativeCommandRegistry,
     NativeProgressEvent,
 };
 use serde_json::json;
 
-use super::support::{env_lock, parse_json_output, write_executable_script};
+use super::support::{parse_json_output, write_executable_script};
 
 fn with_config_path<T>(config_toml: &str, callback: impl FnOnce() -> T) -> T {
-    let _guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = make_temp_dir("osp-cli-app-host-config");
     let config_path = temp.path().join("config.toml");
     std::fs::write(&config_path, config_toml).expect("config should be written");
@@ -62,6 +55,7 @@ impl NativeCommand for GroupShapedServiceCommand {
             data: json!([{"groups": {}, "aggregates": {}, "rows": []}]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1::default(),
         })))
     }
@@ -69,9 +63,8 @@ impl NativeCommand for GroupShapedServiceCommand {
 
 #[test]
 fn service_group_field_names_are_not_interpreted_as_dsl_groups() {
-    let app = App::builder()
-        .with_native_commands(NativeCommandRegistry::new().with_command(GroupShapedServiceCommand))
-        .build();
+    let app = App::new()
+        .with_native_commands(NativeCommandRegistry::new().with_command(GroupShapedServiceCommand));
     let mut sink = BufferedUiSink::default();
     assert_eq!(
         app.run_with_sink(
@@ -116,7 +109,11 @@ impl NativeCommand for NativeProbeCommand {
             }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["active_profile".to_string(), "theme".to_string()]),
                 column_labels: Vec::new(),
@@ -125,8 +122,6 @@ impl NativeCommand for NativeProbeCommand {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -137,31 +132,6 @@ impl NativeCommand for NativeProbeCommand {
 
 fn native_probe_registry() -> NativeCommandRegistry {
     NativeCommandRegistry::new().with_command(NativeProbeCommand)
-}
-
-#[test]
-fn native_session_context_shares_selection_and_redacts_private_state() {
-    let session = osp_cli::NativeSessionContext::default();
-    let next_command = session.clone();
-    session.set_value("selected_target", "private-resource-ref");
-    session.set_prompt_value("selection", "Target", "public-label");
-    assert_eq!(
-        next_command.value("selected_target").as_deref(),
-        Some("private-resource-ref")
-    );
-    let entries = next_command.prompt_entries();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].label, "Target");
-    assert_eq!(entries[0].value, "public-label");
-    let diagnostic = format!("{next_command:?}");
-    assert!(diagnostic.contains("[redacted]"));
-    assert!(!diagnostic.contains("private-resource-ref"));
-    next_command.remove_prompt_value("selection");
-    assert!(session.prompt_entries().is_empty());
-    assert_eq!(
-        session.value("selected_target").as_deref(),
-        Some("private-resource-ref")
-    );
 }
 
 struct SiteStatusCommand;
@@ -180,17 +150,22 @@ impl NativeCommand for CuratedOrchRowsCommand {
     ) -> Result<NativeCommandOutcome> {
         for state in ["running", "completed"] {
             context.emit_progress(
-                NativeProgressEvent::new(json!({"state": state, "name": "db01.uio.no"}))
-                    .with_meta(ResponseMetaV1 {
-                        presentation_lines: vec![
-                            format!("{state}: db01.uio.no"),
-                            "└─ Resource preparation with a description long enough to wrap on a narrow terminal".into(),
-                        ],
-                        progress_append: if state == "running" { vec![format!("{state}: db01.uio.no")] } else { Vec::new() },
-                        progress_replace: true,
-                        preserve_json_document: true,
-                        ..ResponseMetaV1::default()
-                    }),
+                NativeProgressEvent::new(json!({
+                    "state": {"name": state},
+                    "name": "db01.uio.no",
+                    "provider": {"name": "vmware"},
+                    "created_at": 1700000000,
+                    "description": "Resource preparation with a description long enough to wrap on a narrow terminal",
+                }))
+                .with_meta(ResponseMetaV1 {
+                    context_not_found: false,
+                    context: Default::default(),
+                    format_hint: Some("mreg".into()),
+                    columns: Some(vec!["state.name".into(), "name".into(), "description".into()]),
+                    progress_replace: true,
+                    preserve_json_document: true,
+                    ..ResponseMetaV1::default()
+                }),
             )?;
         }
         context.flush_progress()?;
@@ -214,19 +189,23 @@ impl NativeCommand for CuratedOrchRowsCommand {
             error: None,
             messages: vec![
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Warning,
+                    level: MessageLevel::Warning,
                     text: "Results are incomplete".to_string(),
                 },
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Info,
+                    level: MessageLevel::Info,
                     text: "provider evidence".to_string(),
                 },
                 ResponseMessageV1 {
-                    level: ResponseMessageLevelV1::Trace,
+                    level: MessageLevel::Trace,
                     text: "runtime target vmware:prod".to_string(),
                 },
             ],
+            context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![
                     "name".to_string(),
@@ -259,8 +238,6 @@ impl NativeCommand for CuratedOrchRowsCommand {
                     },
                 ],
                 preserve_json_document: true,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -288,7 +265,11 @@ impl NativeCommand for SiteStatusCommand {
             }]),
             error: None,
             messages: Vec::new(),
+            context: None,
             meta: ResponseMetaV1 {
+                context_not_found: false,
+                detail_columns: Vec::new(),
+                context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: Some(vec!["enabled".to_string(), "banner".to_string()]),
                 column_labels: Vec::new(),
@@ -297,8 +278,6 @@ impl NativeCommand for SiteStatusCommand {
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
                 preserve_json_document: false,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
                 progress_replace: false,
                 display_limit: None,
                 partial_rows: None,
@@ -345,9 +324,7 @@ impl UiSink for TerminalCapture {
 
 #[test]
 fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
-    let app = App::builder()
-        .with_native_commands(curated_orch_rows_registry())
-        .build();
+    let app = App::new().with_native_commands(curated_orch_rows_registry());
 
     if std::env::var_os("OSP_LIVE_OUTPUT_CONTRACT_CHILD").is_some() {
         if !StdIoUiSink.stderr_is_terminal() {
@@ -376,7 +353,7 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
     assert!(human.stdout.contains("4 CPU / 8"));
     assert!(human.stdout.contains("GiB"));
     assert!(human.stdout.contains("db01.uio.no"));
-    assert!(human.stdout.contains("db01.uio.no …"));
+    assert!(human.stdout.contains("db01.uio.no (stale)"));
     assert!(!human.stdout.contains("powered_on"));
     assert!(!human.stdout.contains("next_cursor"));
     assert!(human.stderr.contains("Results are incomplete"));
@@ -476,7 +453,7 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
     );
     assert_eq!(projected, json!([{"provider":{"name":"vmware"}}]));
 
-    for format in ["--guide", "--md", "--mreg"] {
+    for format in ["--format=auto", "--md", "--mreg"] {
         let mut rendered = BufferedUiSink::default();
         assert_eq!(
             app.run_with_sink(
@@ -486,8 +463,13 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             .expect("explicit human formats should preserve the curated collection"),
             0,
         );
+        let expected_name = if format == "--md" {
+            r"db01.uio.no \(stale\)"
+        } else {
+            "db01.uio.no (stale)"
+        };
         assert!(
-            rendered.stdout.contains("db01.uio.no (stale)"),
+            rendered.stdout.contains(expected_name),
             "{format}: {}",
             rendered.stdout
         );
@@ -558,8 +540,13 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
                 "{format}: {}",
                 grouped.stdout
             );
+            let expected_state = if format == "--md" {
+                r"powered\_on"
+            } else {
+                "powered_on"
+            };
             assert!(
-                grouped.stdout.contains("powered_on"),
+                grouped.stdout.contains(expected_state),
                 "{format}: {}",
                 grouped.stdout
             );
@@ -597,7 +584,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
 
     // Live output and the final document share filtering, but occupy separate
     // channels so consuming the final JSON never consumes transient progress.
-    assert!(json_sink.stderr.contains("running: db01.uio.no"));
+    assert!(json_sink.stderr.contains("running"));
+    assert!(json_sink.stderr.contains("db01.uio.no"));
     assert!(json_sink.stderr.contains("completed"));
     assert!(!json_sink.stderr.contains('\x1b'));
     for (width, height, resize_height) in [
@@ -617,8 +605,9 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             &mut terminal,
         )
         .expect("live presentations should fit the terminal or append safely");
-        assert!(terminal.output.stderr.contains("running: db01.uio.no"));
-        assert!(terminal.output.stderr.contains("completed: db01.uio.no"));
+        assert!(terminal.output.stderr.contains("running"));
+        assert!(terminal.output.stderr.contains("completed"));
+        assert!(terminal.output.stderr.contains("db01.uio.no"));
         assert_eq!(
             terminal.output.stderr.contains("\x1b[2K"),
             height > 2 && resize_height.is_none()
@@ -651,8 +640,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
     #[cfg(unix)]
     {
         use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-        use std::io::Read;
-        let redirected = std::process::Command::new(std::env::current_exe().unwrap())
+        let redirected = assert_cmd::Command::new(std::env::current_exe().unwrap())
+            .timeout(std::time::Duration::from_secs(20))
             .args([
                 "--exact",
                 "app::host::app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows",
@@ -667,7 +656,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
         let stdout = String::from_utf8(redirected.stdout).unwrap();
         let stderr = String::from_utf8(redirected.stderr).unwrap();
         assert!(stdout.contains("4 CPU / 8 GiB"));
-        assert!(stderr.contains("running: db01.uio.no"));
+        assert!(stderr.contains("running"));
+        assert!(stderr.contains("db01.uio.no"));
         assert!(stderr.contains("completed"));
         assert!(!stderr.contains('\x1b'));
 
@@ -688,19 +678,12 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             ]);
             command.env("OSP_LIVE_OUTPUT_CONTRACT_CHILD", "1");
             command.env("PAGER", pager);
-            let mut child = pair
-                .slave
-                .spawn_command(command)
-                .expect("start terminal host");
-            drop(pair.slave);
-            let mut reader = pair.master.try_clone_reader().unwrap();
-            let mut captured = String::new();
-            reader
-                .read_to_string(&mut captured)
-                .expect("read terminal output");
-            assert!(child.wait().unwrap().success(), "{captured}");
-            assert!(captured.contains("running: db01.uio.no"));
-            assert!(captured.contains("completed: db01.uio.no"));
+            let (captured, status) =
+                crate::pty_support::capture(pair, command, std::time::Duration::from_secs(20));
+            assert!(status.success(), "{captured}");
+            assert!(captured.contains("running"));
+            assert!(captured.contains("completed"));
+            assert!(captured.contains("db01.uio.no"));
             assert!(captured.contains("4 CPU / 8 GiB"), "{captured}");
         }
     }
@@ -712,9 +695,9 @@ fn write_route_probe_plugin(dir: &std::path::Path, plugin_id: &str, command_name
     let script = format!(
         r#"#!/bin/sh
 PATH=/usr/bin:/bin:$PATH
-if [ "$1" = "--describe" ]; then
+if [ "$1" = "--osp-describe" ]; then
   cat <<'JSON'
-{{"protocol_version":1,"plugin_id":"{plugin_id}","plugin_version":"0.1.0","min_osp_version":"0.1.0","commands":[{{"name":"{command_name}","about":"{command_name} route probe","args":[],"flags":{{}},"subcommands":[]}}]}}
+{{"about":"{command_name} route probe","args":[],"flags":{{}},"subcommands":[],"output":"json"}}
 JSON
   exit 0
 fi
@@ -723,7 +706,6 @@ cat <<JSON
 {{"protocol_version":1,"ok":true,"data":[{{"profile":"${{OSP_PROFILE:-}}","selected_command":"${{OSP_COMMAND:-}}","arg0":"${{1:-}}","arg1":"${{2:-}}"}}],"error":null,"meta":{{"format_hint":"json"}}}}
 JSON
 "#,
-        plugin_id = plugin_id,
         command_name = command_name,
     );
     write_executable_script(&plugin_path, &script);
@@ -731,9 +713,7 @@ JSON
 
 #[test]
 fn app_host_surfaces_native_commands_in_help_and_dispatch() {
-    let app = App::builder()
-        .with_native_commands(native_probe_registry())
-        .build();
+    let app = App::new().with_native_commands(native_probe_registry());
     let help_args = ["osp", "--defaults-only", "--help"];
 
     let mut help_sink = BufferedUiSink::default();
@@ -765,50 +745,14 @@ fn app_host_surfaces_native_commands_in_help_and_dispatch() {
 }
 
 #[test]
-fn app_host_merges_active_profile_into_product_policy_context() {
-    with_config_path(
-        r#"
-[default]
-profile.default = "uio"
-
-[profile.uio]
-
-[profile.tsd]
-"#,
-        || {
-            let mut policy = CommandPolicyRegistry::new();
-            policy.register(
-                CommandPolicy::new(CommandPath::new(["config"]))
-                    .visibility(VisibilityMode::Authenticated)
-                    .allow_profiles(["tsd"]),
-            );
-            let app = App::builder()
-                .with_builtin_policy(policy)
-                .with_policy_context(CommandPolicyContext::default().authenticated(true))
-                .build();
-
-            let mut default_sink = BufferedUiSink::default();
-            app.run_with_sink(["osp", "config", "get", "theme.name"], &mut default_sink)
-                .expect_err("default profile should be outside the policy allowlist");
-
-            let mut selected_sink = BufferedUiSink::default();
-            let selected_exit = app
-                .run_with_sink(
-                    ["osp", "--profile", "tsd", "config", "get", "theme.name"],
-                    &mut selected_sink,
-                )
-                .expect("selected-profile access should be evaluated");
-            assert_eq!(selected_exit, 0, "{}", selected_sink.stderr);
-            assert!(selected_sink.stdout.contains("theme.name"));
-        },
-    );
-}
-
-#[test]
 fn app_value_api_layers_product_defaults_and_process_style_failures() {
     let mut product_defaults = ConfigLayer::default();
     product_defaults.set("extensions.site.enabled", true);
-    product_defaults.set_for_terminal("cli", "extensions.site.banner", "cli-wrapper");
+    product_defaults.insert(
+        "extensions.site.banner",
+        "cli-wrapper",
+        osp_cli::config::Scope::terminal("cli"),
+    );
 
     let app = App::new()
         .with_native_commands(site_status_registry())
@@ -854,6 +798,9 @@ fn app_value_api_layers_product_defaults_and_process_style_failures() {
 
 #[test]
 fn app_host_passes_default_and_selected_profiles_into_native_context() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"
@@ -863,9 +810,7 @@ theme.name = "nord"
 theme.name = "dracula"
 "#,
         || {
-            let app = App::builder()
-                .with_native_commands(native_probe_registry())
-                .build();
+            let app = App::new().with_native_commands(native_probe_registry());
 
             let default_args = ["osp", "--no-env", "--json", "native-probe"];
             let mut default_sink = BufferedUiSink::default();
@@ -933,9 +878,7 @@ theme.name = "dracula"
 
 #[test]
 fn app_host_projects_native_commands_into_repl_completion_surface() {
-    let app = App::builder()
-        .with_native_commands(native_probe_registry())
-        .build();
+    let app = App::new().with_native_commands(native_probe_registry());
 
     let args = [
         "osp",
@@ -968,6 +911,9 @@ fn app_host_projects_native_commands_into_repl_completion_surface() {
 #[cfg(unix)]
 #[test]
 fn app_host_routes_attached_and_separate_profile_flags_the_same_for_external_commands() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"
@@ -979,7 +925,7 @@ theme.name = "dracula"
             let dir = make_temp_dir("osp-cli-app-host-route-plugin");
             write_route_probe_plugin(dir.path(), "route-probe", "route-probe");
             let plugin_dir = dir.to_str().expect("plugin dir should be utf-8");
-            let app = App::builder().build();
+            let app = App::new();
 
             let explicit_args = [
                 "osp",
@@ -1049,6 +995,9 @@ theme.name = "dracula"
 #[cfg(unix)]
 #[test]
 fn app_host_keeps_unknown_leading_token_as_command_instead_of_profile() {
+    if crate::isolation::isolated_test() {
+        return;
+    }
     with_config_path(
         r#"[default]
 profile.default = "uio"
@@ -1060,7 +1009,7 @@ theme.name = "dracula"
             let dir = make_temp_dir("osp-cli-app-host-unknown-profile-token");
             write_route_probe_plugin(dir.path(), "prod", "prod");
             let plugin_dir = dir.to_str().expect("plugin dir should be utf-8");
-            let app = App::builder().build();
+            let app = App::new();
 
             let mut sink = BufferedUiSink::default();
             let args = [

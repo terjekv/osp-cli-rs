@@ -1,12 +1,12 @@
 //! Human-facing document IR used between UI lowering and emitters.
 //!
-//! `ui` does not render directly from rows or guide payloads. Lowering first
+//! `ui` does not render directly from rows or semantic payloads. Lowering first
 //! converts semantic output into this smaller document model so terminal and
 //! markdown emitters can share one structural contract.
 //!
 //! In practice:
 //!
-//! - lowering owns how rows, guides, and key/value output become blocks
+//! - lowering owns how rows, documents, and key/value output become blocks
 //! - emitters own how those blocks become final text in a concrete format
 //! - this module should stay dumb data, not a second rendering engine
 
@@ -24,7 +24,7 @@ pub enum Block {
     Paragraph(ParagraphBlock),
     Section(SectionBlock),
     Table(TableBlock),
-    GuideEntries(GuideEntriesBlock),
+    Entries(EntriesBlock),
     KeyValue(KeyValueBlock),
     List(ListBlock),
     Json(JsonBlock),
@@ -56,6 +56,7 @@ pub enum SectionTitleChrome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableBlock {
+    pub cell_styles: Vec<Vec<Option<String>>>,
     pub summary: Vec<KeyValueRow>,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
@@ -65,18 +66,19 @@ pub struct TableBlock {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// Named guide text and its presentation hints, shared by every emitter.
+/// Named text and its presentation hints, shared by every emitter.
 ///
-/// Keeping guide rows typed gives Markdown and terminal rendering one owner
-/// for help labels and descriptions as the guide model evolves.
-pub struct GuideEntriesBlock {
+/// Keeping entries typed gives Markdown and terminal rendering one owner for
+/// labels and descriptions.
+pub struct EntriesBlock {
+    pub inline_markup: bool,
     pub default_indent: String,
     pub default_gap: Option<String>,
-    pub rows: Vec<GuideEntryRow>,
+    pub rows: Vec<EntryRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuideEntryRow {
+pub struct EntryRow {
     pub key: String,
     pub value: String,
     pub indent_hint: Option<String>,

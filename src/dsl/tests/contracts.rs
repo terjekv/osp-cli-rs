@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::{
     core::{
-        output_model::{Group, OutputDocument, OutputDocumentKind, OutputItems, OutputResult},
+        output_model::{Group, OutputDocument, OutputItems, OutputResult},
         row::Row,
     },
     dsl::{apply_output_pipeline, apply_pipeline},
@@ -52,7 +52,7 @@ fn grouped_output() -> OutputResult {
 }
 
 #[test]
-fn quoted_term_contract_is_shared_by_project_and_value_stages() {
+fn quoted_term_contract_is_shared_by_pipeline_stages() {
     let rows = vec![row(
         json!({"display,name": "Alice", "team ops": "platform"}),
     )];
@@ -64,12 +64,40 @@ fn quoted_term_contract_is_shared_by_project_and_value_stages() {
     };
     assert_eq!(projected_rows, vec![row(json!({"display,name": "Alice"}))]);
 
+    let mut labeled = OutputResult::from_rows(vec![row(json!({"status": "running", "uid": "42"}))]);
+    labeled.meta.display_columns = Some(vec!["status".to_string(), "uid".to_string()]);
+    labeled.meta.display_column_labels = Some(vec!["STATE".to_string(), "ID".to_string()]);
+    let labeled_projection = apply_output_pipeline(labeled, &["P STATE,ID".to_string()])
+        .expect("comma-separated display labels should project separately");
+    assert_eq!(
+        labeled_projection.as_rows().expect("row output"),
+        &[row(json!({"status": "running", "uid": "42"}))]
+    );
+
     let values = apply_pipeline(rows, &["VALUE \"display,name\"".to_string()])
         .expect("quoted value term should work");
     let OutputItems::Rows(value_rows) = values.items else {
         panic!("expected row output");
     };
     assert_eq!(value_rows, vec![row(json!({"value": "Alice"}))]);
+
+    for stage in ["V \"hello world\"", "K \"team ops\"", "\"hello world\""] {
+        let quick = apply_pipeline(
+            vec![row(
+                json!({"team ops": "hello world", "note": "hello world"}),
+            )],
+            &[stage.to_string()],
+        )
+        .expect("quoted quick phrase should work");
+        assert_eq!(quick.as_rows().map(|rows| rows.len()), Some(1), "{stage}");
+    }
+
+    let quoted_sigil = apply_pipeline(
+        vec![row(json!({"note": "prefix =hello suffix"}))],
+        &["V \"=hello\"".to_string()],
+    )
+    .expect("quoted quick sigil should stay literal");
+    assert_eq!(quoted_sigil.as_rows().map(|rows| rows.len()), Some(1));
 }
 
 #[test]
@@ -145,14 +173,12 @@ fn nested_array_value_selection_preserves_every_branch_in_document_order() {
 fn nested_array_filter_preserves_every_matching_semantic_branch() {
     let document = deep_array_document();
 
-    // This is a service record, not a declared GuideView. Filtering selects
+    // This is a service record, not a declared Document. Filtering selects
     // the complete row; nested matching leaves do not become a new document.
     let mut filtered_outputs = Vec::new();
     for selector in ["clusters[].nodes[].disks[].ssd", "clusters.nodes.disks.ssd"] {
-        let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::new(
-            OutputDocumentKind::Json,
-            document.clone(),
-        ));
+        let output = OutputResult::from_rows(Vec::new())
+            .with_document(OutputDocument::Json(document.clone()));
         let filtered = apply_output_pipeline(output, &[format!("F {selector}=true")])
             .expect("nested semantic filter should work");
         filtered_outputs.push(filtered);
@@ -194,8 +220,7 @@ fn semantic_value_selection_flattens_leaves_into_value_rows() {
         },
         "counts": {"current": 2}
     });
-    let output = OutputResult::from_rows(Vec::new())
-        .with_document(OutputDocument::new(OutputDocumentKind::Json, document));
+    let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(document));
 
     let extracted = apply_output_pipeline(output, &["VALUE siteadmins.current.name".to_string()])
         .expect("semantic value selection should work");
@@ -225,8 +250,7 @@ fn addressed_filter_keeps_complete_rows_and_sibling_branches() {
         "netgroup": "uio-drift",
         "counts": {"current": 2, "pending": 1}
     });
-    let output = OutputResult::from_rows(Vec::new())
-        .with_document(OutputDocument::new(OutputDocumentKind::Json, document));
+    let output = OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(document));
 
     let filtered = apply_output_pipeline(output, &["F siteadmins.current[].hosts>10".to_string()])
         .expect("addressed semantic filter should work");
@@ -386,6 +410,13 @@ fn unicode_case_insensitive_matching_is_shared_by_quick_and_filter() {
     };
     assert_eq!(value_rows.len(), 1);
 
+    let exact_value_quick = apply_pipeline(rows.clone(), &["V =ålesund".to_string()])
+        .expect("unicode exact quick value match should work");
+    let OutputItems::Rows(exact_value_rows) = exact_value_quick.items else {
+        panic!("expected row output");
+    };
+    assert_eq!(exact_value_rows.len(), 1);
+
     let key_quick = apply_pipeline(rows.clone(), &["K grønn".to_string()])
         .expect("unicode quick key match should work");
     let OutputItems::Rows(key_rows) = key_quick.items else {
@@ -402,7 +433,7 @@ fn unicode_case_insensitive_matching_is_shared_by_quick_and_filter() {
 }
 
 #[test]
-fn quick_contract_preserves_matching_parent_objects_in_object_arrays() {
+fn quick_contract_keeps_complete_matching_objects_in_arrays() {
     let rows = vec![row(json!({
         "commands": [
             {
@@ -416,8 +447,8 @@ fn quick_contract_preserves_matching_parent_objects_in_object_arrays() {
         ]
     }))];
 
-    let output = apply_pipeline(rows, &["shared".to_string()])
-        .expect("quick should preserve full matching command entries");
+    let output =
+        apply_pipeline(rows, &["shared".to_string()]).expect("quick should keep matching commands");
     let OutputItems::Rows(result_rows) = output.items else {
         panic!("expected row output");
     };

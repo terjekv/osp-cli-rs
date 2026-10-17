@@ -1,726 +1,115 @@
-//! `plugins` builtin command implementation.
-//!
-//! This module is the operator-facing management surface for plugin discovery,
-//! catalog browsing, provider preference state, and plugin-scoped config
-//! projection.
+//! Executable inventory and persistent enablement.
 
-use super::resolve_terminal_selector;
-use crate::app::{AppClients, AppRuntime, AuthState, ConfigState, RuntimeContext};
-use crate::app::{CliCommandResult, PluginConfigScope, plugin_config_entries};
-use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{PluginCommandStateArgs, PluginConfigArgs, PluginsArgs, PluginsCommands};
+use crate::app::{AppClients, AppRuntime, CommandOutput};
+use crate::cli::{PluginsArgs, PluginsCommands};
 use crate::config::{
-    ConfigLayer, ConfigValue, ResolvedConfig, RuntimeConfigPaths, Scope, TomlStoreEditOptions,
-    set_scoped_value_in_toml, unset_scoped_value_in_toml,
+    ConfigValue, RuntimeConfigPaths, Scope, TomlStoreEditOptions, set_scoped_value_in_toml,
 };
-use crate::core::plugin::canonical_plugin_command_name;
 use crate::core::row::Row;
-use crate::plugin::config::plugin_config_value_for_display;
-use crate::plugin::{
-    CommandCatalogEntry, DoctorReport, PluginManager, PluginSummary, state::PluginCommandState,
-};
-use miette::{Result, WrapErr};
-
-#[derive(Clone, Copy)]
-pub(crate) struct PluginsCommandContext<'a> {
-    pub(crate) context: &'a RuntimeContext,
-    pub(crate) config: &'a ResolvedConfig,
-    pub(crate) config_state: Option<&'a ConfigState>,
-    pub(crate) auth: &'a AuthState,
-    pub(crate) clients: Option<&'a AppClients>,
-    pub(crate) plugin_manager: &'a PluginManager,
-    pub(crate) product_defaults: &'a ConfigLayer,
-    pub(crate) runtime_load: crate::config::RuntimeLoadOptions,
-}
-
-impl<'a> PluginsCommandContext<'a> {
-    pub(crate) fn from_parts(runtime: &'a AppRuntime, clients: &'a AppClients) -> Self {
-        Self {
-            context: &runtime.context,
-            config: runtime.config.resolved(),
-            config_state: Some(&runtime.config),
-            auth: &runtime.auth,
-            clients: Some(clients),
-            plugin_manager: clients.plugins(),
-            product_defaults: runtime.product_defaults(),
-            runtime_load: runtime.launch.runtime_load,
-        }
-    }
-}
+use miette::{Result, WrapErr, miette};
 
 pub(crate) fn run_plugins_command(
-    context: PluginsCommandContext<'_>,
+    runtime: &AppRuntime,
+    clients: &AppClients,
     args: PluginsArgs,
-) -> Result<CliCommandResult> {
-    let plugin_manager = context.plugin_manager;
+) -> Result<CommandOutput> {
     match args.command {
-        PluginsCommands::List => {
-            let mut plugins = plugin_manager.list_plugins();
-            plugins.sort_by(|a, b| a.plugin_id.cmp(&b.plugin_id));
-            Ok(CliCommandResult::output(
-                rows_to_output_result(plugin_list_rows(&plugins)),
-                None,
-            ))
-        }
-        PluginsCommands::Commands => {
-            let mut commands = context
-                .plugin_manager
-                .command_catalog()
-                .into_iter()
-                .filter(|entry| context.auth.is_external_command_visible(&entry.name))
-                .collect::<Vec<_>>();
-            commands.sort_by(|a, b| a.name.cmp(&b.name));
-            Ok(CliCommandResult::output(
-                rows_to_output_result(command_catalog_rows(&commands)),
-                None,
-            ))
-        }
-        PluginsCommands::Config(PluginConfigArgs { plugin_id }) => Ok(CliCommandResult::output(
-            rows_to_output_result(plugin_config_rows(
-                &plugin_id,
-                &projected_plugin_config_entries(context, &plugin_id),
-            )),
-            None,
+        PluginsCommands::List => Ok(super::rows_with_empty_info(
+            plugin_rows(clients, false),
+            "No plugins discovered.",
         )),
         PluginsCommands::Refresh => {
-            plugin_manager.refresh();
-            let mut result = CliCommandResult::exit(0);
+            clients.plugins().refresh();
+            let mut result = CommandOutput::exit(0);
             result.messages.success("refreshed plugin discovery cache");
             Ok(result)
         }
-        PluginsCommands::Doctor => {
-            let report = plugin_manager.doctor();
-            Ok(CliCommandResult::output(
-                rows_to_output_result(doctor_rows(&report)),
-                None,
-            ))
-        }
-        PluginsCommands::Enable(args) => {
-            set_command_state(context, &args, PluginCommandState::Enabled, "enabled")
-        }
-        PluginsCommands::Disable(args) => {
-            set_command_state(context, &args, PluginCommandState::Disabled, "disabled")
-        }
-        PluginsCommands::ClearState(args) => {
-            let command = validated_state_command(context, &args.target.command)?;
-            let removed = clear_command_state(
-                context,
-                command.as_str(),
-                plugin_scope(context, &args.target.scope),
-            )?;
-            sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
-            if removed {
-                result
-                    .messages
-                    .success(format!("cleared command state for {command}"));
+        PluginsCommands::Enable { name } => set_enabled(runtime, clients, &name, true),
+        PluginsCommands::Disable { name } => set_enabled(runtime, clients, &name, false),
+    }
+}
+
+pub(crate) fn plugin_rows(clients: &AppClients, issues_only: bool) -> Vec<Row> {
+    let native_names = clients
+        .native_commands()
+        .catalog()
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect::<std::collections::HashSet<_>>();
+    clients
+        .plugins()
+        .list()
+        .into_iter()
+        .filter_map(|plugin| {
+            let status = if crate::cli::builtin_command_names().contains(&plugin.name) {
+                format!("shadowed by builtin {}", plugin.name)
+            } else if native_names.contains(&plugin.name) {
+                format!("shadowed by native {}", plugin.name)
             } else {
-                result
-                    .messages
-                    .warning(format!("no explicit command state set for {command}"));
+                plugin.status
+            };
+            if issues_only && status == "ok" {
+                return None;
             }
-            Ok(result)
-        }
-        PluginsCommands::SelectProvider(args) => {
-            let command = normalize_command_name(&args.target.command)?;
-            plugin_manager
-                .validate_provider_selection(&command, &args.plugin_id)
-                .map_err(|err| {
-                    crate::app::report_anyhow_with_context(
-                        err,
-                        "failed to validate provider selection",
-                    )
-                })?;
-            persist_provider_selection(
-                context,
-                &command,
-                &args.plugin_id,
-                plugin_scope(context, &args.target.scope),
-            )?;
-            sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
-            result.messages.success(format!(
-                "selected provider for command `{command}`: {}",
-                args.plugin_id
-            ));
-            Ok(result)
-        }
-        PluginsCommands::ClearProvider(args) => {
-            let command = normalize_command_name(&args.target.command)?;
-            let removed = clear_provider_selection(
-                context,
-                &command,
-                plugin_scope(context, &args.target.scope),
-            )?;
-            sync_current_command_preferences(context)?;
-            let mut result = CliCommandResult::exit(0);
-            if removed {
-                result.messages.success(format!(
-                    "cleared provider selection for command `{command}`"
-                ));
-            } else {
-                result
-                    .messages
-                    .warning(format!("no provider selection set for command `{command}`"));
-            }
-            Ok(result)
-        }
-    }
-}
-
-fn validated_state_command(context: PluginsCommandContext<'_>, command: &str) -> Result<String> {
-    let command = normalize_command_name(command)?;
-    context
-        .plugin_manager
-        .validate_command(&command)
-        .map_err(|err| {
-            crate::app::report_anyhow_with_context(
-                err,
-                "failed to validate plugin command state change",
-            )
-        })?;
-    Ok(command)
-}
-
-fn set_command_state(
-    context: PluginsCommandContext<'_>,
-    args: &PluginCommandStateArgs,
-    state: PluginCommandState,
-    verb: &str,
-) -> Result<CliCommandResult> {
-    let command = validated_state_command(context, &args.target.command)?;
-    persist_command_state(
-        context,
-        command.as_str(),
-        state,
-        plugin_scope(context, &args.target.scope),
-    )?;
-    sync_current_command_preferences(context)?;
-    let mut result = CliCommandResult::exit(0);
-    result
-        .messages
-        .success(format!("{verb} command: {command}"));
-    Ok(result)
-}
-
-fn persist_command_state(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    state: PluginCommandState,
-    scope: Scope,
-) -> Result<()> {
-    let config_path = plugin_config_path(context)?;
-    let value = ConfigValue::String(state.as_str().to_string());
-    set_scoped_value_in_toml(
-        &config_path,
-        &plugin_state_key(command),
-        &value,
-        &scope,
-        TomlStoreEditOptions::new(),
-    )
-    .wrap_err_with(|| format!("failed to persist command state for `{command}`"))?;
-    Ok(())
-}
-
-fn clear_command_state(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    scope: Scope,
-) -> Result<bool> {
-    let config_path = plugin_config_path(context)?;
-    let edit_result = unset_scoped_value_in_toml(
-        &config_path,
-        &plugin_state_key(command),
-        &scope,
-        TomlStoreEditOptions::new(),
-    )
-    .wrap_err_with(|| format!("failed to clear command state for `{command}`"))?;
-    Ok(edit_result.previous.is_some())
-}
-
-fn persist_provider_selection(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    plugin_id: &str,
-    scope: Scope,
-) -> Result<()> {
-    let config_path = plugin_config_path(context)?;
-    set_scoped_value_in_toml(
-        &config_path,
-        &plugin_provider_key(command),
-        &ConfigValue::String(plugin_id.trim().to_string()),
-        &scope,
-        TomlStoreEditOptions::new(),
-    )
-    .wrap_err_with(|| format!("failed to persist provider selection for `{command}`"))?;
-    Ok(())
-}
-
-fn clear_provider_selection(
-    context: PluginsCommandContext<'_>,
-    command: &str,
-    scope: Scope,
-) -> Result<bool> {
-    let config_path = plugin_config_path(context)?;
-    let edit_result = unset_scoped_value_in_toml(
-        &config_path,
-        &plugin_provider_key(command),
-        &scope,
-        TomlStoreEditOptions::new(),
-    )
-    .wrap_err_with(|| format!("failed to clear provider selection for `{command}`"))?;
-    Ok(edit_result.previous.is_some())
-}
-
-fn plugin_config_path(context: PluginsCommandContext<'_>) -> Result<std::path::PathBuf> {
-    if !context.runtime_load.include_config_file {
-        return Err(miette::miette!(
-            "config file writes are disabled for this session"
-        ));
-    }
-    RuntimeConfigPaths::discover()
-        .config_file
-        .ok_or_else(|| miette::miette!("failed to resolve config.toml path for plugin config"))
-}
-
-fn plugin_scope(context: PluginsCommandContext<'_>, args: &crate::cli::PluginScopeArgs) -> Scope {
-    let terminal = resolve_terminal_selector(
-        context.context.terminal_kind().as_config_terminal(),
-        args.terminal.as_deref(),
-    );
-    if args.global {
-        return terminal
-            .as_deref()
-            .map_or_else(Scope::global, Scope::terminal);
-    }
-
-    let profile = args
-        .profile
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| context.config.active_profile());
-
-    terminal.as_deref().map_or_else(
-        || Scope::profile(profile),
-        |current| Scope::profile_terminal(profile, current),
-    )
-}
-
-fn normalize_command_name(command: &str) -> Result<String> {
-    if command.trim().is_empty() {
-        return Err(miette::miette!("command must not be empty"));
-    }
-    canonical_plugin_command_name(command).map_err(|err| miette::miette!("{err}"))
-}
-
-fn sync_current_command_preferences(context: PluginsCommandContext<'_>) -> Result<()> {
-    let resolved = crate::app::resolve_runtime_config(
-        crate::app::RuntimeConfigRequest::new(
-            context.context.profile_override().map(ToOwned::to_owned),
-            Some(context.context.terminal_kind().as_config_terminal()),
-        )
-        .with_runtime_load(context.runtime_load)
-        .with_product_defaults(context.product_defaults.clone()),
-    )
-    .wrap_err("failed to refresh plugin command preferences from runtime config")?;
-    context.plugin_manager.replace_command_preferences(
-        crate::plugin::state::PluginCommandPreferences::from_resolved(&resolved),
-    );
-    Ok(())
-}
-
-fn plugin_state_key(command: &str) -> String {
-    format!("plugins.{}.state", command.trim())
-}
-
-fn plugin_provider_key(command: &str) -> String {
-    format!("plugins.{}.provider", command.trim())
-}
-
-fn projected_plugin_config_entries(
-    context: PluginsCommandContext<'_>,
-    plugin_id: &str,
-) -> Vec<crate::app::PluginConfigEntry> {
-    if let (Some(config_state), Some(clients)) = (context.config_state, context.clients) {
-        return clients.plugin_config_entries(config_state, plugin_id);
-    }
-    plugin_config_entries(context.config, plugin_id)
-}
-
-fn plugin_list_rows(plugins: &[PluginSummary]) -> Vec<Row> {
-    if plugins.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "message" => "No plugins discovered.",
-        }];
-    }
-
-    plugins
-        .iter()
-        .map(|plugin| {
-            let commands = serde_json::Value::Array(
-                plugin
-                    .commands
-                    .iter()
-                    .map(|command| command.clone().into())
-                    .collect(),
-            );
-            let version = plugin
-                .plugin_version
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into);
-            let issue = plugin
-                .issue
-                .clone()
-                .map_or(serde_json::Value::Null, Into::into);
-            crate::row! {
-                "plugin_id" => plugin.plugin_id.clone(),
-                "enabled" => plugin.enabled,
-                "healthy" => plugin.healthy,
+            Some(crate::row! {
+                "name" => plugin.name,
+                "about" => plugin.describe.map(|d| d.about).unwrap_or_default(),
                 "source" => plugin.source.to_string(),
-                "plugin_version" => version,
-                "path" => plugin.executable.display().to_string(),
-                "commands" => commands,
-                "issue" => issue,
-            }
+                "path" => plugin.path.display().to_string(),
+                "status" => status,
+            })
         })
         .collect()
 }
 
-fn command_catalog_rows(commands: &[CommandCatalogEntry]) -> Vec<Row> {
-    if commands.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "message" => "No plugin commands discovered.",
-        }];
-    }
-
-    commands
+fn set_enabled(
+    runtime: &AppRuntime,
+    clients: &AppClients,
+    name: &str,
+    enabled: bool,
+) -> Result<CommandOutput> {
+    if !clients
+        .plugins()
+        .list()
         .iter()
-        .map(|command| {
-            let auth_hint = command
-                .auth_hint()
-                .map_or(serde_json::Value::Null, Into::into);
-            let auth_visibility = command
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.visibility.map(|visibility| visibility.as_label()))
-                .map_or(serde_json::Value::Null, Into::into);
-            let required_capabilities = serde_json::Value::Array(
-                command
-                    .auth
-                    .as_ref()
-                    .map(|auth| {
-                        auth.required_capabilities
-                            .iter()
-                            .map(|value| value.clone().into())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            );
-            let feature_flags = serde_json::Value::Array(
-                command
-                    .auth
-                    .as_ref()
-                    .map(|auth| {
-                        auth.feature_flags
-                            .iter()
-                            .map(|value| value.clone().into())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            );
-            let visible_session = command
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.visible_session.as_ref())
-                .and_then(|session| serde_json::to_value(session).ok())
-                .unwrap_or(serde_json::Value::Null);
-            let run_session = command
-                .auth
-                .as_ref()
-                .and_then(|auth| auth.run_session.as_ref())
-                .and_then(|session| serde_json::to_value(session).ok())
-                .unwrap_or(serde_json::Value::Null);
-            let subcommands = serde_json::Value::Array(
-                command
-                    .subcommands
-                    .iter()
-                    .map(|value| value.clone().into())
-                    .collect(),
-            );
-            let mut row = crate::row! {
-                "name" => command.name.clone(),
-                "about" => command.about.clone(),
-                "provider" => command
-                    .provider
-                    .clone()
-                    .map_or(serde_json::Value::Null, Into::into),
-                "providers" => serde_json::Value::Array(
-                    command
-                        .providers
-                        .iter()
-                        .map(|value| value.clone().into())
-                        .collect(),
-                ),
-                "conflicted" => command.conflicted,
-                "requires_selection" => command.requires_selection,
-                "selected_explicitly" => command.selected_explicitly,
-                "source" => command
-                    .source
-                    .map(|value| value.to_string())
-                    .map_or(serde_json::Value::Null, Into::into),
-                "auth_hint" => auth_hint,
-                "auth_visibility" => auth_visibility,
-                "required_capabilities" => required_capabilities,
-                "feature_flags" => feature_flags,
-                "subcommands" => subcommands,
-            };
-            if !visible_session.is_null() {
-                row.insert("visible_session".to_string(), visible_session);
-            }
-            if !run_session.is_null() {
-                row.insert("run_session".to_string(), run_session);
-            }
-            row
-        })
-        .collect()
-}
-
-fn plugin_config_rows(plugin_id: &str, entries: &[crate::app::PluginConfigEntry]) -> Vec<Row> {
-    if entries.is_empty() {
-        return vec![crate::row! {
-            "status" => "empty",
-            "plugin_id" => plugin_id.to_string(),
-            "message" => "No app-owned plugin config is projected for this plugin.",
-        }];
+        .any(|plugin| plugin.name == name)
+    {
+        return Err(miette!("unknown plugin `{name}`"));
     }
-
-    entries
-        .iter()
-        .map(|entry| {
-            let scope = match entry.scope {
-                PluginConfigScope::Shared => "shared",
-                PluginConfigScope::Plugin => "plugin",
-            };
-            crate::row! {
-                "plugin_id" => plugin_id.to_string(),
-                "env" => entry.env_key.clone(),
-                "value" => plugin_config_value_for_display(entry),
-                "config_key" => entry.config_key.clone(),
-                "scope" => scope,
-                "issue" => entry
-                    .issue
-                    .clone()
-                    .map_or(serde_json::Value::Null, Into::into),
-            }
-        })
-        .collect()
-}
-
-pub(crate) fn doctor_rows(report: &DoctorReport) -> Vec<Row> {
-    let mut rows = Vec::new();
-
-    let broken_enabled = report
-        .plugins
-        .iter()
-        .filter(|plugin| plugin.enabled && !plugin.healthy)
-        .count() as i64;
-    rows.push(crate::row! {
-        "kind" => "summary",
-        "plugins" => report.plugins.len() as i64,
-        "broken_enabled" => broken_enabled,
-        "conflicts" => report.conflicts.len() as i64,
-    });
-
-    for conflict in &report.conflicts {
-        let providers = serde_json::Value::Array(
-            conflict
-                .providers
-                .iter()
-                .map(|provider| provider.clone().into())
-                .collect(),
-        );
-        rows.push(crate::row! {
-            "kind" => "conflict",
-            "command" => conflict.command.clone(),
-            "providers" => providers,
-        });
+    if !runtime.launch.runtime_load.include_config_file {
+        return Err(miette!("config file writes are disabled for this session"));
     }
-
-    rows
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        command_catalog_rows, doctor_rows, normalize_command_name, plugin_config_rows,
-        plugin_list_rows,
-    };
-    use crate::app::PluginConfigEntry;
-    use crate::config::ConfigValue;
-    use crate::core::plugin::{
-        DescribeAuthStrengthV1, DescribeCommandAuthV1, DescribeCredentialRequirementV1,
-        DescribeSessionRequirementsV1, DescribeVisibilityModeV1,
-    };
-    use crate::core::row::Row;
-    use crate::plugin::{
-        CommandCatalogEntry, CommandConflict, DoctorReport, PluginSource, PluginSummary,
-    };
-    use std::path::PathBuf;
-
-    fn row_str<'a>(row: &'a Row, key: &str) -> Option<&'a str> {
-        row.get(key).and_then(serde_json::Value::as_str)
+    let config = crate::app::resolve_runtime_config(
+        crate::app::RuntimeConfigRequest::new(
+            runtime.context.profile_override().map(ToOwned::to_owned),
+            Some(runtime.context.terminal_kind().as_config_terminal()),
+        )
+        .with_runtime_load(runtime.launch.runtime_load)
+        .with_product_defaults(runtime.product_defaults().clone()),
+    )?;
+    let mut disabled = config
+        .get_string_list("extensions.plugins.disabled")
+        .unwrap_or_default();
+    disabled.retain(|entry| entry != name);
+    if !enabled {
+        disabled.push(name.to_string());
     }
-
-    #[test]
-    fn plugin_rows_render_empty_states_unit() {
-        let list = plugin_list_rows(&[]);
-        assert_eq!(row_str(&list[0], "status"), Some("empty"));
-        assert_eq!(row_str(&list[0], "message"), Some("No plugins discovered."));
-
-        let commands = command_catalog_rows(&[]);
-        assert_eq!(row_str(&commands[0], "status"), Some("empty"));
-        assert_eq!(
-            row_str(&commands[0], "message"),
-            Some("No plugin commands discovered.")
-        );
-
-        let config = plugin_config_rows("demo", &[]);
-        assert_eq!(row_str(&config[0], "status"), Some("empty"));
-        assert_eq!(row_str(&config[0], "plugin_id"), Some("demo"));
-    }
-
-    #[test]
-    fn plugin_rows_render_real_metadata_and_scopes_unit() {
-        let plugins = plugin_list_rows(&[PluginSummary {
-            plugin_id: "demo".to_string(),
-            enabled: true,
-            healthy: false,
-            source: PluginSource::Explicit,
-            plugin_version: Some("1.2.3".to_string()),
-            executable: PathBuf::from("/tmp/osp-demo"),
-            commands: vec!["ldap".to_string(), "mreg".to_string()],
-            issue: Some("broken".to_string()),
-        }]);
-        assert_eq!(row_str(&plugins[0], "plugin_id"), Some("demo"));
-        assert_eq!(plugins[0].get("enabled"), Some(&serde_json::json!(true)));
-        assert_eq!(plugins[0].get("healthy"), Some(&serde_json::json!(false)));
-        assert_eq!(row_str(&plugins[0], "source"), Some("explicit"));
-        assert_eq!(row_str(&plugins[0], "plugin_version"), Some("1.2.3"));
-
-        let commands = command_catalog_rows(&[CommandCatalogEntry {
-            name: "shared".to_string(),
-            about: "shared command".to_string(),
-            auth: Some(DescribeCommandAuthV1 {
-                visibility: Some(DescribeVisibilityModeV1::CapabilityGated),
-                required_capabilities: vec!["shared.run".to_string()],
-                feature_flags: vec!["shared".to_string()],
-                visible_session: Some(DescribeSessionRequirementsV1 {
-                    auth_strength: Some(DescribeAuthStrengthV1::Strong),
-                    credentials: vec![DescribeCredentialRequirementV1::valid("osp")],
-                }),
-                ..DescribeCommandAuthV1::default()
-            }),
-            completion: crate::completion::CommandSpec::new("shared"),
-            provider: Some("beta".to_string()),
-            providers: vec!["alpha".to_string(), "beta".to_string()],
-            conflicted: true,
-            requires_selection: false,
-            selected_explicitly: true,
-            source: Some(PluginSource::Explicit),
-            subcommands: vec!["show".to_string()],
-        }]);
-        assert_eq!(row_str(&commands[0], "name"), Some("shared"));
-        assert_eq!(row_str(&commands[0], "provider"), Some("beta"));
-        assert_eq!(
-            commands[0].get("conflicted"),
-            Some(&serde_json::json!(true))
-        );
-        assert_eq!(
-            commands[0].get("providers"),
-            Some(&serde_json::json!(["alpha", "beta"]))
-        );
-        assert_eq!(
-            row_str(&commands[0], "auth_visibility"),
-            Some("capability_gated")
-        );
-        assert_eq!(
-            row_str(&commands[0], "auth_hint"),
-            Some("cap: shared.run; feature: shared; show: auth: strong, token: osp valid")
-        );
-        assert_eq!(
-            commands[0].get("required_capabilities"),
-            Some(&serde_json::json!(["shared.run"]))
-        );
-        assert_eq!(
-            commands[0].get("visible_session"),
-            Some(&serde_json::json!({
-                "auth_strength": "strong",
-                "credentials": [{"state": "valid", "service": "osp"}]
-            }))
-        );
-
-        let config = plugin_config_rows(
-            "demo",
-            &[
-                PluginConfigEntry {
-                    env_key: "OSP_SHARED_TOKEN".to_string(),
-                    value: ConfigValue::String("1".to_string()),
-                    config_key: "extensions.demo.token".to_string(),
-                    scope: crate::app::PluginConfigScope::Shared,
-                    issue: None,
-                },
-                PluginConfigEntry {
-                    env_key: "OSP_PLUGIN_FLAG".to_string(),
-                    value: ConfigValue::String("2".to_string()),
-                    config_key: "extensions.plugins.demo.flag".to_string(),
-                    scope: crate::app::PluginConfigScope::Plugin,
-                    issue: None,
-                },
-            ],
-        );
-        assert_eq!(row_str(&config[0], "scope"), Some("shared"));
-        assert_eq!(row_str(&config[1], "scope"), Some("plugin"));
-    }
-
-    #[test]
-    fn doctor_rows_include_summary_and_conflicts_unit() {
-        let rows = doctor_rows(&DoctorReport {
-            plugins: vec![PluginSummary {
-                plugin_id: "demo".to_string(),
-                enabled: true,
-                healthy: false,
-                source: PluginSource::Explicit,
-                plugin_version: None,
-                executable: PathBuf::from("/tmp/osp-demo"),
-                commands: vec!["shared".to_string()],
-                issue: Some("broken".to_string()),
-            }],
-            conflicts: vec![CommandConflict {
-                command: "shared".to_string(),
-                providers: vec!["alpha".to_string(), "beta".to_string()],
-            }],
-        });
-
-        assert_eq!(row_str(&rows[0], "kind"), Some("summary"));
-        assert_eq!(rows[0].get("broken_enabled"), Some(&serde_json::json!(1)));
-        assert_eq!(row_str(&rows[1], "kind"), Some("conflict"));
-        assert_eq!(row_str(&rows[1], "command"), Some("shared"));
-    }
-
-    #[test]
-    fn plugin_admin_command_names_require_canonical_lowercase_unit() {
-        assert_eq!(
-            normalize_command_name(" shared ").expect("trimmed lowercase command should pass"),
-            "shared"
-        );
-        assert!(
-            normalize_command_name("Shared")
-                .expect_err("mixed-case command names should be rejected")
-                .to_string()
-                .contains("must use lowercase ASCII letters")
-        );
-    }
+    let path = RuntimeConfigPaths::discover()
+        .config_file
+        .ok_or_else(|| miette!("failed to resolve config.toml path for plugin config"))?;
+    set_scoped_value_in_toml(
+        &path,
+        "extensions.plugins.disabled",
+        &ConfigValue::from(disabled.clone()),
+        &Scope::profile(config.active_profile()),
+        TomlStoreEditOptions::new(),
+    )
+    .wrap_err("failed to persist disabled plugins")?;
+    clients.plugins().set_disabled(disabled);
+    let mut result = CommandOutput::exit(0);
+    result.messages.success(format!(
+        "{} plugin: {name}",
+        if enabled { "enabled" } else { "disabled" }
+    ));
+    Ok(result)
 }

@@ -12,35 +12,11 @@
 
 use crate::config::{ConfigSource, ConfigValue, DEFAULT_UI_WIDTH_MAX, ResolvedConfig, Scope};
 use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-use crate::core::output_model::{
-    OutputItems, OutputResult, RenderRecommendation, output_items_to_rows,
-};
+use crate::core::output_model::{OutputItems, OutputResult, RenderRecommendation};
 use crate::ui::section_chrome::{RuledSectionPolicy, SectionFrameStyle};
 use crate::ui::style;
 use crate::ui::theme;
 use crate::ui::theme::{DEFAULT_THEME_NAME, ThemeDefinition};
-
-/// Default format to use when help/guide payloads are rendered in `auto`
-/// mode.
-///
-/// This keeps guide-like output readable without forcing all non-guide output
-/// away from the normal planner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GuideDefaultFormat {
-    #[default]
-    Guide,
-    Inherit,
-}
-
-impl GuideDefaultFormat {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "guide" => Some(Self::Guide),
-            "inherit" | "none" => Some(Self::Inherit),
-            _ => None,
-        }
-    }
-}
 
 /// Concrete renderer family chosen after settings resolution.
 ///
@@ -107,6 +83,9 @@ pub struct PresentationEffect {
 }
 
 impl UiPresentation {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::Expressive, Self::Compact, Self::Austere];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "expressive" => Some(Self::Expressive),
@@ -117,24 +96,17 @@ impl UiPresentation {
     }
 
     pub fn as_config_value(self) -> &'static str {
+        self.as_str()
+    }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Expressive => "expressive",
             Self::Compact => "compact",
             Self::Austere => "austere",
         }
     }
-}
-
-/// Optional chrome overrides for guide/help rendering.
-///
-/// These knobs intentionally stay narrow so operators can tune help density
-/// without having to understand the entire theme system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct HelpChromeSettings {
-    pub table_chrome: TableBorderOverride,
-    pub entry_indent: Option<usize>,
-    pub entry_gap: Option<usize>,
-    pub section_spacing: Option<usize>,
 }
 
 /// Border style override for one family of tables (help tables, nested tables).
@@ -151,6 +123,9 @@ pub enum TableBorderOverride {
 }
 
 impl TableBorderOverride {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::Inherit, Self::None, Self::Square, Self::Round];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "inherit" => Some(Self::Inherit),
@@ -169,6 +144,16 @@ impl TableBorderOverride {
             Self::Round => TableBorderStyle::Round,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inherit => "inherit",
+            Self::None => "none",
+            Self::Square => "square",
+            Self::Round => "round",
+        }
+    }
 }
 
 /// Runtime facts that influence auto render decisions.
@@ -178,6 +163,8 @@ impl TableBorderOverride {
 /// resolved against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RenderRuntime {
+    /// Where the reader types suggested commands.
+    pub command_scope: crate::core::CommandScope,
     /// Whether the visible stdout path is a tty.
     pub stdout_is_tty: bool,
     /// Raw terminal kind such as `xterm-256color`, if known.
@@ -188,50 +175,6 @@ pub struct RenderRuntime {
     pub width: Option<usize>,
     /// Whether locale detection suggests UTF-8 output is safe.
     pub locale_utf8: Option<bool>,
-}
-
-impl RenderRuntime {
-    /// Starts a builder for caller-supplied runtime facts.
-    pub fn builder() -> RenderRuntimeBuilder {
-        RenderRuntimeBuilder::default()
-    }
-}
-
-/// Guided construction for [`RenderRuntime`].
-#[derive(Debug, Clone, Default)]
-pub struct RenderRuntimeBuilder {
-    runtime: RenderRuntime,
-}
-
-impl RenderRuntimeBuilder {
-    pub fn with_stdout_is_tty(mut self, stdout_is_tty: bool) -> Self {
-        self.runtime.stdout_is_tty = stdout_is_tty;
-        self
-    }
-
-    pub fn with_terminal(mut self, terminal: impl Into<String>) -> Self {
-        self.runtime.terminal = Some(terminal.into());
-        self
-    }
-
-    pub fn with_no_color(mut self, no_color: bool) -> Self {
-        self.runtime.no_color = no_color;
-        self
-    }
-
-    pub fn with_width(mut self, width: usize) -> Self {
-        self.runtime.width = Some(width);
-        self
-    }
-
-    pub fn with_locale_utf8(mut self, locale_utf8: bool) -> Self {
-        self.runtime.locale_utf8 = Some(locale_utf8);
-        self
-    }
-
-    pub fn build(self) -> RenderRuntime {
-        self.runtime
-    }
 }
 
 /// Caller-facing render preferences for the canonical UI pipeline.
@@ -246,13 +189,13 @@ impl RenderRuntimeBuilder {
 ///   intent
 /// - `format_explicit` says whether the caller forced the format and therefore
 ///   wants recommendation/auto inference to stop
-/// - `guide_default_format` controls how semantic guide/help payloads behave
-///   when format stays `auto`
 /// - `runtime` carries the ambient facts used to resolve the auto knobs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
     pub format: OutputFormat,
     pub format_explicit: bool,
+    /// Render semantic documents as guides unless an explicit format is selected.
+    pub guide_default_format: bool,
     pub mode: RenderMode,
     pub color: ColorMode,
     pub unicode: UnicodeMode,
@@ -262,17 +205,13 @@ pub struct RenderSettings {
     /// Maximum width for rendered output; zero leaves the measured width uncapped.
     pub width_max: usize,
     pub margin: usize,
-    pub indent_size: usize,
-    pub medium_list_max: usize,
     pub table_overflow: TableOverflow,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
     pub style_overrides: style::StyleOverrides,
-    pub help_chrome: HelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
     pub ruled_section_policy: RuledSectionPolicy,
-    pub guide_default_format: GuideDefaultFormat,
     pub runtime: RenderRuntime,
 }
 
@@ -281,6 +220,7 @@ impl Default for RenderSettings {
         Self {
             format: OutputFormat::Auto,
             format_explicit: false,
+            guide_default_format: true,
             mode: RenderMode::Auto,
             color: ColorMode::Auto,
             unicode: UnicodeMode::Auto,
@@ -289,38 +229,33 @@ impl Default for RenderSettings {
             width: None,
             width_max: usize::try_from(DEFAULT_UI_WIDTH_MAX).unwrap_or(0),
             margin: 0,
-            indent_size: 2,
-            medium_list_max: 5,
             table_overflow: TableOverflow::Ellipsis,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
-            help_chrome: HelpChromeSettings::default(),
             chrome_frame: SectionFrameStyle::Top,
             ruled_section_policy: RuledSectionPolicy::Shared,
-            guide_default_format: GuideDefaultFormat::Guide,
             runtime: RenderRuntime::default(),
         }
     }
 }
 
 impl RenderSettings {
-    pub fn builder() -> RenderSettingsBuilder {
-        RenderSettingsBuilder::default()
-    }
-
     pub fn test_plain(format: OutputFormat) -> Self {
-        RenderSettingsBuilder::plain(format).build()
-    }
-
-    pub fn prefers_guide_rendering(&self) -> bool {
-        matches!(self.format, OutputFormat::Guide)
-            || (!self.format_explicit
-                && matches!(self.guide_default_format, GuideDefaultFormat::Guide))
+        Self {
+            format,
+            mode: RenderMode::Plain,
+            color: ColorMode::Never,
+            unicode: UnicodeMode::Never,
+            ..Self::default()
+        }
     }
 }
 
 impl TableOverflow {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 4] = [Self::None, Self::Clip, Self::Ellipsis, Self::Wrap];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "visible" => Some(Self::None),
@@ -330,9 +265,22 @@ impl TableOverflow {
             _ => None,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Clip => "clip",
+            Self::Ellipsis => "ellipsis",
+            Self::Wrap => "wrap",
+        }
+    }
 }
 
 impl TableBorderStyle {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 3] = [Self::None, Self::Square, Self::Round];
+
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" | "plain" => Some(Self::None),
@@ -341,10 +289,23 @@ impl TableBorderStyle {
             _ => None,
         }
     }
+
+    /// Returns the canonical configuration spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Square => "square",
+            Self::Round => "round",
+        }
+    }
 }
 
 pub fn help_layout_from_config(config: &ResolvedConfig) -> HelpLayout {
-    help_layout_from_presentation_name(config.get_string("ui.presentation"))
+    match resolve_ui_presentation(config) {
+        UiPresentation::Expressive => HelpLayout::Full,
+        UiPresentation::Compact => HelpLayout::Compact,
+        UiPresentation::Austere => HelpLayout::Minimal,
+    }
 }
 
 pub(crate) fn resolve_ui_presentation(config: &ResolvedConfig) -> UiPresentation {
@@ -406,6 +367,10 @@ pub(crate) fn apply_render_config_overrides(
         settings.format = parsed;
     }
 
+    if let Some(value) = config.get_string("ui.guide.default_format") {
+        settings.guide_default_format = value == "guide";
+    }
+
     if let Some(value) = config.get_string("ui.mode")
         && let Some(parsed) = RenderMode::parse(value)
     {
@@ -436,13 +401,8 @@ pub(crate) fn apply_render_config_overrides(
         settings.ruled_section_policy = parsed;
     }
 
-    if let Some(value) = config.get_string("ui.guide.default_format")
-        && let Some(parsed) = GuideDefaultFormat::parse(value)
-    {
-        settings.guide_default_format = parsed;
-    }
-
-    if settings.width.is_none()
+    if settings.runtime.stdout_is_tty
+        && settings.width.is_none()
         && config
             .get_value_entry("ui.width")
             .is_some_and(|entry| entry.source != ConfigSource::BuiltinDefaults)
@@ -455,14 +415,6 @@ pub(crate) fn apply_render_config_overrides(
     }
 
     sync_render_config_overrides(settings, config);
-}
-
-fn help_layout_from_presentation_name(value: Option<&str>) -> HelpLayout {
-    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-        Some("compact") => HelpLayout::Compact,
-        Some("austere") | Some("gammel-og-bitter") => HelpLayout::Minimal,
-        _ => HelpLayout::Full,
-    }
 }
 
 const PRESENTATION_KEYS: &[&str] = &[
@@ -524,18 +476,6 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.margin = value as usize;
     }
 
-    if let Some(value) = config_int(config, "ui.indent")
-        && value > 0
-    {
-        settings.indent_size = value as usize;
-    }
-
-    if let Some(value) = config_int(config, "ui.medium_list_max")
-        && value > 0
-    {
-        settings.medium_list_max = value as usize;
-    }
-
     if let Some(value) = config.get_string("ui.table.overflow")
         && let Some(parsed) = TableOverflow::parse(value)
     {
@@ -553,16 +493,6 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
     {
         settings.nested_table_border = parsed;
     }
-
-    if let Some(value) = config.get_string("ui.help.table_chrome")
-        && let Some(parsed) = TableBorderOverride::parse(value)
-    {
-        settings.help_chrome.table_chrome = parsed;
-    }
-
-    settings.help_chrome.entry_indent = config_usize_override(config, "ui.help.entry_indent");
-    settings.help_chrome.entry_gap = config_usize_override(config, "ui.help.entry_gap");
-    settings.help_chrome.section_spacing = config_usize_override(config, "ui.help.section_spacing");
 }
 
 fn config_int(config: &ResolvedConfig, key: &str) -> Option<i64> {
@@ -588,115 +518,10 @@ fn config_usize_override(config: &ResolvedConfig, key: &str) -> Option<usize> {
     }
 }
 
-/// Guided construction for [`RenderSettings`].
-///
-/// Use [`RenderSettings::builder`] for ordinary caller-controlled rendering, or
-/// [`RenderSettingsBuilder::plain`] when the desired result is explicitly
-/// plain-safe output for scripts, logs, or copy paths.
-#[derive(Debug, Clone, Default)]
-pub struct RenderSettingsBuilder {
-    settings: RenderSettings,
-}
-
-impl RenderSettingsBuilder {
-    /// Starts a builder biased toward plain, copy-safe rendering.
-    ///
-    /// This is the right entrypoint for clipboard, logging, and other paths
-    /// where styling and terminal affordances would be a liability.
-    pub fn plain(format: OutputFormat) -> Self {
-        Self {
-            settings: RenderSettings {
-                format,
-                format_explicit: false,
-                mode: RenderMode::Plain,
-                color: ColorMode::Never,
-                unicode: UnicodeMode::Never,
-                ..RenderSettings::default()
-            },
-        }
-    }
-
-    pub fn with_format(mut self, format: OutputFormat) -> Self {
-        self.settings.format = format;
-        self
-    }
-
-    pub fn with_format_explicit(mut self, format_explicit: bool) -> Self {
-        self.settings.format_explicit = format_explicit;
-        self
-    }
-
-    pub fn with_mode(mut self, mode: RenderMode) -> Self {
-        self.settings.mode = mode;
-        self
-    }
-
-    pub fn with_color(mut self, color: ColorMode) -> Self {
-        self.settings.color = color;
-        self
-    }
-
-    pub fn with_unicode(mut self, unicode: UnicodeMode) -> Self {
-        self.settings.unicode = unicode;
-        self
-    }
-
-    pub fn with_width(mut self, width: usize) -> Self {
-        self.settings.width = Some(width);
-        self
-    }
-
-    pub fn with_width_max(mut self, width_max: usize) -> Self {
-        self.settings.width_max = width_max;
-        self
-    }
-
-    pub fn with_margin(mut self, margin: usize) -> Self {
-        self.settings.margin = margin;
-        self
-    }
-
-    pub fn with_indent_size(mut self, indent_size: usize) -> Self {
-        self.settings.indent_size = indent_size;
-        self
-    }
-
-    pub fn with_table_overflow(mut self, table_overflow: TableOverflow) -> Self {
-        self.settings.table_overflow = table_overflow;
-        self
-    }
-
-    pub fn with_table_border(mut self, table_border: TableBorderStyle) -> Self {
-        self.settings.table_border = table_border;
-        self
-    }
-
-    pub fn with_theme_name(mut self, theme_name: impl Into<String>) -> Self {
-        self.settings.theme_name = theme_name.into();
-        self
-    }
-
-    pub fn with_runtime(mut self, runtime: RenderRuntime) -> Self {
-        self.settings.runtime = runtime;
-        self
-    }
-
-    pub fn build(self) -> RenderSettings {
-        self.settings
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderProfile {
     Normal,
     CopySafe,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolvedHelpChromeSettings {
-    pub entry_indent: usize,
-    pub entry_gap: Option<usize>,
-    pub section_spacing: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -706,18 +531,13 @@ pub struct ResolvedRenderSettings {
     pub unicode: bool,
     pub width: Option<usize>,
     pub margin: usize,
-    pub indent_size: usize,
-    pub medium_list_max: usize,
     pub table_overflow: TableOverflow,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
-    pub help_table_border: TableBorderStyle,
     pub theme_name: String,
     pub theme: ThemeDefinition,
     pub style_overrides: style::StyleOverrides,
-    pub help_chrome: ResolvedHelpChromeSettings,
     pub chrome_frame: SectionFrameStyle,
-    pub guide_default_format: GuideDefaultFormat,
 }
 
 impl RenderSettings {
@@ -740,21 +560,17 @@ impl RenderSettings {
                 if matches!(self.runtime.terminal.as_deref(), Some("dumb")) {
                     return false;
                 }
-                match self.runtime.locale_utf8 {
-                    Some(true) => true,
-                    Some(false) => false,
-                    None => true,
-                }
+                self.runtime.locale_utf8.unwrap_or(true)
             }
         }
     }
 
     fn resolve_width(&self) -> Option<usize> {
-        if self.width_max == 0 {
-            return self.width.filter(|width| *width > 0);
-        }
         let configured = self.width.filter(|width| *width > 0);
-        let measured = self.runtime.width.filter(|width| *width > 0);
+        let measured = self
+            .runtime
+            .width
+            .filter(|width| self.runtime.stdout_is_tty && *width > 0);
         let width = match (configured, measured) {
             (Some(configured), Some(measured)) => configured.min(measured),
             (Some(configured), None) => configured,
@@ -771,7 +587,7 @@ impl RenderSettings {
         })
     }
 
-    pub fn resolve_render_settings(&self) -> ResolvedRenderSettings {
+    pub(crate) fn resolve_render_settings(&self) -> ResolvedRenderSettings {
         let backend = match self.mode {
             RenderMode::Plain => RenderBackend::Plain,
             RenderMode::Rich => RenderBackend::Rich,
@@ -795,77 +611,35 @@ impl RenderSettings {
             .clone()
             .unwrap_or_else(|| theme::resolve_theme(&self.theme_name));
         let theme_name = theme::normalize_theme_name(&theme.id);
-        let help_chrome = ResolvedHelpChromeSettings {
-            entry_indent: self.help_chrome.entry_indent.unwrap_or(2),
-            entry_gap: self.help_chrome.entry_gap,
-            section_spacing: self.help_chrome.section_spacing.unwrap_or(1),
-        };
 
-        match backend {
-            RenderBackend::Plain => ResolvedRenderSettings {
-                backend,
-                color: false,
-                unicode: false,
-                width: self.resolve_width(),
-                margin: self.margin,
-                indent_size: self.indent_size.max(1),
-                medium_list_max: self.medium_list_max.max(1),
-                table_overflow: self.table_overflow,
-                table_border: self.table_border,
-                nested_table_border: self.nested_table_border.resolve(self.table_border),
-                help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
-                theme_name,
-                theme: theme.clone(),
-                style_overrides: self.style_overrides.clone(),
-                help_chrome,
-                chrome_frame: self.chrome_frame,
-                guide_default_format: self.guide_default_format,
-            },
-            RenderBackend::Rich => ResolvedRenderSettings {
-                backend,
-                color: self.resolve_color_mode(),
-                unicode: self.resolve_unicode_mode(),
-                width: self.resolve_width(),
-                margin: self.margin,
-                indent_size: self.indent_size.max(1),
-                medium_list_max: self.medium_list_max.max(1),
-                table_overflow: self.table_overflow,
-                table_border: self.table_border,
-                nested_table_border: self.nested_table_border.resolve(self.table_border),
-                help_table_border: self.help_chrome.table_chrome.resolve(self.table_border),
-                theme_name,
-                theme,
-                style_overrides: self.style_overrides.clone(),
-                help_chrome,
-                chrome_frame: self.chrome_frame,
-                guide_default_format: self.guide_default_format,
-            },
+        ResolvedRenderSettings {
+            backend,
+            color: backend == RenderBackend::Rich && self.resolve_color_mode(),
+            unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
+            width: self.resolve_width(),
+            margin: self.margin,
+            table_overflow: self.table_overflow,
+            table_border: self.table_border,
+            nested_table_border: self.nested_table_border.resolve(self.table_border),
+            theme_name,
+            theme,
+            style_overrides: self.style_overrides.clone(),
+            chrome_frame: self.chrome_frame,
         }
     }
 
     pub(crate) fn plain_copy_settings(&self) -> Self {
         Self {
-            format: self.format,
-            format_explicit: self.format_explicit,
             mode: RenderMode::Plain,
             color: ColorMode::Never,
             unicode: UnicodeMode::Never,
-            width: self.width,
-            width_max: self.width_max,
-            margin: self.margin,
-            indent_size: self.indent_size,
-            medium_list_max: self.medium_list_max,
-            table_overflow: self.table_overflow,
-            table_border: self.table_border,
-            nested_table_border: self.nested_table_border,
-            help_chrome: self.help_chrome,
-            theme_name: self.theme_name.clone(),
-            theme: self.theme.clone(),
-            style_overrides: self.style_overrides.clone(),
-            chrome_frame: self.chrome_frame,
-            ruled_section_policy: self.ruled_section_policy,
-            guide_default_format: self.guide_default_format,
-            runtime: self.runtime.clone(),
+            width: None,
+            width_max: 0,
+            runtime: RenderRuntime {
+                width: None,
+                ..self.runtime.clone()
+            },
+            ..self.clone()
         }
     }
 
@@ -874,16 +648,19 @@ impl RenderSettings {
             return self.format;
         }
 
-        if crate::guide::GuideView::try_from_output_result(output).is_some()
-            && self.prefers_guide_rendering()
-        {
-            return OutputFormat::Guide;
+        // Documents keep their layout unless a format is asked for explicitly.
+        if output.meta.document_rows {
+            return if self.guide_default_format {
+                OutputFormat::Auto
+            } else {
+                self.format
+            };
         }
 
         if let Some(recommended) = output.meta.render_recommendation {
             return match recommended {
                 RenderRecommendation::Format(format) => format,
-                RenderRecommendation::Guide => OutputFormat::Guide,
+                RenderRecommendation::Document => OutputFormat::Auto,
             };
         }
 
@@ -891,11 +668,9 @@ impl RenderSettings {
             return self.format;
         }
 
-        if matches!(output.items, OutputItems::Groups(_)) {
+        let OutputItems::Rows(rows) = &output.items else {
             return OutputFormat::Table;
-        }
-
-        let rows = output_items_to_rows(&output.items);
+        };
         if rows
             .iter()
             .all(|row| row.len() == 1 && row.contains_key("value"))
@@ -923,19 +698,18 @@ pub fn resolve_settings(
 #[cfg(test)]
 mod tests {
     use super::{
-        GuideDefaultFormat, HelpChromeSettings, HelpLayout, RenderBackend, RenderProfile,
-        RenderRuntime, RenderSettingsBuilder, TableBorderOverride, TableBorderStyle, TableOverflow,
-        UiPresentation, apply_render_config_overrides, config_int, config_usize_override,
+        HelpLayout, RenderBackend, RenderProfile, RenderRuntime, TableBorderOverride,
+        TableBorderStyle, TableOverflow, UiPresentation, apply_render_config_overrides, config_int,
         explain_presentation_effect, help_layout_from_config,
     };
     use crate::config::{
         ConfigLayer, ConfigResolver, ConfigSource, ConfigValue, LoadedLayers, ResolveOptions,
     };
+    use crate::core::document::Document;
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
     use crate::core::output_model::{
         Group, OutputItems, OutputMeta, OutputResult, RenderRecommendation,
     };
-    use crate::guide::GuideView;
     use crate::row;
     use crate::ui::build_presentation_defaults_layer;
     use crate::ui::section_chrome::{RuledSectionPolicy, SectionFrameStyle};
@@ -946,10 +720,13 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        ConfigResolver::from_loaded_layers(LoadedLayers {
-            defaults,
-            ..LoadedLayers::default()
-        })
+        ConfigResolver::from_loaded_layers_with_schema(
+            LoadedLayers {
+                defaults,
+                ..LoadedLayers::default()
+            },
+            crate::config::ConfigSchema::default(),
+        )
         .resolve(ResolveOptions::default())
         .expect("config should resolve")
     }
@@ -963,16 +740,24 @@ mod tests {
         for (key, value) in entries {
             defaults.set(*key, *value);
         }
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
         let options = ResolveOptions::default().with_terminal("cli");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base test config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("test config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base test config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("test config should resolve")
     }
 
     fn resolved_config_with_session(
@@ -986,23 +771,31 @@ mod tests {
             defaults.set(*key, *value);
         }
 
-        let mut resolver = ConfigResolver::default();
-        resolver.set_defaults(defaults);
+        let mut layers = crate::config::LoadedLayers {
+            defaults,
+            ..crate::config::LoadedLayers::default()
+        };
 
         let mut session = ConfigLayer::default();
         for (key, value) in session_entries {
             session.set(*key, *value);
         }
-        resolver.set_session(session);
+        layers.session = session;
 
         let options = ResolveOptions::default().with_terminal("cli");
-        let base = resolver
-            .resolve(options.clone())
-            .expect("base test config should resolve");
-        resolver.set_presentation(build_presentation_defaults_layer(&base));
-        resolver
-            .resolve(options)
-            .expect("test config should resolve")
+        let base = ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options.clone())
+        .expect("base test config should resolve");
+        layers.presentation = build_presentation_defaults_layer(&base);
+        ConfigResolver::from_loaded_layers_with_schema(
+            layers.clone(),
+            crate::config::ConfigSchema::default(),
+        )
+        .resolve(options)
+        .expect("test config should resolve")
     }
 
     #[test]
@@ -1050,6 +843,7 @@ mod tests {
             ],
         );
         let mut settings = RenderSettings::test_plain(OutputFormat::Table);
+        settings.runtime.stdout_is_tty = true;
 
         apply_render_config_overrides(&mut settings, &config);
 
@@ -1077,30 +871,6 @@ mod tests {
 
         assert_eq!(settings.chrome_frame, SectionFrameStyle::Square);
         assert_eq!(settings.table_border, TableBorderStyle::None);
-
-        let config = resolved_config_with_presentation(&[("ui.guide.default_format", "inherit")]);
-        let mut settings = RenderSettings::test_plain(OutputFormat::Json);
-
-        apply_render_config_overrides(&mut settings, &config);
-
-        assert_eq!(settings.guide_default_format, GuideDefaultFormat::Inherit);
-
-        let config = resolved_config_with_presentation(&[
-            ("ui.help.entry_indent", "4"),
-            ("ui.help.entry_gap", "3"),
-            ("ui.help.section_spacing", "inherit"),
-        ]);
-        let mut settings = RenderSettings::test_plain(OutputFormat::Guide);
-
-        apply_render_config_overrides(&mut settings, &config);
-
-        assert_eq!(
-            config_usize_override(&config, "ui.help.entry_indent"),
-            Some(4)
-        );
-        assert_eq!(settings.help_chrome.entry_indent, Some(4));
-        assert_eq!(settings.help_chrome.entry_gap, Some(3));
-        assert_eq!(settings.help_chrome.section_spacing, None);
     }
 
     #[test]
@@ -1109,35 +879,34 @@ mod tests {
         assert_eq!(defaults.format, OutputFormat::Auto);
         assert_eq!(defaults.theme_name, super::DEFAULT_THEME_NAME);
         assert_eq!(defaults.table_border, TableBorderStyle::Square);
-        assert_eq!(defaults.help_chrome, HelpChromeSettings::default());
 
-        let plain_settings = RenderSettingsBuilder::default()
-            .with_runtime(
-                RenderRuntime::builder()
-                    .with_stdout_is_tty(false)
-                    .with_width(72)
-                    .build(),
-            )
-            .build();
+        let plain_settings = RenderSettings {
+            runtime: RenderRuntime {
+                stdout_is_tty: false,
+                width: Some(72),
+                ..RenderRuntime::default()
+            },
+            ..RenderSettings::default()
+        };
         let plain = plain_settings.resolve_render_settings();
         assert_eq!(plain.backend, RenderBackend::Plain);
         assert!(!plain.color);
         assert!(!plain.unicode);
-        assert_eq!(plain.width, Some(72));
+        assert_eq!(plain.width, None);
 
-        let rich_settings = RenderSettingsBuilder::default()
-            .with_mode(RenderMode::Auto)
-            .with_color(ColorMode::Always)
-            .with_unicode(UnicodeMode::Always)
-            .with_runtime(
-                RenderRuntime::builder()
-                    .with_stdout_is_tty(true)
-                    .with_terminal("xterm-256color")
-                    .with_locale_utf8(true)
-                    .with_width(88)
-                    .build(),
-            )
-            .build();
+        let rich_settings = RenderSettings {
+            mode: RenderMode::Auto,
+            color: ColorMode::Always,
+            unicode: UnicodeMode::Always,
+            runtime: RenderRuntime {
+                stdout_is_tty: true,
+                terminal: Some("xterm-256color".into()),
+                locale_utf8: Some(true),
+                width: Some(88),
+                ..RenderRuntime::default()
+            },
+            ..RenderSettings::default()
+        };
         let rich = rich_settings.resolve_render_settings();
         assert_eq!(rich.backend, RenderBackend::Rich);
         assert!(rich.color);
@@ -1154,10 +923,10 @@ mod tests {
         assert!(!resolved_copy.unicode);
 
         let guide_output =
-            GuideView::from_text("Usage: osp history <COMMAND>\n").to_output_result();
+            Document::from_help_text("Usage: osp history <COMMAND>\n").to_output_result();
         assert_eq!(
             plain_settings.resolve_output_format(&guide_output),
-            OutputFormat::Guide
+            OutputFormat::Auto
         );
 
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
@@ -1183,6 +952,8 @@ mod tests {
             }]),
             document: None,
             meta: OutputMeta {
+                display_notes: Vec::new(),
+                context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],
                 unix_timestamp_columns: Vec::new(),
                 display_rules: Vec::new(),
@@ -1191,10 +962,10 @@ mod tests {
                 column_align: Vec::new(),
                 wants_copy: false,
                 grouped: true,
+                document_rows: false,
+                document_entry_gap: None,
+                document_long_help: false,
                 render_recommendation: None,
-                presentation_lines: Vec::new(),
-                progress_append: Vec::new(),
-                progress_replace: false,
                 display_limit: None,
             },
         };
@@ -1218,10 +989,6 @@ mod tests {
 
     #[test]
     fn parser_aliases_and_presentation_effects_remain_canonical_unit() {
-        assert_eq!(
-            GuideDefaultFormat::parse("none"),
-            Some(GuideDefaultFormat::Inherit)
-        );
         assert_eq!(
             TableBorderOverride::parse("boxed"),
             Some(TableBorderOverride::Square)

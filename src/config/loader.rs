@@ -153,11 +153,9 @@ impl TomlFileLoader {
 
 impl ConfigLoader for TomlFileLoader {
     fn load(&self) -> Result<ConfigLayer, ConfigError> {
-        tracing::debug!(
-            path = %self.path.display(),
-            missing_ok = self.missing_ok,
-            "loading TOML config layer"
-        );
+        if self.path.exists() {
+            tracing::info!(path = %self.path.display(), "loading TOML config layer");
+        }
         if !self.path.exists() {
             if self.missing_ok {
                 tracing::debug!(path = %self.path.display(), "optional TOML config file missing");
@@ -270,7 +268,6 @@ impl ConfigLoader for EnvVarLoader {
 pub struct SecretsTomlLoader {
     path: PathBuf,
     missing_ok: bool,
-    strict_permissions: bool,
 }
 
 impl SecretsTomlLoader {
@@ -279,7 +276,6 @@ impl SecretsTomlLoader {
         Self {
             path,
             missing_ok: true,
-            strict_permissions: true,
         }
     }
 
@@ -294,12 +290,6 @@ impl SecretsTomlLoader {
         self.missing_ok = true;
         self
     }
-
-    /// Enables or disables permission checks before loading.
-    pub fn with_strict_permissions(mut self, strict: bool) -> Self {
-        self.strict_permissions = strict;
-        self
-    }
 }
 
 impl ConfigLoader for SecretsTomlLoader {
@@ -307,7 +297,6 @@ impl ConfigLoader for SecretsTomlLoader {
         tracing::debug!(
             path = %self.path.display(),
             missing_ok = self.missing_ok,
-            strict_permissions = self.strict_permissions,
             "loading TOML secrets layer"
         );
         if !self.path.exists() {
@@ -321,7 +310,7 @@ impl ConfigLoader for SecretsTomlLoader {
             });
         }
 
-        validate_secrets_permissions(&self.path, self.strict_permissions)?;
+        validate_secrets_permissions(&self.path)?;
 
         let raw = std::fs::read_to_string(&self.path).map_err(|err| ConfigError::FileRead {
             path: self.path.display().to_string(),
@@ -459,7 +448,7 @@ impl ConfigLoader for ChainedLoader {
         );
         for loader in &self.loaders {
             let layer = loader.load()?;
-            merged.entries.extend(layer.entries);
+            merged.extend_from_layer(&layer);
         }
         tracing::debug!(
             entries = merged.entries().len(),
@@ -472,7 +461,7 @@ impl ConfigLoader for ChainedLoader {
 /// Materialized config layers grouped by source priority.
 ///
 /// This is the concrete snapshot handed to
-/// [`ConfigResolver::from_loaded_layers_with_schema`](crate::config::ConfigResolver::from_loaded_layers_with_schema)
+/// the host schema resolver
 /// after the load phase is complete.
 #[derive(Debug, Clone, Default)]
 pub struct LoadedLayers {
@@ -502,16 +491,10 @@ pub struct LoaderPipeline {
     defaults: Box<dyn ConfigLoader>,
     presentation: Option<Box<dyn ConfigLoader>>,
     file: Option<Box<dyn ConfigLoader>>,
-    secrets: Option<SecretsPipelineLoader>,
+    secrets: Option<crate::config::RuntimeSelectedSecretsLoader>,
     env: Option<Box<dyn ConfigLoader>>,
     cli: Option<Box<dyn ConfigLoader>>,
     session: Option<Box<dyn ConfigLoader>>,
-    schema: ConfigSchema,
-}
-
-enum SecretsPipelineLoader {
-    Fixed(Box<dyn ConfigLoader>),
-    Runtime(crate::config::RuntimeSelectedSecretsLoader),
 }
 
 impl LoaderPipeline {
@@ -531,7 +514,6 @@ impl LoaderPipeline {
             env: None,
             cli: None,
             session: None,
-            schema: ConfigSchema::default(),
         }
     }
 
@@ -553,20 +535,11 @@ impl LoaderPipeline {
         self
     }
 
-    /// Adds the secrets loader.
-    pub fn with_secrets<L>(mut self, loader: L) -> Self
-    where
-        L: ConfigLoader + 'static,
-    {
-        self.secrets = Some(SecretsPipelineLoader::Fixed(Box::new(loader)));
-        self
-    }
-
     pub(crate) fn with_runtime_secrets(
         mut self,
         loader: crate::config::RuntimeSelectedSecretsLoader,
     ) -> Self {
-        self.secrets = Some(SecretsPipelineLoader::Runtime(loader));
+        self.secrets = Some(loader);
         self
     }
 
@@ -597,29 +570,28 @@ impl LoaderPipeline {
         self
     }
 
-    /// Replaces the schema used during resolution.
-    pub fn with_schema(mut self, schema: ConfigSchema) -> Self {
-        self.schema = schema;
-        self
-    }
-
     /// Loads every configured source into concrete layers.
     ///
     /// This is the boundary between source I/O and config resolution.
     pub fn load_layers(&self) -> Result<LoadedLayers, ConfigError> {
         tracing::debug!("loading config layers");
+        let defaults = load_layer("defaults", || self.defaults.load())?;
+        let presentation = load_optional_layer("presentation", self.presentation.as_deref())?;
+        let file = load_optional_layer("file", self.file.as_deref())?;
+        let env = load_optional_layer("environment", self.env.as_deref())?;
+        let cli = load_optional_layer("CLI overrides", self.cli.as_deref())?;
+        let session = load_optional_layer("session", self.session.as_deref())?;
         let mut layers = LoadedLayers {
-            defaults: self.defaults.load()?,
-            presentation: load_optional_loader(self.presentation.as_deref())?,
-            file: load_optional_loader(self.file.as_deref())?,
+            defaults,
+            presentation,
+            file,
             secrets: ConfigLayer::default(),
-            env: load_optional_loader(self.env.as_deref())?,
-            cli: load_optional_loader(self.cli.as_deref())?,
-            session: load_optional_loader(self.session.as_deref())?,
+            env,
+            cli,
+            session,
         };
         layers.secrets = match self.secrets.as_ref() {
-            Some(SecretsPipelineLoader::Fixed(loader)) => loader.load()?,
-            Some(SecretsPipelineLoader::Runtime(loader)) => loader.load(&layers)?,
+            Some(loader) => load_layer("secrets", || loader.load(&layers))?,
             None => ConfigLayer::default(),
         };
         tracing::debug!(
@@ -644,7 +616,7 @@ impl LoaderPipeline {
         let layers = self.load_layers()?;
         Ok(ConfigResolver::from_loaded_layers_with_schema(
             layers,
-            self.schema.clone(),
+            ConfigSchema::default(),
         ))
     }
 
@@ -666,15 +638,27 @@ impl LoaderPipeline {
     /// assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
     /// ```
     pub fn resolve(&self, options: ResolveOptions) -> Result<ResolvedConfig, ConfigError> {
+        let _phase = tracing::info_span!(target: "osp_startup", "config resolution").entered();
         self.resolver()?.resolve(options)
     }
 }
 
-fn load_optional_loader(loader: Option<&dyn ConfigLoader>) -> Result<ConfigLayer, ConfigError> {
+fn load_optional_layer(
+    name: &'static str,
+    loader: Option<&dyn ConfigLoader>,
+) -> Result<ConfigLayer, ConfigError> {
     match loader {
-        Some(loader) => loader.load(),
+        Some(loader) => load_layer(name, || loader.load()),
         None => Ok(ConfigLayer::default()),
     }
+}
+
+fn load_layer(
+    name: &'static str,
+    load: impl FnOnce() -> Result<ConfigLayer, ConfigError>,
+) -> Result<ConfigLayer, ConfigError> {
+    let _phase = tracing::info_span!(target: "osp_startup", "config layer", name = %format_args!("config layer {name}")).entered();
+    load()
 }
 
 #[cfg(test)]

@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use super::{
     ClipboardError, ClipboardService,
     backend::{
@@ -7,16 +5,6 @@ use super::{
         copy_via_command, osc52_enabled, osc52_max_bytes, osc52_payload, platform_backends,
     },
 };
-
-fn env_lock() -> &'static Mutex<()> {
-    crate::tests::env_lock()
-}
-
-fn acquire_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn set_path_for_test(value: Option<&str>) {
     let key = "PATH";
@@ -44,7 +32,10 @@ fn base64_encoder_matches_known_values() {
 
 #[test]
 fn base64_length_and_env_helpers_behave_predictably() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     assert_eq!(base64_encoded_len(0), 0);
     assert_eq!(base64_encoded_len(1), 4);
     assert_eq!(base64_encoded_len(4), 8);
@@ -101,7 +92,6 @@ fn clipboard_error_display_covers_backend_spawn_and_status_cases() {
 #[cfg_attr(miri, ignore = "clipboard subprocess/path integration test")]
 #[test]
 fn command_backend_reports_success_and_failure() {
-    let _guard = acquire_env_lock();
     copy_via_command(
         ClipboardCommand {
             command: "/bin/sh",
@@ -132,7 +122,10 @@ fn command_backend_reports_success_and_failure() {
 
 #[test]
 fn platform_backends_prefers_wayland_when_present() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let original = std::env::var("WAYLAND_DISPLAY").ok();
     set_env_for_test("WAYLAND_DISPLAY", Some("wayland-0"));
     let backends = platform_backends();
@@ -148,7 +141,10 @@ fn platform_backends_prefers_wayland_when_present() {
 #[cfg_attr(miri, ignore = "clipboard path integration test")]
 #[test]
 fn copy_without_osc52_reports_no_backend_when_path_is_empty() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let key = "PATH";
     let original = std::env::var(key).ok();
     set_path_for_test(Some(""));
@@ -187,7 +183,10 @@ fn command_backend_reports_spawn_failure_for_missing_binary() {
 
 #[test]
 fn platform_backends_include_x11_fallbacks_without_wayland() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let original = std::env::var("WAYLAND_DISPLAY").ok();
     set_env_for_test("WAYLAND_DISPLAY", None);
     let backends = platform_backends();
@@ -218,7 +217,10 @@ fn command_failure_without_stderr_uses_short_display() {
 
 #[test]
 fn osc52_helpers_respect_env_toggles_and_defaults() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let original_enabled = std::env::var("OSC52").ok();
     let original_max = std::env::var("OSC52_MAX_BYTES").ok();
 
@@ -251,7 +253,10 @@ fn clipboard_service_builders_toggle_osc52_preference() {
 
 #[test]
 fn clipboard_plan_prefers_osc52_only_when_tty_and_payload_fit_unit() {
-    let _guard = acquire_env_lock();
+    if crate::tests::isolated_test() {
+        return;
+    }
+
     let osc52_original = std::env::var("OSC52").ok();
     let max_original = std::env::var("OSC52_MAX_BYTES").ok();
     set_env_for_test("OSC52", Some("yes"));

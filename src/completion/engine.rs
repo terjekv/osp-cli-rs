@@ -6,13 +6,13 @@
 //! without knowing about the parser/context/suggester split.
 
 use crate::completion::{
-    context::{ProviderSelection, TreeResolver},
+    context::TreeResolver,
     model::{
         CommandLine, CompletionAnalysis, CompletionContext, CompletionNode, CompletionRequest,
         CompletionTree, ContextScope, CursorState, MatchKind, ParsedLine, SuggestionOutput,
         TailItem,
     },
-    parse::CommandLineParser,
+    parse::{CommandLineParser, FlagArity},
     suggest::SuggestionEngine,
 };
 use crate::core::fuzzy::fold_case;
@@ -29,39 +29,37 @@ use std::ops::Range;
 pub struct CompletionEngine {
     parser: CommandLineParser,
     suggester: SuggestionEngine,
-    tree: CompletionTree,
     global_context_flags: BTreeSet<String>,
 }
 
 impl CompletionEngine {
     /// Creates an engine for a prebuilt completion tree.
     ///
-    /// The engine keeps a clone of the tree for suggestion ranking and caches
-    /// global context-only flags up front.
+    /// Analysis and suggestion ranking share the tree; global context-only
+    /// flags are cached up front.
     pub fn new(tree: CompletionTree) -> Self {
         let global_context_flags = collect_global_context_flags(&tree.root);
         Self {
             parser: CommandLineParser,
-            suggester: SuggestionEngine::new(tree.clone()),
-            tree,
+            suggester: SuggestionEngine::new(tree),
             global_context_flags,
         }
     }
 
     /// Parses `line` at `cursor` and returns the cursor state with suggestions.
     ///
-    /// This is the canonical one-shot completion entrypoint when callers do
-    /// not need the intermediate [`CompletionAnalysis`].
+    /// This one-shot completion entrypoint returns the cursor state and ranked
+    /// suggestions.
     ///
     /// # Examples
     ///
     /// ```
     /// use osp_cli::completion::{
-    ///     CommandSpec, CompletionEngine, CompletionTreeBuilder, SuggestionOutput,
+    ///     CompletionNode, CompletionEngine, CompletionTreeBuilder, SuggestionOutput,
     /// };
     ///
     /// let tree = CompletionTreeBuilder
-    ///     .build_from_specs(&[CommandSpec::new("ldap")], [])
+    ///     .build_from_specs(&[CompletionNode::new("ldap")], [])
     ///     .expect("tree should build");
     /// let engine = CompletionEngine::new(tree);
     ///
@@ -80,7 +78,10 @@ impl CompletionEngine {
     }
 
     /// Generates suggestions for a previously computed completion analysis.
-    pub fn suggestions_for_analysis(&self, analysis: &CompletionAnalysis) -> Vec<SuggestionOutput> {
+    pub(crate) fn suggestions_for_analysis(
+        &self,
+        analysis: &CompletionAnalysis,
+    ) -> Vec<SuggestionOutput> {
         self.suggester.generate(analysis)
     }
 
@@ -88,17 +89,25 @@ impl CompletionEngine {
     ///
     /// `cursor` is clamped to the line length and to a valid UTF-8 character
     /// boundary before parsing.
-    pub fn analyze(&self, line: &str, cursor: usize) -> CompletionAnalysis {
-        let parsed = self.parser.analyze(line, cursor);
+    pub(crate) fn analyze(&self, line: &str, cursor: usize) -> CompletionAnalysis {
+        let parsed = self
+            .parser
+            .analyze_with_flag_arity(line, cursor, |path, flag| self.flag_arity(path, flag));
 
         self.analyze_command_parts(parsed.parsed, parsed.cursor)
+    }
+
+    pub(crate) fn parse_command_tokens(&self, tokens: &[String]) -> CommandLine {
+        self.parser
+            .parse_with_flag_arity(tokens, &|path, flag| self.flag_arity(path, flag))
     }
 
     /// Resolves completion state from pre-parsed command representations.
     ///
     /// This is mainly useful for tests or callers that already have split
     /// command state for the full line and the cursor-local prefix.
-    pub fn analyze_command(
+    #[cfg(test)]
+    pub(crate) fn analyze_command(
         &self,
         full_cmd: CommandLine,
         cursor_cmd: CommandLine,
@@ -137,16 +146,17 @@ impl CompletionEngine {
     }
 
     /// Returns how many leading tokens resolve to a command path in the tree.
-    pub fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
-        TreeResolver::new(&self.tree).matched_command_len_tokens(tokens)
+    #[cfg(test)]
+    pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
+        TreeResolver::new(self.suggester.tree()).matched_command_len_tokens(tokens)
     }
 
     /// Classifies a candidate value relative to the current completion analysis.
-    pub fn classify_match(&self, analysis: &CompletionAnalysis, value: &str) -> MatchKind {
+    pub(crate) fn classify_match(&self, analysis: &CompletionAnalysis, value: &str) -> MatchKind {
         if analysis.parsed.cursor_cmd.has_pipe() {
             return MatchKind::Pipe;
         }
-        let nodes = TreeResolver::new(&self.tree).resolved_nodes(&analysis.context);
+        let nodes = TreeResolver::new(self.suggester.tree()).resolved_nodes(&analysis.context);
 
         if value.starts_with("--") || nodes.flag_scope_node.flags.contains_key(value) {
             return MatchKind::Flag;
@@ -163,14 +173,15 @@ impl CompletionEngine {
 
     /// Returns the tree node at an exact command path.
     pub(crate) fn node_at(&self, path: &[String]) -> Option<&CompletionNode> {
-        TreeResolver::new(&self.tree).resolve_exact(path)
+        TreeResolver::new(self.suggester.tree()).resolve_exact(path)
     }
 
     /// Positional usage and the byte range of the slot at the cursor.
     ///
     /// Filled slots use their bare names; remaining slots retain declared
     /// requiredness and repetition. Commands without named positions fall back
-    /// to the caller's normal status. No flag signature is included.
+    /// to the caller's normal status. Neither the flag signature nor the
+    /// command's own description is included.
     pub(crate) fn positional_usage(
         &self,
         analysis: &CompletionAnalysis,
@@ -183,12 +194,9 @@ impl CompletionEngine {
         if path.is_empty() || node.args.is_empty() {
             return None;
         }
-        let index = positional_arg_index(
-            &analysis.parsed.cursor_cmd,
-            &analysis.cursor.token_stub,
-            path.len(),
-            node,
-        );
+        let path_tokens = command_path_tokens(&analysis.parsed.cursor_cmd);
+        let index =
+            positional_arg_index(&path_tokens, &analysis.cursor.token_stub, path.len(), node);
         let active_index = match &analysis.request {
             CompletionRequest::Positionals { arg_index, .. } => Some(*arg_index),
             _ => None,
@@ -221,16 +229,10 @@ impl CompletionEngine {
                 .collect::<Vec<_>>()
                 .join(" | ")
         });
-        let detail = choices.as_deref().or_else(|| {
-            if index > 0 {
-                arg.and_then(|arg| arg.tooltip.as_deref())
-                    .or(node.tooltip.as_deref())
-            } else {
-                node.tooltip
-                    .as_deref()
-                    .or_else(|| arg.and_then(|arg| arg.tooltip.as_deref()))
-            }
-        });
+        // The command's own tooltip is the hinter's separate description line.
+        let detail = choices
+            .as_deref()
+            .or_else(|| arg.and_then(|arg| arg.tooltip.as_deref()));
         if let Some(detail) = detail {
             text.push_str(" · ");
             text.push_str(detail);
@@ -240,14 +242,14 @@ impl CompletionEngine {
 
     /// Required flags of the command at the cursor that the line still lacks.
     ///
-    /// Only flags the tree declares as required are reported, including the
-    /// provider-specific ones once a provider is selected. A flag counts as
+    /// Only flags the tree declares as required are reported, including any
+    /// supplied by the local completion callback. A flag counts as
     /// given under any of its spellings.
     pub(crate) fn missing_required_flags(&self, analysis: &CompletionAnalysis) -> Vec<String> {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let node = resolver.resolved_nodes(&analysis.context).flag_scope_node;
         let cmd = &analysis.parsed.full_cmd;
-        let provider = ProviderSelection::from_command(cmd, node);
+        let node = crate::completion::suggest::resolve_dynamic(node, cmd);
         let given = |flag: &str| {
             cmd.has_flag(flag)
                 || node.flags.iter().any(|(spelling, meta)| {
@@ -255,7 +257,7 @@ impl CompletionEngine {
                 })
         };
         self.suggester
-            .required_flags(node, &provider)
+            .required_flags(&node)
             .into_iter()
             .filter(|flag| !given(flag))
             .collect()
@@ -293,7 +295,7 @@ impl CompletionEngine {
         stub: &str,
     ) {
         let context = self.resolve_completion_context(cursor_cmd, stub);
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let mut scoped_flags = BTreeSet::new();
         for i in (0..=context.matched_path.len()).rev() {
             let path = &context.matched_path[..i];
@@ -323,7 +325,7 @@ impl CompletionEngine {
     }
 
     fn merge_prefilled_values(&self, cursor_cmd: &mut CommandLine, matched_path: &[String]) {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let mut prefilled_positionals = Vec::new();
         for i in 0..=matched_path.len() {
             let Some(node) = resolver.resolve_exact(&matched_path[..i]) else {
@@ -342,10 +344,32 @@ impl CompletionEngine {
         cursor_cmd.prepend_positional_values(prefilled_positionals);
     }
 
+    fn flag_arity(&self, command_path: &[String], flag_name: &str) -> Option<FlagArity> {
+        let resolver = TreeResolver::new(self.suggester.tree());
+        let (_, matched_path) = resolver.resolve_context(command_path);
+        for prefix_len in (0..=matched_path.len()).rev() {
+            let Some(node) = resolver.resolve_exact(&matched_path[..prefix_len]) else {
+                continue;
+            };
+            let Some(flag) = node.flags.get(flag_name) else {
+                continue;
+            };
+            return Some(if flag.flag_only {
+                FlagArity::FlagOnly
+            } else if flag.multi {
+                FlagArity::MultipleValues
+            } else {
+                FlagArity::SingleValue
+            });
+        }
+        None
+    }
+
     fn resolve_completion_context(&self, cmd: &CommandLine, stub: &str) -> CompletionContext {
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
+        let path_tokens = command_path_tokens(cmd);
         let exact_token_commits = if !stub.is_empty() && !stub.starts_with('-') {
-            let parent_path = &cmd.head()[..cmd.head().len().saturating_sub(1)];
+            let parent_path = &path_tokens[..path_tokens.len().saturating_sub(1)];
             resolver
                 .resolve_exact(parent_path)
                 .and_then(|node| node.children.get(stub))
@@ -357,31 +381,25 @@ impl CompletionEngine {
         // Keep exact and partial head tokens in the parent scope so Tab keeps
         // cycling sibling commands until a trailing space commits the token,
         // unless the exact token explicitly commits scope on its own.
-        let head_without_partial_subcommand = if !stub.is_empty()
+        let path_without_partial_token = if !stub.is_empty()
             && !stub.starts_with('-')
-            && cmd.head().last().is_some_and(|token| token == stub)
+            && path_tokens.last().is_some_and(|token| token == stub)
             && !exact_token_commits
         {
-            &cmd.head()[..cmd.head().len().saturating_sub(1)]
+            &path_tokens[..path_tokens.len().saturating_sub(1)]
         } else {
-            cmd.head()
+            &path_tokens
         };
-        let (_, matched) = resolver.resolve_context(head_without_partial_subcommand);
+        let (_, matched) = resolver.resolve_context(path_without_partial_token);
         let flag_scope_path = resolver.resolve_flag_scope_path(&matched);
 
         // Keep the in-progress stub out of arg accounting so a partial
         // subcommand or value does not shift completion into the next slot.
-        let arg_tokens: Vec<String> = cmd
-            .head()
+        let arg_tokens: Vec<String> = path_tokens
             .iter()
             .skip(matched.len())
             .filter(|token| token.as_str() != stub)
             .cloned()
-            .chain(
-                cmd.positional_args()
-                    .filter(|token| token.as_str() != stub)
-                    .cloned(),
-            )
             .collect();
 
         let context_node = resolver.resolve_exact_or_root(&matched);
@@ -414,7 +432,7 @@ impl CompletionEngine {
             };
         }
 
-        let resolver = TreeResolver::new(&self.tree);
+        let resolver = TreeResolver::new(self.suggester.tree());
         let context_node = resolver.resolve_exact_or_root(&context.matched_path);
         let flag_scope_node = resolver.resolve_exact_or_root(&context.flag_scope_path);
         let (needs_flag_value, last_flag) = last_flag_needs_value(flag_scope_node, cmd, stub);
@@ -425,18 +443,22 @@ impl CompletionEngine {
             };
         }
 
-        let consumed = cmd
-            .head()
+        let path_tokens = command_path_tokens(cmd);
+        let consumed = path_tokens
             .iter()
             .skip(context.matched_path.len())
-            .chain(cmd.positional_args())
             .filter(|token| token.as_str() != stub)
             .count();
         let required_args = context_node.args.iter().filter(|arg| arg.required).count();
         CompletionRequest::Positionals {
             context_path: context.matched_path.clone(),
             flag_scope_path: context.flag_scope_path.clone(),
-            arg_index: positional_arg_index(cmd, stub, context.matched_path.len(), context_node),
+            arg_index: positional_arg_index(
+                &path_tokens,
+                stub,
+                context.matched_path.len(),
+                context_node,
+            ),
             show_subcommands: context.subcommand_context
                 && (context_node.value_key || consumed <= required_args),
             show_flag_names: stub.is_empty() && !context.subcommand_context,
@@ -449,7 +471,8 @@ fn last_flag_needs_value(
     cmd: &CommandLine,
     stub: &str,
 ) -> (bool, Option<String>) {
-    let Some(last_occurrence) = cmd.last_flag_occurrence() else {
+    // A positional word after the flag means the flag is complete.
+    let Some(TailItem::Flag(last_occurrence)) = cmd.tail().last() else {
         return (false, None);
     };
     let last_flag = &last_occurrence.name;
@@ -478,17 +501,23 @@ fn last_flag_needs_value(
     (flag_node.multi, Some(last_flag.clone()))
 }
 
+fn command_path_tokens(cmd: &CommandLine) -> Vec<String> {
+    cmd.head()
+        .iter()
+        .cloned()
+        .chain(cmd.positional_args().cloned())
+        .collect()
+}
+
 fn positional_arg_index(
-    cmd: &CommandLine,
+    path_tokens: &[String],
     stub: &str,
-    matched_head_len: usize,
+    matched_path_len: usize,
     context_node: &CompletionNode,
 ) -> usize {
-    let consumed = cmd
-        .head()
+    let consumed = path_tokens
         .iter()
-        .skip(matched_head_len)
-        .chain(cmd.positional_args())
+        .skip(matched_path_len)
         .filter(|token| token.as_str() != stub)
         .count();
 
@@ -528,8 +557,8 @@ mod tests {
     use crate::completion::{
         CompletionEngine,
         model::{
-            ArgNode, CompletionNode, CompletionTree, FlagNode, QuoteStyle, SuggestionEntry,
-            SuggestionOutput,
+            ArgNode, CompletionNode, CompletionTree, DynamicCompletion, FlagCompletions, FlagNode,
+            QuoteStyle, SuggestionEntry, SuggestionOutput,
         },
     };
 
@@ -549,10 +578,6 @@ mod tests {
         deploy.flags.insert(
             "--image".to_string(),
             FlagNode {
-                suggestions_by_provider: BTreeMap::from([
-                    ("alpha".to_string(), vec![SuggestionEntry::from("red")]),
-                    ("beta".to_string(), vec![SuggestionEntry::from("blue")]),
-                ]),
                 suggestions: vec![SuggestionEntry::from("red"), SuggestionEntry::from("blue")],
                 ..FlagNode::default()
             },
@@ -565,6 +590,21 @@ mod tests {
             },
         );
 
+        deploy.dynamic = Some(DynamicCompletion::new(|cmd| {
+            let values = match cmd
+                .flag_values("--provider")
+                .and_then(|values| values.first())
+                .map(String::as_str)
+            {
+                Some("alpha") => vec![SuggestionEntry::from("red")],
+                Some("beta") => vec![SuggestionEntry::from("blue")],
+                _ => vec![SuggestionEntry::from("red"), SuggestionEntry::from("blue")],
+            };
+            FlagCompletions {
+                values: BTreeMap::from([("--image".into(), values)]),
+                ..FlagCompletions::default()
+            }
+        }));
         let mut service = CompletionNode::default();
         service.children.insert("deploy".to_string(), deploy);
 

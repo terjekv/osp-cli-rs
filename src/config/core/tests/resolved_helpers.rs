@@ -45,7 +45,7 @@ fn validate_and_adapt_converts_runtime_visible_string_values() {
         },
     );
     values.insert(
-        "ui.prompt.secrets".to_string(),
+        "repl.history.enabled".to_string(),
         ResolvedValue {
             raw_value: ConfigValue::String("true".to_string()),
             value: ConfigValue::String("true".to_string()),
@@ -55,7 +55,7 @@ fn validate_and_adapt_converts_runtime_visible_string_values() {
         },
     );
     values.insert(
-        "session.cache.max_results".to_string(),
+        "repl.history.menu_rows".to_string(),
         ResolvedValue {
             raw_value: ConfigValue::String("15".to_string()),
             value: ConfigValue::String("15".to_string()),
@@ -80,12 +80,12 @@ fn validate_and_adapt_converts_runtime_visible_string_values() {
         .expect("runtime-visible values should adapt");
 
     assert_eq!(
-        values.get("ui.prompt.secrets").map(|entry| &entry.value),
+        values.get("repl.history.enabled").map(|entry| &entry.value),
         Some(&ConfigValue::Bool(true))
     );
     assert_eq!(
         values
-            .get("session.cache.max_results")
+            .get("repl.history.menu_rows")
             .map(|entry| &entry.value),
         Some(&ConfigValue::Integer(15))
     );
@@ -101,12 +101,13 @@ fn validate_and_adapt_converts_runtime_visible_string_values() {
 #[test]
 fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
     let resolved = ResolvedConfig {
+        ignored_keys: Vec::new(),
         active_profile: "ops".to_string(),
         terminal: Some("repl".to_string()),
         known_profiles: BTreeSet::from(["default".to_string(), "ops".to_string()]),
         values: BTreeMap::from([
             (
-                "ui.prompt.secrets".to_string(),
+                "repl.history.enabled".to_string(),
                 ResolvedValue {
                     raw_value: ConfigValue::Bool(true),
                     value: ConfigValue::Bool(true),
@@ -140,7 +141,7 @@ fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
 
     assert_eq!(resolved.active_profile(), "ops");
     assert_eq!(resolved.terminal(), Some("repl"));
-    assert_eq!(resolved.get_bool("ui.prompt.secrets"), Some(true));
+    assert_eq!(resolved.get_bool("repl.history.enabled"), Some(true));
     assert_eq!(
         resolved.get_string_list("theme.path"),
         Some(vec!["base".to_string()])
@@ -148,10 +149,11 @@ fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
     assert!(resolved.get_alias_entry("lookup").is_some());
     assert!(resolved.get_alias_entry("alias.lookup").is_some());
     assert!(resolved.known_profiles().contains("default"));
-    assert!(resolved.values().contains_key("ui.prompt.secrets"));
+    assert!(resolved.values().contains_key("repl.history.enabled"));
     assert!(resolved.aliases().contains_key("alias.lookup"));
 
     let resolved = ResolvedConfig {
+        ignored_keys: Vec::new(),
         active_profile: "default".to_string(),
         terminal: Some("repl".to_string()),
         known_profiles: BTreeSet::new(),
@@ -204,13 +206,14 @@ fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
 
     let mut layer = ConfigLayer::default();
     layer.set("ui.format", "json");
-    layer.set_for_terminal("repl", "ui.format", "table");
+    layer.insert("ui.format", "table", crate::config::Scope::terminal("repl"));
     assert_eq!(
         layer.remove_scoped("ui.format", &Scope::terminal("repl")),
         Some(ConfigValue::String("table".to_string()))
     );
 
     let resolved = ResolvedConfig {
+        ignored_keys: Vec::new(),
         active_profile: "ops".to_string(),
         terminal: None,
         known_profiles: BTreeSet::new(),

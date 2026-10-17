@@ -18,7 +18,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -66,7 +66,7 @@ ui.mode = "plain"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -106,7 +106,7 @@ profile.default = "tsd"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -145,7 +145,7 @@ user.name = "tester"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -188,7 +188,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     let output = cmd
         .envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
@@ -223,7 +223,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -262,7 +262,7 @@ profile.default = "uio"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -279,8 +279,8 @@ profile.default = "uio"
     cmd.assert()
         .failure()
         .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("─ Unknown configuration key "))
-        .stderr(predicate::str::contains("\x1b["));
+        .stderr(predicate::str::contains("error: Unknown config key "))
+        .stderr(predicate::str::contains("hint:"));
 
 }
 
@@ -297,7 +297,7 @@ ui.format = "json"
 "#,
     );
 
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("osp"));
+    let mut cmd = crate::test_env::command(assert_cmd::cargo::cargo_bin!("osp"));
     cmd.envs(crate::test_env::isolated_env(&home))
         .env("PATH", "/usr/bin:/bin")
         .args([
@@ -313,10 +313,8 @@ ui.format = "json"
         ]);
     let output = cmd.assert().failure().get_output().clone();
     let payload = parse_json_stdout(&output.stdout);
-    assert_eq!(payload["error"]["code"], "config key not found");
-    assert_eq!(payload["error"]["message"], "ui.formt");
-    assert!(payload["messages"][1]["text"]
-        .as_str()
-        .is_some_and(|text| text.contains("did you mean: ui.format")));
+    assert_eq!(payload["error"]["code"], "command_failed");
+    assert_eq!(payload["error"]["message"], "Unknown config key 'ui.formt'.");
+    assert_eq!(payload["error"]["details"]["action"], "Run osp config list to see the keys.");
     assert!(output.stderr.is_empty());
 }

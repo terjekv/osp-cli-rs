@@ -1,4 +1,4 @@
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 const GRID_PADDING: usize = 4;
 const GRID_COLUMN_WEIGHT: usize = 3;
@@ -46,7 +46,22 @@ fn arrange_in_grid(
     }
 
     if let Some(forced) = grid_columns {
-        return build_grid_matrix(values, forced.max(1).min(n), available_width);
+        return build_grid_matrix(values, forced.max(1).min(n));
+    }
+
+    if values
+        .iter()
+        .any(|value| UnicodeWidthStr::width(value.as_str()) > available_width)
+    {
+        let width = values
+            .iter()
+            .map(|value| UnicodeWidthStr::width(value.as_str()))
+            .max()
+            .unwrap_or(0);
+        return (
+            values.iter().cloned().map(|value| vec![value]).collect(),
+            vec![width],
+        );
     }
 
     let mut best_cols = 1usize;
@@ -54,61 +69,52 @@ fn arrange_in_grid(
     let mut best_widths = vec![UnicodeWidthStr::width(values[0].as_str())];
     for cols in 1..=n {
         let rows = n.div_ceil(cols);
-        let col_widths = compute_grid_column_widths(values, cols, rows, available_width);
-        let total_width = col_widths.iter().sum::<usize>() + grid_padding * cols.saturating_sub(1);
+        // `rows - cols * weight` only decreases as columns grow, so its
+        // distance from zero is lowest once; stop as soon as it rises.
+        let score = rows.abs_diff(cols.saturating_mul(column_weight));
+        if score > best_score {
+            break;
+        }
+        let col_widths = compute_grid_column_widths(values, cols, rows);
+        let total_width = col_widths
+            .iter()
+            .fold(0usize, |total, width| total.saturating_add(*width))
+            .saturating_add(grid_padding.saturating_mul(cols.saturating_sub(1)));
         if total_width > available_width {
             break;
         }
 
-        let score = rows.abs_diff(cols * column_weight);
-        if score <= best_score {
-            best_score = score;
-            best_cols = cols;
-            best_widths = col_widths;
-        }
+        best_score = score;
+        best_cols = cols;
+        best_widths = col_widths;
     }
 
     let rows = n.div_ceil(best_cols);
-    let matrix = build_grid_rows(values, best_cols, rows, available_width);
+    let matrix = build_grid_rows(values, best_cols, rows);
     (matrix, best_widths)
 }
 
-fn build_grid_matrix(
-    values: &[String],
-    columns: usize,
-    available_width: usize,
-) -> (Vec<Vec<String>>, Vec<usize>) {
+fn build_grid_matrix(values: &[String], columns: usize) -> (Vec<Vec<String>>, Vec<usize>) {
     let rows = values.len().div_ceil(columns);
-    let widths = compute_grid_column_widths(values, columns, rows, available_width);
-    let matrix = build_grid_rows(values, columns, rows, available_width);
+    let widths = compute_grid_column_widths(values, columns, rows);
+    let matrix = build_grid_rows(values, columns, rows);
     (matrix, widths)
 }
 
-fn compute_grid_column_widths(
-    values: &[String],
-    columns: usize,
-    rows: usize,
-    available_width: usize,
-) -> Vec<usize> {
+fn compute_grid_column_widths(values: &[String], columns: usize, rows: usize) -> Vec<usize> {
     let mut column_widths = vec![0usize; columns];
     for (index, value) in values.iter().enumerate() {
         let column_index = index / rows;
         if column_index >= columns {
             continue;
         }
-        let truncated = truncate_display_width_crop(value, available_width.max(4));
         column_widths[column_index] =
-            column_widths[column_index].max(UnicodeWidthStr::width(truncated.as_str()));
+            column_widths[column_index].max(UnicodeWidthStr::width(value.as_str()));
     }
     column_widths
 }
 
-fn build_grid_rows(
-    values: &[String],
-    columns: usize,
-    rows: usize,
-    available_width: usize,
-) -> Vec<Vec<String>> {
+fn build_grid_rows(values: &[String], columns: usize, rows: usize) -> Vec<Vec<String>> {
     let mut matrix = vec![vec![String::new(); columns]; rows];
     for (index, value) in values.iter().enumerate() {
         let row_index = index % rows;
@@ -116,8 +122,7 @@ fn build_grid_rows(
         if column_index >= columns {
             continue;
         }
-        matrix[row_index][column_index] =
-            truncate_display_width_crop(value, available_width.max(4));
+        matrix[row_index][column_index] = value.clone();
     }
 
     matrix
@@ -126,36 +131,21 @@ fn build_grid_rows(
         .collect()
 }
 
-fn truncate_display_width_crop(value: &str, max_width: usize) -> String {
-    if UnicodeWidthStr::width(value) <= max_width {
-        return value.to_string();
-    }
-
-    let mut out = String::new();
-    let mut width = 0usize;
-    for ch in value.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + ch_width > max_width {
-            break;
-        }
-        out.push(ch);
-        width += ch_width;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::{PreparedGridList, arrange_in_grid};
 
     #[test]
-    fn prepared_grid_list_crops_cells_to_available_width_unit() {
+    fn prepared_grid_list_preserves_cells_when_width_is_too_narrow_unit() {
         let values = vec!["alphabet".to_string(), "beta".to_string()];
 
         let grid = PreparedGridList::from_items(&values, 4);
 
-        assert_eq!(grid.rows[0][0], "alph");
-        assert_eq!(grid.column_widths[0], 4);
+        assert_eq!(
+            grid.rows,
+            vec![vec!["alphabet".to_string()], vec!["beta".to_string()]]
+        );
+        assert_eq!(grid.column_widths[0], 8);
         assert_eq!(grid.gap, 4);
     }
 

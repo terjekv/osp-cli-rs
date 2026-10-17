@@ -1,5 +1,0 @@
----
-source: crates/osp-cli/tests/contracts/plugins.rs
-expression: stderr
----
-plugin help note

@@ -13,9 +13,9 @@ It sits at the host layer and imports `app`, `cli`, `completion`, `config`,
 | Path | Owns |
 |---|---|
 | `engine/` | The reedline boundary: editor, menus, hinter, prompt, debug surfaces |
-| `dispatch/` | Running an accepted line: builtins, shell scope, command handoff |
+| `dispatch/` | REPL builtins, shell scope and command handoff; shared inline parsing and pipeline policy live in `app/command_plan.rs` |
 | `host.rs`, `lifecycle.rs` | The loop: build a cycle, run it, restart on reload |
-| `surface.rs` | The browse/completion surface derived from the command catalog |
+| `surface.rs` | Browse/completion specs from clap and the command catalog, with REPL wording and live value overrides |
 | `completion.rs` | Shaping that surface into a completion tree: aliases, invocation flags, shell re-rooting |
 | `highlight.rs` | Input colouring and the first invalid word |
 | `menu.rs`, `menu_core.rs` | The completion menu: reedline adapter and editor-free layout/navigation |
@@ -25,8 +25,8 @@ It sits at the host layer and imports `app`, `cli`, `completion`, `config`,
 
 ## Common changes
 
-- **New REPL setting:** add the default in `config/defaults.rs` and the schema
-  entry in `config/core.rs`, read it in `presentation.rs`, carry it on
+- **New REPL setting:** declare the default and schema
+  entry in `config/builtin.rs`, read it in `presentation.rs`, carry it on
   `ReplRunConfig`. `repl.tab_mode` is a small worked example.
 - **Builtin that only makes sense interactively:** `dispatch/builtins.rs`.
 - **Completion looks wrong for a command:** first check the tree with
@@ -43,3 +43,7 @@ OSP_REPL_TRACE_COMPLETION=1 OSP_REPL_TRACE_PATH=/tmp/trace.jsonl osp
 
 The trace records every menu refresh, cycle and accept with the buffer before
 and after. It is the quickest way to tell a data problem from a paint problem.
+
+Intro templates and root help build `core::Document` blocks. Help
+includes append blocks in authored order; Markdown lists and repeated data
+fences retain their content. The DSL sees flat rows, not section groups.

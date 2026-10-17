@@ -19,12 +19,12 @@ use crate::core::row::Row;
 use crate::dsl::verbs::common::map_group_rows;
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::dsl::{
     eval::{
         flatten::{coalesce_flat_row_with_fill, flatten_row},
-        resolve::{compact_sparse_arrays, sparse_hole},
+        resolve::{AddressStep, AddressedValue, compact_sparse_arrays, sparse_hole},
     },
     verbs::common::parse_terms,
 };
@@ -139,7 +139,6 @@ fn project_single_row(
                             .iter()
                             .any(|drop| entry.address.starts_with(&drop.address))
                     })
-                    .map(|entry| entry.value)
                     .collect(),
             });
             continue;
@@ -166,7 +165,7 @@ fn project_single_row(
         })
     });
 
-    reject_ambiguous_dynamic_columns(&dynamic_columns)?;
+    reject_ambiguous_dynamic_columns(&static_flat, &dynamic_columns)?;
     let mut rows = build_rows_from_dynamic(static_flat, dynamic_columns);
     if rows.is_empty() && keepers.is_empty() {
         rows.push(rebuild_row(&Map::new()));
@@ -178,29 +177,62 @@ fn project_single_row(
 struct DynamicColumn {
     label: String,
     source: String,
-    values: Vec<Value>,
+    values: Vec<AddressedValue>,
 }
 
-fn reject_ambiguous_dynamic_columns(columns: &[DynamicColumn]) -> Result<()> {
-    let mut grouped: HashMap<&str, Vec<&str>> = HashMap::new();
+fn reject_ambiguous_dynamic_columns(static_flat: &Row, columns: &[DynamicColumn]) -> Result<()> {
+    let static_keys = static_flat
+        .keys()
+        .map(|key| (key.as_str(), key.as_str()))
+        .collect::<Vec<_>>();
+
+    let mut dynamic_keys = Vec::<(String, &str)>::new();
     for column in columns {
-        grouped
-            .entry(column.label.as_str())
-            .or_default()
-            .push(column.source.as_str());
+        let emitted_keys = column
+            .values
+            .iter()
+            .flat_map(|entry| match &entry.value {
+                Value::Object(map) => map.keys().cloned().collect(),
+                _ => vec![column.label.clone()],
+            })
+            .collect::<BTreeSet<_>>();
+
+        for key in &emitted_keys {
+            if let Some((_, source)) = static_keys
+                .iter()
+                .find(|(existing, _)| output_keys_overlap(existing, key))
+            {
+                return Err(ambiguous_projection_key(key, source, &column.source));
+            }
+            if let Some((_, source)) = dynamic_keys
+                .iter()
+                .find(|(existing, _)| output_keys_overlap(existing, key))
+            {
+                return Err(ambiguous_projection_key(key, source, &column.source));
+            }
+        }
+        dynamic_keys.extend(
+            emitted_keys
+                .into_iter()
+                .map(|key| (key, column.source.as_str())),
+        );
     }
 
-    let Some((label, selectors)) = grouped
-        .into_iter()
-        .find(|(_, selectors)| selectors.len() > 1)
-    else {
-        return Ok(());
-    };
+    Ok(())
+}
 
-    Err(anyhow!(
-        "ambiguous dynamic projection label `{label}` from selectors: {}",
-        selectors.join(", ")
-    ))
+fn output_keys_overlap(left: &str, right: &str) -> bool {
+    fn is_parent(parent: &str, child: &str) -> bool {
+        child
+            .strip_prefix(parent)
+            .is_some_and(|suffix| suffix.starts_with('.') || suffix.starts_with('['))
+    }
+
+    left == right || is_parent(left, right) || is_parent(right, left)
+}
+
+fn ambiguous_projection_key(key: &str, first: &str, second: &str) -> anyhow::Error {
+    anyhow!("ambiguous dynamic projection label `{key}` from selectors: {first}, {second}")
 }
 
 fn rebuild_row(flat: &Row) -> Row {
@@ -217,46 +249,39 @@ fn build_rows_from_dynamic(static_flat: Row, dynamic_columns: Vec<DynamicColumn>
         return vec![rebuild_row(&static_flat)];
     }
 
-    let row_count = dynamic_columns
-        .iter()
-        .map(|column| column.values.len())
-        .max()
-        .unwrap_or(0);
-    if row_count == 0 {
-        return if static_flat.is_empty() {
-            Vec::new()
-        } else {
-            vec![rebuild_row(&static_flat)]
-        };
-    }
-
     let mut rows = Vec::new();
-    for index in 0..row_count {
-        let mut flat = static_flat.clone();
-        for column in &dynamic_columns {
-            if let Some(value) = column.values.get(index) {
-                match value {
-                    Value::Object(map) => {
-                        for (key, nested_value) in map {
-                            flat.insert(key.clone(), nested_value.clone());
-                        }
-                    }
-                    scalar => {
-                        flat.insert(column.label.clone(), scalar.clone());
-                    }
+    let mut index_by_address = HashMap::new();
+    for column in dynamic_columns {
+        for mut entry in column.values {
+            if let Some(index) = entry
+                .address
+                .iter()
+                .rposition(|step| matches!(step, AddressStep::Index(_)))
+            {
+                entry.address.truncate(index + 1);
+            }
+            let index = *index_by_address.entry(entry.address).or_insert_with(|| {
+                let index = rows.len();
+                rows.push(static_flat.clone());
+                index
+            });
+            let flat = &mut rows[index];
+            match entry.value {
+                Value::Object(map) => flat.extend(map),
+                scalar => {
+                    flat.insert(column.label.clone(), scalar);
                 }
-            } else {
-                flat.insert(column.label.clone(), Value::Null);
             }
         }
-
-        let projected = rebuild_row(&flat);
-        if !projected.is_empty() {
-            rows.push(projected);
-        }
+    }
+    if rows.is_empty() && !static_flat.is_empty() {
+        rows.push(static_flat);
     }
 
-    rows
+    rows.into_iter()
+        .map(|flat| rebuild_row(&flat))
+        .filter(|row| !row.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
