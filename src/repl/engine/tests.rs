@@ -914,7 +914,7 @@ fn history_picker_options_use_configured_rows_query_and_skin_unit() {
     assert_eq!(
         options.color.as_deref(),
         Some(
-            "normal:7,matched:7,current:7,current_match:7,query:7,prompt:7,cursor:7,selected:7,info:7,header:7,spinner:7,border:7,bg:0,matched_bg:0,current_bg:6,current_match_bg:6"
+            "normal:7,matched:7:underlined,current:7,current_match:7:underlined,query:7,prompt:7,cursor:7,selected:7,info:7,header:7,spinner:7,border:7,bg:0,matched_bg:0,current_bg:6,current_match_bg:6"
         )
     );
 }

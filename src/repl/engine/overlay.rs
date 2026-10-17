@@ -5,7 +5,7 @@ use super::{COMPLETION_MENU_NAME, SharedHistory};
 use anyhow::Result;
 use nu_ansi_term::Color;
 #[cfg(not(miri))]
-use skim::options::MatchScheme;
+use skim::item::RankCriteria;
 #[cfg(not(miri))]
 use skim::prelude::{
     Skim, SkimItem, SkimItemReceiver, SkimItemSender, SkimOptionsBuilder,
@@ -211,7 +211,7 @@ fn build_skim_options(options: HistoryPickerOptions, scoped: bool) -> Result<ski
         .no_mouse(true)
         .prompt(options.prompt)
         .query(options.query.unwrap_or_default())
-        .scheme(MatchScheme::History)
+        .tiebreak(vec![RankCriteria::Score, RankCriteria::Index])
         .bind(vec![
             "tab:accept".to_string(),
             if scoped {
@@ -254,9 +254,9 @@ fn build_history_picker_color(appearance: &ReplAppearance) -> Option<String> {
         // prompt/query chrome, and match highlights. Set them all explicitly so
         // the picker does not inherit unreadable defaults from skim itself.
         parts.push(format!("normal:{text}"));
-        parts.push(format!("matched:{text}"));
+        parts.push(format!("matched:{text}:underlined"));
         parts.push(format!("current:{text}"));
-        parts.push(format!("current_match:{text}"));
+        parts.push(format!("current_match:{text}:underlined"));
         parts.push(format!("query:{text}"));
         parts.push(format!("prompt:{text}"));
         parts.push(format!("cursor:{text}"));

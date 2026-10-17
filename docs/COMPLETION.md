@@ -132,6 +132,11 @@ entered `!!` form expands in the editor on Tab; Enter executes the expanded
 command and keeps it as the last command when it is accepted, including after
 an execution failure.
 
+Ctrl-R filters commands as you type, ranks matches by score, and underlines the
+matched text. Equal scores retain newest-first order. Inside a shell it searches
+commands in that shell without their stored prefix; Ctrl-R again searches all
+history. Enter runs the selection and Tab puts it back in the editor.
+
 Supported expansions:
 
 - `!!`
