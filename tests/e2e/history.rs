@@ -143,14 +143,14 @@ theme.name = "dracula"
     let cleared = osp_command(home.path())
         .timeout(std::time::Duration::from_secs(5))
         .env("OSP__REPL__HISTORY__PATH", &history)
-        .args(["--profile", "tsd", "history", "clear"])
+        .args(["--profile", "tsd", "history", "clear", "*"])
         .assert()
         .success()
         .get_output()
         .clone();
     assert_eq!(
         String::from_utf8(cleared.stdout).unwrap(),
-        "Cleared root history.\n"
+        "Deleted 2 history lines.\n"
     );
     let resumed = capture("tsd", "theme list --json | dracula\nexit\n");
     assert_eq!(resumed[0][0]["id"], "dracula");

@@ -53,6 +53,13 @@ impl<'a> ReplViewContext<'a> {
 // Keep the host loop as orchestration only so editor/runtime details stay in
 // `repl::engine` and command semantics stay in `repl::dispatch`.
 pub(crate) fn run_plugin_repl(state: &mut AppState) -> Result<i32> {
+    let recording = state.session.recording.clone();
+    let result = run_plugin_repl_inner(state);
+    recording.stop()?;
+    result
+}
+
+fn run_plugin_repl_inner(state: &mut AppState) -> Result<i32> {
     crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
     start_native_completion_refreshes(&state.runtime, &state.clients);
     let mut loop_state = lifecycle::ReplLoopState::new(

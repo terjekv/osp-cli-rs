@@ -5,7 +5,7 @@
 //! and configured exclusion patterns. Shell-scoped views strip the prefix back
 //! off so callers see the command as it was typed inside that shell.
 //!
-//! Pruning and clearing only remove records visible in the chosen scope. The
+//! Pruning and clearing only remove records visible in the chosen scope.
 //!
 //! Public API shape:
 //!
@@ -396,13 +396,60 @@ impl OspHistoryStore {
         Ok(to_remove.len())
     }
 
-    /// Clears all entries visible to the provided shell prefix.
-    ///
-    /// This is equivalent to `prune_for(0, shell_prefix)`.
-    ///
-    /// Returns the number of removed entries.
-    pub fn clear_for(&mut self, shell_prefix: Option<&str>) -> Result<usize> {
-        self.prune_for(0, shell_prefix)
+    /// Matches the displayed scope under the file transaction lock. Pending
+    /// editor input stays buffered and is never included in the replacement.
+    pub fn clear_matching_for(
+        &mut self,
+        pattern: &str,
+        shell_prefix: Option<&str>,
+        preview: bool,
+        force: bool,
+    ) -> Result<Vec<HistoryEntry>> {
+        let path = self
+            .config
+            .path
+            .clone()
+            .filter(|_| self.config.persist_enabled());
+        let _transaction_lock = path
+            .as_ref()
+            .map(|path| crate::config::lock_file_transaction(path))
+            .transpose()?;
+        if let Some(path) = &path {
+            let mut records = self.config.load_records(path)?;
+            trim_records_to_capacity(&mut records, self.config.max_entries);
+            if let Some(pending) = &mut self.pending_record {
+                pending.index = records.len();
+                records.push(pending.record.clone());
+            }
+            self.records = records;
+        }
+        let pending_index = self.pending_record.as_ref().map(|pending| pending.index);
+        let entries = self.list_entries_for(shell_prefix);
+        let indices = self.visible_record_indices_for(shell_prefix);
+        let matches = entries
+            .into_iter()
+            .zip(indices)
+            .filter(|(entry, index)| {
+                Some(*index) != pending_index && matches_clear_pattern(pattern, &entry.command)
+            })
+            .collect::<Vec<_>>();
+        let (entries, indices): (Vec<_>, Vec<_>) = matches.into_iter().unzip();
+        if !preview && (entries.len() <= 100 || force) && !indices.is_empty() {
+            // Write before mutating memory so a failed replacement loses nothing.
+            if let Some(path) = &path {
+                let mut persisted = self.records.clone();
+                let mut remove = indices.clone();
+                if let Some(index) = pending_index {
+                    remove.push(index);
+                    remove.sort_unstable();
+                }
+                remove_record_indices(&mut persisted, &remove);
+                write_records(path, &persisted)?;
+            }
+            self.remove_records(&indices)?;
+            self.last_command = None;
+        }
+        Ok(entries)
     }
 
     pub(crate) fn expand(
@@ -1180,7 +1227,7 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
         .any(|pattern| matches_pattern(pattern, trimmed))
 }
 
-fn is_sensitive_line(line: &str) -> bool {
+pub(super) fn is_sensitive_line(line: &str) -> bool {
     shell_words::split(line).map_or(true, |tokens| has_sensitive_arguments(&tokens))
 }
 
@@ -1222,6 +1269,34 @@ pub(super) fn has_sensitive_arguments(tokens: &[String]) -> bool {
         return false;
     };
     set.store.secrets || crate::config::is_sensitive_key(&set.key)
+}
+
+fn matches_clear_pattern(pattern: &str, command: &str) -> bool {
+    // Greedy glob matching with an implicit trailing star; ? consumes a Unicode
+    // character, not one byte. Only * and ? have special meaning.
+    let pattern = pattern
+        .chars()
+        .chain(std::iter::once('*'))
+        .collect::<Vec<_>>();
+    let command = command.chars().collect::<Vec<_>>();
+    let (mut p, mut c, mut star, mut retry) = (0, 0, None, 0);
+    while c < command.len() {
+        if p < pattern.len() && pattern[p] == '*' {
+            star = Some(p);
+            p += 1;
+            retry = c;
+        } else if p < pattern.len() && (pattern[p] == '?' || pattern[p] == command[c]) {
+            p += 1;
+            c += 1;
+        } else if let Some(index) = star {
+            retry += 1;
+            c = retry;
+            p = index + 1;
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|ch| *ch == '*')
 }
 
 fn matches_pattern(pattern: &str, command: &str) -> bool {

@@ -187,9 +187,16 @@ pub(crate) fn run_history_repl_command(
                 )
             }))
         }
-        HistoryCommands::Clear => {
-            let removed = history
-                .with(|store| store.clear_for(scope.prefix.as_deref()))
+        HistoryCommands::Clear(args) => {
+            let entries = history
+                .with(|store| {
+                    store.clear_matching_for(
+                        &args.pattern,
+                        scope.prefix.as_deref(),
+                        args.preview,
+                        args.force,
+                    )
+                })
                 .map_err(anyhow::Error::msg)
                 .and_then(|result| result)
                 .map_err(|err| {
@@ -198,11 +205,25 @@ pub(crate) fn run_history_repl_command(
                         crate::app::host::ErrorContext::Operation("failed to clear REPL history"),
                     )
                 })?;
-            Ok(CommandOutput::text(if removed == 0 {
-                format!("{} is already empty.\n", scope.label)
-            } else {
-                format!("Cleared {}.\n", scope.label)
-            }))
+            let count = entries.len();
+            if count == 0 {
+                return Ok(CommandOutput::text("No matching history lines.\n"));
+            }
+            if args.preview {
+                let mut output = rows_to_output_result(history_entries_rows(entries));
+                output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
+                return Ok(CommandOutput::output(output, None));
+            }
+            if count > 100 && !args.force {
+                let mut output = CommandOutput::exit(0);
+                output.messages.warning(format!(
+                    "This would delete {count} lines (more than 100). Use --force to delete them, or --preview to list them."
+                ));
+                return Ok(output);
+            }
+            Ok(CommandOutput::text(format!(
+                "Deleted {count} history lines.\n"
+            )))
         }
     }
 }
@@ -681,14 +702,17 @@ mod tests {
         let clear = run_history_repl_command(
             &mut session,
             HistoryArgs {
-                command: HistoryCommands::Clear,
+                command: HistoryCommands::Clear(crate::cli::HistoryClearArgs {
+                    pattern: "*".into(),
+                    ..Default::default()
+                }),
             },
             &history,
         )
         .expect("scoped clear should succeed");
         match clear.body {
             crate::app::CommandBody::Text(text) => {
-                assert_eq!(text, "Cleared ldap shell history.\n")
+                assert_eq!(text, "Deleted 1 history lines.\n")
             }
             other => panic!("unexpected clear output: {other:?}"),
         }

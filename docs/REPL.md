@@ -192,6 +192,8 @@ state.
 
 See [COMPLETION.md](COMPLETION.md).
 
+`history clear PATTERN [--preview] [--force]` deletes matching displayed lines in the current history scope: matching starts at the beginning, `*` and `?` are wildcards, and a trailing `*` is implicit. More than 100 matches require `--force`; `--preview` lists the original history numbers without deleting. Root history includes shell prefixes; inside a shell the prefix is stripped, as in `history list` and Ctrl-R.
+
 ## Command Aliases
 
 Use the `alias` wrapper for ordinary alias work instead of spelling config
@@ -377,3 +379,21 @@ formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
 Hints without a command do not replace the remembered command. Native commands
 produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
 retains recovery commands in errors. No terminal text is scraped.
+
+## Session recording
+
+`recording start FILE` creates a new private (0600) JSON Lines file.
+`recording stop` closes it; `recording status` shows the active file. Recording
+also stops when the REPL exits and survives configuration or theme reloads.
+Existing files are refused. Each submitted line produces a `command` event
+with `line`, `output` events with `stream` and plain `text`, and `http` events
+with `method`, sanitized `url`, `status` (null for transport failure), and
+`duration_ms`. HTTP events reuse command diagnostics, independent of `-v`.
+Headers and request/response bodies are never captured. Leading-space lines,
+sensitive command arguments, and explicit secret-display commands are omitted,
+including their output and HTTP events. Password prompt input is never captured;
+known config secrets and sensitive output fields are redacted.
+
+Replay uses ordinary command files, not recording files. Extract commands with
+`jq -r 'select(.event == "command") | .line' session.jsonl > commands.osp`,
+then run `source commands.osp`. Review the commands before sourcing a recording.

@@ -614,9 +614,22 @@ pub(crate) enum HistoryCommands {
     /// Keep last N entries.
     #[command(display_order = 11)]
     Prune(HistoryPruneArgs),
-    /// Clear history.
+    /// Delete history lines matching a prefix or glob.
     #[command(display_order = 12)]
-    Clear,
+    Clear(HistoryClearArgs),
+}
+
+/// Arguments for `history clear`.
+#[derive(Debug, Args, Default)]
+pub(crate) struct HistoryClearArgs {
+    /// Match the displayed command from its start; * and ? are wildcards.
+    pub pattern: String,
+    /// List matching lines without deleting them.
+    #[arg(long)]
+    pub preview: bool,
+    /// Allow deleting more than 100 lines.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Arguments for `history list`.
@@ -942,7 +955,7 @@ pub(crate) fn is_help_all(tokens: &[String]) -> bool {
         && ReplHelpCommand::try_parse_from(tokens).is_ok_and(|help| help.all)
 }
 
-pub(crate) fn repl_only_commands() -> [clap::Command; 6] {
+pub(crate) fn repl_only_commands() -> [clap::Command; 7] {
     use clap::{Arg, ArgAction, Command, ValueHint};
     [
         <ReplHelpCommand as clap::CommandFactory>::command(),
@@ -970,6 +983,7 @@ pub(crate) fn repl_only_commands() -> [clap::Command; 6] {
                     .action(ArgAction::SetTrue)
                     .help("Continue after a command fails"),
             ),
+        <crate::repl::recording::RecordingCommand as clap::CommandFactory>::command(),
         Command::new("exit").about("Exit REPL"),
         Command::new("quit").about("Exit REPL"),
     ]

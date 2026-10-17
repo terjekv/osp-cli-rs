@@ -305,7 +305,9 @@ fn shared_history_supports_save_load_prune_clear_and_sync() {
     assert!(path.exists());
     assert_eq!(
         history
-            .with(|store| store.clear_for(None))
+            .with(|store| store
+                .clear_matching_for("*", None, false, true)
+                .map(|entries| entries.len()))
             .expect("history lock should be available")
             .expect("clear should succeed"),
         1
@@ -539,14 +541,18 @@ fn file_scoped_history_loads_legacy_records_and_drops_rejected_commands() {
     );
     assert_eq!(
         history
-            .with(|store| store.clear_for(store.shell_prefix().as_deref()))
+            .with(|store| store
+                .clear_matching_for("*", store.shell_prefix().as_deref(), false, true)
+                .map(|entries| entries.len()))
             .expect("history lock should be available")
             .expect("clear should succeed"),
         4
     );
     assert_eq!(
         history
-            .with(|store| store.clear_for(store.shell_prefix().as_deref()))
+            .with(|store| store
+                .clear_matching_for("*", store.shell_prefix().as_deref(), false, true)
+                .map(|entries| entries.len()))
             .expect("history lock should be available")
             .expect("clear should succeed"),
         0
