@@ -154,9 +154,10 @@ impl PluginManager {
             }
             cache.insert(path, entry);
         }
-        // Every command discovers plugins; an unchanged cache must not cost a
-        // synced write on each startup.
+        // Every command discovers plugins. The cache is regenerable, so it is
+        // written only when it changed, never synced, and not created empty.
         if let Some(path) = cache_path
+            && !(cache.is_empty() && old_bytes.is_none())
             && let Ok(payload) = serde_json::to_vec(&cache)
             && old_bytes.as_deref() != Some(payload.as_slice())
         {
@@ -169,7 +170,7 @@ impl PluginManager {
                         &path,
                         &payload,
                         false,
-                        crate::config::AtomicWriteDurability::Synced,
+                        crate::config::AtomicWriteDurability::Buffered,
                     )
                     .map_err(std::io::Error::other)
                 });

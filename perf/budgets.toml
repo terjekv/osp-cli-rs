@@ -41,14 +41,13 @@ measure = true
 repl_keys = ["\t", "\u0003", "exit\r"]
 measure = true
 
-# A first start describes the plugin and saves the metadata cache: one plugin
-# exec, then a synced atomic write (two cache directories, temp file, rename;
-# file and directory sync).
+# A first start describes the plugin and saves the regenerable metadata cache:
+# one plugin exec, then a buffered atomic write (two cache directories, temp
+# file, rename) with no disk sync.
 [scenarios.plugin-describe-cold]
 argv = ["--help"]
 warm = false
 execs = 1
-syncs = 2
 persistent_writes = 4
 
 # Each new history entry is saved atomically (lock, temp file, rename) without
