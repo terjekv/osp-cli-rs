@@ -134,3 +134,11 @@ pub(crate) fn replay<R>(run: impl FnOnce() -> R) -> R {
     let _restore = Restore(REPLAY.with(|active| active.replace(true)));
     run()
 }
+
+/// Rings the terminal during an explicit interactive sound preview.
+/// Notification policy and rate limiting remain owned by the REPL.
+pub fn preview_bell() -> io::Result<()> {
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(b"\x07")?;
+    stderr.flush()
+}

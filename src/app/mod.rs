@@ -682,3 +682,27 @@ pub(crate) fn render_process_error(
     }
     rendered
 }
+
+/// Emits a levelled message before a command host or credential flow resumes.
+/// Uses the same config-derived presentation and filtering as command messages.
+pub fn emit_message(
+    config: &crate::config::ResolvedConfig,
+    level: crate::core::MessageLevel,
+    text: impl Into<String>,
+    sink: &mut dyn UiSink,
+) -> miette::Result<()> {
+    let context = RuntimeContext::new(
+        None,
+        if config.terminal() == Some("repl") {
+            TerminalKind::Repl
+        } else {
+            TerminalKind::Cli
+        },
+        std::env::var("TERM").ok(),
+    );
+    let ui = UiState::from_resolved_config(&context, config)?;
+    let mut messages = crate::ui::messages::MessageBuffer::default();
+    messages.push(level, text);
+    command_output::emit_messages_for_ui(config, &ui, &messages, ui.verbosity, sink);
+    Ok(())
+}
