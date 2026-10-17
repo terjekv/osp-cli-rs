@@ -310,3 +310,28 @@ mod tests;
 
 pub mod picker;
 pub mod prompt;
+
+/// Renders one levelled message through the shared message renderer.
+/// Interactive lesson screens may select plain layout to avoid extra chrome.
+pub fn render_message(
+    level: crate::core::MessageLevel,
+    text: impl Into<String>,
+    settings: &RenderSettings,
+    verbosity: crate::core::MessageLevel,
+) -> String {
+    let text = text.into();
+    if level > verbosity {
+        return String::new();
+    }
+    if settings.format == OutputFormat::Json {
+        return format!(
+            "{}\n",
+            serde_json::json!({"messages": [{"level": level, "text": text}]})
+        );
+    }
+    let mut messages = messages::MessageBuffer::default();
+    messages.push(level, text);
+    let mut request = MessageRequest::new(settings, verbosity);
+    request.layout = messages::MessageLayout::Plain;
+    render_messages(&messages, &request)
+}

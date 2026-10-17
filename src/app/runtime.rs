@@ -295,7 +295,6 @@ impl UiState {
     /// assert_eq!(ui.verbosity.as_str(), "info");
     /// assert_eq!(ui.render_settings.runtime.terminal.as_deref(), Some("xterm-256color"));
     /// ```
-    #[cfg(test)]
     pub fn from_resolved_config(
         context: &RuntimeContext,
         config: &ResolvedConfig,
