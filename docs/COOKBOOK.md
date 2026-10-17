@@ -12,7 +12,6 @@ shapes. Replace them with a real plugin command from `osp plugins list`.
 
 ```bash
 osp plugins list
-osp plugins list
 ```
 
 ## Ask For JSON Once
@@ -30,8 +29,8 @@ osp --format json --render-mode plain plugins list
 ## Explain Why A Config Value Won
 
 ```bash
-osp config explain ui.format
-osp config get ui.format --sources
+osp config explain ui.verbosity
+osp config get ui.verbosity --sources
 ```
 
 ## Show The Whole Resolved Config

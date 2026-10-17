@@ -35,7 +35,7 @@ You can ignore for now:
 - the optional `site_runtime_config_for(...)` helper if you do not need
   wrapper-owned tooling/tests outside the host
 
-## Development API cutover (2026-10-17)
+## API migration
 
 Update wrappers alongside the library checkout. Configure the host through
 `App`, and use the narrow `AppRuntime` getters in access-policy hooks.
@@ -49,7 +49,7 @@ The unpublished UiO companion uses the sibling path dependency.
 | `core::fuzzy` matchers, env constants, value helpers, `quote_for_shell` | Internal; supported helpers remain `core::{fold_case,escape_for_shell}` |
 | `core::command_policy::CommandPath` | Internal host lookup key |
 | `completion::{model,engine,parse,suggest,tree}::*` | Flat `completion::*`; analysis details are internal |
-| `Cli.command`, CLI argument enums and parsers | `Cli::has_command()`; parse `Cli` through clap |
+| `Cli.command`, CLI argument enums and parsers | `cli::Cli::has_command()`; parse `cli::Cli` through clap |
 | `Cli` / `NativeCommandContext` struct literals | clap parsing / `NativeCommandContext::new()`; both are non-exhaustive |
 | `AppRuntime::config_state().resolved()` | `AppRuntime::config()` |
 | `AppRuntime::context().is_repl()` | `AppRuntime::is_repl()` |
@@ -365,9 +365,10 @@ When implementing native commands:
 - use `NativeCommand::configure` to select local service/session state from the
   resolved host config before help, policy, completion, and execution inspect
   it; keep remote refresh out of this hook
-- authentication recovery updates product facts through
-  `AppRuntime::set_policy_context`; resolved configuration and derived UI state
-  are read-only to wrappers and change through host configuration workflows
+- Keep credentials in the product's shared credential owner. Return current
+  authentication and credential facts from `AccessPolicy::session_facts`; use
+  `AppRuntime::set_authenticated_subject` to publish the validated subject.
+  See [AUTH.md](AUTH.md#product-hook) for the acquisition lifecycle.
 - registration should happen in one place, usually a product integrations
   module
 
@@ -401,3 +402,67 @@ For code-level entrypoints, start with:
 - [`src/native.rs`](../src/native.rs)
 - [`src/config/mod.rs`](../src/config/mod.rs)
 - [`src/config/runtime.rs`](../src/config/runtime.rs)
+
+## Config loader composition
+
+`osp_cli::config` exposes a generic loader interface so each source can be wired
+without custom host loading code:
+
+- `config::ConfigLoader` trait (`load() -> Result<ConfigLayer, ConfigError>`)
+- `StaticLayerLoader` for in-memory defaults/session layers
+- `TomlFileLoader` for file-backed layers (optional or required)
+- `EnvVarLoader` for `OSP__...` environment overrides
+- `SecretsTomlLoader` for file-backed secrets with strict permissions checks
+- `EnvSecretsLoader` for `OSP_SECRET__...` secret overrides
+- `ChainedLoader` for combining multiple backends within one precedence stage
+- `LoaderPipeline` for assembling all loaders in precedence order
+
+## REPL product hooks
+
+### Background notices
+
+Products can use `osp_cli::repl::post_notice` for a short informational line
+computed after startup. The editor prints it above the prompt; work posted
+before the editor starts is queued. The basic reader also displays notices on
+stderr, although it cannot redraw a partially typed line. Notice delivery does
+not wait for network work or block the prompt.
+
+### Product status
+
+Native commands may supply `repl_status()` as cached status text in a separate
+right-prompt slot. Rendering never performs network I/O. The host sanitizes
+control sequences and line breaks; Reedline measures terminal cells and omits
+the right prompt when it collides with input. Context and incognito remain;
+product attention takes priority over timing. Basic and JSON sessions omit it.
+Product `repl_status` hooks return `ReplStatus` text and a message level.
+The host strips terminal controls before applying the active theme's error
+or warning colour. `NO_COLOR`, `--no-color` and plain rendering suppress colour.
+A cached update is visible at the next editor paint. The pinned Reedline reader
+blocks on terminal input: cache changes and queued
+transition notices appear at the next input event, rather than waking an idle
+reader. No fake input events or worker ANSI writes are used.
+
+### Product actions and terminal ownership
+
+Internally, the editor distinguishes ordinary lines, global history selections
+that bypass shell scope, and named actions. Products use native-command hooks
+to register `repl::ReplAction`s and implement
+`NativeCommand::execute_repl_action`; the host uses ordinary elevation without
+running an interactive login hook. Actions bypass user history, alias expansion,
+shell navigation, last-command expansion and pagination reset. The same editor
+retains its draft and byte cursor across normal return, cancellation and errors.
+
+Bindings accept F2–F12, Alt+Enter or `none`; duplicate bindings are rejected.
+Products supply a default and a human label. Basic and JSON
+sessions have no product shortcuts. Existing Ctrl+R, Ctrl+L and pagination keys
+keep their meanings.
+
+`NativeCommand::start_repl(config, Some(ReplSession))` supplies a cancellable
+rich-editor lifetime.
+Basic selection and fallback report `None` for legacy startup behavior only;
+recurring attention and sound remain disabled.
+Workers use its bounded, sanitized `post_notice(text)` sink and
+`wait(duration)` cancellation point. Reedline queues delivery while foreground
+commands, line prompts, raw menus, pagers or the history picker own the terminal.
+Rebuild, fallback and exit cancel the handle and discard queued product output.
+Workers must also validate their own credential generation before publication.

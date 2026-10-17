@@ -133,8 +133,8 @@ Suggestions for another root keep their root form; leave the current shell
 before running them. JSON follow-ups in the REPL use the same form, while
 one-shot output uses `osp …`.
 
-`repl.shellable_commands` selects eligible
-top-level roots; its defaults are `nh`, `mreg`, `ldap`, `vm`, and `orch`.
+Products choose shellable roots through `repl.shellable_commands`; the library
+enables none by default.
 Built-in namespaces such as `plugins`, `config`, `theme`, and `help` do not
 become shells.
 
@@ -179,15 +179,8 @@ The REPL provides:
 - shell-like tokenization
 - command and flag completion
 - scoped completion inside shells
-- history navigation: Up after typing searches by prefix; Ctrl-R opens fuzzy
-  history search, where Enter runs, Tab edits, and Escape restores the draft.
-  Inside a shell, Ctrl-R again widens to the full identity/profile history
-- `!!` repeats the last accepted command, including one that failed during
-  execution; `sudo !!` repeats it with elevation. Tab expands these into the
-  editor without running; Enter expands and runs them. Unknown commands and
-  invalid syntax are excluded from saved history.
-- A leading space keeps a line off disk while allowing one temporary Up recall.
-- saved-history expansion such as `!123`, `!-2`, and `!prefix`
+- history search, bang replay and leading-space privacy; see
+  [COMPLETION.md](COMPLETION.md#history) for keys and persistence rules
 - paged results: `next` and `prev`, or Shift+→ / Shift+← (also PageDown /
   PageUp) on an empty line; with text on the line, Shift+arrows move the cursor
 
@@ -325,47 +318,10 @@ In those cases, use ordinary CLI commands with explicit render flags such as:
 osp --format json --render-mode plain plugins list
 ```
 
-## Background notices
+## Shortcuts and terminal bells
 
-Products can use `osp_cli::repl::post_notice` for a short informational line
-computed after startup. The editor prints it above the prompt; work posted
-before the editor starts is queued. The basic reader also displays notices on
-stderr, although it cannot redraw a partially typed line. Notice delivery does
-not wait for network work or block the prompt.
-
-### Product status
-
-Native commands may supply `repl_status()` as cached status text in a separate
-right-prompt slot. Rendering never performs network I/O. The host sanitizes
-control sequences and line breaks; Reedline measures terminal cells and omits
-the right prompt when it collides with input. Context and incognito remain;
-product attention takes priority over timing. Basic and JSON sessions omit it.
-A cached update is visible at the next editor paint. The pinned Reedline reader blocks on terminal input: cache changes and queued
-transition notices appear at the next input event, rather than waking an idle
-reader. No fake input events or worker ANSI writes are used.
-
-### Product actions and terminal ownership
-
-The editor dispatches `ReplEvent::Line` for a submitted line and
-`ReplEvent::Action` for a named action. Native products register `ReplAction`s
-and implement `execute_repl_action`; the host uses ordinary elevation without
-running an interactive login hook. Actions bypass user history, alias expansion,
-shell navigation, last-command expansion and pagination reset. The same editor
-retains its draft and byte cursor across normal return, cancellation and errors.
-
-`repl.bindings.<action-id>` accepts F2 through F12 or `none`; conflicting keys
-are rejected. Products supply a default and a human label. Basic and JSON
-sessions have no product shortcuts. Existing Ctrl+R, Ctrl+L and pagination keys
-keep their meanings.
-
-`start_repl(config, Some(ReplSession))` supplies a cancellable rich-editor lifetime.
-Basic selection and fallback report `None` for legacy startup behavior only;
-recurring attention and sound remain disabled.
-Workers use its bounded, sanitized `post_notice(text)` sink and
-`wait(duration)` cancellation point. Reedline queues delivery while foreground
-commands, line prompts, raw menus, pagers or the history picker own the terminal.
-Rebuild, fallback and exit cancel the handle and discard queued product output.
-Workers must also validate their own credential generation before publication.
+Products choose named actions and bindings; basic and JSON sessions omit product
+shortcuts. See [EMBEDDING.md](EMBEDDING.md#repl-product-hooks) for the host API.
 
 ### Terminal bells
 
@@ -419,7 +375,3 @@ formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
 Hints without a command do not replace the remembered command. Native commands
 produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
 retains recovery commands in errors. No terminal text is scraped.
-
-Product `repl_status` hooks return `ReplStatus` text and a message level.
-The host strips terminal controls before applying the active theme's error
-or warning colour. `NO_COLOR`, `--no-color` and plain rendering suppress colour.

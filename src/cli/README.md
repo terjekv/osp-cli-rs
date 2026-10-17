@@ -37,5 +37,5 @@ tests all see the same flag; REPL completion lists invocation flags from
 `repl/completion.rs`. Handlers must not parse their own hidden flags.
 
 Builtin help targets are selected with a passive clap parser, then built from
-clap command metadata. Shared invocation help composes document blocks. The
-`guide` format and shorthand are removed; `auto` renders human documents.
+clap command metadata. Shared invocation help composes document blocks.
+`guide` and `--guide` render human documents with the shared document renderer.

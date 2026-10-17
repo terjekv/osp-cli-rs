@@ -114,3 +114,23 @@ inflate examples with private fixtures or state assertions to raise coverage.
 Report which existing checks passed, how you exercised the requested behavior,
 and what remains unverified. Full CI checks the revision submitted for merge;
 a local hook checks the working tree and may not match the revision pushed.
+
+## Config internals and checks
+
+Each value is tracked with its origin and scope:
+
+- `config::LayerEntry` = raw value, scope and optional origin
+- `config::ConfigValue` = typed value before or after resolution
+- `config::ResolvedValue` = final value, raw value, source, scope and origin
+
+Scopes are always optional. Unscoped values act as the baseline.
+
+Minimum contract tests:
+
+1. Profile scoping beats unscoped values.
+2. Terminal scoping beats unscoped values.
+3. Session overrides beat environment and config.
+4. Placeholder cycles raise errors.
+5. Unknown keys are rejected unless under `extensions.*`; retired keys warn and
+   are ignored.
+

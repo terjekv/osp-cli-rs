@@ -17,7 +17,6 @@ These commands usually tell you the most with the least effort:
 - `osp config explain <key>`
 - `osp doctor plugins`
 - `osp plugins list`
-- `osp plugins list`
 
 Use these to identify the problem before changing settings.
 
@@ -124,7 +123,7 @@ config set ui.format json --permanent
 To see which setting takes precedence, run:
 
 ```bash
-osp config explain ui.format
+osp config explain ui.verbosity
 ```
 
 ## Symptom: Themes Look Wrong

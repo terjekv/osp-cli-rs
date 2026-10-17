@@ -47,7 +47,8 @@ A describe error does not prevent execution.
 `OSP_COMMAND=hello`, not as a leading argument. To share an executable across
 several commands, install one symlink per name and read `OSP_COMMAND`.
 
-Stdin, stdout, stderr, and the environment are inherited. Ordinary runs have
+Stdin and stderr are inherited. Stdout is inherited unless structured rendering
+or a pipeline requires capture. The environment is inherited. Ordinary runs have
 no timeout and retain the plugin's exit code. Ctrl-C reaches the foreground
 plugin while the host waits. `osp hello --help` and `osp hello -h` always
 run the executable's own help directly, so argparse and Click work normally.

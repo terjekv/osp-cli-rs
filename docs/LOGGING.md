@@ -53,9 +53,8 @@ Host diagnostics use `debug:` and `trace:` prefixes. Service traffic belongs
 to `-vv`, independently of `-d`. Dependency logging is not enabled by repeated
 `-d` flags. File logs keep timestamps and sanitized event names and fields.
 
-Plugin stderr is drained concurrently. Unverified prose is withheld; `-dd`
-reports that the plugin wrote it. This also applies to plugin help. Executable
-stdout, stdin, exit status and inherited environment retain their contracts.
+Plugin stderr is inherited, including during help and captured stdout runs.
+Structured response messages are sanitized by the host.
 The REPL's debug timing badge remains available.
 
 ## Timing Hints
@@ -127,16 +126,7 @@ subcommands and the complete JSON report remain available.
 
 ## Plugin Runtime Hints
 
-`osp` exports logging-related hints to plugins; it never reads these names
-as configuration inputs:
-
-- `OSP_UI_VERBOSITY`
-- `OSP_DEBUG_LEVEL`
-- `OSP_COMMAND_VERBOSITY` (numeric `0` through `3`)
-
-`OSP_UI_VERBOSITY` keeps the plugin vocabulary: both command levels 2 and 3
-export `trace`. The numeric hint distinguishes them. Plugins should keep result
-data on stdout and avoid putting credentials in any output.
+See [PLUGINS.md](PLUGINS.md#command-detail-hints) for plugin runtime hints.
 
 ## Scripting Safety
 

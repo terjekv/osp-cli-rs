@@ -82,16 +82,6 @@ explicit profiles and unknown environment-selected defaults fail with
 `UnknownProfile` during configuration resolution, before command/network work.
 They never silently fall back to another environment.
 
-## Data Model
-
-Each value is tracked with its origin and scope:
-
-- `ConfigKey` = `key`, `profile`, `terminal`
-- `ConfigValue` = raw value + source + scope
-- `ResolvedValue` = final value + raw value + source + scope + origin hint
-
-Scopes are always optional. Unscoped values act as the baseline.
-
 ## Scoping Rules (Profile + Terminal)
 
 Within a single loader, the resolver picks the most specific match using this
@@ -136,23 +126,11 @@ For UI keys, there is one more rule inside the resolved config:
 - `ui.presentation` only seeds keys still at builtin default
 - `config explain` shows that seeded effect when it matters
 
-## Loader Abstraction
-
-`osp_cli::config` exposes a generic loader interface so each source can be wired
-without custom host loading code:
-
-- `ConfigLoader` trait (`load() -> ConfigLayer`)
-- `StaticLayerLoader` for in-memory defaults/session layers
-- `TomlFileLoader` for file-backed layers (optional or required)
-- `EnvVarLoader` for `OSP__...` environment overrides
-- `SecretsTomlLoader` for file-backed secrets with strict permissions checks
-- `EnvSecretsLoader` for `OSP_SECRET__...` secret overrides
-- `ChainedLoader` for combining multiple backends within one precedence stage
-- `LoaderPipeline` for assembling all loaders in precedence order
+See [EMBEDDING.md](EMBEDDING.md#config-loader-composition) for loader composition.
 
 ## Typed Schema and Validation
 
-`osp_cli::config` validates resolved keys against a typed schema (`ConfigSchema`):
+The host validates resolved keys against its internal typed schema:
 
 - Unknown keys are rejected by default.
 - `extensions.*` is the only open namespace for unknown keys.
@@ -342,16 +320,6 @@ The resolver should provide:
 
 Diagnostics must redact secrets and avoid logging token contents.
 
-## Testing Checklist
-
-Minimum contract tests:
-
-1. Profile scoping beats unscoped values.
-2. Terminal scoping beats unscoped values.
-3. Session overrides beat environment and config.
-4. Placeholder cycles raise errors.
-5. Unknown keys are rejected unless under `extensions.*`.
-
 ## UI/REPL Keys (Current)
 
 These keys currently drive user-visible rendering and REPL presentation:
@@ -456,10 +424,8 @@ adds a `current` explanation of the key before the write.
 
 ## Fixed presentation settings in v2
 
-Help tables use no border. Help entries retain their default indentation,
-entry gaps, and section spacing. Nested output uses two-space indentation and
-lists expand after five items. The REPL right prompt shows session context,
-incognito state, and timing when applicable.
+See [UI.md](UI.md#fixed-layout-defaults) for fixed presentation settings.
 
-The removed keys are listed in `CHANGELOG.md` under Unreleased. Remove them
-from configuration files; they are now rejected as unknown keys.
+Retired keys are ignored with one warning naming them. Remove them with
+`osp config unset KEY`. Other unknown keys still fail validation. See
+[CHANGELOG.md](../CHANGELOG.md) for the removal list.

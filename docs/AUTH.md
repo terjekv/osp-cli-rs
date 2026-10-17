@@ -20,6 +20,11 @@ Install one `App::with_access_policy(policy)` implementation of
   reports the supplied message verbatim, or the standard hidden-policy message.
 - `startup(runtime)` runs once after resolved configuration and runtime assembly,
   for both CLI and REPL. It does not run again after a REPL configuration rebuild.
+- `before_dispatch(path, runtime)` handles explicit external invocations before
+  parsing, metadata, help or shell entry. It may acquire credentials when the
+  product's interaction policy allows it. Root help, completion and background
+  refresh never call it. Native paths may contain raw argument tokens; do not
+  log them.
 - `before_run(path, runtime)` runs once for an external native or plugin execution,
   after visibility is checked and before declared runnable requirements. It never
   runs for builtins, help or completion. Products may acquire credentials here.
@@ -31,12 +36,13 @@ All methods have public, tokenless defaults. The hook is `Send + Sync`, and the
 same instance survives REPL rebuilds. Products should share their credential
 owner with native integrations instead of copying tokens into the host.
 
-Native dispatch normalizes and parses arguments before calling the hook. If a
-cached grammar rejects an invocation, the hook receives the known canonical
+`before_run` receives the canonical path available from the cached grammar;
+`before_dispatch` runs earlier. If a cached grammar rejects an invocation, the hook receives the known canonical
 prefix before `prepare_invocation_metadata` runs. The host refreshes metadata at
 most once and authorizes the final canonical path using the refreshed auth
-metadata. Help may refresh metadata without acquisition; an unavailable refresh
-keeps cached help usable. Native help uses clap metadata directly. Explicit
+metadata. Explicit external help may pass `before_dispatch` before refreshing
+metadata; an unavailable refresh keeps cached help usable. Native help uses clap
+metadata directly. Explicit
 `NativeCommandOutcome::Help(String)` and plugin help still use the text parser.
 
 ## Declared authentication
@@ -62,8 +68,8 @@ requirement can require a named credential to be `present` or `valid`:
 ```
 
 Product visibility and declared authentication both apply. Help only requires
-visibility; execution additionally requires runnable access. Provider selection
-and plugin enable/disable behavior remain independent of authentication.
+visibility; execution additionally requires runnable access. Plugin discovery
+precedence and enable/disable remain independent of auth.
 
 Protocol-v1 DTOs still accept legacy `capability_gated`, `required_capabilities`,
 `feature_flags`, `visible_session`, `auth_strength` and `fresh` credential
@@ -102,7 +108,7 @@ the host writes it through its output sink and exits successfully. An optional
 argument in the invocation config layer. Action flags cannot accompany commands
 or other actions. Help and version never execute the callback.
 
-`RuntimeContext::is_repl()` distinguishes actual shell startup from one-shot
+`AppRuntime::is_repl()` distinguishes actual shell startup from one-shot
 commands using REPL-scoped presentation, such as `intro`.
 
 Intro templates and tips can wrap command-specific prose in

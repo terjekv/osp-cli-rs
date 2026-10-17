@@ -59,8 +59,7 @@
 //!
 //! - keep site-specific auth, policy, and domain integrations in the wrapper
 //!   crate
-//! - extend the command surface with [`App::with_native_commands`] or
-//!   [`App::with_native_commands`]
+//! - Extend the command surface with [`App::with_native_commands`].
 //! - keep runtime config bootstrap aligned with
 //!   [`config::RuntimeDefaults`], [`config::RuntimeConfigPaths`], and
 //!   [`config::build_runtime_pipeline`]
@@ -204,21 +203,6 @@
 //!   compatibility shims or open-ended assembly
 //! - each public concept should have one canonical home; duplicate aliases and
 //!   mirrored module paths are treated as API debt
-//!
-//! Guided construction naming:
-//!
-//! - `Type::new(...)` is the exact constructor when the caller already knows
-//!   the required inputs
-//! - `Type::builder(...)` starts guided construction for heavier host/runtime
-//!   objects and returns a concrete `TypeBuilder`
-//! - builder setters use `with_*` and the terminal step is always `build()`
-//! - `Type::from_*` and `Type::detect()` are reserved for derived/probing
-//!   factories
-//! - semantic DSLs may keep domain verbs such as `arg`, `flag`, or
-//!   `subcommand`; the `with_*` rule is for guided host configuration, not for
-//!   every fluent API
-//! - avoid abstract "factory builder" layers in the public API; callers should
-//!   see concrete type-named builders and factories directly
 //!
 //! For embedders, choose the smallest surface that solves the problem you
 //! actually have:

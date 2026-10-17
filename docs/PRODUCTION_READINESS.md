@@ -27,8 +27,8 @@ establish DNS resolver deadlines. LDAP response-inactivity limits are not overal
 deadlines for continuously streaming results.
 
 The DSL operates on canonical rows and explicit groups, with raw documents for
-unstaged presentation. Floating-point numeric operations and whole-second
-timestamp comparisons have precision limits; see [DSL_REVIEW.md](DSL_REVIEW.md).
+unstaged presentation. Floating-point numeric operations have precision limits; timestamp comparisons
+preserve fractional seconds. See [DSL_REVIEW.md](DSL_REVIEW.md).
 Do not infer equivalent scope or precision for every verb from shared execution.
 
 Report observed commands/results and any skipped effects. An archive built

@@ -25,11 +25,11 @@ CLI help output also accepts stages, for example `osp --help '|' C`.
 Shell-completion scripts and version text are not structured command output;
 they reject pipe stages explicitly.
 
-For a product task list whose JSON exposes `id` and `status`:
+For a product task search whose JSON exposes `id` and `status.name`:
 
 ```bash
-osp --json orch task list '|' F status=running '|' C
-osp orch task list '|' P id,status,created_at '|' S -created_at
+osp --json orch task find '|' F status.name=running '|' C
+osp orch task find '|' P id,status.name,created_at '|' S -created_at
 ```
 
 Use the actual raw field path returned by your command. `status` is not an
@@ -83,7 +83,7 @@ distinct addresses.
 | Stage | Syntax and meaning | Example |
 | --- | --- | --- |
 | Bare search | Case-insensitive text search across keys and values; retains rows | `running` |
-| `F` | `F field OP value`; operators `=`, `==`, `!=`, `>`, `>=`, `<`, `<=`, `~` | `F status=running` |
+| `F` | `F field OP value`; operators `=`, `==`, `!=`, `>`, `>=`, `<`, `<=`, `~` | `F status.name=running` |
 | `P` | `P field[,field...] [!field...]`; keep/drop fields | `P id,status` |
 | `S` | `S field [asc\|desc] [AS num\|str\|ip] ...` | `S created_at desc id` |
 | `G` | `G field [AS alias] [field ...]`; partition by group keys | `G provider` |

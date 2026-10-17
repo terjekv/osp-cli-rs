@@ -18,7 +18,10 @@ At a high level, rendering happens in this order:
 Supported formats:
 
 - `auto`
+- `guide`
 - `json`
+- `csv`
+- `tsv`
 - `table`
 - `md`
 - `mreg`
@@ -30,9 +33,9 @@ Selection order is:
 2. a command/plugin recommendation attached to the output
 3. automatic inference from the output shape
 
-Help and intro documents are the exception: they keep their document layout
-unless `--format` is given for that invocation, so a configured `ui.format`
-does not turn help into JSON.
+Help and intro documents keep their document layout when
+`ui.guide.default_format=guide`, unless `--format` is given for that invocation.
+With `inherit` or `none`, they follow the configured format.
 
 When `format=auto`, the current rules are:
 
@@ -41,7 +44,7 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg`
 - larger row sets render as `table`
 
-Help and intro producers build `core::document::Document`: ordered sections,
+Help and intro producers build `core::Document`: ordered sections,
 paragraphs, named entries, lists, and data blocks. `auto` renders these as human
 documents laid out for the active `ui.presentation`. Ordinary records never
 become documents from field names such as `notes` or `commands`.
@@ -51,7 +54,7 @@ Unstaged `--json` emits the document object, for example
 With any pipe stage, JSON emits the resulting flat rows instead. Document rows
 carry their section in a column; human rendering emits headings for consecutive
 runs without changing row order. Shape-changing stages return ordinary data.
-The former `guide` format and `--guide` shorthand are no longer accepted.
+`guide` and `--guide` render human documents with the shared document renderer.
 
 ## Render Modes
 
@@ -146,7 +149,7 @@ The main keys here are:
 - `ui.help.level`
   - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `ui.messages.layout`
-  - `grouped | plain | minimal`
+  - See [CONFIG.md](CONFIG.md#uirepl-keys-current) for values and aliases.
 - `ui.chrome.frame`
   - `none | top | bottom | top-bottom | square | round`
 - `ui.chrome.rule_policy`

@@ -31,21 +31,21 @@ Start with built-in commands that exist in every upstream install:
 
 ```bash
 osp plugins list
-osp plugins list
-osp plugins list --json
+osp help --all
+osp help --all --json
 ```
 
 That gives you three different answers:
 
 - which plugins were discovered
-- which command roots are currently visible
+- which command paths are currently visible
 - what the command catalog looks like in machine-readable form
 
 To inspect the active configuration, run:
 
 ```bash
 osp config show
-osp config explain ui.format
+osp config explain ui.verbosity
 ```
 
 ## 3. Start The REPL

@@ -156,9 +156,9 @@ Examples:
 !123 --json
 ```
 
-Persisted history intentionally skips help-like and bang commands such as
-`help`, `history list`, `--help`, and `!` expansions. That is deliberate; it
-keeps durable history focused on commands you are likely to rerun.
+Help/history commands and literal bang expressions are excluded. Accepted bang
+replays save the expanded command unless excluded; a leading space keeps the
+replay off disk.
 
 `history list` accepts inclusive ISO-like time bounds when you want a smaller
 window:
@@ -172,6 +172,11 @@ timestamp with `Z` or a numeric offset. Natural-language values such as
 `today` and `now` are not accepted.
 
 ## Scoped History
+
+`repl.history.path` controls identity/profile isolation. Default filenames
+lowercase the identity and keep ordinary and drift accounts separate. Use a path
+without `${profile.active}` to share history across profiles.
+`repl.history.profile_scoped` is retired.
 
 History is shell-aware. That makes repeated work inside a supported shellable
 root more predictable because the shell prefix stays part of the command

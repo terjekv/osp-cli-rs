@@ -12,7 +12,7 @@ parallel implementations of verbs.
   hints never rename, remove or convert canonical values. A raw document can
   survive unstaged JSON rendering, but no staged service result retains its
   stale pagination/total envelope.
-- `core::document::Document` supplies flat rows once, before key validation.
+- `core::Document` supplies flat rows once, before key validation.
   Entries carry `section`, `name`, and `description`; text carries `section` and
   `text`. Output metadata declares document intent. Preserve the current row
   stream and never reconstruct sections by value equality. Existing stage

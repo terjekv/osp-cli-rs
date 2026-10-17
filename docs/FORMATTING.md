@@ -16,11 +16,14 @@ new default.
 
 Canonical form:
 
-- `--format {auto,json,table,mreg,value,md}`
+- `--format {auto,guide,json,csv,tsv,table,md,mreg,value}`
 
 Convenience aliases:
 
+- `--guide`
 - `--json`
+- `--csv`
+- `--tsv`
 - `--table`
 - `--value`
 - `--md`
@@ -42,6 +45,10 @@ help --format auto
 
 Format guide:
 
+- `guide`
+  - human documents
+- `csv` / `tsv`
+  - comma-separated / tab-separated rows
 - `json`
   - machine-readable payload
 - `table`
@@ -93,19 +100,12 @@ These are also invocation-local:
 - `-q/-qq`
 - `-d/-dd/-ddd`
 
-`-v/-q` control process-facing error detail and message verbosity. `-d`
-controls developer debug logs and timing on `stderr`.
-
-Failures use `error:`, optional `request-id:`, and at most one `hint:` line
-in CLI and REPL. `-v` adds command context, `-vv` exchanges, and `-vvv` further
-evidence. Human supplements go to stderr. JSON failures keep a single envelope
-on stdout, with the action in `error.details.action`. Host debug detail stays
-on the independent `-d` axis. See [logging](LOGGING.md).
+See [LOGGING.md](LOGGING.md) for command evidence, error wording and debug levels.
 
 ```bash
 osp plugins list -v
-osp config get ui.format -vv
-osp config get ui.format -v -dd
+osp config get ui.verbosity -vv
+osp config get ui.verbosity -v -dd
 osp plugins list -dd
 osp plugins list --json -q
 ```
@@ -119,7 +119,7 @@ These are all valid:
 ```bash
 osp plugins list --json
 osp --json plugins list
-osp plugins --json commands
+osp plugins --json list
 ```
 
 After `--`, remaining tokens are passed through literally.
