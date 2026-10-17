@@ -642,7 +642,7 @@ fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
         },
     );
 
-    assert!(rendered.contains("Welcome Demo!\n\n  Logged in as"));
+    assert!(rendered.contains("  Welcome Demo!\n\n  Logged in as"));
     assert!(rendered.contains("Theme"));
 }
 
@@ -745,7 +745,7 @@ fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
         panic!("expected guide entries block");
     };
 
-    assert_eq!(entries.default_indent, "  ");
+    assert_eq!(entries.default_indent, "");
     assert_eq!(entries.default_gap, None);
 }
 

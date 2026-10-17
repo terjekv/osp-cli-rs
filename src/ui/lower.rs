@@ -271,9 +271,9 @@ fn lower_document_blocks(
     inside: bool,
     long_help: bool,
 ) -> Vec<Block> {
-    let (format, indent_size, help) = match layout {
-        DocumentLayout::Direct { format } => (format, 2, None),
-        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, 0, Some((plan, layout))),
+    let (format, help) = match layout {
+        DocumentLayout::Direct { format } => (format, None),
+        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, Some((plan, layout))),
     };
     let mut lowered = Vec::new();
     for block in blocks {
@@ -318,7 +318,7 @@ fn lower_document_blocks(
                     body_indent: if format == OutputFormat::Markdown {
                         0
                     } else {
-                        indent_size
+                        2
                     },
                     inline_title_suffix: suffix,
                     trailing_newline: help.is_none() && format != OutputFormat::Markdown,
@@ -327,11 +327,12 @@ fn lower_document_blocks(
             }
             DocBlock::Paragraph { text } => vec![Block::Paragraph(ParagraphBlock {
                 text: text.clone(),
-                indent: if help.is_some() && inside { 2 } else { 0 },
+                indent: 0,
                 inline_markup: true,
             })],
             DocBlock::Entries { entries } => {
-                let mut block = entries_block_with_defaults(entries, 2, None);
+                let mut block =
+                    entries_block_with_defaults(entries, if inside { 0 } else { 2 }, None);
                 if let Some((plan, _)) = help {
                     block.inline_markup =
                         !long_help || !entries.iter().all(|entry| entry.name.starts_with('-'));
@@ -349,8 +350,8 @@ fn lower_document_blocks(
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             row.indent_hint =
-                                Some(" ".repeat(if row.key.starts_with("--") { 6 } else { 2 }));
-                            row.gap_hint = Some("\n          ".into());
+                                Some(" ".repeat(if row.key.starts_with("--") { 4 } else { 0 }));
+                            row.gap_hint = Some("\n        ".into());
                         } else {
                             row.gap_hint = plan.document_entry_gap.map(|gap| {
                                 " ".repeat(width.saturating_sub(display_width(&row.key)) + gap)
@@ -366,12 +367,12 @@ fn lower_document_blocks(
                 } else {
                     items.iter().map(|item| format!("- {item}")).collect()
                 },
-                indent: if help.is_some() && inside { 2 } else { 0 },
+                indent: 0,
                 inline_markup: true,
                 auto_grid: false,
             })],
             DocBlock::Data { value } => match help {
-                Some(_) => help_layout_blocks_from_value(value),
+                Some(_) => help_layout_blocks_from_value(value, if inside { 0 } else { 2 }),
                 None => lower_value_blocks(value),
             },
         };
@@ -970,10 +971,12 @@ fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::
     })
 }
 
-fn help_layout_blocks_from_value(value: &Value) -> Vec<Block> {
+fn help_layout_blocks_from_value(value: &Value, indent: usize) -> Vec<Block> {
     match value {
         Value::Object(map) if should_render_as_key_value_group(map) => {
-            vec![Block::KeyValue(key_value_from_document_data_map(map))]
+            vec![Block::KeyValue(key_value_from_document_data_map(
+                map, indent,
+            ))]
         }
         Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
         Value::Array(items) if items.is_empty() => Vec::new(),
@@ -984,12 +987,12 @@ fn help_layout_blocks_from_value(value: &Value) -> Vec<Block> {
                 .collect::<Option<Vec<_>>>()
             {
                 vec![Block::Entries(entries_block_with_defaults(
-                    &entries, 2, None,
+                    &entries, indent, None,
                 ))]
             } else if items.iter().all(is_scalar_like) {
                 vec![Block::List(ListBlock {
                     items: items.iter().map(display_value).collect(),
-                    indent: 2,
+                    indent,
                     inline_markup: true,
                     auto_grid: true,
                 })]
@@ -1008,7 +1011,7 @@ fn help_layout_blocks_from_value(value: &Value) -> Vec<Block> {
         Value::Bool(_) | Value::Number(_) | Value::String(_) => {
             vec![Block::Paragraph(ParagraphBlock {
                 text: display_value(value),
-                indent: 2,
+                indent,
                 inline_markup: true,
             })]
         }
@@ -1281,14 +1284,14 @@ fn display_value(value: &Value) -> String {
     }
 }
 
-fn key_value_from_document_data_map(map: &Map<String, Value>) -> KeyValueBlock {
+fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> KeyValueBlock {
     KeyValueBlock {
         rows: map
             .iter()
             .map(|(key, value)| KeyValueRow {
                 key: key.clone(),
                 value: lower_key_value_value(value, true),
-                indent: Some("  ".to_string()),
+                indent: Some(" ".repeat(indent)),
                 gap: None,
             })
             .collect(),
