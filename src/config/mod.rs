@@ -142,10 +142,6 @@ use defaults::DEFAULT_PROFILE_NAME;
 mod loading_and_mutation;
 
 #[cfg(test)]
-#[path = "tests/diagnostics.rs"]
-mod diagnostics;
-
-#[cfg(test)]
 mod tests {
 
     #[test]

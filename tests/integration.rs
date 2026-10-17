@@ -18,3 +18,9 @@ mod isolation;
 
 #[path = "support/pty.rs"]
 mod pty_support;
+
+#[path = "integration/config.rs"]
+mod config;
+
+#[path = "integration/dsl_output.rs"]
+mod dsl_output;

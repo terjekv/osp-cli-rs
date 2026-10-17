@@ -54,3 +54,18 @@ mod temp_support;
 
 #[path = "support/output.rs"]
 mod output_support;
+
+#[path = "support/process.rs"]
+mod process_support;
+
+#[path = "support/isolation.rs"]
+mod isolation;
+
+#[path = "contracts/binary_surface.rs"]
+mod binary_surface;
+
+#[path = "contracts/plugin_processes.rs"]
+mod plugin_processes;
+
+#[path = "contracts/cli_invocation.rs"]
+mod cli_invocation;

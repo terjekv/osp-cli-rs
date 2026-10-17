@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 #[cfg(unix)]
-use crate::support::{
+use crate::process_support::{
     osp_command, stderr_utf8, write_config, write_executable_script, write_nonzero_plugin,
     write_table_plugin, write_timeout_plugin,
 };

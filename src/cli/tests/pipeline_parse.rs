@@ -33,6 +33,10 @@ fn parse_allows_quick_pipe_segments() {
 
 #[test]
 fn parse_preserves_quoted_pipe_inside_command_segment() {
+    let raw = crate::dsl::parse_pipeline("ldap user 'foo|bar' | P uid").expect("valid pipeline");
+    assert_eq!(raw.command, "ldap user 'foo|bar'");
+    assert_eq!(raw.stages, vec!["P uid"]);
+
     let config = make_config(&[]);
     let parsed = parse_command_text_with_aliases("ldap user 'foo|bar' | P uid", &config)
         .expect("quoted pipe command should parse");

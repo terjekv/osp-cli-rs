@@ -1,36 +1,22 @@
-use crate::app::{AccessPolicy, AppRuntime, BufferedUiSink};
-use crate::config::{
-    ConfigLayer, ConfigSchema, LoaderPipeline, ResolveOptions, SchemaEntry, StaticLayerLoader,
-    TomlFileLoader,
+use crate::temp_support::make_temp_dir;
+use osp_cli::app::{AccessPolicy, AppRuntime, BufferedUiSink};
+use osp_cli::config::{
+    ConfigLayer, LoaderPipeline, ResolveOptions, StaticLayerLoader, TomlFileLoader,
 };
-use crate::tests::make_temp_dir;
 use serde_json::json;
 
 struct ProductSessionBootstrap;
 
 impl AccessPolicy for ProductSessionBootstrap {
     fn startup(&self, runtime: &mut AppRuntime) -> miette::Result<()> {
-        let host_config = runtime.config_state().resolved();
+        let host_config = runtime.config();
         let path = host_config
             .get_string("extensions.site.session.path")
             .expect("product defaults should provide the session manifest path");
         let mut defaults = ConfigLayer::default();
         defaults.set("profile.default", host_config.active_profile());
-        let mut schema = ConfigSchema::default();
-
-        schema.insert(
-            "extensions.site.session.authenticated",
-            SchemaEntry::boolean().required(),
-        );
-        schema.insert(
-            "extensions.site.session.capabilities",
-            SchemaEntry::string_list().required(),
-        );
-        let layers = LoaderPipeline::new(StaticLayerLoader::new(defaults))
+        LoaderPipeline::new(StaticLayerLoader::new(defaults))
             .with_file(TomlFileLoader::new(path.into()).required())
-            .load_layers()
-            .map_err(miette::Report::new)?;
-        crate::config::ConfigResolver::from_loaded_layers_with_schema(layers, schema)
             .resolve(ResolveOptions::new())
             .map_err(miette::Report::new)?;
         Ok(())
@@ -55,7 +41,7 @@ fn product_session_bootstrap_preserves_diagnostics_and_recovers_after_manifest_r
         session_path.to_string_lossy().to_string(),
     );
     product_defaults.set("extensions.site.service.enabled", true);
-    let app = crate::App::new()
+    let app = osp_cli::App::new()
         .with_product_defaults(product_defaults)
         .with_access_policy(ProductSessionBootstrap);
 

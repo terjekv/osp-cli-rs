@@ -134,13 +134,6 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
 }
 
 #[test]
-fn top_level_help_guide_contract() {
-    let guide = run_cli_stdout(&["--no-env", "--no-config-file", "--format=auto", "--help"]);
-    assert!(guide.contains("Usage"));
-    assert!(guide.contains("Commands"));
-}
-
-#[test]
 fn intro_command_supports_all_explicit_output_formats_contract() {
     let json = run_cli_stdout(&["--no-env", "--no-config-file", "--json", "intro"]);
     let json_value: serde_json::Value =
@@ -183,53 +176,6 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
 }
 
 #[test]
-fn intro_command_expressive_guide_contract() {
-    let config = r#"[default]
-ui.presentation = "expressive"
-repl.intro = "full"
-repl.simple_prompt = true
-user.display_names.oistes = "Demo"
-user.name = "oistes"
-theme.name = "rose-pine-moon"
-"#;
-    let guide = run_cli_stdout_with_config(Some(config), &["--no-env", "--format=auto", "intro"]);
-    assert!(guide.contains("Demo"));
-    assert!(guide.contains("Commands"));
-    assert!(guide.contains("help"));
-}
-
-#[test]
-fn intro_command_compact_contract() {
-    let output = run_cli_stdout(&[
-        "--user",
-        "anonymous",
-        "--no-env",
-        "--no-config-file",
-        "--presentation",
-        "compact",
-        "intro",
-    ]);
-    assert!(output.contains("Usage: [INVOCATION_OPTIONS] COMMAND [ARGS]..."));
-    assert!(output.contains("Commands:"));
-    assert!(output.contains("help"));
-}
-
-#[test]
-fn intro_command_austere_contract() {
-    let output = run_cli_stdout(&[
-        "--user",
-        "anonymous",
-        "--no-env",
-        "--no-config-file",
-        "--presentation",
-        "austere",
-        "intro",
-    ]);
-    assert!(output.contains("Welcome"));
-    assert!(output.contains("Commands:"));
-}
-
-#[test]
 fn intro_command_compact_and_austere_diverge_by_presentation_contract() {
     let compact = run_cli_stdout(&[
         "--user",
@@ -252,6 +198,7 @@ fn intro_command_compact_and_austere_diverge_by_presentation_contract() {
 
     assert!(compact.contains("Usage: [INVOCATION_OPTIONS] COMMAND [ARGS]..."));
     assert!(compact.contains("Commands:"));
+    assert!(compact.contains("help"));
     assert!(compact.contains("Show this command overview."));
     assert!(!compact.contains("Welcome anonymous."));
 
@@ -421,6 +368,7 @@ theme.name = "rose-pine-moon"
     assert!(stdout.contains("User: Not authenticated"), "{stdout}");
     assert!(stdout.contains("Theme: Rose Pine Moon"), "{stdout}");
     assert!(stdout.contains("Show this command overview."), "{stdout}");
+    assert!(stdout.contains("help"), "{stdout}");
 
     let osp = stdout.find("OSP").expect("OSP section should render");
     let keybindings = stdout
