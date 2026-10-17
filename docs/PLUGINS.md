@@ -47,8 +47,7 @@ A describe error does not prevent execution.
 `OSP_COMMAND=hello`, not as a leading argument. To share an executable across
 several commands, install one symlink per name and read `OSP_COMMAND`.
 
-Stdin, stdout, and the environment are inherited. Stderr is drained; unverified
-text is withheld, with a diagnostic notice at `-dd`. Ordinary runs have
+Stdin, stdout, stderr, and the environment are inherited. Ordinary runs have
 no timeout and retain the plugin's exit code. Ctrl-C reaches the foreground
 plugin while the host waits. `osp hello --help` and `osp hello -h` always
 run the executable's own help directly, so argparse and Click work normally.
@@ -90,7 +89,8 @@ JSON-producing plugins. An argparse attribute can be a parser factory.
 
 Stdout is captured when metadata sets `"output": "json"`, an osp format flag
 such as `--json` or `--format table` is supplied, or the command has DSL stages.
-Stdin remains live; unverified stderr is withheld. Captured stdout is limited to 64 MiB.
+Stdin and stderr remain inherited. Captured stdout is limited to 64 MiB;
+capture ends when the direct child exits, even if descendants retain stdout.
 
 Bare JSON arrays and objects become rows for the normal renderer and DSL:
 
@@ -109,7 +109,8 @@ A JSON object with `protocol_version` is decoded as `ResponseV1`. Its data and
 render hints retain their existing semantics. Message text
 is shown at its declared level, with terminal controls stripped, newlines
 flattened and a 512-character limit. Known secrets supplied through the plugin
-environment are redacted. `meta`
+environment are redacted in host-rendered structured fields only; inherited
+plugin streams are not redacted. `meta`
 may be omitted. An `ok: false` response is rendered as an error.
 
 ## Environment and config
@@ -151,7 +152,8 @@ views. Host flags before `--` belong to osp; plugin-owned flags go after it.
 
 Structured messages preserve their text, levels and ordering. Failure summaries
 include the plugin's reason. Terminal controls are stripped and messages are
-bounded to one line of 512 characters; known environment secrets are redacted.
+bounded to one line of 512 characters; known environment secrets are redacted
+in host-rendered structured fields only.
 
 ## Entity context
 
