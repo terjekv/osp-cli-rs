@@ -450,7 +450,7 @@ pub(crate) fn run_cli_command(
 }
 
 /// Renders transient progress on stderr at normal verbosity and above.
-/// Quiet output retains levelled messages but suppresses the progress body.
+/// Quiet output suppresses replaceable progress while retaining durable notices.
 pub(crate) fn run_progress_command_with_ui(
     config: &ResolvedConfig,
     ui: &UiState,
@@ -463,7 +463,7 @@ pub(crate) fn run_progress_command_with_ui(
     let json_output = resolve_render_settings_with_hint(&ui.render_settings, result.format_hint)
         .format
         == OutputFormat::Json;
-    let show_body = ui.verbosity >= MessageLevel::Success;
+    let show_body = !result.presentation.progress_replace || ui.verbosity >= MessageLevel::Success;
     let framed = show_body
         && result.presentation.progress_replace
         && !json_output
