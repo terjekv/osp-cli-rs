@@ -31,7 +31,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use super::highlight::{HighlightDebugSpan, debug_highlight};
+pub use super::highlight::debug_highlight;
 pub use super::history_store::{HistoryConfig, HistoryEntry, HistoryShellContext, SharedHistory};
 use crate::completion::CompletionTree;
 use anyhow::Result;
@@ -53,14 +53,10 @@ pub(crate) use adapter::{
 };
 pub use adapter::{color_from_style_spec, default_pipe_verbs};
 pub use config::{
-    LineProjection, LineProjector, PromptRightRenderer, ReplAppearance, ReplAppearanceBuilder,
-    ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig, ReplRunConfigBuilder,
-    ReplTabMode,
+    LineProjection, LineProjector, PromptRightRenderer, ReplAppearance, ReplInputMode, ReplPrompt,
+    ReplReloadKind, ReplResult, ReplRunConfig, ReplTabMode,
 };
-pub use debug::{
-    CompletionDebug, CompletionDebugFrame, CompletionDebugMatch, CompletionDebugOptions, DebugStep,
-    debug_completion, debug_completion_steps,
-};
+pub use debug::{CompletionDebugOptions, DebugStep, debug_completion, debug_completion_steps};
 #[cfg(test)]
 use editor::{
     AutoCompleteEmacs, contains_cursor_position_report, is_cursor_position_error,

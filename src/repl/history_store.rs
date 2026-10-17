@@ -116,6 +116,7 @@ pub struct HistoryShellContext {
 
 impl HistoryShellContext {
     /// Creates a shell context with an initial normalized prefix.
+    #[cfg(test)]
     pub fn new(prefix: impl Into<String>) -> Self {
         let context = Self::default();
         context.set_prefix(prefix);
@@ -130,6 +131,7 @@ impl HistoryShellContext {
     }
 
     /// Clears the current shell prefix.
+    #[cfg(test)]
     pub fn clear(&self) {
         if let Ok(mut guard) = self.inner.write() {
             *guard = None;

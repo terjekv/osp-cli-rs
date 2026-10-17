@@ -139,7 +139,7 @@ impl<'a> CompletionDebugOptions<'a> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::CompletionDebugOptions;
     ///
     /// let options = CompletionDebugOptions::new(100, 12)
@@ -397,5 +397,23 @@ fn snapshot_menu_debug(
         height: options.height,
         unicode: options.unicode,
         color: options.ansi,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn repl_internal_example_1() {
+        use crate::repl::CompletionDebugOptions;
+
+        let options = CompletionDebugOptions::new(100, 12)
+            .with_ansi(true)
+            .with_unicode(true);
+
+        assert_eq!(options.width, 100);
+        assert_eq!(options.height, 12);
+        assert!(options.ansi);
+        assert!(options.unicode);
     }
 }

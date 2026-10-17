@@ -235,8 +235,7 @@
 //!   implementing the wire protocol itself
 //! - "I need the configured host" → [`App::new`]
 //!   and apply launch settings through its `with_*` methods
-//! - "I want to embed the interactive editor loop directly" →
-//!   [`repl::ReplRunConfig::builder`] and [`repl::HistoryConfig`]
+//! - "I need interactive native-command hooks" → [`repl`] and [`NativeCommand`]
 //! - "I need semantic payload generation for help/completion surfaces" →
 //!   [`core::Document`] and [`completion::CompletionTreeBuilder`]
 //!

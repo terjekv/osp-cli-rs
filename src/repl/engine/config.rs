@@ -119,7 +119,7 @@ impl ReplTabMode {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplTabMode;
     ///
     /// assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
@@ -231,7 +231,7 @@ impl ReplRunConfig {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::{HistoryConfig, ReplInputMode, ReplPrompt, ReplRunConfig};
     ///
     /// let config = ReplRunConfig::builder(
@@ -322,7 +322,7 @@ impl ReplPrompt {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplPrompt;
     ///
     /// let prompt = ReplPrompt::simple("osp> ");
@@ -369,7 +369,7 @@ impl ReplAppearance {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::repl::ReplAppearance;
     ///
     /// let appearance = ReplAppearance::builder()
@@ -492,6 +492,58 @@ impl ReplAppearanceBuilder {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn repl_internal_example_1() {
+        use crate::repl::ReplTabMode;
+
+        assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
+        assert_eq!(
+            ReplTabMode::parse("after_1_letter"),
+            Some(ReplTabMode::AfterLetters(1))
+        );
+        assert_eq!(
+            ReplTabMode::parse("after_3_letters"),
+            Some(ReplTabMode::AfterLetters(3))
+        );
+        assert_eq!(ReplTabMode::parse("after_0_letters"), None);
+    }
+
+    #[test]
+    fn repl_internal_example_2() {
+        use crate::repl::{HistoryConfig, ReplInputMode, ReplPrompt, ReplRunConfig};
+
+        let config = ReplRunConfig::builder(ReplPrompt::simple("osp> "), HistoryConfig::default())
+            .with_input_mode(ReplInputMode::Basic)
+            .build();
+
+        assert_eq!(config.prompt.left, "osp> ");
+        assert_eq!(config.input_mode, ReplInputMode::Basic);
+    }
+
+    #[test]
+    fn repl_internal_example_3() {
+        use crate::repl::ReplPrompt;
+
+        let prompt = ReplPrompt::simple("osp> ");
+
+        assert_eq!(prompt.left, "osp> ");
+        assert!(prompt.indicator.is_empty());
+    }
+
+    #[test]
+    fn repl_internal_example_4() {
+        use crate::repl::ReplAppearance;
+
+        let appearance = ReplAppearance::builder()
+            .with_history_menu_rows(8)
+            .with_command_highlight_style(Some("green".to_string()))
+            .build();
+
+        assert_eq!(appearance.history_menu_rows, 8);
+        assert_eq!(appearance.command_highlight_style.as_deref(), Some("green"));
+    }
+
     use super::{
         ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig,
     };
