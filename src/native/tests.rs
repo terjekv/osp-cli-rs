@@ -102,7 +102,7 @@ fn native_completion_refresh_is_background_and_filtered_unit() {
             release: Arc::clone(&release),
         });
 
-    registry.refresh_completion_in_background(|name| name == "visible");
+    registry.refresh_completion_in_background(|name, _| name == "visible");
 
     assert_eq!(observed.recv_timeout(Duration::from_secs(1)), Ok("visible"));
     assert!(observed.try_recv().is_err());
