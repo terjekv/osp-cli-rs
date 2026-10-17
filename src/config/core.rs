@@ -294,7 +294,6 @@ pub(crate) struct SchemaEntry {
     writable: bool,
     allowed_values: Option<Vec<String>>,
     positive_integer: bool,
-    non_negative_integer: bool,
     runtime_visible: bool,
     bootstrap_phase: Option<BootstrapPhase>,
     bootstrap_scope_rule: Option<BootstrapScopeRule>,
@@ -322,7 +321,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -340,7 +338,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -358,7 +355,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -377,7 +373,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -395,7 +390,6 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
-            non_negative_integer: false,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -1903,14 +1897,7 @@ fn validate_value_constraints(
             reason: "expected a positive integer".to_string(),
         });
     }
-    if schema.non_negative_integer
-        && !matches!(value.reveal(), ConfigValue::Integer(current) if *current >= 0)
-    {
-        return Err(ConfigError::InvalidConfigValue {
-            key: key.to_string(),
-            reason: "expected a non-negative integer".to_string(),
-        });
-    }
+
     Ok(())
 }
 

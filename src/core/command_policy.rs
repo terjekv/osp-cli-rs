@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 /// Normalized command path used as the lookup key for policy evaluation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CommandPath(Vec<String>);
+pub(crate) struct CommandPath(Vec<String>);
 
 impl CommandPath {
     /// Builds a normalized command path, lowercasing segments and dropping
@@ -19,7 +19,7 @@ impl CommandPath {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```text
     /// use osp_cli::core::command_policy::CommandPath;
     ///
     /// let path = CommandPath::new([" Orch ", "", "Approval", "  Decide  "]);
@@ -44,11 +44,6 @@ impl CommandPath {
     /// Returns the normalized path segments.
     pub fn as_slice(&self) -> &[String] {
         self.0.as_slice()
-    }
-
-    /// Returns `true` when the path contains no usable segments.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
 
@@ -180,4 +175,17 @@ pub fn evaluate_auth(auth: Option<&DescribeCommandAuthV1>, facts: &SessionFacts)
         }
     }
     CommandAccess::Runnable
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn policy_internal_example_1() {
+        use crate::core::command_policy::CommandPath;
+
+        let path = CommandPath::new([" Orch ", "", "Approval", "  Decide  "]);
+
+        assert_eq!(path.as_slice(), &["orch", "approval", "decide"]);
+    }
 }
