@@ -135,7 +135,7 @@ fn quick_keeps_only_matching_root_fields_and_matching_array_elements_unit() {
 }
 
 #[test]
-fn quick_narrows_matching_array_object_fields_without_inventing_values_unit() {
+fn quick_keeps_matching_objects_in_mixed_arrays_unit() {
     let value = json!({
         "k": [
             "a",
@@ -147,7 +147,7 @@ fn quick_narrows_matching_array_object_fields_without_inventing_values_unit() {
     let filtered = apply_stage(value.clone(), &stage(ParsedStageKind::Quick, "", "", "c"))
         .expect("quick stage should succeed");
 
-    assert_eq!(filtered, json!([{"k": [{"k": "c"}]}]));
+    assert_eq!(filtered, json!([{"k": [{"a": "d", "k": "c"}]}]));
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn quick_narrows_singleton_matching_array_member_unit() {
     let filtered = apply_stage(value.clone(), &stage(ParsedStageKind::Quick, "", "", "d2"))
         .expect("quick stage should succeed");
 
-    assert_eq!(filtered, json!([{"k": [{"c2": "d2"}]}]));
+    assert_eq!(filtered, json!([{"k": [{"c2": "d2", "e1": "e2"}]}]));
 }
 
 #[test]

@@ -115,13 +115,15 @@ keep field formatting such as relative times for fields that survive.
 ## Matching and selectors
 
 Quick search (`| term`) uses the number of rows entering that stage. With one
-object, it narrows the object to matching fields and keeps only matching list
-items. With multiple objects, it filters rows and keeps each matching row whole.
+object, it keeps fields whose names match. In every other field, it keeps only
+matching values and list items: scalar lists retain only matching items, and a
+value match inside a list of objects retains that whole object. With multiple
+objects, it filters rows and keeps each matching row whole.
 Negation (`| !term`) removes matching fields or list items from one object, or
 removes matching rows from multiple objects. Each group's member rows follow
 this rule independently, including after earlier pipeline stages.
 
-A term naming a field's last path segment projects that field's complete value;
+A term exactly naming a field projects only that field's complete value;
 selectors can also project addressed objects or list members. `?field` and
 `!?field` always filter by truthy presence or absence without narrowing fields.
 
@@ -136,9 +138,10 @@ Quick search supports these prefixes, with or without intervening spaces:
 | `%text` | Fuzzy text matching |
 | `?field` / `!?field` | Truthy presence / absence |
 
-`K` and `V` restrict the search to keys or values. `K !=field` selects rows
-having a key unequal to that name. All whitespace variants of `!=` have the
-same interpretation; predicate `F field != value` also permits attached forms.
+`K` and `V` restrict the search to keys or values. `K !=field` keeps unequal
+keys in one object, or rows having a key unequal to that name. All whitespace
+variants of `!=` have the same interpretation; predicate `F field != value`
+also permits attached forms.
 `F field text` means a contains comparison; `F field=value` means
 case-insensitive equality and `F field==value` means case-sensitive equality.
 Array-valued fields match if an element satisfies the predicate.

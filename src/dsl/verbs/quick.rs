@@ -15,9 +15,7 @@ use crate::dsl::{
             contains_case_insensitive, eq_case_insensitive, fuzzy_contains_case_insensitive,
             match_row_keys_detailed, match_row_keys_detailed_fuzzy, render_value,
         },
-        resolve::{
-            compact_sparse_arrays, is_truthy, resolve_pairs, resolve_values_truthy, sparse_hole,
-        },
+        resolve::{compact_sparse_arrays, resolve_pairs, resolve_values_truthy, sparse_hole},
     },
     parse::{
         key_spec::ExactMode,
@@ -149,23 +147,12 @@ pub(crate) fn apply_groups_with_plan(groups: Vec<Group>, plan: &QuickPlan) -> Re
 }
 
 fn matches_row(row: &Row, spec: &CompiledQuickSpec) -> bool {
-    if let Some(matched) = match_structural_value(row, spec) {
-        return matched;
-    }
-
     if spec.existence() {
         let found = resolve_values_truthy(row, spec.token(), spec.exact());
         return if spec.negated() { !found } else { found };
     }
 
-    let flat = flatten_row(row);
-    if matches!(spec.scope, QuickScope::ValueOnly) {
-        let matched = flat
-            .values()
-            .any(|value| value_matches_token(value, spec.token(), spec.exact(), spec.fuzzy));
-        return if spec.negated() { !matched } else { matched };
-    }
-    match_flat_row(&flat, spec).matched
+    match_flat_row(&flatten_row(row), spec).matched
 }
 
 struct RowMatch {
@@ -173,6 +160,7 @@ struct RowMatch {
     key_hits: HashSet<String>,
     value_hits: HashSet<String>,
     synthetic: Row,
+    projection: bool,
 }
 
 fn match_flat_row(flat: &Row, spec: &CompiledQuickSpec) -> RowMatch {
@@ -183,6 +171,7 @@ fn match_flat_row(flat: &Row, spec: &CompiledQuickSpec) -> RowMatch {
     } else {
         match_row_keys_detailed(flat, spec.token(), spec.exact())
     };
+    let mut projection = !matches.exact.is_empty();
     let mut key_hits = if matches.exact.is_empty() {
         matches.partial
     } else {
@@ -190,27 +179,36 @@ fn match_flat_row(flat: &Row, spec: &CompiledQuickSpec) -> RowMatch {
     }
     .into_iter()
     .collect::<HashSet<_>>();
-    if spec.is_structural() && !matches!(spec.scope, QuickScope::ValueOnly) && !spec.key_not_equals
-    {
+    if spec.is_structural() && !matches!(spec.scope, QuickScope::ValueOnly) {
         let root = Value::Object(coalesce_flat_row(flat));
         let addressed = spec.selector.resolve_matches(&root);
         if !addressed.is_empty() {
+            projection = true;
             key_hits = flat
                 .keys()
                 .filter(|key| {
-                    addressed.iter().any(|entry| {
-                        *key == &entry.flat_key
-                            || key
-                                .strip_prefix(&entry.flat_key)
-                                .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
-                    })
+                    addressed
+                        .iter()
+                        .any(|entry| is_within(key, &entry.flat_key))
                 })
                 .cloned()
                 .collect();
         }
     }
-    let (pairs, _) = resolve_pairs(flat, spec.token());
-    let value_hits = pairs
+    let mut synthetic = if !spec.is_structural() || matches!(spec.scope, QuickScope::ValueOnly) {
+        Row::new()
+    } else {
+        resolve_pairs(flat, spec.token())
+            .0
+            .into_iter()
+            .filter(|(parent, _)| {
+                !flat.contains_key(parent) && key_hits.iter().any(|key| is_within(key, parent))
+            })
+            .collect::<Row>()
+    };
+    // Values are searched in every field, not only the fields whose names
+    // matched: `| uio` keeps `uioAffiliation` and each netgroup containing uio.
+    let value_hits = flat
         .iter()
         .filter(|(_, value)| {
             !matches!(spec.scope, QuickScope::KeyOnly)
@@ -218,21 +216,23 @@ fn match_flat_row(flat: &Row, spec: &CompiledQuickSpec) -> RowMatch {
         })
         .map(|(key, _)| key.clone())
         .collect::<HashSet<_>>();
-    let synthetic = pairs
-        .into_iter()
-        .filter(|(key, _)| !flat.contains_key(key))
-        .collect::<Row>();
-    let matched = if spec.key_not_equals {
-        flat.keys().any(|key| !key_hits.contains(key))
-    } else {
-        !key_hits.is_empty() || !value_hits.is_empty() || !synthetic.is_empty()
-    };
+    if spec.key_not_equals {
+        key_hits = flat
+            .keys()
+            .filter(|key| !key_hits.contains(*key))
+            .cloned()
+            .collect();
+        synthetic.clear();
+        projection = false;
+    }
+    let matched = !key_hits.is_empty() || !value_hits.is_empty() || !synthetic.is_empty();
 
     RowMatch {
         matched: if spec.negated() { !matched } else { matched },
         key_hits,
         value_hits,
         synthetic,
+        projection,
     }
 }
 
@@ -244,15 +244,9 @@ fn narrow_row(row: Row, spec: &CompiledQuickSpec) -> Vec<Row> {
         return Vec::new();
     }
 
-    // Naming a field projects its complete value, even if other values contain
-    // the same text. Synthetic pairs carry containers and selector fanout.
-    let projection = !result.synthetic.is_empty()
-        || (!result.key_hits.is_empty()
-            && result.key_hits.iter().all(|key| {
-                let selector = selector::CompiledSelector::from_token(key.clone(), spec.exact());
-                eq_case_insensitive(&selector.label(), spec.token())
-            }));
-    if projection && !negated && !result.synthetic.is_empty() {
+    // Addressed containers and selector fanout can become standalone rows.
+    // Bare field names keep the field and its complete value in place.
+    if result.projection && !negated && !result.synthetic.is_empty() {
         return result
             .synthetic
             .into_iter()
@@ -275,16 +269,21 @@ fn narrow_row(row: Row, spec: &CompiledQuickSpec) -> Vec<Row> {
             .collect();
     }
 
+    let values_count = negated || !result.projection;
+    // A value inside a list of objects keeps its whole object, so a matching
+    // member stays readable: `commands[0].name` keeps all of `commands[0]`.
+    let members = result
+        .value_hits
+        .iter()
+        .filter(|_| values_count)
+        .filter_map(|key| key.find("].").map(|end| &key[..=end]))
+        .collect::<HashSet<_>>();
     let narrowed = flat
         .into_iter()
         .filter(|(key, _)| {
             let selected = result.key_hits.contains(key)
-                || ((negated || !projection || result.key_hits.is_empty())
-                    && result.value_hits.contains(key))
-                || result.synthetic.keys().any(|parent| {
-                    key.strip_prefix(parent)
-                        .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
-                });
+                || (values_count && result.value_hits.contains(key))
+                || members.iter().any(|member| is_within(key, member));
             selected != negated
         })
         .collect::<Row>();
@@ -293,6 +292,13 @@ fn narrow_row(row: Row, spec: &CompiledQuickSpec) -> Vec<Row> {
     } else {
         vec![rebuild_row(&narrowed)]
     }
+}
+
+fn is_within(key: &str, parent: &str) -> bool {
+    key == parent
+        || key
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
 }
 
 fn rebuild_row(flat: &Row) -> Row {
@@ -325,26 +331,6 @@ fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool
             scalar => contains_case_insensitive(&render_value(scalar), token),
         },
     }
-}
-
-fn match_structural_value(row: &Row, spec: &CompiledQuickSpec) -> Option<bool> {
-    if !spec.is_structural()
-        || spec.key_not_equals
-        || (matches!(spec.scope, QuickScope::ValueOnly) && !spec.existence())
-    {
-        return None;
-    }
-
-    let root = Value::Object(coalesce_flat_row(&flatten_row(row)));
-    let matches = spec.selector.resolve_matches(&root);
-    let found = if spec.existence() {
-        matches.iter().any(|entry| is_truthy(&entry.value))
-    } else if matches.is_empty() {
-        return None;
-    } else {
-        true
-    };
-    Some(if spec.negated() { !found } else { found })
 }
 
 #[cfg(test)]
