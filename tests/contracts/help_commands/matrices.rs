@@ -121,7 +121,7 @@ fn table_color_unicode_presentation_matrix_contract() {
         let plain = strip_ansi(&output);
 
         assert!(
-            plain.contains("name") && plain.contains("source"),
+            plain.contains("name") && plain.contains("type"),
             "missing table headers for {presentation}/{color}/{unicode}: {plain:?}"
         );
 
