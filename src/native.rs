@@ -263,6 +263,17 @@ impl<'a> NativeCommandContext<'a> {
             None => Ok(()),
         }
     }
+
+    /// Emits a canonical object to live consumers and the invocation's DSL.
+    /// JSON output writes each surviving event as one stdout JSON line before
+    /// the final result document. Human output uses the shared renderer.
+    pub fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        match self.progress {
+            Some(progress) => progress.emit_stream(event),
+            None => Ok(()),
+        }
+    }
 }
 
 /// One transient structured document emitted while a native command runs.
@@ -276,6 +287,18 @@ pub struct NativeProgressEvent {
     pub meta: ResponseMetaV1,
     /// Historical input: retain it in event streams without animating a terminal replay.
     pub replay: bool,
+    /// Optional structured terminal snapshot. Event data remains the stream
+    /// and DSL contract; filtered invocations never display this snapshot.
+    pub frame: Option<NativeProgressFrame>,
+}
+
+/// Accumulated structured state for a live terminal replacement frame.
+#[derive(Debug, Clone)]
+pub struct NativeProgressFrame {
+    /// Canonical snapshot data rendered by the shared renderer.
+    pub data: serde_json::Value,
+    /// Preferred human projection and format for the snapshot.
+    pub meta: ResponseMetaV1,
 }
 
 impl NativeProgressEvent {
@@ -286,6 +309,7 @@ impl NativeProgressEvent {
             messages: Vec::new(),
             meta: ResponseMetaV1::default(),
             replay: false,
+            frame: None,
         }
     }
 
@@ -300,6 +324,15 @@ impl NativeProgressEvent {
         self.messages = messages;
         self
     }
+
+    /// Uses a structured snapshot for unfiltered human terminal updates.
+    pub fn with_frame(mut self, data: impl Into<serde_json::Value>, meta: ResponseMetaV1) -> Self {
+        self.frame = Some(NativeProgressFrame {
+            data: data.into(),
+            meta,
+        });
+        self
+    }
 }
 
 /// Host boundary that renders transient native-command progress.
@@ -312,6 +345,11 @@ pub trait NativeProgressSink {
 
     /// Renders or records one progress document before command execution resumes.
     fn emit(&self, event: NativeProgressEvent) -> Result<()>;
+
+    /// Delivers an event without terminal coalescing or replay suppression.
+    fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
+        self.emit(event)
+    }
 
     /// Draws immediately and reports whether terminal replacement is available.
     fn emit_measured(&self, event: NativeProgressEvent) -> Result<bool> {

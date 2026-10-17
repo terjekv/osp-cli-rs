@@ -456,6 +456,7 @@ pub(crate) fn run_progress_command_with_ui(
     ui: &UiState,
     result: CommandOutput,
     sink: &mut dyn UiSink,
+    stream: bool,
 ) -> Result<()> {
     let CommandBody::Output(output) = &result.body else {
         return Ok(());
@@ -463,6 +464,22 @@ pub(crate) fn run_progress_command_with_ui(
     let json_output = resolve_render_settings_with_hint(&ui.render_settings, result.format_hint)
         .format
         == OutputFormat::Json;
+    if stream && json_output {
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+        if progress_output_is_empty(output) {
+            return Ok(());
+        }
+        let data = crate::ui::json_value(output);
+        let events = data
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_else(|| std::slice::from_ref(&data));
+        for event in events {
+            let line = serde_json::to_string(event).map_err(|err| miette!("{err}"))?;
+            sink.write_stdout(&format!("{line}\n"));
+        }
+        return Ok(());
+    }
     let show_body = !result.presentation.progress_replace || ui.verbosity >= MessageLevel::Success;
     let framed = show_body
         && result.presentation.progress_replace
