@@ -37,6 +37,16 @@ HTTP(S) URL. The renderer emits OSC 8 only for rich TTY output. Plain output,
 JSON, Markdown, CSV/TSV, pipelines and `last` replay keep the plain URL; product
 text remains sanitized. The marker never changes canonical values.
 
+`NullText`, `Date`, `Decimal`, and `TextLimit` format scalar fields only at
+the human rendering boundary. `Compose` joins ordered literal and relative
+field spans from a typed object or array into one displayed value. Apply scalar rules
+before composition. These rules accept the same field selectors as curated
+columns, never replace the JSON document, and never interpolate values in the
+command adapter. A shape-changing stage clears them; synthesized fields also
+lose any formatting attached to the overwritten input field. Table output
+with declared columns retains its headings for an empty collection without
+manufacturing a result row.
+
 A stage that changes shape clears curated columns, alignment, numeric timestamp
 hints, conditional display rules and renderer recommendations. Guide layout
 survives only row-preserving stages; cleanup (`?`), projection, aggregation and

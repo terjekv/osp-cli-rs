@@ -37,7 +37,15 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         OutputItems::Rows(rows) => rows.is_empty() || rows.iter().all(Row::is_empty),
         OutputItems::Groups(groups) => groups.is_empty(),
     };
-    if plan.format != OutputFormat::Json && is_empty {
+    let declared_empty_table = matches!(
+        plan.format,
+        OutputFormat::Table | OutputFormat::Guide | OutputFormat::Markdown
+    ) && output
+        .meta
+        .display_columns
+        .as_ref()
+        .is_some_and(|columns| !columns.is_empty());
+    if plan.format != OutputFormat::Json && is_empty && !declared_empty_table {
         return Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
                 text: "No results.".to_string(),
@@ -616,6 +624,56 @@ fn display_output(output: &OutputResult) -> OutputResult {
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::NullText { field, text } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && value.is_null()
+                        {
+                            *value = Value::String(text.clone());
+                        }
+                    }
+                    DisplayRule::Date { field, pattern } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && let Some(text) = value.as_str()
+                            && let Some(formatted) = format_date(text, pattern)
+                        {
+                            *value = Value::String(formatted);
+                        }
+                    }
+                    DisplayRule::Decimal { field, precision } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && let Some(number) = value.as_f64()
+                        {
+                            *value =
+                                Value::String(format!("{:.*}", (*precision).min(4096), number));
+                        }
+                    }
+                    DisplayRule::TextLimit { field, length } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && !value.is_null()
+                        {
+                            *value =
+                                Value::String(display_value(value).chars().take(*length).collect());
+                        }
+                    }
+                    DisplayRule::Compose { field, parts } => {
+                        if let Some(value) = display_path_mut(&mut original, field)
+                            && (value.is_object() || value.is_array())
+                        {
+                            use crate::core::output_model::DisplayPart;
+                            let text: Option<String> = parts
+                                .iter()
+                                .map(|part| match part {
+                                    DisplayPart::Literal { text } => Some(text.clone()),
+                                    DisplayPart::Field { field } => {
+                                        display_path(value, field).map(display_value)
+                                    }
+                                })
+                                .collect();
+                            if let Some(text) = text {
+                                *value = Value::String(text);
+                            }
+                        }
+                    }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
                         if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
                             items.retain(|item| {
@@ -691,6 +749,26 @@ fn display_output(output: &OutputResult) -> OutputResult {
         }
     }
     display
+}
+
+fn format_date(text: &str, pattern: &str) -> Option<String> {
+    use chrono::{NaiveDate, NaiveDateTime};
+    let date = NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S")
+        .ok()
+        .or_else(|| {
+            chrono::DateTime::parse_from_rfc3339(text)
+                .ok()
+                .map(|date| date.naive_local())
+        })
+        .or_else(|| {
+            NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                .ok()?
+                .and_hms_opt(0, 0, 0)
+        })?;
+    let mut result = String::new();
+    use std::fmt::Write;
+    write!(&mut result, "{}", date.format(pattern)).ok()?;
+    Some(result)
 }
 
 fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
@@ -1244,10 +1322,11 @@ fn table_from_rows(
         .collect::<Vec<_>>();
     let mut visible_columns = (0..all_headers.len())
         .filter(|index| {
-            all_rows.iter().any(|row| {
-                row.get(*index)
-                    .is_some_and(|value| !value.trim().is_empty())
-            })
+            all_rows.is_empty()
+                || all_rows.iter().any(|row| {
+                    row.get(*index)
+                        .is_some_and(|value| !value.trim().is_empty())
+                })
         })
         .collect::<Vec<_>>();
     if visible_columns.is_empty() && !all_headers.is_empty() {
