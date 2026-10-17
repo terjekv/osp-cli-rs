@@ -369,7 +369,8 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
     meta.display_rules.retain(|rule| match rule {
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
-        DisplayRule::Hyperlink { field }
+        DisplayRule::ValueStyle { field, .. }
+        | DisplayRule::Hyperlink { field }
         | DisplayRule::Bytes { field }
         | DisplayRule::RelativeTimestamp { field }
         | DisplayRule::HideArrayItemsWhenTrue { field, .. } => !created(field),

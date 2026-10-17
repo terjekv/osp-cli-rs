@@ -430,19 +430,9 @@ pub(crate) enum ThemeCommands {
     /// List available themes.
     #[command(display_order = 10)]
     List,
-    /// Show a theme definition.
-    #[command(display_order = 11)]
-    Show(ThemeShowArgs),
     /// Set active theme.
     #[command(display_order = 12)]
     Use(ThemeUseArgs),
-}
-
-/// Arguments for `theme show`.
-#[derive(Debug, Args)]
-pub(crate) struct ThemeShowArgs {
-    /// Theme name to inspect; defaults to the active theme.
-    pub name: Option<String>,
 }
 
 /// Arguments for `theme use`.
@@ -824,15 +814,15 @@ pub(crate) fn runtime_load_options_from_flags(
 ///
 /// let tokens = vec![
 ///     "theme".to_string(),
-///     "show".to_string(),
+///     "use".to_string(),
 ///     "dracula".to_string(),
 /// ];
 ///
 /// let command = parse_inline_command_tokens(&tokens).unwrap().unwrap();
 /// match command {
 ///     Commands::Theme(args) => match args.command {
-///         ThemeCommands::Show(show) => {
-///             assert_eq!(show.name.as_deref(), Some("dracula"));
+///         ThemeCommands::Use(selected) => {
+///             assert_eq!(selected.name, "dracula");
 ///         }
 ///         _ => panic!("unexpected theme command"),
 ///     },
@@ -998,15 +988,15 @@ mod tests {
 
         let tokens = vec![
             "theme".to_string(),
-            "show".to_string(),
+            "use".to_string(),
             "dracula".to_string(),
         ];
 
         let command = parse_inline_command_tokens(&tokens).unwrap().unwrap();
         match command {
             Commands::Theme(args) => match args.command {
-                ThemeCommands::Show(show) => {
-                    assert_eq!(show.name.as_deref(), Some("dracula"));
+                ThemeCommands::Use(selected) => {
+                    assert_eq!(selected.name, "dracula");
                 }
                 _ => panic!("unexpected theme command"),
             },

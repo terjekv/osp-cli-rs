@@ -78,13 +78,13 @@ theme.name = "dracula"
     };
     let uio = capture(
         "uio",
-        "theme show nord --json\ntheme show dracula --json\nexit\n",
+        "theme list --json | nord\ntheme list --json | dracula\nexit\n",
     );
     assert_eq!(uio[0][0]["id"], "nord");
     assert_eq!(uio[1][0]["id"], "dracula");
     let tsd = capture(
         "tsd",
-        "theme show rose-pine-moon --json\ntheme show nord --json\nexit\n",
+        "theme list --json | rose-pine-moon\ntheme list --json | nord\nexit\n",
     );
     assert_eq!(tsd[0][0]["id"], "rose-pine-moon");
     assert_eq!(tsd[1][0]["id"], "nord");
@@ -111,11 +111,14 @@ theme.name = "dracula"
     };
     assert_eq!(
         list("uio"),
-        ["theme show nord --json", "theme show dracula --json"]
+        ["theme list --json | nord", "theme list --json | dracula"]
     );
     assert_eq!(
         list("tsd"),
-        ["theme show rose-pine-moon --json", "theme show nord --json"]
+        [
+            "theme list --json | rose-pine-moon",
+            "theme list --json | nord"
+        ]
     );
     let pruned = osp_command(home.path())
         .timeout(std::time::Duration::from_secs(5))
@@ -129,10 +132,13 @@ theme.name = "dracula"
         String::from_utf8(pruned.stdout).unwrap(),
         "Removed 1 entry from root history.\n"
     );
-    assert_eq!(list("uio"), ["theme show dracula --json"]);
+    assert_eq!(list("uio"), ["theme list --json | dracula"]);
     assert_eq!(
         list("tsd"),
-        ["theme show rose-pine-moon --json", "theme show nord --json"]
+        [
+            "theme list --json | rose-pine-moon",
+            "theme list --json | nord"
+        ]
     );
     let cleared = osp_command(home.path())
         .timeout(std::time::Duration::from_secs(5))
@@ -146,8 +152,8 @@ theme.name = "dracula"
         String::from_utf8(cleared.stdout).unwrap(),
         "Cleared root history.\n"
     );
-    let resumed = capture("tsd", "theme show dracula --json\nexit\n");
+    let resumed = capture("tsd", "theme list --json | dracula\nexit\n");
     assert_eq!(resumed[0][0]["id"], "dracula");
-    assert_eq!(list("tsd"), ["theme show dracula --json"]);
-    assert_eq!(list("uio"), ["theme show dracula --json"]);
+    assert_eq!(list("tsd"), ["theme list --json | dracula"]);
+    assert_eq!(list("uio"), ["theme list --json | dracula"]);
 }

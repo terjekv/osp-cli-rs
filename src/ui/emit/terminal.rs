@@ -465,6 +465,7 @@ fn table_row_lines(
                 .enumerate()
                 .map(|(index, lines)| PreparedCell {
                     command: cells.get(index).is_some_and(|cell| cell.command),
+                    style: cells.get(index).and_then(|cell| cell.style.clone()),
                     raw: lines.get(line_index).cloned().unwrap_or_default(),
                     markdown: String::new(),
                     width: lines
@@ -793,6 +794,8 @@ fn table_row(
         );
         let styled_cell = if header {
             styler.paint(raw_cell, StyleToken::TableHeader)
+        } else if let Some(spec) = cell.and_then(|cell| cell.style.as_deref()) {
+            crate::ui::style::apply_style_spec(raw_cell, spec, styler.enabled)
         } else if cell.is_some_and(|cell| cell.command) {
             styler.paint(raw_cell, StyleToken::PromptCommand)
         } else {

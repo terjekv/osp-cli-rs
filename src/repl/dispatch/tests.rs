@@ -710,7 +710,7 @@ fn intro_value_pipeline_prefers_matching_entry_content_unit() {
 }
 
 #[test]
-fn theme_show_value_pipeline_renders_selected_field_rhs_unit() {
+fn theme_list_value_pipeline_renders_selected_field_rhs_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     state.runtime.themes =
         crate::ui::theme_catalog::load_theme_catalog(state.runtime.config.resolved());
@@ -720,21 +720,19 @@ fn theme_show_value_pipeline_renders_selected_field_rhs_unit() {
     let result = run_repl_command(
         &mut state,
         Commands::Theme(ThemeArgs {
-            command: ThemeCommands::Show(crate::cli::ThemeShowArgs {
-                name: Some("catppuccin".to_string()),
-            }),
+            command: ThemeCommands::List,
         }),
         &invocation,
         &test_history(),
     )
-    .expect("theme show should succeed");
+    .expect("theme list should succeed");
 
     let mut sink = crate::app::sink::BufferedUiSink::default();
     let rendered = render_repl_command_output(
         &state.runtime,
         &mut state.session,
-        "theme show catppuccin --value | VALUE muted",
-        &["VALUE muted".to_string()],
+        "theme list --value | catppuccin | VALUE muted",
+        &["catppuccin".to_string(), "VALUE muted".to_string()],
         result,
         &invocation,
         &mut sink,

@@ -179,8 +179,8 @@ fn repl_dsl_capability_is_declared_per_command_unit() {
             name: "orch".to_string(),
         },
     });
-    let theme_show = Commands::Theme(crate::cli::ThemeArgs {
-        command: ThemeCommands::Show(crate::cli::ThemeShowArgs { name: None }),
+    let theme_list = Commands::Theme(crate::cli::ThemeArgs {
+        command: ThemeCommands::List,
     });
     let theme_use = Commands::Theme(crate::cli::ThemeArgs {
         command: ThemeCommands::Use(crate::cli::ThemeUseArgs {
@@ -217,7 +217,7 @@ fn repl_dsl_capability_is_declared_per_command_unit() {
 
     assert!(repl::repl_command_spec(&plugins_list).supports_dsl);
     assert!(!repl::repl_command_spec(&plugins_enable).supports_dsl);
-    assert!(repl::repl_command_spec(&theme_show).supports_dsl);
+    assert!(repl::repl_command_spec(&theme_list).supports_dsl);
     assert!(!repl::repl_command_spec(&theme_use).supports_dsl);
     assert!(repl::repl_command_spec(&config_show).supports_dsl);
     assert!(!repl::repl_command_spec(&config_set).supports_dsl);

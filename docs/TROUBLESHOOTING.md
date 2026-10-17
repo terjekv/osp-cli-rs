@@ -132,7 +132,7 @@ Start with:
 
 ```bash
 osp theme list
-osp theme show dracula
+osp theme list '|' dracula
 osp doctor theme
 osp config explain theme.name
 ```

@@ -111,10 +111,7 @@ pub(crate) fn repl_command_spec(command: &Commands) -> ReplCommandSpec {
             "alias",
             matches!(args.command, crate::cli::AliasCommands::List(_)),
         ),
-        Commands::Theme(args) => (
-            "theme",
-            matches!(args.command, ThemeCommands::List | ThemeCommands::Show(_)),
-        ),
+        Commands::Theme(args) => ("theme", matches!(args.command, ThemeCommands::List)),
         Commands::Intro(_) => (CMD_INTRO, true),
         Commands::Repl(_) => ("repl", false),
     };

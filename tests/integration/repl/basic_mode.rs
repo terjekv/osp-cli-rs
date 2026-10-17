@@ -31,12 +31,12 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
     .expect("command file should write");
     let first = files.path().join("first result.osp");
     let second = files.path().join("second result.osp");
-    std::fs::write(&first, "theme show dracula | P id,name\n").unwrap();
-    std::fs::write(&second, "theme show nord | P id,name\n").unwrap();
+    std::fs::write(&first, "theme list | dracula | P id,name\n").unwrap();
+    std::fs::write(&second, "theme list | nord | P id,name\n").unwrap();
     let recovery = files.path().join("recovery batch.osp");
     std::fs::write(
         &recovery,
-        "theme show dracula | P id,name\ntheme show dracula | Z\ntheme show nord | P id,name\n",
+        "theme list | dracula | P id,name\ntheme list | dracula | Z\ntheme list | nord | P id,name\n",
     )
     .unwrap();
     let input = format!(
@@ -120,7 +120,7 @@ fn repl_basic_mode_recovers_from_ignored_batch_errors() {
     let files = make_temp_dir("osp-cli-repl-source-errors");
     let missing = files.path().join("missing.osp");
     let batch = files.path().join("batch.osp");
-    std::fs::write(&batch, "source other.osp\ntheme show nord | P id,name\n").unwrap();
+    std::fs::write(&batch, "source other.osp\ntheme list | nord | P id,name\n").unwrap();
     // A terminal cursor report left in the input buffer must not corrupt
     // the command typed after it.
     let input = format!(
@@ -278,7 +278,7 @@ fn repl_basic_mode_restarts_after_refresh_without_tty() {
     let commands = files.path().join("refresh.osp");
     std::fs::write(&commands, "plugins refresh\n").unwrap();
     let input = format!(
-        "source '{}'\ntheme show dracula --json\nexit\n",
+        "source '{}'\ntheme list --json | dracula\nexit\n",
         commands.display()
     );
     let output = run_basic_repl(input.as_bytes());

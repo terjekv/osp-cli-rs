@@ -28,6 +28,13 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Paint a colour/style specification using its own style in terminal cells.
+    ValueStyle {
+        /// Canonical string field containing a validated style specification.
+        field: String,
+        /// Emphasize the value in addition to its declared style.
+        bold: bool,
+    },
     /// Link an HTTP(S) URL value in rich terminal output only.
     Hyperlink {
         /// Canonical string field containing the URL and visible link text.

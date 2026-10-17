@@ -46,7 +46,7 @@ osp theme list
 Inspect one theme:
 
 ```bash
-osp theme show dracula
+osp theme list '|' dracula
 ```
 
 Switch theme for the current process or REPL session:
@@ -143,18 +143,10 @@ theme.path = ["~/.config/osp/themes", "/srv/shared/osp-themes"]
 
 ## Inspecting Custom Theme State
 
-`theme list` shows whether a theme is `builtin` or `custom`, and includes the
-origin path for custom themes.
-
-`theme show` includes:
-
-- `base`
-- `source`
-- `origin`
-- the current palette values
-
-That makes it the first command to run when a theme does not look the way you
-expected.
+`theme list` shows each theme's palette, source type and active/default status.
+Each colour value is painted in its own colour in terminal output. Use
+`theme list --json` for full definitions, including custom origins and bases,
+or `theme list | NAME` in the REPL to narrow the list to one palette.
 
 ## If Themes Look Wrong
 
@@ -162,7 +154,7 @@ Start with:
 
 ```bash
 osp theme list
-osp theme show <name>
+osp theme list '|' <name>
 osp doctor theme
 osp config explain theme.name
 ```

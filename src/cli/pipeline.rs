@@ -60,7 +60,7 @@ pub(crate) struct ParsedCommandLine {
 /// resolver.set_defaults(defaults);
 /// let config = resolver.resolve(ResolveOptions::default()).unwrap();
 ///
-/// let parsed = parse_command_text_with_aliases("theme show dracula | H P", &config).unwrap();
+/// let parsed = parse_command_text_with_aliases("theme list | dracula | H P", &config).unwrap();
 /// assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
 /// assert_eq!(parsed.stages, vec!["H P"]);
 /// ```
@@ -472,7 +472,8 @@ mod tests {
         resolver.set_defaults(defaults);
         let config = resolver.resolve(ResolveOptions::default()).unwrap();
 
-        let parsed = parse_command_text_with_aliases("theme show dracula | H P", &config).unwrap();
+        let parsed =
+            parse_command_text_with_aliases("theme list | dracula | H P", &config).unwrap();
         assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
         assert_eq!(parsed.stages, vec!["H P"]);
     }

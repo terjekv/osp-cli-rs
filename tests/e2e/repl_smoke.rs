@@ -92,11 +92,11 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 
     // Recall executes the selected command; cancelling keeps the unfinished input.
     for (query, command, expected_id, expected_name) in [
-        (None, "theme show dracula --json", "dracula", "Dracula"),
+        (None, "theme list --json | dracula", "dracula", "Dracula"),
         (Some("dracula"), "", "dracula", "Dracula"),
         (
-            Some("theme show "),
-            "rose-pine-moon --json",
+            Some("theme list "),
+            "--json | rose-pine-moon",
             "rose-pine-moon",
             "Rose Pine Moon",
         ),
@@ -137,9 +137,9 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
 
     // Navigate the editor's durable-history backend in both directions.
     for (keys, selected) in [
-        (b"\x1b[A".as_slice(), "theme show rose-pine-moon --json"),
-        (b"\x1b[A".as_slice(), "theme show dracula --json"),
-        (b"\x1b[B".as_slice(), "theme show rose-pine-moon --json"),
+        (b"\x1b[A".as_slice(), "theme list --json | rose-pine-moon"),
+        (b"\x1b[A".as_slice(), "theme list --json | dracula"),
+        (b"\x1b[B".as_slice(), "theme list --json | rose-pine-moon"),
     ] {
         let start = session.output_len();
         session.write_bytes(keys);
@@ -159,19 +159,19 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
     assert!(
         session.wait_for_plain_output_since(
             expanded,
-            "theme show rose-pine-moon --json",
+            "theme list --json | rose-pine-moon",
             Duration::from_secs(3)
         ),
         "Tab should expand the last accepted command; output:\n{}",
         session.output_snapshot(8000)
     );
     // A single expansion is filled in place, like shell completion.
-    assert_editor_command(&session, expanded, "theme show rose-pine-moon --json");
+    assert_editor_command(&session, expanded, "theme list --json | rose-pine-moon");
     let start = session.output_len();
     session.write_bytes(b"\r");
     assert_theme_result(&session, start, "rose-pine-moon", "Rose Pine Moon");
 
-    session.type_text("theme show nord --json");
+    session.type_text("theme list --json | nord");
     let start = session.output_len();
     session.write_bytes(b"\r");
     assert_theme_result(&session, start, "nord", "Nord");
@@ -344,7 +344,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     }
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default());
     assert!(session.wait_for_plain_output("default>", Duration::from_secs(10)));
-    let failed_command = "theme show dracula | Z";
+    let failed_command = "theme list | dracula | Z";
     session.type_text(failed_command);
     let failed = session.output_len();
     session.write_bytes(b"\r");
@@ -380,7 +380,7 @@ fn repl_operator_inspects_pipeline_failure_and_recovers_to_typed_output() {
     );
     assert_ne!(failure["detail"], failure["summary"]);
 
-    session.type_text("theme show dracula --json | G id | A count | Z");
+    session.type_text("theme list --json | dracula | G id | A count | Z");
     let start = session.output_len();
     session.write_bytes(b"\r");
     let recovered = wait_for_repl_json(&session, start);

@@ -135,6 +135,9 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         OutputFormat::Mreg => lower_mreg_doc(output),
         OutputFormat::Auto | OutputFormat::Csv | OutputFormat::Tsv => Doc::default(),
     };
+    if plan.settings.color && plan.format != OutputFormat::Json {
+        apply_value_styles(&mut doc.blocks, output);
+    }
     if plan.format != OutputFormat::Json {
         sanitize_doc(&mut doc);
     }
@@ -679,6 +682,53 @@ fn display_output(output: &OutputResult) -> OutputResult {
     display
 }
 
+fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
+    use crate::core::output_model::DisplayRule;
+    let columns = output
+        .meta
+        .display_columns
+        .as_deref()
+        .unwrap_or(&output.meta.key_index);
+    let labels = display_labels(output, columns);
+    let style = |key: &str, value: &str| {
+        output.meta.display_rules.iter().find_map(|rule| {
+            let DisplayRule::ValueStyle { field, bold } = rule else {
+                return None;
+            };
+            let label = columns
+                .iter()
+                .position(|column| column == field)
+                .and_then(|index| labels.get(index))
+                .unwrap_or(field);
+            (key == label && super::style::is_valid_style_spec(value)).then(|| {
+                if *bold {
+                    format!("bold {value}")
+                } else {
+                    value.to_owned()
+                }
+            })
+        })
+    };
+    for block in blocks {
+        match block {
+            Block::Section(section) => apply_value_styles(&mut section.blocks, output),
+            Block::Table(table) => {
+                table.cell_styles = table
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .zip(&table.headers)
+                            .map(|(value, key)| style(key, value))
+                            .collect()
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+}
+
 fn display_labels(output: &OutputResult, columns: &[String]) -> Vec<String> {
     let labels = output
         .meta
@@ -1186,6 +1236,7 @@ fn table_from_rows(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     TableBlock {
+        cell_styles: Vec::new(),
         summary: Vec::new(),
         headers: visible_columns
             .iter()
