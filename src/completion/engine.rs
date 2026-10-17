@@ -180,7 +180,8 @@ impl CompletionEngine {
     ///
     /// Filled slots use their bare names; remaining slots retain declared
     /// requiredness and repetition. Commands without named positions fall back
-    /// to the caller's normal status. No flag signature is included.
+    /// to the caller's normal status. Neither the flag signature nor the
+    /// command's own description is included.
     pub(crate) fn positional_usage(
         &self,
         analysis: &CompletionAnalysis,
@@ -228,16 +229,10 @@ impl CompletionEngine {
                 .collect::<Vec<_>>()
                 .join(" | ")
         });
-        let detail = choices.as_deref().or_else(|| {
-            if index > 0 {
-                arg.and_then(|arg| arg.tooltip.as_deref())
-                    .or(node.tooltip.as_deref())
-            } else {
-                node.tooltip
-                    .as_deref()
-                    .or_else(|| arg.and_then(|arg| arg.tooltip.as_deref()))
-            }
-        });
+        // The command's own tooltip is the hinter's separate description line.
+        let detail = choices
+            .as_deref()
+            .or_else(|| arg.and_then(|arg| arg.tooltip.as_deref()));
         if let Some(detail) = detail {
             text.push_str(" · ");
             text.push_str(detail);
