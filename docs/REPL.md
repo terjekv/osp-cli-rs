@@ -358,12 +358,18 @@ returns the rest as editable input. Press Enter to execute it. Launcher flags
 such as `osp -u USER …` or `osp --prod …` stay visible; these lines are not
 normalized because their first word after `osp` is not a command root.
 
+`!! <args>` recalls the last command and appends arguments as editable input.
+For example, `!! --force --override cname` prepares a retry; Enter submits it.
+
 `each 'host {}'` runs once per `VALUE` value of the saved result, after its
 pipeline. Values are shell-quoted into `{}`; put the placeholder outside quotes
-inside the template. More than 50 values or a command path not ending in a recognized read
-verb (such as host, info, find, list, get, or status) requires `--yes`. This
-includes mutations and unclassified integration commands. Existing
-command confirmations still apply. `--ignore-errors` continues after failures;
+inside the template. More than 50 values requires `--yes`. Commands that change
+state require both `--yes` and `--count N`, where N is exactly the number of
+values. Native integrations declare read/write effects on their command metadata;
+commands without declarations require acknowledgement unless their resolved leaf
+is a recognized read command. Templates with unresolved command names require
+acknowledgement. Domain `--force` and named overrides do not acknowledge a bulk
+write. Existing command confirmations still apply. `--ignore-errors` continues after failures;
 a final `N ok, M failed` tally is always printed after execution. Like `source`,
 exit or reload stops the batch, and nested source/each commands are refused.
 

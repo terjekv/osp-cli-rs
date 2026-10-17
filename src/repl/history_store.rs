@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BangCommand {
     Last,
+    LastWithSuffix(String),
     Relative(usize),
     Absolute { id: usize, suffix: Option<String> },
     Prefix(String),
@@ -47,6 +48,11 @@ pub(crate) fn parse_bang_command(raw: &str) -> miette::Result<Option<BangCommand
     }
     if raw == "!!" {
         return Ok(Some(BangCommand::Last));
+    }
+    if let Some(rest) = raw.strip_prefix("!!")
+        && rest.starts_with(char::is_whitespace)
+    {
+        return Ok(Some(BangCommand::LastWithSuffix(rest.trim().to_string())));
     }
     if let Some(rest) = raw.strip_prefix("!?") {
         let term = rest.trim();
@@ -458,16 +464,20 @@ impl OspHistoryStore {
         scope: Option<&str>,
         elevated: bool,
     ) -> Option<String> {
-        let expanded = if matches!(command, BangCommand::Last) {
-            self.last_command.clone().or_else(|| {
+        let expanded = if matches!(command, BangCommand::Last | BangCommand::LastWithSuffix(_)) {
+            let last = self.last_command.clone().or_else(|| {
                 self.recent_commands_for(self.shell_prefix().as_deref())
                     .last()
                     .cloned()
-            })?
+            })?;
+            match command {
+                BangCommand::LastWithSuffix(suffix) => format!("{last} {suffix}"),
+                _ => last,
+            }
         } else {
             let recent = self.recent_commands_for(scope);
             let selected = match command {
-                BangCommand::Last => unreachable!(),
+                BangCommand::Last | BangCommand::LastWithSuffix(_) => unreachable!(),
                 BangCommand::Relative(offset) => recent.get(recent.len().checked_sub(*offset)?),
                 BangCommand::Absolute { id, .. } => recent.get(id.checked_sub(1)?),
                 BangCommand::Prefix(prefix) => recent

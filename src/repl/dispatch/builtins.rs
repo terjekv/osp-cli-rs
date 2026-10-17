@@ -465,7 +465,7 @@ fn render_bang_help() -> String {
     out.push_str("  last     replay the last successful result\n");
     out.push_str("  last --raw  show the pre-pipeline result\n\n");
     out.push_str("Bang history shortcuts:\n");
-    out.push_str("  !!       repeat the last command\n");
+    out.push_str("  !! [args] repeat the last command, appending arguments\n");
     out.push_str("  !-N      Nth previous visible command\n");
     out.push_str("  !N [args]  visible history entry by id, with optional appended arguments\n");
     out.push_str("  !prefix  latest visible command starting with prefix\n");
