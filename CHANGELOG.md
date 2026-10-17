@@ -245,8 +245,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### API and protocol migration
 
-- **Breaking:** Remove `ResponseMetaV1.presentation_lines`,
-  `ResponseMetaV1.progress_append` and `RenderRequest.presentation_lines`.
+- **Breaking:** Remove final-text overrides from response metadata and render
+  requests, together with the string-only progress append field.
   Final native/plugin output is structured `data` plus renderer hints; notices
   use levelled `messages`. Native streaming endpoints call `emit_stream` with
   object events: `--json` writes event JSONL to stdout followed by the final
