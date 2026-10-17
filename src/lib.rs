@@ -253,7 +253,7 @@ pub use crate::app::{App, run_from, run_process};
 pub use crate::native::{
     InvocationElevation, NativeCommand, NativeCommandContext, NativeCommandOutcome,
     NativeCommandRegistry, NativePagination, NativeProgressEvent, NativeProgressSink,
-    NativePromptContextEntry, NativeSessionContext, NativeSessionContextEntry,
+    NativePromptContextEntry, NativeSessionContext, NativeSessionContextEntry, NativeWrite,
 };
 
 mod native;

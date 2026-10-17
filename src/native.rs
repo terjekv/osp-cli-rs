@@ -37,6 +37,12 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use clap::Command;
 
+/// Declares that a native command mutates remote or local state.
+/// Attach to the owning clap subcommand with `Command::add`.
+#[derive(Clone, Debug)]
+pub struct NativeWrite;
+impl clap::builder::CommandExt for NativeWrite {}
+
 use crate::completion::CompletionNode;
 use crate::config::ResolvedConfig;
 use crate::core::command_policy::CommandPath;
@@ -1016,6 +1022,21 @@ impl NativeCommandRegistry {
     /// reuse human-typed names without normalizing them first.
     pub fn command(&self, name: &str) -> Option<&Arc<dyn NativeCommand>> {
         self.commands.get(&normalize_name(name))
+    }
+
+    /// Resolves parsed argv through clap, so values cannot impersonate command names.
+    pub(crate) fn writes(&self, tokens: &[String]) -> Option<bool> {
+        let command = self.command(tokens.first()?)?.command();
+        let matches = command.clone().try_get_matches_from(tokens).ok()?;
+        let mut leaf = &command;
+        let mut matched = &matches;
+        let mut writes = leaf.get::<NativeWrite>().is_some();
+        while let Some((name, child)) = matched.subcommand() {
+            leaf = leaf.find_subcommand(name)?;
+            writes |= leaf.get::<NativeWrite>().is_some();
+            matched = child;
+        }
+        Some(writes)
     }
 
     /// Returns catalog metadata for all registered native commands.

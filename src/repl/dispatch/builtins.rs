@@ -165,6 +165,9 @@ pub(crate) struct EachCommand {
     /// Allow more than 50 values and commands that change data.
     #[arg(long)]
     yes: bool,
+    /// Acknowledge exactly this many writes.
+    #[arg(long)]
+    count: Option<usize>,
     /// Continue after command errors.
     #[arg(long)]
     ignore_errors: bool,
@@ -196,9 +199,9 @@ fn execute_each_command(
         "reset", "resize", "restore", "revoke", "retry", "rm", "set", "start", "stop", "unset",
         "update",
     ];
-    let writes = tokens
-        .iter()
-        .any(|word| WRITE_VERBS.contains(&word.as_str()));
+    let writes = state.clients.native_commands().writes(&tokens).unwrap_or_else(|| {
+        tokens.iter().any(|word| WRITE_VERBS.contains(&word.as_str()))
+    });
     if writes && !command.yes {
         return Err(miette!("each requires --yes for commands that change data"));
     }
@@ -223,6 +226,9 @@ fn execute_each_command(
     let rows = crate::core::output_model::rows_from_value(values);
     if rows.len() > 50 && !command.yes {
         return Err(miette!("each requires --yes for more than 50 values"));
+    }
+    if writes && command.count != Some(rows.len()) {
+        return Err(miette!("each will run {} writes; acknowledge with --count {}", rows.len(), rows.len()));
     }
     let (mut ok, mut failed) = (0, 0);
     let mut result = Ok(ReplResult::Continue);
