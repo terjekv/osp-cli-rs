@@ -414,6 +414,7 @@ def run(root: Path, fixtures: dict | None = None) -> None:
         failures.extend(check_timings(scenarios, budgets["gates"]))
     elapsed = time.perf_counter() - started
     if failures:
+        sys.stdout.flush()
         print(f"\nperf: FAILED after {elapsed:.0f}s", file=sys.stderr)
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
