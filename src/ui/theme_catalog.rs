@@ -513,6 +513,55 @@ fn empty_palette() -> ThemePalette {
     }
 }
 
+/// Creates a custom theme alongside the catalog's first configured theme path.
+/// Existing files are never replaced; inheritance keeps the saved file minimal.
+pub(crate) fn save_custom_theme(
+    config: &ResolvedConfig,
+    name: &str,
+    base: &str,
+    palette: &BTreeMap<String, String>,
+) -> Result<(String, PathBuf), String> {
+    use std::io::Write;
+    let id = normalize_theme_name(name);
+    if id.is_empty() {
+        return Err("theme name must contain a letter or number".into());
+    }
+    let dir = resolve_theme_paths(config)
+        .paths
+        .into_iter()
+        .next()
+        .ok_or_else(|| "theme.path has no directory for custom themes".to_string())?;
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+    let path = dir.join(format!("{id}.toml"));
+    let value = toml::Value::Table(toml::map::Map::from_iter([
+        ("base".into(), toml::Value::String(base.into())),
+        (
+            "palette".into(),
+            toml::Value::Table(
+                palette
+                    .iter()
+                    .map(|(key, value)| (key.clone(), toml::Value::String(value.clone())))
+                    .collect(),
+            ),
+        ),
+    ]));
+    let text = toml::to_string_pretty(&value).map_err(|error| error.to_string())?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+    if let Err(error) = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        let _ = fs::remove_file(&path);
+        return Err(format!("cannot write {}: {error}", path.display()));
+    }
+    Ok((id, path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

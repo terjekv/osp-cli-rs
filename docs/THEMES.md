@@ -176,7 +176,13 @@ osp config unset color.accent
 `theme list` applies these global overrides to every row and marks each
 overridden cell with `*`. Its legend appears only when an override is present.
 Data exports retain undecorated values and expose the overridden role names.
-The preview picker also applies the overrides while cycling themes.
+The preview picker also applies the overrides while cycling themes. Choose
+`[ Save as theme… ]` to name a custom theme containing a base-theme reference
+and only the overridden roles. The new file is created in the first configured
+`theme.path` directory (normally `~/.config/osp/themes`). Existing names are
+rejected. Saving selects the new theme and clears the absorbed overrides from
+applicable config/session scopes. Explicit overrides for other profiles are
+retained.
 
 ## If Themes Look Wrong
 

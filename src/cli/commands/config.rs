@@ -476,6 +476,81 @@ fn config_entry_row(
     row.build()
 }
 
+pub(super) fn absorb_palette_overrides(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    keys: &[String],
+) -> Result<()> {
+    let paths = config_write_paths(runtime.launch.runtime_load, ConfigStore::Config)?;
+    let path = paths
+        .as_ref()
+        .and_then(|paths| paths.config_file.as_deref())
+        .ok_or_else(|| miette!("unable to resolve config path"))?;
+    let layer = match std::fs::read_to_string(path) {
+        Ok(text) => ConfigLayer::from_toml_str(&text).into_diagnostic()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigLayer::default(),
+        Err(error) => return Err(error).into_diagnostic(),
+    };
+    for entry in layer
+        .entries()
+        .iter()
+        .filter(|entry| keys.contains(&entry.key) && scope_applies(&entry.scope, runtime))
+    {
+        run_config_unset(
+            runtime,
+            session,
+            ConfigUnsetArgs {
+                key: entry.key.clone(),
+                scope: ConfigScopeArgs {
+                    global: entry.scope.profile.is_none(),
+                    profile: entry.scope.profile.clone(),
+                    terminal: entry.scope.terminal.clone(),
+                    ..ConfigScopeArgs::default()
+                },
+                store: ConfigStoreArgs {
+                    save: true,
+                    ..ConfigStoreArgs::default()
+                },
+                dry_run: false,
+            },
+        )?;
+    }
+    clear_session_values(runtime, session, keys, &mut Vec::new());
+    Ok(())
+}
+
+fn scope_applies(scope: &Scope, runtime: &AppRuntime) -> bool {
+    scope
+        .profile
+        .as_deref()
+        .is_none_or(|profile| profile == runtime.config.resolved().active_profile())
+        && scope
+            .terminal
+            .as_deref()
+            .is_none_or(|terminal| terminal == runtime.context.terminal_kind().as_config_terminal())
+}
+
+fn clear_session_values(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    keys: &[String],
+    changed: &mut Vec<String>,
+) {
+    let applicable = session
+        .config_overrides
+        .entries()
+        .iter()
+        .filter(|entry| keys.contains(&entry.key) && scope_applies(&entry.scope, runtime))
+        .map(|entry| (entry.key.clone(), entry.scope.clone()))
+        .collect::<Vec<_>>();
+    for (key, scope) in applicable {
+        session.config_overrides.remove_scoped(&key, &scope);
+        if !changed.contains(&key) {
+            changed.push(key);
+        }
+    }
+}
+
 pub(super) fn set_picker_value(
     runtime: &AppRuntime,
     session: &mut AppSession,

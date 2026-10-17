@@ -711,7 +711,9 @@ fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
                 .position(|column| column == field)
                 .and_then(|index| labels.get(index))
                 .unwrap_or(field);
-            if key != label { return None; }
+            if key != label {
+                return None;
+            }
             let original = output
                 .as_rows()
                 .and_then(|rows| rows.get(row_index))
