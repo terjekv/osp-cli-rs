@@ -889,6 +889,11 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
         self.draw(event, self.stages, true)
     }
 
+    fn emit_stream_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
+        self.emit_stream(event)?;
+        Ok(self.can_present.get() && self.sink.borrow().can_replace())
+    }
+
     fn emit(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
         let tree = event.meta.progress_replace && self.can_present.get();
         if !tree {

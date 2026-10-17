@@ -221,7 +221,7 @@ impl NativeCommand for ApprovalWorkflow {
         }]);
         // Stream consumers retain historical events without terminal coalescing.
         progress.replay = true;
-        context.emit_stream(progress)?;
+        context.emit_stream_measured(progress)?;
         context.present(
             NativeProgressEvent::new(json!({"notice": notice})).with_meta(ResponseMetaV1 {
                 context: Default::default(),
