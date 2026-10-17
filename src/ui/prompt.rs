@@ -66,7 +66,9 @@ pub fn confirm_phrase(phrase: &str) -> io::Result<bool> {
     Ok(!answer.is_empty() && answer.trim() == phrase)
 }
 
-fn ask(question: &str) -> io::Result<String> {
+/// Writes a question to stderr and reads a response, excluding cursor reports.
+/// Returns an empty string on EOF. The caller owns prompting and consent policy.
+pub fn ask(question: &str) -> io::Result<String> {
     let mut stderr = io::stderr().lock();
     stderr.write_all(question.as_bytes())?;
     stderr.flush()?;
