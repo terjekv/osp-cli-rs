@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Performance budgets for the built release CLI.
 
-Scenarios and limits live in `perf/budgets.toml`. Each scenario runs the real
+Scenarios and limits live in `perf/budgets.json`. Each scenario runs the real
 binary in a fresh hermetic home after one unmeasured warm-up run. Three layers
 check it, from deterministic to noisy:
 
@@ -43,10 +43,6 @@ import tempfile
 import termios
 import time
 
-if sys.version_info < (3, 11):
-    sys.exit(f"perf.py needs Python 3.11+ for tomllib; found {sys.version.split()[0]}. Run it with python3.11 or newer.")
-
-import tomllib
 
 
 SYNC_CALLS = {"fsync", "fdatasync", "sync_file_range", "sync", "syncfs"}
@@ -383,7 +379,7 @@ def check_timings(scenarios: list[Scenario], gates: dict) -> list[str]:
 
 
 def run(root: Path, fixtures: dict | None = None) -> None:
-    """Check `root`'s perf/budgets.toml; `fixtures` adds product fixture factories."""
+    """Check `root`'s perf/budgets.json; `fixtures` adds product fixture factories."""
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--binary", type=Path, default=binary_default(root))
@@ -396,7 +392,7 @@ def run(root: Path, fixtures: dict | None = None) -> None:
     binary = args.binary.resolve()
     if not binary.is_file():
         parser.error(f"release binary missing: {binary}; run confidence.py --check build first")
-    budgets = tomllib.loads((root / "perf" / "budgets.toml").read_text())
+    budgets = json.loads((root / "perf" / "budgets.json").read_text())
     scenarios = [
         Scenario(name, spec, budgets["defaults"], binary, {**FIXTURES, **(fixtures or {})})
         for name, spec in budgets["scenarios"].items()

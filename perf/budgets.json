@@ -1,0 +1,102 @@
+{
+  "gates": {
+    "why": "Performance budgets checked by `scripts/perf.py`; see docs/TESTING.md.; instructions_percent: per measured scenario, against perf/baselines; instructions_total_percent: sum over measured scenarios; phase_ms: min-of-5 duration of any startup phase; total_ms: min-of-5 one-shot total or REPL first prompt",
+    "instructions_percent": 5,
+    "instructions_total_percent": 3,
+    "phase_ms": 200,
+    "total_ms": 500
+  },
+  "defaults": {
+    "why": "Each scenario runs once unmeasured in a fresh hermetic home, so these exact; counts describe a warm second start. Scenarios override what they persist.",
+    "fixture": "plugins",
+    "syncs": 0,
+    "persistent_writes": 0,
+    "execs": 0,
+    "remote_connects": 0
+  },
+  "scenarios": {
+    "help": {
+      "argv": [
+        "--help"
+      ],
+      "measure": true
+    },
+    "theme-list": {
+      "argv": [
+        "theme",
+        "list"
+      ],
+      "measure": true
+    },
+    "config-get": {
+      "argv": [
+        "config",
+        "get",
+        "extensions.plugins.timeout_ms"
+      ]
+    },
+    "dsl-pipeline": {
+      "why": "execs: the plugin itself",
+      "argv": [
+        "rows",
+        "|",
+        "F",
+        "team=core",
+        "|",
+        "S",
+        "cpus",
+        "desc",
+        "name",
+        "|",
+        "P",
+        "name,cpus"
+      ],
+      "execs": 1,
+      "measure": true
+    },
+    "repl-exit": {
+      "repl_keys": [
+        "exit\r"
+      ],
+      "measure": true
+    },
+    "repl-completion": {
+      "why": "Tab on an empty line completes from the full command tree; Ctrl-C clears it.; Each entry is typed after the next prompt or menu paint.",
+      "repl_keys": [
+        "\t",
+        "\u0003",
+        "exit\r"
+      ],
+      "measure": true
+    },
+    "plugin-describe-cold": {
+      "why": "A first start describes the plugin and saves the regenerable metadata cache:; one plugin exec, then a buffered atomic write (two cache directories, temp; file, rename) with no disk sync.",
+      "argv": [
+        "--help"
+      ],
+      "warm": false,
+      "execs": 1,
+      "persistent_writes": 4
+    },
+    "repl-history": {
+      "why": "Each new history entry is saved atomically (lock, temp file, rename) without; forcing a disk sync. The commands alternate so the warm run's entries are not; deduplicated away.",
+      "repl_keys": [
+        "theme list\r",
+        "config get debug.level\r",
+        "exit\r"
+      ],
+      "persistent_writes": 6
+    },
+    "config-set": {
+      "why": "A saved setting takes the config lock and replaces the file atomically with; file and directory syncs.",
+      "argv": [
+        "config",
+        "set",
+        "ui.format",
+        "json"
+      ],
+      "syncs": 2,
+      "persistent_writes": 3
+    }
+  }
+}

@@ -109,7 +109,7 @@ python3 scripts/confidence.py perf
 python3 scripts/perf.py --layer syscalls help   # one layer or scenario
 ```
 
-`perf/budgets.toml` declares the scenarios and their limits. Each scenario
+`perf/budgets.json` declares the scenarios and their limits. Each scenario
 runs once unmeasured in a fresh hermetic home, then:
 
 - under `strace` it must match exact counts of disk syncs, persistent writes

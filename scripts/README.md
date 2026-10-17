@@ -20,7 +20,7 @@ The folder is intentionally flat for now. The current rule is simple:
   intentionally reviewed baseline.
 - `perf.py`
   Checks the release binary's syscall, instruction and startup-phase budgets
-  from `perf/budgets.toml`; the product reuses it for its own scenarios.
+  from `perf/budgets.json`; the product reuses it for its own scenarios.
 - `run-hermetic-cargo.py`
   Isolates runtime roots and ambient settings for behavior and coverage checks.
 - `public-api-examples.py`
