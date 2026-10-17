@@ -21,7 +21,7 @@ the plugin describe timeout constant. This module does not render output.
 | `resolver.rs` | Picking a winner per key and applying the schema |
 | `interpolate.rs` | `${…}` placeholders, after winners are chosen |
 | `explain.rs` | The trace behind `config explain` |
-| `runtime.rs` | Path discovery and the smaller `RuntimeConfig` view the app uses |
+| `runtime.rs` | Path discovery, runtime defaults and loader-pipeline bootstrap |
 | `store.rs` | Editing TOML files in place with the same scope rules |
 | `secrets.rs` | Secret backends |
 

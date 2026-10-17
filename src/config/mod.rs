@@ -7,8 +7,6 @@
 //!   environment, and in-memory overrides.
 //! - [`crate::config::ConfigResolver`] applies source precedence, scope
 //!   precedence, interpolation, and schema adaptation.
-//! - `RuntimeConfig` lowers the resolved config into the
-//!   smaller runtime view used by the app and REPL.
 //! - [`crate::config::set_scoped_value_in_toml`] edits TOML-backed config files
 //!   while preserving the same schema and scope rules used at runtime.
 //!
@@ -32,34 +30,9 @@
 //! assert_eq!(resolved.get_string("theme.name"), Some("dracula"));
 //! ```
 //!
-//! Host-style bootstrap with runtime defaults plus standard path discovery:
-//!
-//! ```text
-//! use osp_cli::config::{
-//!     ResolveOptions, RuntimeConfig, RuntimeConfigPaths, RuntimeDefaults,
-//!     RuntimeLoadOptions, build_runtime_pipeline,
-//! };
-//!
-//! let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
-//! let paths = RuntimeConfigPaths::discover();
-//! let presentation = None;
-//! let cli = None;
-//! let session = None;
-//!
-//! let resolved = build_runtime_pipeline(
-//!     defaults,
-//!     presentation,
-//!     &paths,
-//!     RuntimeLoadOptions::default(),
-//!     cli,
-//!     session,
-//! )
-//! .resolve(ResolveOptions::new().with_terminal("cli"))?;
-//!
-//! let runtime = RuntimeConfig::from_resolved(&resolved);
-//! assert_eq!(runtime.active_profile, resolved.active_profile());
-//! # Ok::<(), osp_cli::config::ConfigError>(())
-//! ```
+//! Host-style bootstrap uses [`crate::config::RuntimeDefaults`], [`crate::config::RuntimeConfigPaths`] and
+//! [`crate::config::build_runtime_pipeline`] to produce a [`crate::config::ResolvedConfig`]. Inspect its
+//! active profile and typed values directly; derived host state stays internal.
 //!
 //! On-disk config mutation:
 //!
@@ -81,7 +54,6 @@
 //!    precedence + interpolation + type adaptation
 //!        │
 //!        ├── ResolvedConfig  (full provenance-aware map)
-//!        ├── RuntimeConfig   (smaller runtime view used by the host)
 //!        └── config explain  (why this winner won)
 //! ```
 //!
@@ -93,8 +65,7 @@
 //!
 //! - load layers through [`crate::config::LoaderPipeline`]
 //! - resolve once through [`crate::config::ConfigResolver`]
-//! - consume the result as [`crate::config::ResolvedConfig`] or
-//!   `RuntimeConfig`
+//! - consume the result as [`crate::config::ResolvedConfig`]
 //! - for host-style startup, prefer [`crate::config::RuntimeDefaults`],
 //!   [`crate::config::RuntimeConfigPaths`], and
 //!   [`crate::config::build_runtime_pipeline`] over hand-rolled file/env

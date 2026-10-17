@@ -9,8 +9,7 @@
 //! - define stable default values and path-discovery rules
 //! - discover runtime config file locations from the current environment
 //! - assemble the standard loader pipeline used by the host
-//! - lower resolved config into the compact `RuntimeConfig` view used by
-//!   callers that do not need the full explanation surface
+//! - return resolved configuration through the standard loader pipeline
 //!
 //! Contract:
 //!

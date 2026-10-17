@@ -31,23 +31,44 @@ If you want the shortest successful wrapper:
 
 You can ignore for now:
 
-- [`osp_cli::app::AppStateBuilder`]
 - manual runtime/session assembly
 - the optional `site_runtime_config_for(...)` helper if you do not need
   wrapper-owned tooling/tests outside the host
 
-## Development API cutover (2026-09-14)
+## Development API cutover (2026-10-17)
 
-Update product wrappers alongside the core checkout. Development uses one
-current API; there is no compatibility shim or release-version bump for this
-cutover. The unpublished UiO companion uses the sibling path dependency.
+Update wrappers alongside the library checkout. Configure the host through
+`App`, and use the narrow `AppRuntime` getters in access-policy hooks.
+Host state, editor engines and plugin discovery remain owned by the host.
+The unpublished UiO companion uses the sibling path dependency.
 
-| Previous access | Current API |
+| Previous API | Current API |
 | --- | --- |
-| Public `AppRuntime` fields | `context()`, `config_state()`, `ui()`, `auth()`, `launch()` |
-| `auth_mut().set_policy_context(...)` | `set_policy_context(...)`, preserving the resolved profile |
-| `config_state_mut()` / `ui_mut()` | Change configuration through host configuration/rebuild paths |
-| `AppStateBuilder::new(...)` | `AppStateBuilder::from_resolved_config(...)` |
+| `command_policy::*` | `core::command_policy::*` |
+| `core::{output,output_model,runtime,row,command_scope,document}::*` | Flat `core::*` types, including semantic documents |
+| `core::fuzzy` matchers, env constants, value helpers, `quote_for_shell` | Internal; supported helpers remain `core::{fold_case,escape_for_shell}` |
+| `core::command_policy::CommandPath` | Internal host lookup key |
+| `completion::{model,engine,parse,suggest,tree}::*` | Flat `completion::*`; analysis details are internal |
+| `Cli.command`, CLI argument enums and parsers | `Cli::has_command()`; parse `Cli` through clap |
+| `Cli` / `NativeCommandContext` struct literals | clap parsing / `NativeCommandContext::new()`; both are non-exhaustive |
+| `AppRuntime::config_state().resolved()` | `AppRuntime::config()` |
+| `AppRuntime::context().is_repl()` | `AppRuntime::is_repl()` |
+| `AppRuntime::ui().render_settings.runtime.command_scope` | `AppRuntime::command_scope()` |
+| Other host state getters, `AppState*`, session/client builders | Internal; configure the host through `App::new().with_*()` |
+| Free `app::run_process_with_sink` | `App::run_process_with_sink` |
+| Plugin manager and registry catalogs | Internal; register native commands or use the plugin wire protocol |
+| Config schema, explanation model, `RuntimeConfig`, secret-store internals and default constants | Internal; use public loaders, `ResolvedConfig`, runtime bootstrap and TOML editing helpers |
+| `ui::section_chrome::{SectionFrameStyle,RuledSectionPolicy}`, `ui::style::StyleOverrides` | Flat `ui::{SectionFrameStyle,RuledSectionPolicy,StyleOverrides}` |
+| UI theme, message, clipboard and resolved-settings engines | Internal; use `ui::render`, `RenderSettings`, and `RenderRequest` |
+| DSL parsing and verb metadata | Internal; use `apply_pipeline`, `apply_output_pipeline`, or `execute_pipeline` |
+| REPL engine, history and debug APIs | Internal; use `App` and the native-command REPL hooks |
+| `context::KINDS` | Internal; public context contracts, resolution and session APIs remain available |
+
+Native command contexts retain `may_prompt()` and `can_present()`. Terminal
+confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.
+`core::CommandError` carries recovery advice, `ResponseV1::ok` constructs
+successful wire responses, and `config::is_sensitive_key` classifies secret
+names. Public context contracts and native REPL hooks remain available.
 
 Native commands can implement `configure(&ResolvedConfig)` to select their
 local session before help, completion, policy, or execution reads it. Remote

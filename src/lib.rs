@@ -231,8 +231,8 @@
 //! - "I already have rows and only want pipeline transforms" →
 //!   [`dsl::apply_pipeline`] or [`dsl::apply_output_pipeline`]
 //! - "I need plugin discovery and catalog/policy integration" →
-//!   `plugin::PluginManager` on the host side, or [`core::plugin`] when
-//!   implementing the wire protocol itself
+//!   [`App`] owns discovery; use [`app::AccessPolicy`] for product policy and
+//!   [`core::plugin`] for the wire protocol
 //! - "I need the configured host" → [`App::new`]
 //!   and apply launch settings through its `with_*` methods
 //! - "I need interactive native-command hooks" → [`repl`] and [`NativeCommand`]

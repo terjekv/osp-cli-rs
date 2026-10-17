@@ -7,6 +7,36 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ## [Unreleased]
 
+- **Breaking:** The embedding API now exposes one canonical path for shared
+  types and keeps host engines and state internal. App setup, native-command
+  hooks, rendering/DSL entry points, config bootstrap/editing, and drop-in
+  plugins retain their behavior. Product wrappers must update imports and
+  runtime reads together with the library. The wire protocol is unchanged.
+
+| Previous API | Current API |
+| --- | --- |
+| `command_policy::*` | `core::command_policy::*` |
+| `core::{output,output_model,runtime,row,command_scope,document}::*` | Flat `core::*` types, including semantic documents |
+| `core::fuzzy` matchers, env constants, value helpers, `quote_for_shell` | Internal; supported helpers remain `core::{fold_case,escape_for_shell}` |
+| `core::command_policy::CommandPath` | Internal host lookup key |
+| `completion::{model,engine,parse,suggest,tree}::*` | Flat `completion::*`; analysis details are internal |
+| `Cli.command`, CLI argument enums and parsers | `Cli::has_command()`; parse `Cli` through clap |
+| `Cli` / `NativeCommandContext` struct literals | clap parsing / `NativeCommandContext::new()`; both are non-exhaustive |
+| `AppRuntime::config_state().resolved()` | `AppRuntime::config()` |
+| `AppRuntime::context().is_repl()` | `AppRuntime::is_repl()` |
+| `AppRuntime::ui().render_settings.runtime.command_scope` | `AppRuntime::command_scope()` |
+| Other host state getters, `AppState*`, session/client builders | Internal; configure the host through `App::new().with_*()` |
+| Free `app::run_process_with_sink` | `App::run_process_with_sink` |
+| Plugin manager and registry catalogs | Internal; register native commands or use the plugin wire protocol |
+| Config schema, explanation model, `RuntimeConfig`, secret-store internals and default constants | Internal; use public loaders, `ResolvedConfig`, runtime bootstrap and TOML editing helpers |
+| `ui::section_chrome::{SectionFrameStyle,RuledSectionPolicy}`, `ui::style::StyleOverrides` | Flat `ui::{SectionFrameStyle,RuledSectionPolicy,StyleOverrides}` |
+| UI theme, message, clipboard and resolved-settings engines | Internal; use `ui::render`, `RenderSettings`, and `RenderRequest` |
+| DSL parsing and verb metadata | Internal; use `apply_pipeline`, `apply_output_pipeline`, or `execute_pipeline` |
+| REPL engine, history and debug APIs | Internal; use `App` and the native-command REPL hooks |
+| `context::KINDS` | Internal; public context contracts, resolution and session APIs remain available |
+
+
+
 - Reject known injected secrets in context selections and announcements; redact
   them from context provenance while preserving canonical command result data.
 
@@ -60,7 +90,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   identity/profile file, preserving the query. Prompts distinguish the shell
   from `all`. Global selections run outside the shell for that line; Tab keeps
   that scope while editing. Ctrl-R at root keeps its scope.
-- **Breaking:** Embedders receive `ReplEvent::RootLine` for global history selections.
+- Global history selections dispatch outside the current shell through the
+  internal `ReplEvent::RootLine` event.
 
 - History bang words are valid in the REPL highlighter; `!!` and `sudo !!`
   show their expansion as a muted hint without an unknown-command status.
