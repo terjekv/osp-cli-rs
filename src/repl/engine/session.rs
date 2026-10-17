@@ -1,9 +1,6 @@
 use super::adapter::{ReplCompleter, build_repl_highlighter, color_from_style_spec};
 use super::config::{LineProjector, ReplAppearance, ReplResult, ReplTabMode};
-use super::editor::{
-    AutoCompleteEmacs, BasicInputReason, OspPrompt, PaintedLine, is_cursor_position_error,
-    mark_cursor_position_unsupported,
-};
+use super::editor::{AutoCompleteEmacs, OspPrompt, PaintedLine};
 use super::hint::ReplHinter;
 use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
 use super::{
@@ -14,7 +11,6 @@ use super::{
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
 use crate::repl::menu::SharedCompletionMenu;
-use crate::ui::prompt::PendingLine;
 use anyhow::Result;
 use nu_ansi_term::{Color, Style};
 use reedline::{
@@ -30,8 +26,6 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) tab_mode: ReplTabMode,
     pub(crate) line_projector: Option<LineProjector>,
     pub(crate) actions: Vec<crate::repl::ReplAction>,
-    pub(crate) on_start:
-        Option<std::sync::Arc<dyn Fn(Option<crate::repl::ReplSession>) + Send + Sync>>,
 }
 
 pub(crate) struct SubmissionContext<'a, F> {
@@ -81,7 +75,6 @@ where
         tab_mode,
         line_projector,
         actions,
-        on_start,
     } = config;
 
     let mut bindings = build_repl_keybindings();
@@ -117,18 +110,11 @@ where
         )
     };
     drive_interactive_editor(
-        prompt,
         &appearance,
         &history_store,
         submission,
         &mut editor,
         |editor| editor.read_line(prompt),
-        |prompt, submission| {
-            if let Some(start) = &on_start {
-                start(None);
-            }
-            run_repl_basic(prompt, submission)
-        },
     )
 }
 
@@ -182,55 +168,21 @@ pub(super) fn build_interactive_editor(
         .with_history_exclusion_prefix(Some(" ".to_string()))
 }
 
-pub(super) fn drive_interactive_editor<F, R, B>(
-    prompt: &OspPrompt,
+pub(super) fn drive_interactive_editor<F, R>(
     appearance: &ReplAppearance,
     history_store: &SharedHistory,
     submission: &mut SubmissionContext<'_, F>,
     editor: &mut Reedline,
     mut read_signal: R,
-    mut run_basic_fn: B,
 ) -> Result<ReplResult>
 where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
     R: FnMut(&mut Reedline) -> io::Result<Signal>,
-    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
 {
     crate::startup_trace::begin_first_prompt();
     let mut last_argument = None;
     loop {
-        // Keys typed during the startup probe: run lines finished with Enter
-        // as if submitted, and leave an unfinished line in the editor.
-        let pending = crate::ui::prompt::take_pending_line();
-        let signal = if matches!(pending, Some(PendingLine::Eof)) {
-            Signal::CtrlD
-        } else if let Some(PendingLine::Typed {
-            text: typed,
-            terminated: true,
-        }) = pending
-        {
-            println!("{}{}{typed}", prompt.left(), prompt.indicator());
-            submission
-                .history_store
-                .with(|store| store.stage_command_line(&typed))
-                .map_err(anyhow::Error::msg)??;
-            Signal::Success(typed)
-        } else {
-            if let Some(PendingLine::Typed { text: typed, .. }) = pending {
-                editor.run_edit_commands(&[EditCommand::InsertString(typed)]);
-            }
-            match read_signal(editor) {
-                Ok(signal) => signal,
-                Err(err) => {
-                    if is_cursor_position_error(&err) {
-                        mark_cursor_position_unsupported();
-                        super::warn_basic_input_once(BasicInputReason::CursorProbeUnsupported);
-                        return run_basic_fn(prompt, submission);
-                    }
-                    return Err(err.into());
-                }
-            }
-        };
+        let signal = read_signal(editor)?;
 
         if let Signal::HostCommand(command) = &signal
             && matches!(

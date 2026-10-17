@@ -28,7 +28,8 @@ pub(crate) enum ReplPtyColorMode {
 #[derive(Clone, Debug)]
 pub(crate) struct ReplPtyConfig<'a> {
     color_mode: ReplPtyColorMode,
-    cursor_position_reports: bool,
+    // Late replies model a slow SSH round trip.
+    cursor_report_delay: Duration,
     simple_prompt: bool,
     config: Option<&'a str>,
     plugins_dir: Option<&'a Path>,
@@ -40,7 +41,7 @@ impl Default for ReplPtyConfig<'_> {
     fn default() -> Self {
         Self {
             color_mode: ReplPtyColorMode::Plain,
-            cursor_position_reports: true,
+            cursor_report_delay: Duration::ZERO,
             simple_prompt: true,
             config: None,
             plugins_dir: None,
@@ -56,8 +57,8 @@ impl<'a> ReplPtyConfig<'a> {
         self
     }
 
-    pub(crate) fn without_cursor_position_reports(mut self) -> Self {
-        self.cursor_position_reports = false;
+    pub(crate) fn with_cursor_report_delay(mut self, delay: Duration) -> Self {
+        self.cursor_report_delay = delay;
         self
     }
 
@@ -87,7 +88,6 @@ pub(crate) struct ReplPtySession {
     child: Box<dyn portable_pty::Child + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     terminal: Box<dyn portable_pty::MasterPty + Send>,
-    interactive: bool,
     // PTY reads can split UTF-8 characters; retain bytes until taking a view.
     output: Arc<Mutex<Vec<u8>>>,
     reader: Option<std::thread::JoinHandle<()>>,
@@ -195,25 +195,19 @@ impl ReplPtySession {
             },
         );
         cmd.env("OSP__REPL__HISTORY__ENABLED", "false");
-        if config.cursor_position_reports {
-            // Most PTY tests exercise interactive rendering paths directly and
-            // should not depend on cursor-probe timing.
-            cmd.env("OSP__REPL__INPUT_MODE", "interactive");
-        }
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
         let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("take writer")));
 
         let output = Arc::new(Mutex::new(Vec::new()));
         let output_clone = Arc::clone(&output);
         let writer_clone = Arc::clone(&writer);
-        let cursor_position_reports = config.cursor_position_reports;
+        let cursor_report_delay = config.cursor_report_delay;
         let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
         drop(pair.slave);
         let mut session = Self {
             child,
             writer,
             terminal: pair.master,
-            interactive: cursor_position_reports,
             output,
             reader: None,
             deadline: Instant::now() + Duration::from_secs(120),
@@ -228,20 +222,27 @@ impl ReplPtySession {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if cursor_position_reports {
-                            // Requests may share a read or cross its boundary.
-                            for byte in &buf[..n] {
-                                cpr_prefix = if *byte == cpr_request[cpr_prefix] {
-                                    cpr_prefix + 1
-                                } else {
-                                    usize::from(*byte == cpr_request[0])
-                                };
-                                if cpr_prefix == cpr_request.len() {
-                                    let mut writer = writer_clone.lock().expect("writer lock");
+                        // Requests may share a read or cross its boundary.
+                        for byte in &buf[..n] {
+                            cpr_prefix = if *byte == cpr_request[cpr_prefix] {
+                                cpr_prefix + 1
+                            } else {
+                                usize::from(*byte == cpr_request[0])
+                            };
+                            if cpr_prefix == cpr_request.len() {
+                                let writer = Arc::clone(&writer_clone);
+                                let reply = move || {
+                                    std::thread::sleep(cursor_report_delay);
+                                    let mut writer = writer.lock().expect("writer lock");
                                     let _ = writer.write_all(b"\x1b[1;1R");
                                     let _ = writer.flush();
-                                    cpr_prefix = 0;
+                                };
+                                if cursor_report_delay.is_zero() {
+                                    reply();
+                                } else {
+                                    std::thread::spawn(reply);
                                 }
+                                cpr_prefix = 0;
                             }
                         }
                         output_clone
@@ -301,11 +302,10 @@ impl ReplPtySession {
     pub(crate) fn write_bytes(&mut self, bytes: &[u8]) {
         let deadline = self.wait_deadline(Duration::from_secs(15));
         // A rendered prompt can still belong to the editor being rebuilt.
-        while self.interactive
-            && self
-                .terminal
-                .get_termios()
-                .is_some_and(|termios| termios.local_flags.bits() & libc::ECHO != 0)
+        while self
+            .terminal
+            .get_termios()
+            .is_some_and(|termios| termios.local_flags.bits() & libc::ECHO != 0)
         {
             assert!(
                 Instant::now() < deadline,
@@ -343,10 +343,9 @@ impl ReplPtySession {
     }
 
     fn output_ready(&self, output: &str) -> bool {
-        !self.interactive
-            || output.rsplit_once("\x1b[?25h").is_some_and(|(_, tail)| {
-                !tail.contains("\x1b[?25l") && strip_terminal_noise(tail).is_empty()
-            })
+        output.rsplit_once("\x1b[?25h").is_some_and(|(_, tail)| {
+            !tail.contains("\x1b[?25l") && strip_terminal_noise(tail).is_empty()
+        })
     }
 
     pub(crate) fn wait_for_output_since(

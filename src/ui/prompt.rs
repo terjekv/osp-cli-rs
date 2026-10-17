@@ -1,117 +1,14 @@
 //! Line input shared by command prompts and the REPL terminal protocol.
 
-use std::collections::VecDeque;
 use std::io::{self, IsTerminal, Write};
-use std::sync::{Mutex, PoisonError};
-
-static PENDING_INPUT: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
-
-pub(crate) enum PendingLine {
-    Typed { text: String, terminated: bool },
-    Eof,
-}
-
-#[cfg(unix)]
-pub(crate) fn preserve_pending_input(bytes: &[u8]) {
-    if !bytes.is_empty() {
-        PENDING_INPUT
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .extend(bytes.iter().copied());
-    }
-}
-
-/// Takes pending input for the rich editor, preserving EOF on an empty line.
-/// Typed lines have their edits applied and their line break removed.
-pub(crate) fn take_pending_line() -> Option<PendingLine> {
-    take_pending().filter(|line| match line {
-        PendingLine::Typed { text, .. } => !text.is_empty(),
-        PendingLine::Eof => true,
-    })
-}
-
-/// Takes the next pending line or EOF, with typed line edits applied.
-fn take_pending() -> Option<PendingLine> {
-    let mut pending = PENDING_INPUT.lock().unwrap_or_else(PoisonError::into_inner);
-    if pending.is_empty() {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    let mut terminated = false;
-    while let Some(byte) = pending.pop_front() {
-        if byte == b'\x04' && apply_line_edits(&String::from_utf8_lossy(&bytes)).is_empty() {
-            return Some(PendingLine::Eof);
-        }
-        if matches!(byte, b'\r' | b'\n') {
-            if byte == b'\r' && pending.front() == Some(&b'\n') {
-                pending.pop_front();
-            }
-            terminated = true;
-            break;
-        }
-        bytes.push(byte);
-    }
-    Some(PendingLine::Typed {
-        text: apply_line_edits(&String::from_utf8_lossy(&bytes)),
-        terminated,
-    })
-}
-
-/// Applies the keys a terminal line editor would: Backspace deletes, Ctrl-U
-/// clears, and escape sequences such as arrow keys are dropped.
-fn apply_line_edits(raw: &str) -> String {
-    let mut out = String::new();
-    let mut chars = raw.chars();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\u{7f}' | '\u{8}' => {
-                out.pop();
-            }
-            '\u{15}' => out.clear(),
-            '\u{1b}' => match chars.next() {
-                Some('[') => {
-                    for ch in chars.by_ref() {
-                        if ('@'..='~').contains(&ch) {
-                            break;
-                        }
-                    }
-                }
-                Some('O') => {
-                    chars.next();
-                }
-                _ => {}
-            },
-            ch if ch.is_control() => {}
-            ch => out.push(ch),
-        }
-    }
-    out
-}
 
 /// Read a response, excluding terminal cursor reports left by an editor query.
 ///
 /// Only a well-formed CPR sequence is consumed; arbitrary escape sequences and
-/// user text remain intact. Keys typed before the prompt appeared are echoed
-/// and continue the line. Returns zero on EOF, like `Stdin::read_line`.
+/// user text remain intact. Returns zero on EOF, like `Stdin::read_line`.
 pub fn read_line(answer: &mut String) -> io::Result<usize> {
     let mut line = String::new();
-    match take_pending() {
-        Some(PendingLine::Eof) => return Ok(0),
-        Some(PendingLine::Typed { text, terminated }) => {
-            let mut stdout = io::stdout().lock();
-            stdout.write_all(text.as_bytes())?;
-            line.push_str(&text);
-            if terminated {
-                stdout.write_all(b"\n")?;
-                line.push('\n');
-            }
-            stdout.flush()?;
-        }
-        None => {}
-    }
-    if !line.ends_with('\n') {
-        io::stdin().read_line(&mut line)?;
-    }
+    io::stdin().read_line(&mut line)?;
     let count = line.len();
     let mut rest = line.as_str();
     while let Some(start) = rest.find("\x1b[") {

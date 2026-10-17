@@ -2,14 +2,11 @@
 //!
 //! Host-facing REPL configuration lives in [`super::config`]. This module
 //! translates that semantic surface into reedline-specific behavior such as
-//! prompt rendering, menu reopening, and terminal capability probing.
+//! prompt rendering and menu reopening.
 
 use std::borrow::Cow;
-use std::io::{self, IsTerminal, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-#[cfg(unix)]
-use std::time::{Duration, Instant};
+use std::io::{self, IsTerminal};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use reedline::{
     EditCommand, EditMode, Emacs, Menu, MenuEvent, Prompt, PromptEditMode, PromptHistorySearch,
@@ -237,21 +234,10 @@ impl EditMode for AutoCompleteEmacs {
     }
 }
 
-pub(crate) fn is_cursor_position_error(err: &io::Error) -> bool {
-    if matches!(err.raw_os_error(), Some(6 | 25)) {
-        return true;
-    }
-    let message = err.to_string().to_ascii_lowercase();
-    message.contains("cursor position could not be read")
-        || message.contains("no such device or address")
-        || message.contains("inappropriate ioctl")
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BasicInputReason {
     Explicit,
     NotATerminal,
-    CursorProbeUnsupported,
 }
 
 pub(crate) fn basic_input_reason(input_mode: ReplInputMode) -> Option<BasicInputReason> {
@@ -263,147 +249,8 @@ pub(crate) fn basic_input_reason(input_mode: ReplInputMode) -> Option<BasicInput
         return Some(BasicInputReason::NotATerminal);
     }
 
-    if matches!(input_mode, ReplInputMode::Auto)
-        && (CURSOR_POSITION_FAILED.load(Ordering::Relaxed)
-            || !*CURSOR_POSITION_SUPPORTED.get_or_init(probe_cursor_position_reports))
-    {
-        return Some(BasicInputReason::CursorProbeUnsupported);
-    }
-
     None
 }
-
-static CURSOR_POSITION_SUPPORTED: OnceLock<bool> = OnceLock::new();
-static CURSOR_POSITION_FAILED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn mark_cursor_position_unsupported() {
-    CURSOR_POSITION_FAILED.store(true, Ordering::Relaxed);
-}
-
-#[cfg(not(unix))]
-fn probe_cursor_position_reports() -> bool {
-    true
-}
-
-#[cfg(unix)]
-fn probe_cursor_position_reports() -> bool {
-    use std::mem::MaybeUninit;
-    use std::os::fd::AsRawFd;
-
-    // Matches crossterm's own position() wait: over SSH the reply can take
-    // well over 100 ms, and a too-short probe both picks basic input wrongly
-    // and lets the late reply echo into the prompt.
-    const CURSOR_PROBE_TIMEOUT: Duration = Duration::from_millis(2000);
-
-    struct RawModeGuard {
-        fd: i32,
-        original: libc::termios,
-        active: bool,
-    }
-
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            if self.active {
-                unsafe {
-                    libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
-                }
-            }
-        }
-    }
-
-    let stdin = io::stdin();
-    let fd = stdin.as_raw_fd();
-    let mut original = MaybeUninit::<libc::termios>::uninit();
-    if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
-        return true;
-    }
-    let original = unsafe { original.assume_init() };
-    let mut raw = original;
-    unsafe {
-        libc::cfmakeraw(&mut raw);
-    }
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
-        return true;
-    }
-    let _guard = RawModeGuard {
-        fd,
-        original,
-        active: true,
-    };
-
-    let mut stdout = io::stdout();
-    if stdout.write_all(b"\x1b[6n").is_err() || stdout.flush().is_err() {
-        return true;
-    }
-
-    // Probe early so we can choose basic input before reedline owns the
-    // terminal, instead of surfacing a cursor-request failure mid-session.
-    let start = Instant::now();
-    let mut buffer = Vec::with_capacity(32);
-    while start.elapsed() < CURSOR_PROBE_TIMEOUT {
-        let remaining = CURSOR_PROBE_TIMEOUT
-            .saturating_sub(start.elapsed())
-            .as_millis()
-            .min(i32::MAX as u128) as i32;
-        let mut pollfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        let ready = unsafe { libc::poll(&mut pollfd, 1, remaining) };
-        if ready <= 0 {
-            break;
-        }
-        let mut chunk = [0u8; 64];
-        let read = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
-        if read <= 0 {
-            break;
-        }
-        buffer.extend_from_slice(&chunk[..read as usize]);
-        if contains_cursor_position_report(&buffer) {
-            // Keys typed during the probe are kept for whichever reader runs.
-            let (found, pending) = separate_cursor_position_reports(&buffer);
-            crate::ui::prompt::preserve_pending_input(&pending);
-            return found;
-        }
-        if buffer.len() >= 256 {
-            break;
-        }
-    }
-
-    let (_, pending) = separate_cursor_position_reports(&buffer);
-    crate::ui::prompt::preserve_pending_input(&pending);
-    false
-}
-
-pub(crate) fn contains_cursor_position_report(bytes: &[u8]) -> bool {
-    bytes.windows(2).enumerate().any(|(start, window)| {
-        window == b"\x1b[" && parse_cursor_position_report(&bytes[start..]).is_some()
-    })
-}
-
-#[cfg(unix)]
-fn separate_cursor_position_reports(bytes: &[u8]) -> (bool, Vec<u8>) {
-    let mut found = false;
-    let mut pending = Vec::with_capacity(bytes.len());
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        let remaining = &bytes[cursor..];
-        if remaining.starts_with(b"\x1b[")
-            && parse_cursor_position_report(remaining).is_some()
-            && let Some(length) = remaining.iter().position(|byte| *byte == b'R')
-        {
-            found = true;
-            cursor += length + 1;
-        } else {
-            pending.push(bytes[cursor]);
-            cursor += 1;
-        }
-    }
-    (found, pending)
-}
-
-pub(crate) use crate::ui::prompt::parse_cursor_position_report;
 
 pub(crate) struct OspPrompt {
     left: String,

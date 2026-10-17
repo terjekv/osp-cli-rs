@@ -240,34 +240,34 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
 
 #[cfg(unix)]
 #[test]
-fn repl_without_cursor_position_reports_falls_back_without_blocking() {
+fn repl_keeps_the_rich_editor_when_cursor_reports_arrive_late() {
     if crate::isolation::isolated_test() {
         return;
     }
-    let started = Instant::now();
-    let mut session =
-        ReplPtySession::spawn(ReplPtyConfig::default().without_cursor_position_reports());
+    // A few hundred milliseconds is an ordinary SSH round trip from a laptop.
+    let mut session = ReplPtySession::spawn(
+        ReplPtyConfig::default().with_cursor_report_delay(Duration::from_millis(300)),
+    );
     assert!(
-        session.wait_for_plain_output("default>", Duration::from_secs(1)),
-        "expected prompt after cursor-probe fallback; output:\n{}",
+        session.wait_for_plain_output("default>", Duration::from_secs(5)),
+        "expected prompt; output:\n{}",
         session.output_snapshot(2000),
     );
-    assert!(started.elapsed() < Duration::from_secs(1));
+    let startup = session.output_snapshot(4000);
+    assert!(!startup.contains("basic input mode"), "{startup}");
     assert!(
-        session
-            .output_snapshot(2000)
-            .contains("using basic input mode")
+        !startup.contains("1;1R"),
+        "late cursor report leaked: {startup:?}"
     );
 
+    // Ctrl-L only exists in the rich editor; basic input would echo ^L.
     let output_start = session.output_len();
-    let started = Instant::now();
-    session.write_bytes(b"theme list\r");
+    session.write_bytes(b"\x0c");
     assert!(
-        session.wait_for_output_since(output_start, "Catppuccin", Duration::from_secs(1)),
-        "theme list stalled after cursor-probe fallback; output:\n{}",
-        session.output_snapshot(4000),
+        session.wait_for_output_since(output_start, "\x1b[2J", Duration::from_secs(1)),
+        "Ctrl-L did not clear the screen; output:\n{:?}",
+        session.output_since(output_start),
     );
-    assert!(started.elapsed() < Duration::from_secs(1));
 
     session.write_bytes(b"exit\r");
     if !session.wait_for_exit(Duration::from_secs(1)) {

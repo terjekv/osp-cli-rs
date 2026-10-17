@@ -44,6 +44,8 @@ mod hint;
 mod overlay;
 mod session;
 
+#[cfg(test)]
+use crate::ui::prompt::parse_cursor_position_report;
 pub(crate) use adapter::{
     CompletionTraceEvent, CompletionTraceMenuState, trace_completion, trace_completion_enabled,
 };
@@ -58,10 +60,7 @@ pub use config::{
 };
 pub use debug::{CompletionDebugOptions, DebugStep, debug_completion, debug_completion_steps};
 #[cfg(test)]
-use editor::{
-    AutoCompleteEmacs, contains_cursor_position_report, is_cursor_position_error,
-    parse_cursor_position_report,
-};
+use editor::AutoCompleteEmacs;
 pub(crate) use editor::{BasicInputReason, OspPrompt, basic_input_reason};
 #[cfg(test)]
 use overlay::{build_history_picker_options, history_picker_items};
@@ -95,12 +94,9 @@ struct ReplRunContext {
 /// # Fallback behavior
 ///
 /// This prefers the interactive editor loop, but it falls back to basic
-/// line-by-line stdin mode when interactive assumptions do not hold. That
-/// includes non-terminal stdin and terminals that do not support the cursor
-/// position probe used by the editor layer.
-///
-/// When that fallback happens, the function emits a warning to stderr unless
-/// the caller explicitly requested basic input mode through the config.
+/// line-by-line stdin mode when stdin or stdout is not a terminal, with a
+/// warning on stderr, or when the config explicitly requests basic input. A
+/// terminal always gets the full editor, however slowly it answers.
 ///
 /// # Errors
 ///
@@ -135,11 +131,7 @@ where
         execute: &mut execute,
     };
     let prompt = OspPrompt::new(prompt.left, prompt.indicator, prompt_right);
-    let basic_reason = {
-        let _phase = tracing::info_span!(target: "osp_startup", "terminal capability/cursor probe")
-            .entered();
-        basic_input_reason(input_mode)
-    };
+    let basic_reason = basic_input_reason(input_mode);
 
     run_repl_with_reason(
         ReplRunContext {
@@ -206,7 +198,6 @@ where
             tab_mode,
             line_projector,
             actions,
-            on_start,
         },
         history_store,
         submission,
@@ -224,11 +215,6 @@ fn warn_basic_input_once(reason: BasicInputReason) {
     match reason {
         BasicInputReason::NotATerminal => {
             eprintln!("warning: Input is not a terminal; using basic input mode.");
-        }
-        BasicInputReason::CursorProbeUnsupported => {
-            eprintln!(
-                "warning: Terminal does not support cursor position requests; using basic input mode."
-            );
         }
         BasicInputReason::Explicit => {}
     }

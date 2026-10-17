@@ -14,10 +14,9 @@ use super::{
     HistoryShellContext, OspPrompt, PromptRightRenderer, ReplAppearance, ReplCompleter,
     ReplInputMode, ReplReloadKind, ReplResult, SharedHistory, SubmissionContext,
     basic_input_reason, build_history_picker_options, build_repl_highlighter,
-    color_from_style_spec, contains_cursor_position_report, debug_completion,
-    debug_completion_steps, default_pipe_verbs, evaluate_repl_submission, history_picker_items,
-    is_cursor_position_error, parse_cursor_position_report, path_suggestions, split_path_stub,
-    trace_completion, trace_completion_enabled,
+    color_from_style_spec, debug_completion, debug_completion_steps, default_pipe_verbs,
+    evaluate_repl_submission, history_picker_items, parse_cursor_position_report, path_suggestions,
+    split_path_stub, trace_completion, trace_completion_enabled,
 };
 use crate::core::shell_words::QuoteStyle;
 use crate::repl::LineProjection;
@@ -638,25 +637,15 @@ fn trace_completion_env_controls_and_jsonl_output_unit() {
 }
 
 #[test]
-fn cursor_probe_helpers_distinguish_errors_and_valid_reports_unit() {
-    assert!(is_cursor_position_error(&io::Error::from_raw_os_error(25)));
-    assert!(is_cursor_position_error(&io::Error::other(
-        "Cursor position could not be read"
-    )));
-    assert!(!is_cursor_position_error(&io::Error::other(
-        "permission denied"
-    )));
-
+fn cursor_position_reports_parse_only_well_formed_replies_unit() {
     assert_eq!(parse_cursor_position_report(b"\x1b[12;34R"), Some((34, 12)));
     assert_eq!(
         parse_cursor_position_report(b"\x1b[1;200R trailing"),
         Some((200, 1))
     );
-    assert!(contains_cursor_position_report(b"noise\x1b[22;7R"));
     assert_eq!(parse_cursor_position_report(b"\x1b[;34R"), None);
     assert_eq!(parse_cursor_position_report(b"\x1b[12;R"), None);
     assert_eq!(parse_cursor_position_report(b"\x1b[12;34"), None);
-    assert!(!contains_cursor_position_report(b"\x1b[bad"));
 }
 
 #[test]
@@ -669,7 +658,6 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
     for reason in [
         Some(BasicInputReason::Explicit),
         Some(BasicInputReason::NotATerminal),
-        Some(BasicInputReason::CursorProbeUnsupported),
         None,
     ] {
         let history = SharedHistory::new(history_config());
@@ -791,11 +779,10 @@ fn expand_home_and_prompt_renderers_behave_unit() {
 }
 
 #[test]
-fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() {
+fn interactive_editor_builder_and_driver_cover_signal_and_error_paths_unit() {
     let history = disabled_history();
     let appearance = test_appearance();
-    let prompt = OspPrompt::new("left".to_string(), "> ".to_string(), None);
-    let mut built_editor = super::session::build_interactive_editor(
+    let built_editor = super::session::build_interactive_editor(
         completion_tree_with_root_commands(),
         &appearance,
         ReplTabMode::Tab,
@@ -804,26 +791,6 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         None,
     );
     assert_eq!(built_editor.current_buffer_contents(), "");
-
-    let mut fallback_execute =
-        |_line: crate::repl::ReplEvent<'_>, _history: &SharedHistory| Ok(ReplResult::Continue);
-    let mut fallback_submission = SubmissionContext {
-        root_input: false,
-        exit_on_interrupt: false,
-        history_store: &history,
-        execute: &mut fallback_execute,
-    };
-    let fallback = super::session::drive_interactive_editor(
-        &prompt,
-        &appearance,
-        &history,
-        &mut fallback_submission,
-        &mut built_editor,
-        |_editor| Err(io::Error::from_raw_os_error(25)),
-        |_prompt, _submission| Ok(ReplResult::Exit(9)),
-    )
-    .expect("cursor probe errors should fall back to basic mode");
-    assert_eq!(fallback, ReplResult::Exit(9));
 
     let executed = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&executed);
@@ -845,7 +812,6 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
     let mut editor = reedline::Reedline::create();
     let mut reads = 0usize;
     let exit = super::session::drive_interactive_editor(
-        &prompt,
         &appearance,
         &history,
         &mut submission,
@@ -858,7 +824,6 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
                 reedline::Signal::CtrlD
             })
         },
-        |_prompt, _submission| Ok(ReplResult::Exit(99)),
     )
     .expect("success and ctrl-d signals should succeed");
     assert_eq!(exit, ReplResult::Exit(0));
@@ -878,15 +843,13 @@ fn interactive_editor_builder_and_driver_cover_fallback_and_signal_paths_unit() 
         execute: &mut error_execute,
     };
     let err = super::session::drive_interactive_editor(
-        &prompt,
         &appearance,
         &history,
         &mut error_submission,
         &mut reedline::Reedline::create(),
         |_editor| Err(io::Error::other("boom")),
-        |_prompt, _submission| Ok(ReplResult::Exit(1)),
     )
-    .expect_err("non-cursor editor errors should bubble up");
+    .expect_err("editor errors should bubble up");
     assert!(err.to_string().contains("boom"));
 }
 
