@@ -67,6 +67,7 @@ pub(crate) use editor::{BasicInputReason, OspPrompt, basic_input_reason};
 use overlay::{build_history_picker_options, history_picker_items};
 #[cfg(test)]
 use session::evaluate_repl_submission;
+pub(crate) use session::read_path;
 use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";

@@ -561,6 +561,47 @@ fn apply_submission(result: ReplResult, editor: Option<&mut Reedline>) -> Option
     }
 }
 
+/// Standalone file input shares the REPL's completion menu and navigation.
+pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
+    use reedline::{Completer, Span, Suggestion};
+    struct Paths;
+    impl Completer for Paths {
+        fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+            crate::completion::path_candidates(&line[..pos])
+                .into_iter()
+                .map(|(value, directory)| Suggestion {
+                    value,
+                    span: Span::new(0, pos),
+                    append_whitespace: false,
+                    description: Some(if directory { "dir" } else { "file" }.into()),
+                    ..Suggestion::default()
+                })
+                .collect()
+        }
+    }
+    let menu = SharedCompletionMenu::new(build_completion_menu(&ReplAppearance::default()));
+    let mut bindings = build_repl_keybindings();
+    bindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::CtrlC);
+    let mode = AutoCompleteEmacs::new(
+        Emacs::new(bindings),
+        menu.clone(),
+        ReplTabMode::Always,
+        PaintedLine::default(),
+    );
+    let mut editor = Reedline::create()
+        .with_completer(Box::new(Paths))
+        .with_menu(ReedlineMenu::EngineCompleter(Box::new(menu)))
+        .with_partial_completions(true)
+        .with_edit_mode(Box::new(mode));
+    match editor
+        .read_line(&OspPrompt::new(label.into(), String::new(), None))
+        .map_err(io::Error::other)?
+    {
+        Signal::Success(path) => Ok(Some(path)),
+        _ => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

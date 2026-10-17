@@ -178,6 +178,17 @@ fn ask(question: &str) -> io::Result<String> {
     Ok(answer)
 }
 
+/// Reads a visible file path using the REPL editor and filesystem completion.
+/// The standalone input has no history; Esc and Ctrl-C cancel.
+pub fn read_path(label: &str) -> io::Result<Option<String>> {
+    if input_is_replay() || !io::stdout().is_terminal() || !io::stderr().is_terminal() {
+        return Err(io::Error::other(
+            "file prompt requires an interactive terminal",
+        ));
+    }
+    crate::repl::read_path(label)
+}
+
 thread_local! { static REPLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 /// Whether input comes from replay or redirected stdin rather than a person.

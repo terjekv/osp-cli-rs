@@ -33,6 +33,8 @@ mod context;
 /// High-level orchestration that combines parsing, context resolution, and suggestion ranking.
 mod engine;
 /// Shared completion data structures passed between the parser and suggester.
+pub(crate) mod paths;
+pub use paths::path_candidates;
 mod model;
 /// Tokenization and cursor-aware command-line parsing.
 mod parse;

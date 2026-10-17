@@ -210,7 +210,11 @@ impl OspCompletionMenu {
             UndoBehavior::CreateUndoPoint,
         );
         self.navigate(event, &mut editor);
-        self.skip_own_edit = true;
+        // Selecting a directory changes the lookup; show its children next.
+        self.skip_own_edit = self
+            .core
+            .selected_value()
+            .is_none_or(|value| value.description.as_deref() != Some("dir"));
         Some(vec![
             EditCommand::Clear,
             EditCommand::InsertString(editor.get_buffer().to_string()),

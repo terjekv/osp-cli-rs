@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 
 use crate::completion::{CompletionAnalysis, CompletionEngine, CompletionTree, SuggestionOutput};
 use crate::core::shell_words::{QuoteStyle, escape_for_shell, quote_for_shell};
@@ -319,38 +318,16 @@ pub(crate) fn path_suggestions(
     quote_style: Option<QuoteStyle>,
     span: Span,
 ) -> Vec<Suggestion> {
-    let (lookup, insert_prefix, typed_prefix) = split_path_stub(token_stub);
-    let read_dir = std::fs::read_dir(&lookup);
-    let Ok(entries) = read_dir else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        if !file_name.starts_with(&typed_prefix) {
-            continue;
-        }
-
-        let path = entry.path();
-        let is_dir = path.is_dir();
-        let suffix = if is_dir { "/" } else { "" };
-        let inserted = render_path_completion(
-            raw_stub,
-            &format!("{insert_prefix}{file_name}{suffix}"),
-            quote_style,
-        );
-
-        out.push(Suggestion {
-            value: inserted,
+    crate::completion::path_candidates(token_stub)
+        .into_iter()
+        .map(|(candidate, is_dir)| Suggestion {
+            value: render_path_completion(raw_stub, &candidate, quote_style),
             description: Some(if is_dir { "dir" } else { "file" }.to_string()),
             span,
             append_whitespace: !is_dir,
             ..Suggestion::default()
-        });
-    }
-
-    out
+        })
+        .collect()
 }
 
 fn render_path_completion(
@@ -392,39 +369,5 @@ enum PathQuoteContext {
     Closed(QuoteStyle),
 }
 
-pub(crate) fn split_path_stub(stub: &str) -> (PathBuf, String, String) {
-    if stub.is_empty() {
-        return (PathBuf::from("."), String::new(), String::new());
-    }
-
-    let expanded = crate::normalize::expand_home(stub)
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| stub.to_string());
-    let mut lookup = PathBuf::from(expanded);
-    if stub.ends_with('/') {
-        return (lookup, stub.to_string(), String::new());
-    }
-
-    let typed_prefix = Path::new(stub)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .map(ToOwned::to_owned)
-        .unwrap_or_default();
-
-    let insert_prefix = match stub.rfind('/') {
-        Some(index) => stub[..=index].to_string(),
-        None => String::new(),
-    };
-
-    if let Some(parent) = lookup.parent() {
-        if parent.as_os_str().is_empty() {
-            lookup = PathBuf::from(".");
-        } else {
-            lookup = parent.to_path_buf();
-        }
-    } else {
-        lookup = PathBuf::from(".");
-    }
-
-    (lookup, insert_prefix, typed_prefix)
-}
+#[cfg(test)]
+pub(crate) use crate::completion::paths::split_path_stub;
