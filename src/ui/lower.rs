@@ -926,17 +926,33 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
         return None;
     };
     let mut total = 0;
-    if rows.len() > limit {
+    let record_document = rows.len() == 1
+        && matches!(output.document, Some(OutputDocument::Json(Value::Object(_))));
+    if rows.len() > limit && !record_document {
         total = rows.len();
         limited_rows.truncate(limit);
     } else if let [record] = limited_rows.as_mut_slice() {
-        for value in record.values_mut() {
-            if let Value::Array(items) = value
-                && items.len() > limit
-            {
-                total = total.max(items.len());
-                items.truncate(limit);
+        fn shorten(value: &mut Value, limit: usize, total: &mut usize) {
+            match value {
+                Value::Array(items) => {
+                    if items.len() > limit {
+                        *total = (*total).max(items.len());
+                        items.truncate(limit);
+                    }
+                    for item in items {
+                        shorten(item, limit, total);
+                    }
+                }
+                Value::Object(fields) => {
+                    for value in fields.values_mut() {
+                        shorten(value, limit, total);
+                    }
+                }
+                _ => {}
             }
+        }
+        for value in record.values_mut() {
+            shorten(value, limit, &mut total);
         }
     }
     (total > 0).then_some((limited, total))
