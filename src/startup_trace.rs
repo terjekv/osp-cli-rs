@@ -151,6 +151,10 @@ impl Visit for PhaseName {
 
 /// Prints the trace once. Open phases end here, including a one-shot command
 /// that returns before all of its span handles have been dropped.
+///
+/// Only stdio process entrypoints call this. A run with a caller-owned sink is
+/// embedded, such as a product reading config before its own run, and must not
+/// end the process trace before the first prompt.
 pub(crate) fn finish() {
     let output = {
         let mut state = trace_state().lock().unwrap_or_else(PoisonError::into_inner);
