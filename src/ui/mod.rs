@@ -94,13 +94,6 @@ pub fn format_relative_timestamp(value: &str) -> Option<String> {
         .map(|time| format_relative_unix_timestamp(time.timestamp()))
 }
 
-/// Lays out values in the balanced columns the terminal renderer uses for
-/// long lists, for commands that pre-render human cards. Values are never
-/// cropped; a value wider than `available_width` gets its own line.
-pub fn grid_lines(values: &[String], available_width: usize) -> Vec<String> {
-    emit::grid_lines(values, available_width)
-}
-
 /// Formats a byte count with the largest useful binary unit.
 pub fn format_binary_bytes(bytes: u64) -> String {
     for (unit, divisor) in [
