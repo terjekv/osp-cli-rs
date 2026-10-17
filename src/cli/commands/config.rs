@@ -195,7 +195,7 @@ fn config_show_rows(runtime: &AppRuntime, args: ConfigShowArgs) -> Vec<Row> {
         .iter()
         .chain(runtime.config.resolved().aliases().iter())
         .collect::<Vec<(&String, &ResolvedValue)>>();
-    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    entries.sort_by_key(|(key, _)| *key);
     let mut rows = entries
         .into_iter()
         .map(|(key, entry)| config_entry_row(key, entry, args.output.sources, args.output.raw))
