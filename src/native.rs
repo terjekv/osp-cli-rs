@@ -37,11 +37,16 @@ use std::sync::{Arc, RwLock};
 use anyhow::Result;
 use clap::Command;
 
-/// Declares that a native command mutates remote or local state.
+/// Declares the state effect of a native command.
 /// Attach to the owning clap subcommand with `Command::add`.
-#[derive(Clone, Debug)]
-pub struct NativeWrite;
-impl clap::builder::CommandExt for NativeWrite {}
+#[derive(Clone, Copy, Debug)]
+pub enum NativeEffect {
+    /// Does not mutate remote or local service state.
+    Read,
+    /// May mutate service state.
+    Write,
+}
+impl clap::builder::CommandExt for NativeEffect {}
 
 use crate::completion::CompletionNode;
 use crate::config::ResolvedConfig;
@@ -1036,17 +1041,39 @@ impl NativeCommandRegistry {
 
     /// Resolves parsed argv through clap, so values cannot impersonate command names.
     pub(crate) fn writes(&self, tokens: &[String]) -> Option<bool> {
-        let command = self.command(tokens.first()?)?.command();
-        let matches = command.clone().try_get_matches_from(tokens).ok()?;
+        let tokens = if tokens.first().is_some_and(|token| token == "sudo") {
+            &tokens[1..]
+        } else {
+            tokens
+        };
+        let native = self.command(tokens.first()?)?;
+        let args = native.normalize_args(&tokens[1..]).ok()?;
+        let command = native.command();
+        // Templates can put {} in typed value slots. Keep the resolved command path.
+        let matches = command
+            .clone()
+            .ignore_errors(true)
+            .try_get_matches_from(std::iter::once(tokens[0].clone()).chain(args))
+            .ok()?;
         let mut leaf = &command;
         let mut matched = &matches;
-        let mut writes = leaf.get::<NativeWrite>().is_some();
+        let mut effect = leaf.get::<NativeEffect>().copied();
         while let Some((name, child)) = matched.subcommand() {
             leaf = leaf.find_subcommand(name)?;
-            writes |= leaf.get::<NativeWrite>().is_some();
+            effect = leaf.get::<NativeEffect>().copied().or(effect);
             matched = child;
         }
-        Some(writes)
+        if leaf.get_subcommands().next().is_some() {
+            return None;
+        }
+        effect
+            .map(|effect| matches!(effect, NativeEffect::Write))
+            .or_else(|| {
+                const READ_VERBS: &[&str] = &[
+                    "host", "info", "find", "list", "get", "show", "status", "history", "help",
+                ];
+                READ_VERBS.contains(&leaf.get_name()).then_some(false)
+            })
     }
 
     /// Returns catalog metadata for all registered native commands.

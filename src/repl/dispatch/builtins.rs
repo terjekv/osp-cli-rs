@@ -191,17 +191,12 @@ fn execute_each_command(
     let parsed =
         crate::repl::input::ReplParsedLine::parse(&template, state.runtime.config.resolved())?;
     let tokens = parsed.prefixed_tokens(&state.session.scope);
-    // Repeating a write is where `each` can hurt; reads run freely.
-    const WRITE_VERBS: &[&str] = &[
-        "add", "apply", "approve", "assign", "attach", "cancel", "clear", "close", "create",
-        "delete", "destroy", "disable", "enable", "grant", "login", "logout", "move", "offboard",
-        "pair", "power", "prevent", "prune", "reboot", "reject", "remove", "rename", "renew",
-        "reset", "resize", "restore", "revoke", "retry", "rm", "set", "start", "stop", "unset",
-        "update",
-    ];
-    let writes = state.clients.native_commands().writes(&tokens).unwrap_or_else(|| {
-        tokens.iter().any(|word| WRITE_VERBS.contains(&word.as_str()))
-    });
+    // Unclassified templates may expand into writes, so require acknowledgement.
+    let writes = state
+        .clients
+        .native_commands()
+        .writes(&tokens)
+        .unwrap_or(true);
     if writes && !command.yes {
         return Err(miette!("each requires --yes for commands that change data"));
     }
@@ -228,7 +223,11 @@ fn execute_each_command(
         return Err(miette!("each requires --yes for more than 50 values"));
     }
     if writes && command.count != Some(rows.len()) {
-        return Err(miette!("each will run {} writes; acknowledge with --count {}", rows.len(), rows.len()));
+        return Err(miette!(
+            "each will run {} writes; acknowledge with --count {}",
+            rows.len(),
+            rows.len()
+        ));
     }
     let (mut ok, mut failed) = (0, 0);
     let mut result = Ok(ReplResult::Continue);
@@ -257,6 +256,9 @@ fn execute_each_command(
         }
     }
     sink.write_stderr(&format!("{ok} ok, {failed} failed\n"));
+    if failed > 0 && result.is_ok() {
+        return Err(miette!("each: {failed} commands failed"));
+    }
     result
 }
 
