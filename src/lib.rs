@@ -265,3 +265,6 @@ mod tests;
 
 /// Declared entity selection shared by commands and plugins.
 pub mod context;
+
+/// Daily background snapshots for native integrations.
+pub mod snapshot;

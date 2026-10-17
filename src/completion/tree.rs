@@ -285,7 +285,15 @@ impl CompletionNode {
             children: command
                 .get_subcommands()
                 .filter(|child| !child.is_hide_set())
-                .map(|child| (child.get_name().to_string(), Self::from_clap(child)))
+                .flat_map(|child| {
+                    std::iter::once(child.get_name())
+                        .chain(child.get_visible_aliases())
+                        .map(move |name| {
+                            let mut node = Self::from_clap(child);
+                            node.name = name.to_owned();
+                            (name.to_owned(), node)
+                        })
+                })
                 .collect(),
             ..Self::default()
         }
