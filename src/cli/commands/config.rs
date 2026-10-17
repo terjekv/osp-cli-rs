@@ -983,6 +983,11 @@ fn apply_scoped_edit(
         );
         rows.push(row.build());
     }
+    // A session override outranks stored values, so leaving it would make the
+    // stored edit invisible until restart.
+    if !dry_run && store != ConfigStore::Session {
+        clear_session_values(runtime, session, &[key.to_owned()], &mut Vec::new());
+    }
     Ok(rows)
 }
 
