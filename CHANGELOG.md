@@ -16,6 +16,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Merge persisted context changes under a file transaction so concurrent REPLs
   preserve other identities’ selections and use unique atomic writes.
 
+- Finish captured plugin runs when the direct child exits, draining available
+  stdout without waiting for descendant-owned pipes.
+
 - Reject plugin describe metadata with colliding argument IDs, invalid flag
   aliases or unsupported positional layouts. Inventory reports the error while
   the executable remains available as a plain drop-in, including for old caches.

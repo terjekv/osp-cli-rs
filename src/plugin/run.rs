@@ -46,7 +46,7 @@ pub(crate) fn run(
     let _signal = IgnoreInterrupt::new(&mut command)?;
     let mut child = spawn(&mut command, plugin)?;
     let stdout = if let Some(stdout) = child.stdout.take() {
-        match read_stdout(stdout) {
+        match read_captured_stdout(stdout, &mut child) {
             Ok(bytes) => Some(bytes),
             Err(error) => {
                 let _ = child.kill();
@@ -131,6 +131,89 @@ pub(super) fn describe(plugin: &Plugin, timeout: Duration) -> Result<PluginDescr
     crate::core::plugin::validate_command(&describe.clone().command(&plugin.name))
         .map_err(|_| miette!("invalid describe command metadata"))?;
     Ok(describe)
+}
+
+fn read_captured_stdout(
+    mut stdout: std::process::ChildStdout,
+    child: &mut Child,
+) -> Result<Vec<u8>> {
+    // A descendant may retain the pipe after the direct child has exited.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::fd::AsRawFd;
+        let fd = stdout.as_raw_fd();
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags == -1 || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == -1 {
+            return Err(std::io::Error::last_os_error()).into_diagnostic();
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let exited = child.try_wait().into_diagnostic()?.is_some();
+        match read_available(&mut stdout, &mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                bytes.extend_from_slice(&buffer[..count]);
+                if bytes.len() as u64 > MAX_STDOUT {
+                    return Err(miette!("plugin stdout exceeds 64 MiB"));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if exited {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error).into_diagnostic(),
+        }
+    }
+    Ok(bytes)
+}
+
+fn read_available(
+    stdout: &mut std::process::ChildStdout,
+    buffer: &mut [u8],
+) -> std::io::Result<usize> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn PeekNamedPipe(
+                pipe: *mut std::ffi::c_void,
+                buffer: *mut std::ffi::c_void,
+                size: u32,
+                read: *mut u32,
+                available: *mut u32,
+                remaining: *mut u32,
+            ) -> i32;
+        }
+        let mut available = 0;
+        let success = unsafe {
+            PeekNamedPipe(
+                stdout.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        if success == 0 {
+            let error = std::io::Error::last_os_error();
+            return if error.raw_os_error() == Some(109) {
+                Ok(0)
+            } else {
+                Err(error)
+            };
+        }
+        if available == 0 {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+    }
+    stdout.read(buffer)
 }
 
 fn read_stdout(stdout: impl Read) -> Result<Vec<u8>> {
