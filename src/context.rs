@@ -417,22 +417,11 @@ pub fn resolve(
                     .and_then(|arg| arg.get_value_names())
                     .and_then(|names| names.first())
                     .map(|name| name.to_string())
-                    .filter(|name| {
-                        !name
-                            .to_ascii_lowercase()
-                            .strip_prefix("arg")
-                            .is_some_and(|suffix| suffix.chars().all(|c| c.is_ascii_digit()))
-                    })
                     .unwrap_or_else(|| consume.kind.clone())
                     .to_lowercase()
                     .replace('_', " ");
-                let article = if label.starts_with(['a', 'e', 'i', 'o', 'u']) {
-                    "an"
-                } else {
-                    "a"
-                };
                 return Err(crate::core::CommandError::new(format!(
-                    "{} needs {article} {label}",
+                    "{} is missing its {label}",
                     path.join(" ")
                 ))
                 .with_action(leaf.clone().render_usage().to_string())
