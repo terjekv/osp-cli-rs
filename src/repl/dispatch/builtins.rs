@@ -16,6 +16,7 @@ use super::shell::{handle_repl_exit_request, render_repl_help_for_scope};
 pub(super) enum ReplBuiltin {
     Help,
     HelpAll,
+    Recording(Option<crate::repl::recording::RecordingCommand>),
     Exit,
     Last,
     Pagination(PaginationDirection),
@@ -44,6 +45,15 @@ pub(super) fn execute_repl_builtin(
     sink: &mut dyn UiSink,
 ) -> Result<ReplResult> {
     match builtin {
+        ReplBuiltin::Recording(command) => {
+            use clap::CommandFactory;
+            Ok(ReplResult::Print(match command {
+                Some(command) => command.run(&state.session.recording)?,
+                None => crate::repl::recording::RecordingCommand::command()
+                    .render_long_help()
+                    .to_string(),
+            }))
+        }
         ReplBuiltin::HelpAll => {
             let parsed =
                 crate::repl::input::ReplParsedLine::parse(raw, state.runtime.config.resolved())?;
@@ -107,6 +117,24 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
     }
     if raw.split_whitespace().next() == Some("last") {
         return Ok(Some(ReplBuiltin::Last));
+    }
+    if raw.split_whitespace().next() == Some("recording") {
+        use clap::Parser;
+        let words =
+            shell_words::split(raw).map_err(|err| miette!("invalid recording command: {err}"))?;
+        return match crate::repl::recording::RecordingCommand::try_parse_from(words) {
+            Ok(command) => Ok(Some(ReplBuiltin::Recording(Some(command)))),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    clap::error::ErrorKind::DisplayHelp
+                        | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                ) =>
+            {
+                Ok(Some(ReplBuiltin::Recording(None)))
+            }
+            Err(err) => Err(miette!(err.to_string())),
+        };
     }
     if raw.split_whitespace().next() == Some("each") {
         use clap::Parser;

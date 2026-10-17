@@ -169,6 +169,42 @@ pub(crate) fn execute_repl_plugin_line(
     line: &str,
     sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
+    let recording = state.session.recording.clone();
+    let Some((_scope, capture)) = recording.enter(line, state.runtime.config.resolved()) else {
+        return execute_repl_line_inner(state, history, line, sink);
+    };
+    let mut stdio = StdIoUiSink;
+    let mut sink = super::recording::RecordingSink {
+        inner: sink.unwrap_or(&mut stdio),
+        capture: capture.clone(),
+    };
+    let result = execute_repl_line_inner(state, history, line, Some(&mut sink));
+    if let Some(capture) = &capture
+        && let Ok(executed) = &result
+    {
+        match &executed.result {
+            ReplResult::Print(output) | ReplResult::Restart { output, .. } => {
+                capture.output("stdout", output)
+            }
+            _ => {}
+        }
+    }
+    if let Some(error) = recording.finish(capture) {
+        crate::app::sink::write_diagnostics(
+            sink.inner,
+            &format!("warning: {error}\n"),
+            &state.runtime.ui.render_settings,
+        );
+    }
+    result
+}
+
+fn execute_repl_line_inner(
+    state: &mut crate::app::AppState,
+    history: &SharedHistory,
+    line: &str,
+    sink: Option<&mut dyn UiSink>,
+) -> Result<ExecutedReplLine> {
     crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
     let mut stdio = StdIoUiSink;
     let sink = sink.unwrap_or(&mut stdio);

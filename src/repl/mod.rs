@@ -24,6 +24,7 @@ mod menu_core;
 pub(crate) mod notices;
 pub(crate) mod presentation;
 mod product;
+pub(crate) mod recording;
 pub(crate) mod surface;
 
 #[cfg(test)]

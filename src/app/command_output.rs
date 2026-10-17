@@ -764,6 +764,9 @@ pub(crate) fn render_saved_repl_output(
     stages: &[String],
     sink: Option<&mut dyn UiSink>,
 ) -> Result<String> {
+    if let Some(recording) = crate::repl::recording::current() {
+        recording.observe(&output.body.json_value());
+    }
     let mut staged = output.saved();
     let context = match &staged.body {
         CommandBody::Text(_) | CommandBody::Json(_)
@@ -795,6 +798,9 @@ pub(crate) fn render_repl_command(
     mut result: CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
+    if let Some(recording) = crate::repl::recording::current() {
+        recording.observe(&result.body.json_value());
+    }
     if let Some(command) = &result.hint_command {
         session.repl_feedback.remember_hint(command.clone());
     }

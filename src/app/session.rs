@@ -280,6 +280,7 @@ pub(crate) struct AppSession {
     pub prompt_prefix: String,
     /// Whether history capture is enabled for this session.
     pub history_enabled: bool,
+    pub(crate) recording: crate::repl::recording::Recording,
     /// Shell-scoped history prefix state shared with the history store.
     pub history_shell: HistoryShellContext,
     /// Shared prompt timing badge state.
@@ -588,6 +589,7 @@ impl Default for AppSession {
             #[cfg(test)]
             prompt_prefix: "osp".to_string(),
             history_enabled: true,
+            recording: Default::default(),
             history_shell: HistoryShellContext::default(),
             prompt_timing: DebugTimingState::default(),
             native_context: NativeSessionContext::default(),

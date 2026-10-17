@@ -195,6 +195,7 @@ pub(crate) fn safe_text(raw: &str) -> String {
 /// Bounded sanitized evidence for one command, shared with native adapters.
 #[derive(Debug, Clone)]
 pub struct DiagnosticSink {
+    recording: Option<crate::repl::recording::Capture>,
     started: Instant,
     state: Arc<Mutex<Evidence>>,
 }
@@ -209,6 +210,7 @@ struct Evidence {
 impl Default for DiagnosticSink {
     fn default() -> Self {
         Self {
+            recording: crate::repl::recording::current(),
             started: Instant::now(),
             state: Arc::default(),
         }
@@ -218,6 +220,17 @@ impl Default for DiagnosticSink {
 impl DiagnosticSink {
     /// Accepts only reviewed event fields; sanitizes before retaining anything.
     pub fn emit(&self, event: DiagnosticEvent) {
+        if let DiagnosticEvent::Exchange {
+            method,
+            url,
+            status,
+            elapsed_ms,
+            ..
+        } = &event
+            && let Some(recording) = &self.recording
+        {
+            recording.http(method, url, *status, *elapsed_ms);
+        }
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Evidence {
             lines,

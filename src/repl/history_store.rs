@@ -1227,7 +1227,7 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
         .any(|pattern| matches_pattern(pattern, trimmed))
 }
 
-fn is_sensitive_line(line: &str) -> bool {
+pub(super) fn is_sensitive_line(line: &str) -> bool {
     shell_words::split(line).map_or(true, |tokens| has_sensitive_arguments(&tokens))
 }
 
