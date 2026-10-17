@@ -59,7 +59,7 @@ CLIPPY_DENIES = (
     "clippy::unnecessary_lazy_evaluations",
 )
 
-MIRI_TOOLCHAIN = "nightly-2026-03-24"
+MIRI_TOOLCHAIN = "nightly-2026-10-16"
 TOOL_VERSIONS = {"cargo-audit": "0.22.2", "cargo-llvm-cov": "0.8.4"}
 GENERIC_CHECKS = {"fmt", "fmt-fix", "clippy", "test", "build", "audit", "metadata", "coverage-crate"}
 LINUX_KEYRING_TOOLS = {"dbus-run-session", "dbus-daemon", "gnome-keyring-daemon", "gdbus"}

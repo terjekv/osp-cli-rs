@@ -65,7 +65,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install nightly Rust with Miri
-        uses: dtolnay/rust-toolchain@nightly-2026-03-24
+        uses: dtolnay/rust-toolchain@nightly-2026-10-16
         with:
           components: miri
 
