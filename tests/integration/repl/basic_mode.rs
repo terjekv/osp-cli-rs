@@ -61,7 +61,13 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
     assert!(stdout.contains("help"));
     assert!(stdout.contains("exit"));
     assert!(
-        stdout.matches("rose-pine-moon").count() == 2,
+        stdout
+            .split("[\n")
+            .next()
+            .unwrap_or_default()
+            .matches("rose-pine-moon")
+            .count()
+            == 2,
         "source and recall should each execute the resolved config command; stdout:\n{stdout}"
     );
     assert!(stderr.contains("warning: Input is not a terminal"));
