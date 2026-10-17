@@ -28,7 +28,11 @@ arrives already baked into the tree; this module never fetches it.
   Completion reports them; it never invents requiredness.
 - Large catalogues use `ValueCatalog`s, searched in order: a later catalogue
   (every VM) is consulted only when earlier ones (your VMs) have no match.
-  They rank like other values: exact, prefix, word boundary, then fuzzy. When
+  Entries retain their menu metadata and matching aliases. Dynamic completion
+  can select flag and positional catalogue tiers from already typed arguments.
+  A local semantic matcher can replace fuzzy matching for structured values
+  such as network addresses.
+  Ordinary catalogues rank like other values: exact, prefix, word boundary, then fuzzy. When
   nothing matches, a Jaro-Winkler typo rescue (4+ characters, ≥ 0.85 on the
   part before the first `.`) runs in the same order. At most 25 results.
 
