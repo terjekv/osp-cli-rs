@@ -23,6 +23,9 @@ Directories are searched in this order:
    `../lib/osp/plugins/`.
 5. PATH.
 
+Names with file extensions are skipped after stripping Windows `.exe`, `.cmd`,
+or `.bat` suffixes.
+
 Builtins and native commands win name clashes. Among plugins, the first
 executable found wins. `osp plugins list` shows name, about, source, path,
 and status, including disabled entries and shadowed copies.

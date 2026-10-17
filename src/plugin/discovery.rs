@@ -251,5 +251,5 @@ fn executable_name(path: &Path) -> Option<String> {
         .or_else(|| file.strip_suffix(".bat"))
         .unwrap_or(file);
     let name = file.strip_prefix("osp-")?;
-    (!name.is_empty()).then(|| name.to_string())
+    (!name.is_empty() && Path::new(name).extension().is_none()).then(|| name.to_string())
 }
