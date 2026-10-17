@@ -83,7 +83,7 @@ impl ReplHinter {
         if line.trim().is_empty() {
             return None;
         }
-        if let Some(expanded) = self.completer.expand_last_command(line) {
+        if let Some(expanded) = self.completer.expand_bang_request(line) {
             return Some((expanded, false, None));
         }
         if let Some(problem) = self.highlighter.problem(line, pos) {

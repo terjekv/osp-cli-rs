@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-pub(super) use crate::repl::history_store::BangCommand;
 use crate::repl::history_store::split_bang_request;
+pub(super) use crate::repl::history_store::{BangCommand, parse_bang_command};
 use crate::repl::{ReplResult, SharedHistory};
 use miette::{Result, WrapErr, miette};
 
@@ -21,7 +21,6 @@ pub(super) enum ReplBuiltin {
     Pagination(PaginationDirection),
     Source(SourceCommand),
     Each(EachCommand),
-    Bang(BangCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,9 +85,6 @@ pub(super) fn execute_repl_builtin(
         }
         ReplBuiltin::Each(command) => execute_each_command(state, history, command, sink),
         ReplBuiltin::Source(command) => execute_source_command(state, history, command, sink),
-        ReplBuiltin::Bang(command) => {
-            execute_bang_command(&mut state.session, history, raw, command)
-        }
     }
 }
 
@@ -126,9 +122,6 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
     }
     if let Some(command) = parse_source_builtin(raw)? {
         return Ok(Some(ReplBuiltin::Source(command)));
-    }
-    if let Some(command) = parse_bang_command(raw)? {
-        return Ok(Some(ReplBuiltin::Bang(command)));
     }
     Ok(None)
 }
@@ -397,60 +390,6 @@ fn source_help() -> String {
         .to_string()
 }
 
-pub(super) fn parse_bang_command(raw: &str) -> Result<Option<BangCommand>> {
-    let Some((_, raw)) = split_bang_request(raw) else {
-        return Ok(None);
-    };
-    if raw == "!" {
-        return Ok(Some(BangCommand::Prefix(String::new())));
-    }
-    if raw == "!!" {
-        return Ok(Some(BangCommand::Last));
-    }
-    if let Some(rest) = raw.strip_prefix("!?") {
-        let term = rest.trim();
-        if term.is_empty() {
-            return Err(miette!("`!?` expects search text"));
-        }
-        return Ok(Some(BangCommand::Contains(term.to_string())));
-    }
-    if let Some(rest) = raw.strip_prefix("!-") {
-        let offset = rest
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| miette!("`!-N` expects a positive integer"))?;
-        if offset == 0 {
-            return Err(miette!("`!-N` expects N >= 1"));
-        }
-        return Ok(Some(BangCommand::Relative(offset)));
-    }
-    let rest = raw.trim_start_matches('!').trim();
-    if rest.is_empty() {
-        return Ok(Some(BangCommand::Prefix(String::new())));
-    }
-    let digit_len = rest.bytes().take_while(u8::is_ascii_digit).count();
-    let (id, suffix) = rest.split_at(digit_len);
-    if !id.is_empty() && (suffix.is_empty() || suffix.starts_with(char::is_whitespace)) {
-        let id = id
-            .parse::<usize>()
-            .map_err(|_| miette!("`!N` expects a positive integer"))?;
-        if id == 0 {
-            return Err(miette!("`!N` expects N >= 1"));
-        }
-        return Ok(Some(BangCommand::Absolute {
-            id,
-            suffix: (!suffix.trim_start().is_empty()).then(|| suffix.trim_start().to_string()),
-        }));
-    }
-    if let Some(offset) = rest.strip_prefix('-') {
-        return Ok(Some(BangCommand::Relative(offset.parse().unwrap_or(0))));
-    }
-    if let Ok(id) = rest.parse::<usize>() {
-        return Ok(Some(BangCommand::Absolute { id, suffix: None }));
-    }
-    Ok(Some(BangCommand::Prefix(rest.to_string())))
-}
-
 pub(super) fn execute_bang_command(
     session: &mut AppSession,
     history: &SharedHistory,
@@ -468,7 +407,10 @@ pub(super) fn execute_bang_command(
         .flatten();
 
     let Some(expanded) = expanded else {
-        return Ok(ReplResult::Print(format!("No history match for: {raw}\n")));
+        return match command {
+            BangCommand::Absolute { id, .. } => Err(miette!("no history entry {id}")),
+            _ => Err(miette!("no history match for: {raw}")),
+        };
     };
 
     Ok(ReplResult::ReplaceInput(expanded))
@@ -548,7 +490,7 @@ pub(super) fn is_repl_bang_request(raw: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{BangCommand, PaginationDirection, execute_repl_builtin, parse_repl_builtin};
+    use super::{PaginationDirection, execute_repl_builtin, parse_repl_builtin};
     use crate::app::{AppState, CommandOutput, LaunchContext, RuntimeContext, TerminalKind};
     use crate::cli::rows::output::rows_to_output_result;
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};
@@ -626,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_repl_builtin_covers_none_help_exit_and_bang_unit() {
+    fn parse_repl_builtin_covers_none_help_exit_and_pagination_unit() {
         assert_eq!(parse_repl_builtin("   ").expect("blank"), None);
         assert!(matches!(
             parse_repl_builtin("--help").expect("help"),
@@ -653,10 +595,6 @@ mod tests {
             Some(super::ReplBuiltin::Pagination(
                 PaginationDirection::Previous
             ))
-        ));
-        assert!(matches!(
-            parse_repl_builtin("!!").expect("bang"),
-            Some(super::ReplBuiltin::Bang(BangCommand::Last))
         ));
     }
 

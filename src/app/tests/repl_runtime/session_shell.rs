@@ -166,7 +166,7 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
 
 #[cfg_attr(miri, ignore = "plugin filesystem/process integration test")]
 #[test]
-fn repl_bang_contains_search_expands_matching_command_unit() {
+fn repl_bang_contains_search_executes_matching_command_unit() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = make_temp_dir("osp-cli-repl-bang-contains-plugin");
@@ -218,8 +218,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
         "!?alpha", None,).map(|executed| executed.result)
     .expect("contains bang expansion should succeed");
     match expanded {
-        crate::repl::ReplResult::ReplaceInput(text) => {
-            assert_eq!(text, "cache alpha");
+        crate::repl::ReplResult::Print(text) => {
+            assert!(text.contains("alpha"), "replayed command output: {text}");
         }
         other => panic!("unexpected repl result: {other:?}"),
     }
@@ -238,29 +238,25 @@ fn repl_bang_contains_search_respects_shell_scope_unit() {
     state.session.scope.enter("orch");
     state.sync_history_shell_context();
     history
-        .with(|store| store.save_command_line("status"))
+        .with(|store| store.save_command_line("config get profile.default"))
         .expect("history lock should be available")
         .expect("scoped history seed should save");
 
     let scoped_hit = repl_dispatch::execute_repl_plugin_line(
         &mut state,
         &history,
-        "!?status", None,).map(|executed| executed.result)
+        "!?profile", None,).map(|executed| executed.result)
     .expect("scoped bang search should succeed");
     match scoped_hit {
-        crate::repl::ReplResult::ReplaceInput(text) => assert_eq!(text, "status"),
+        crate::repl::ReplResult::Print(text) => assert!(text.contains("profile.default")),
         other => panic!("unexpected repl result: {other:?}"),
     }
 
-    let scoped_miss = repl_dispatch::execute_repl_plugin_line(
+    let mut sink = crate::app::BufferedUiSink::default();
+    repl_dispatch::execute_repl_plugin_line(
         &mut state,
         &history,
-        "!?config", None,).map(|executed| executed.result)
+        "!?show", Some(&mut sink),)
     .expect("cross-shell bang miss should render feedback");
-    match scoped_miss {
-        crate::repl::ReplResult::Print(text) => {
-            assert_eq!(text, "No history match for: !?config\n");
-        }
-        other => panic!("unexpected repl result: {other:?}"),
-    }
+    assert!(sink.stdout.contains("no history match for: !?show"));
 }

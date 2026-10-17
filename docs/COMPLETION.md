@@ -128,14 +128,17 @@ The REPL keeps history for two different jobs:
 
 An accepted command stays in navigation and persistent history when execution
 fails. Unknown commands and invalid syntax are removed after dispatch. The
-entered `!!` form expands in the editor on Tab; Enter executes the expanded
-command and keeps it as the last command when it is accepted, including after
-an execution failure.
+entered bang request expands in the editor on Tab; Enter echoes and executes
+the expanded command and keeps it as the last command when it is accepted,
+including after an execution failure.
 
 Ctrl-R filters commands as you type, ranks matches by score, and underlines the
 matched text. Equal scores retain newest-first order. Inside a shell it searches
 commands in that shell without their stored prefix; Ctrl-R again searches all
 history. Enter runs the selection and Tab puts it back in the editor.
+
+Bang IDs match `history list` and Ctrl-R in the current shell scope. The shell
+prefix is omitted from the recalled input and applied once during execution.
 
 Alt+. inserts the previous command's last shell word at the cursor, preserving
 quotes and escapes. Consecutive presses replace that insertion with the last
@@ -151,7 +154,7 @@ Supported expansions:
 - `!123`
   - absolute history entry
 - `!123 args...`
-  - absolute history entry with arguments appended to the editable recalled line
+  - absolute history entry with arguments appended before execution
 - `!prefix`
   - most recent command starting with that prefix
 - `!?text`

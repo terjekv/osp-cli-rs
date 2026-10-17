@@ -179,10 +179,7 @@ fn repl_starts_runs_help_and_exits_end_to_end() {
     session.type_text("!-2");
     let expanded = session.output_len();
     session.write_bytes(b"\r");
-    assert_editor_command(&session, expanded, "theme show rose-pine-moon --json");
-    let start = session.output_len();
-    session.write_bytes(b"\r");
-    assert_theme_result(&session, start, "rose-pine-moon", "Rose Pine Moon");
+    assert_theme_result(&session, expanded, "rose-pine-moon", "Rose Pine Moon");
 
     session.write_bytes(b"exit\r");
     assert!(

@@ -22,6 +22,7 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use miette::miette;
 use reedline::{
     CommandLineSearch, History, HistoryItem, HistoryItemId, HistorySessionId, ReedlineError,
     ReedlineErrorVariants, Result as ReedlineResult, SearchDirection, SearchFilter, SearchQuery,
@@ -35,6 +36,54 @@ pub(crate) enum BangCommand {
     Absolute { id: usize, suffix: Option<String> },
     Prefix(String),
     Contains(String),
+}
+
+pub(crate) fn parse_bang_command(raw: &str) -> miette::Result<Option<BangCommand>> {
+    let Some((_, raw)) = split_bang_request(raw) else {
+        return Ok(None);
+    };
+    if raw == "!" {
+        return Ok(Some(BangCommand::Prefix(String::new())));
+    }
+    if raw == "!!" {
+        return Ok(Some(BangCommand::Last));
+    }
+    if let Some(rest) = raw.strip_prefix("!?") {
+        let term = rest.trim();
+        if term.is_empty() {
+            return Err(miette!("`!?` expects search text"));
+        }
+        return Ok(Some(BangCommand::Contains(term.to_string())));
+    }
+    if let Some(rest) = raw.strip_prefix("!-") {
+        let offset = rest
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| miette!("`!-N` expects a positive integer"))?;
+        if offset == 0 {
+            return Err(miette!("`!-N` expects N >= 1"));
+        }
+        return Ok(Some(BangCommand::Relative(offset)));
+    }
+    let rest = raw.trim_start_matches('!').trim();
+    if rest.is_empty() {
+        return Ok(Some(BangCommand::Prefix(String::new())));
+    }
+    let digit_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+    let (id, suffix) = rest.split_at(digit_len);
+    if !id.is_empty() && (suffix.is_empty() || suffix.starts_with(char::is_whitespace)) {
+        let id = id
+            .parse::<usize>()
+            .map_err(|_| miette!("`!N` expects a positive integer"))?;
+        if id == 0 {
+            return Err(miette!("`!N` expects N >= 1"));
+        }
+        return Ok(Some(BangCommand::Absolute {
+            id,
+            suffix: (!suffix.trim_start().is_empty()).then(|| suffix.trim_start().to_string()),
+        }));
+    }
+    Ok(Some(BangCommand::Prefix(rest.to_string())))
 }
 
 pub(crate) fn split_bang_request(raw: &str) -> Option<(bool, &str)> {
@@ -411,12 +460,13 @@ impl OspHistoryStore {
     }
 
     /// The same expansion is used by Tab completion and Enter dispatch.
-    pub(crate) fn expand_last_command(&self, raw: &str) -> Option<String> {
-        let (elevated, bang) = split_bang_request(raw)?;
-        if bang != "!!" {
+    pub(crate) fn expand_bang_request(&self, raw: &str) -> Option<String> {
+        let (elevated, _) = split_bang_request(raw)?;
+        let command = parse_bang_command(raw).ok().flatten()?;
+        if matches!(&command, BangCommand::Prefix(prefix) if prefix.is_empty()) {
             return None;
         }
-        self.expand(&BangCommand::Last, None, elevated)
+        self.expand(&command, self.shell_prefix().as_deref(), elevated)
     }
 
     /// Commit the editor's pending record, or save an accepted basic-mode replay.

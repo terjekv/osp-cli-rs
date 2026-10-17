@@ -202,7 +202,7 @@ pub(crate) fn execute_repl_plugin_line(
                 ));
             }
         }
-        if let Some(command @ builtins::BangCommand::Last) = builtins::parse_bang_command(line)? {
+        if let Some(command) = builtins::parse_bang_command(line)? {
             match builtins::execute_bang_command(&mut state.session, history, line, command)? {
                 ReplResult::ReplaceInput(expanded) => {
                     sink.write_stderr(&format!("{expanded}\n"));

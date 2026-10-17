@@ -235,8 +235,8 @@ fn repl_builtin_and_bang_parsers_cover_shortcuts_unit() {
         Some(super::ReplBuiltin::Last)
     ));
     assert!(matches!(
-        parse_repl_builtin("!?ops").expect("contains parses"),
-        Some(super::ReplBuiltin::Bang(BangCommand::Contains(term))) if term == "ops"
+        parse_bang_command("!?ops").expect("contains parses"),
+        Some(BangCommand::Contains(term)) if term == "ops"
     ));
     assert!(matches!(
         parse_bang_command("!!").expect("last parses"),
@@ -376,39 +376,32 @@ fn bang_execution_and_scope_helpers_cover_help_matches_and_replace_unit() {
             "!missing",
             BangCommand::Prefix("missing".to_string())
         )
-        .expect("missing bang match should still succeed"),
-        ReplResult::Print(value) if value.contains("No history match")
+        .expect_err("missing bang match should report an error").to_string(),
+        value if value.contains("no history match")
     ));
     assert!(is_repl_bang_request(" !prefix"));
     assert!(!is_repl_bang_request("help"));
 }
 
 #[test]
-fn absolute_history_recall_appends_quoted_suffix_without_executing_unit() {
+fn absolute_history_replay_executes_with_suffix_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let history = test_history();
     history
-        .with(|store| store.save_command_line("config show"))
+        .with(|store| store.save_command_line("config get profile.default"))
         .expect("history lock should be available")
         .expect("history command saves");
-
-    let bare = execute_repl_plugin_line(&mut state, &history, "!1", None)
+    let mut sink = crate::app::BufferedUiSink::default();
+    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --json", Some(&mut sink))
         .map(|executed| executed.result)
-        .expect("bare absolute history recall should succeed");
-    assert_eq!(bare, ReplResult::ReplaceInput("config show".to_string()));
+        .expect("absolute history replay should execute");
 
-    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --label \"two words\"", None)
-        .map(|executed| executed.result)
-        .expect("absolute history recall should succeed");
-
-    assert_eq!(
-        recalled,
-        ReplResult::ReplaceInput("config show --label \"two words\"".to_string())
-    );
+    assert!(matches!(recalled, ReplResult::Print(value) if value.contains("profile.default")));
+    assert_eq!(sink.stderr, "config get profile.default --json\n");
 }
 
 #[test]
-fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
+fn absolute_history_replay_executes_suffix_inside_scoped_repl_unit() {
     let mut state = make_state_with_plugins(empty_plugins());
     let history = test_history();
     history
@@ -416,19 +409,17 @@ fn absolute_history_recall_appends_suffix_inside_scoped_repl_unit() {
         .expect("history lock should be available")
         .expect("root history command saves");
     history
-        .with(|store| store.save_command_line("ldap user alice"))
+        .with(|store| store.save_command_line("ldap config get profile.default"))
         .expect("history lock should be available")
         .expect("scoped history command saves");
     state.session.scope.enter("ldap");
-
-    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --json", None)
+    let mut sink = crate::app::BufferedUiSink::default();
+    let recalled = execute_repl_plugin_line(&mut state, &history, "!1 --json", Some(&mut sink))
         .map(|executed| executed.result)
-        .expect("scoped absolute history recall should succeed");
+        .expect("scoped absolute history replay should execute");
 
-    assert_eq!(
-        recalled,
-        ReplResult::ReplaceInput("user alice --json".to_string())
-    );
+    assert!(matches!(recalled, ReplResult::Print(value) if value.contains("profile.default")));
+    assert_eq!(sink.stderr, "config get profile.default --json\n");
 }
 
 #[test]

@@ -522,7 +522,7 @@ fn file_scoped_history_loads_legacy_records_and_drops_rejected_commands() {
     let _ = history.with(|store| store.remember_command("user bob"));
     assert_eq!(
         history
-            .with(|store| store.expand_last_command("sudo !!"))
+            .with(|store| store.expand_bang_request("sudo !!"))
             .ok()
             .flatten()
             .as_deref(),
