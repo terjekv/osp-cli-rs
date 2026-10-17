@@ -22,10 +22,12 @@ impl PluginManager {
             return plugins.clone();
         }
         let cache_path = self.describe_cache_path();
-        let old: BTreeMap<PathBuf, CachedDescribe> = cache_path
+        let old_bytes = cache_path
             .as_ref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|path| std::fs::read(path).ok());
+        let old: BTreeMap<PathBuf, CachedDescribe> = old_bytes
+            .as_deref()
+            .and_then(|bytes| serde_json::from_slice(bytes).ok())
             .unwrap_or_default();
         let disabled = self.disabled.lock().unwrap_or_else(|e| e.into_inner());
         let mut seen_paths = HashSet::new();
@@ -152,8 +154,11 @@ impl PluginManager {
             }
             cache.insert(path, entry);
         }
+        // Every command discovers plugins; an unchanged cache must not cost a
+        // synced write on each startup.
         if let Some(path) = cache_path
             && let Ok(payload) = serde_json::to_vec(&cache)
+            && old_bytes.as_deref() != Some(payload.as_slice())
         {
             let result = path
                 .parent()
