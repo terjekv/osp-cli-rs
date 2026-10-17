@@ -705,9 +705,8 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         assert!(config_path.exists());
         let config_payload =
             std::fs::read_to_string(&config_path).expect("config file should be readable");
-        let config_root: toml::Value = config_payload
-            .parse()
-            .expect("config file should stay valid TOML");
+        let config_root: toml::Value =
+            toml::from_str(&config_payload).expect("config file should stay valid TOML");
         assert_eq!(
             config_root
                 .get("default")
@@ -750,9 +749,8 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         assert!(secrets_path.exists());
         let secrets_payload =
             std::fs::read_to_string(&secrets_path).expect("secrets file should be readable");
-        let secrets_root: toml::Value = secrets_payload
-            .parse()
-            .expect("secrets file should stay valid TOML");
+        let secrets_root: toml::Value =
+            toml::from_str(&secrets_payload).expect("secrets file should stay valid TOML");
         assert_eq!(
             secrets_root
                 .get("default")
@@ -803,9 +801,8 @@ fn run_config_set_and_unset_cover_persistent_paths_and_warning_unit() {
         );
         let secrets_payload =
             std::fs::read_to_string(&secrets_path).expect("secrets file should still be readable");
-        let secrets_root: toml::Value = secrets_payload
-            .parse()
-            .expect("secrets file should stay valid TOML");
+        let secrets_root: toml::Value =
+            toml::from_str(&secrets_payload).expect("secrets file should stay valid TOML");
         assert!(
             secrets_root
                 .get("profile")

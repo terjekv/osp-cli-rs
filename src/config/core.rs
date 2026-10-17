@@ -1096,7 +1096,7 @@ impl ConfigLayer {
     }
 
     fn from_toml_str_with_source(raw: &str, include_source: bool) -> Result<Self, ConfigError> {
-        let parsed = raw.parse::<toml::Value>().map_err(|err| {
+        let parsed = toml::from_str::<toml::Value>(raw).map_err(|err| {
             let diagnostic = crate::config::TomlParseDiagnostic::new(err.message());
             ConfigError::TomlParse(if include_source {
                 diagnostic.with_source("config layer", raw.to_string(), err.span())

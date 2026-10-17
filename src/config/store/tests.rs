@@ -79,7 +79,7 @@ format = "json"
     )
     .expect("list set should succeed");
     let payload = std::fs::read_to_string(&list_path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("default")
             .and_then(|value| value.get("theme"))
@@ -118,7 +118,7 @@ format = "json"
     assert_eq!(set_result.previous, None);
 
     let payload = std::fs::read_to_string(&terminal_profile_path).expect("config should exist");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
@@ -143,7 +143,7 @@ format = "json"
     );
     let payload =
         std::fs::read_to_string(&terminal_profile_path).expect("config should still be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
@@ -231,7 +231,7 @@ ui.format = "json"
     .expect("unset should succeed");
     assert_eq!(result.previous, None);
     let payload = std::fs::read_to_string(&path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert_eq!(
         root.get("terminal")
             .and_then(|value| value.get("repl"))
@@ -274,7 +274,7 @@ format = "json"
     )
     .expect("unset should succeed");
     let payload = std::fs::read_to_string(&prune_path).expect("config should be readable");
-    let root: toml::Value = payload.parse().expect("written config should stay valid");
+    let root: toml::Value = toml::from_str(&payload).expect("written config should stay valid");
     assert!(
         root["terminal"]["repl"]["profile"]["ops"]
             .as_table()
@@ -491,11 +491,12 @@ fn helper_value_and_path_functions_cover_scalar_secret_nested_and_pruned_cases_u
         ])
     );
 
-    let root: toml::Value = r#"
+    let root: toml::Value = toml::from_str(
+        r#"
 [default.ui]
 format = "json"
-"#
-    .parse()
+"#,
+    )
     .expect("fixture should parse");
     let table = root.as_table().expect("root should be a table");
     assert_eq!(
@@ -555,11 +556,12 @@ format = "json"
 fn write_and_load_helpers_cover_regular_io_and_error_paths_unit() {
     let dir = make_temp_dir("osp-config-store-write-root");
     let path = dir.join("config.toml");
-    let root: toml::Value = r#"
+    let root: toml::Value = toml::from_str(
+        r#"
 [default.ui]
 format = "json"
-"#
-    .parse()
+"#,
+    )
     .expect("fixture should parse");
 
     write_toml_root(&path, &root, false).expect("toml root should be written");

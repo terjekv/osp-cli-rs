@@ -262,7 +262,7 @@ fn load_or_create_toml_root_with_source(
         reason: err.to_string(),
     })?;
 
-    raw.parse::<toml::Value>().map_err(|err| {
+    toml::from_str::<toml::Value>(&raw).map_err(|err| {
         let diagnostic = TomlParseDiagnostic::new(err.message());
         with_path_context(
             path.display().to_string(),
