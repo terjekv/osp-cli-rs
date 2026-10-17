@@ -150,7 +150,9 @@ impl<'a> NativeCommandContext<'a> {
     /// Requires stdin and stderr terminals, non-JSON output and no output pipeline.
     /// Credential acquisition owns any additional command-scope restrictions.
     pub fn may_prompt(&self) -> bool {
-        self.human_output() && std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+        self.human_output()
+            && !crate::ui::prompt::input_is_replay()
+            && std::io::stderr().is_terminal()
     }
 
     /// Whether live or preliminary documents can be presented on stderr.

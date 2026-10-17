@@ -496,6 +496,12 @@ impl AppRuntime {
         self.context.is_repl()
     }
 
+    /// Whether this invocation reads replayed commands or redirected stdin.
+    /// Access hooks must not acquire interactive input in this context.
+    pub fn input_is_replay(&self) -> bool {
+        crate::ui::prompt::input_is_replay()
+    }
+
     /// Returns the active command execution scope.
     pub fn command_scope(&self) -> &crate::core::CommandScope {
         &self.ui.render_settings.runtime.command_scope

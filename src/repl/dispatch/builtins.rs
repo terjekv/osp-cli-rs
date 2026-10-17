@@ -325,7 +325,9 @@ fn execute_source_line(
             "nested `source` or `each` commands are not supported"
         ));
     }
-    let executed = super::execute_repl_plugin_line(state, history, line, Some(sink))?;
+    let executed = crate::ui::prompt::replay(|| {
+        super::execute_repl_plugin_line(state, history, line, Some(sink))
+    })?;
     match executed.result {
         ReplResult::Continue => {}
         ReplResult::Print(rendered) => sink.write_stdout(&rendered),

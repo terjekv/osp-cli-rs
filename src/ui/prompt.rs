@@ -1,7 +1,7 @@
 //! Line input shared by command prompts and the REPL terminal protocol.
 
 use std::collections::VecDeque;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::sync::{Mutex, PoisonError};
 
 static PENDING_INPUT: Mutex<VecDeque<u8>> = Mutex::new(VecDeque::new());
@@ -176,4 +176,22 @@ fn ask(question: &str) -> io::Result<String> {
     let mut answer = String::new();
     read_line(&mut answer)?;
     Ok(answer)
+}
+
+thread_local! { static REPLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// Whether input comes from replay or redirected stdin rather than a person.
+pub fn input_is_replay() -> bool {
+    REPLAY.with(std::cell::Cell::get) || !io::stdin().is_terminal()
+}
+
+pub(crate) fn replay<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            REPLAY.with(|active| active.set(self.0));
+        }
+    }
+    let _restore = Restore(REPLAY.with(|active| active.replace(true)));
+    run()
 }
