@@ -354,6 +354,20 @@ When implementing native commands:
   root-form input so terminal and REPL readers receive the appropriate spelling
 - long-running commands should emit `NativeProgressEvent` values through the
   context rather than writing directly to stdio
+- streaming endpoints call `context.emit_stream(event)` with one typed JSON
+  object in `event.data`; human output uses the shared renderer and `--json`
+  writes each event as a compact JSON line on stdout before the final result
+  document. DSL stages apply to each event and to the final result separately;
+  filtered-out events emit nothing. Events are never coalesced, including replay
+  events, and quiet mode does not suppress machine-readable events
+- use `event.with_meta(...)` for event columns/labels/format and optionally
+  `event.with_frame(snapshot, meta)` for an accumulated structured terminal
+  frame. The shared renderer renders that snapshot only on an unfiltered human
+  terminal; JSON, redirected output and DSL always consume the original event.
+  Set `progress_replace: true` on the frame metadata to replace it safely
+- `emit_progress` remains preliminary human progress on stderr, independent of
+  the streaming endpoint contract. Return the final document through the normal
+  `NativeCommandOutcome` path; stream metadata never replaces that document
 - use `presentation_lines` with `progress_replace: true` for transient status;
   a single rendered line animates on interactive stderr and clears when the
   command finishes or presents another document

@@ -346,7 +346,7 @@ impl<'a> ProgressUiSink<'a> {
 
 impl UiSink for ProgressUiSink<'_> {
     fn write_stdout(&mut self, text: &str) {
-        self.write_progress(text, false);
+        self.inner.write_stdout(text);
     }
 
     fn write_stderr(&mut self, text: &str) {

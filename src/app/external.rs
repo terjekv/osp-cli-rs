@@ -837,13 +837,31 @@ impl NativeProgressRenderer<'_, '_> {
         self.sink.borrow_mut().clear_progress();
     }
 
-    fn draw(&self, event: NativeProgressEvent, stages: &[String]) -> anyhow::Result<()> {
+    fn draw(
+        &self,
+        mut event: NativeProgressEvent,
+        stages: &[String],
+        stream: bool,
+    ) -> anyhow::Result<()> {
+        let json = self.ui.render_settings.format == crate::core::OutputFormat::Json;
+        if stream {
+            event.meta.preserve_json_document = true;
+            event.meta.row_path = None;
+            if !json
+                && stages.is_empty()
+                && self.can_present.get()
+                && let Some(frame) = event.frame.take()
+            {
+                event.data = frame.data;
+                event.meta = frame.meta;
+            }
+        }
         let mut result = CommandOutput::from_data(event.data, &event.meta, &event.messages, stages);
         result
             .apply_stages(stages)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
         let mut sink = self.sink.borrow_mut();
-        run_progress_command_with_ui(self.config, self.ui, result, &mut *sink)
+        run_progress_command_with_ui(self.config, self.ui, result, &mut *sink, stream)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))?;
         Ok(())
     }
@@ -856,19 +874,25 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
 
     fn emit_measured(&self, event: NativeProgressEvent) -> anyhow::Result<bool> {
         self.flush()?;
-        self.draw(event, self.stages)?;
+        self.draw(event, self.stages, false)?;
         Ok(self.sink.borrow().can_replace())
     }
 
     fn present(&self, document: NativeProgressEvent) -> anyhow::Result<()> {
         self.flush()?;
-        self.draw(document, &[])
+        self.draw(document, &[], false)
+    }
+
+    fn emit_stream(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
+        anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
+        self.flush()?;
+        self.draw(event, self.stages, true)
     }
 
     fn emit(&self, event: NativeProgressEvent) -> anyhow::Result<()> {
         let tree = event.meta.progress_replace && self.can_present.get();
         if !tree {
-            return self.draw(event, self.stages);
+            return self.draw(event, self.stages, false);
         }
         let replay = event.replay;
         *self.pending.borrow_mut() = Some(event);
@@ -894,7 +918,7 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
             {
                 std::thread::sleep(delay);
             }
-            self.draw(event, self.stages)?;
+            self.draw(event, self.stages, false)?;
             self.last_draw.set(Some(std::time::Instant::now()));
         }
         Ok(())
