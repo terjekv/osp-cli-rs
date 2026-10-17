@@ -327,7 +327,7 @@ impl NativeIntent {
                 ExternalPathAccessRequirement::Runnable
             },
             render_help,
-            refresh_metadata: parsed.matches.is_err() && (render_help || !help_requested),
+            refresh_metadata: parsed.matches.is_err(),
         }
     }
 }
@@ -349,7 +349,7 @@ fn refresh_native_parse(
     if matches!(refreshed, Ok(true)) {
         session_context.request_completion_refresh();
     }
-    if intent.requirement == ExternalPathAccessRequirement::Visible {
+    if intent.requirement == ExternalPathAccessRequirement::Visible && parsed.render_help {
         match refreshed {
             Ok(true) => match NativeParse::new(command, &name, args) {
                 Ok(parsed) => return Ok(parsed),

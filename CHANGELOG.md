@@ -30,6 +30,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   command recall, including quoted templates, aliases, expanded commands and
   runtime failures.
 
+- Prepare native metadata for explicit help on cold command paths. If no cached
+  help exists, retain the provider's recovery advice when discovery fails.
+
 - Treat `passwd` and `credential` names as sensitive alongside passwords, tokens,
   secrets and API keys wherever the shared sensitivity policy is used.
 
