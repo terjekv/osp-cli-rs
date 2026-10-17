@@ -175,6 +175,10 @@ pub struct FlagCompletions {
     /// A variadic slot uses the same index for every repeated value. Unknown
     /// slots are ignored. Path and large-catalog completion keep precedence.
     pub positionals: BTreeMap<usize, Vec<SuggestionEntry>>,
+    /// Ordered catalogue tiers replacing the catalogues of these flags.
+    pub flag_catalogs: BTreeMap<String, Vec<ValueCatalog>>,
+    /// Ordered catalogue tiers replacing the catalogues of these argument slots.
+    pub positional_catalogs: BTreeMap<usize, Vec<ValueCatalog>>,
 }
 
 /// A local completion callback shared by tree clones.
@@ -233,6 +237,16 @@ impl DynamicCompletion {
         for (slot, entries) in completion.positionals {
             if let Some(arg) = node.args.get_mut(slot) {
                 arg.suggestions = entries;
+            }
+        }
+        for (flag, catalogs) in completion.flag_catalogs {
+            if let Some(flag) = node.flags.get_mut(&flag) {
+                flag.catalogs = catalogs;
+            }
+        }
+        for (slot, catalogs) in completion.positional_catalogs {
+            if let Some(arg) = node.args.get_mut(slot) {
+                arg.catalogs = catalogs;
             }
         }
         node
@@ -350,47 +364,65 @@ impl ArgNode {
 /// compares shared catalogue identity, not the current entries. Ranking lives
 /// in completion suggestion code, which reads the values through [`Self::scan`].
 #[derive(Debug, Clone, Default)]
-pub struct ValueCatalog(std::sync::Arc<std::sync::RwLock<Vec<String>>>);
+pub struct ValueCatalog {
+    entries: std::sync::Arc<std::sync::RwLock<Vec<SuggestionEntry>>>,
+    pub(super) matcher: Option<fn(&SuggestionEntry, &str) -> bool>,
+}
 
 impl PartialEq for ValueCatalog {
     fn eq(&self, other: &Self) -> bool {
-        std::sync::Arc::ptr_eq(&self.0, &other.0)
+        std::sync::Arc::ptr_eq(&self.entries, &other.entries)
     }
 }
 impl Eq for ValueCatalog {}
 
 impl ValueCatalog {
+    /// Uses a local semantic matcher instead of fuzzy matching and typo rescue.
+    /// The matcher receives the entry and case-folded stub; it must not do I/O.
+    pub fn with_matcher(matcher: fn(&SuggestionEntry, &str) -> bool) -> Self {
+        Self {
+            matcher: Some(matcher),
+            ..Self::default()
+        }
+    }
+
     /// Atomically replaces the catalogue, sorting and removing duplicate values.
-    pub fn replace(&self, mut values: Vec<String>) {
-        values.sort_unstable();
-        values.dedup();
-        *self.0.write().unwrap_or_else(|err| err.into_inner()) = values;
+    pub fn replace(&self, values: Vec<String>) {
+        self.replace_entries(values.into_iter().map(SuggestionEntry::value).collect());
+    }
+
+    /// Replaces values together with their menu labels and matching aliases.
+    pub fn replace_entries(&self, mut entries: Vec<SuggestionEntry>) {
+        entries.sort_unstable_by(|a, b| a.value.cmp(&b.value));
+        entries.dedup_by(|a, b| a.value == b.value);
+        *self.entries.write().unwrap_or_else(|err| err.into_inner()) = entries;
     }
 
     /// Returns lexicographically ordered prefix matches, bounded before cloning.
     pub fn matching(&self, prefix: &str, limit: usize) -> Vec<String> {
-        let values = self.0.read().unwrap_or_else(|err| err.into_inner());
-        let start = values.partition_point(|value| value.as_str() < prefix);
-        values[start..]
-            .iter()
-            .take_while(|value| value.starts_with(prefix))
-            .take(limit)
-            .cloned()
-            .collect()
+        self.scan(|entries| {
+            let start = entries.partition_point(|entry| entry.value.as_str() < prefix);
+            entries[start..]
+                .iter()
+                .take_while(|entry| entry.value.starts_with(prefix))
+                .take(limit)
+                .map(|entry| entry.value.clone())
+                .collect()
+        })
     }
 
     /// Reports exact membership without copying the catalogue.
     pub fn contains(&self, value: &str) -> bool {
-        self.0
-            .read()
-            .unwrap_or_else(|err| err.into_inner())
-            .binary_search_by(|candidate| candidate.as_str().cmp(value))
-            .is_ok()
+        self.scan(|entries| {
+            entries
+                .binary_search_by(|entry| entry.value.as_str().cmp(value))
+                .is_ok()
+        })
     }
 
-    /// Reads the sorted values in place; callers copy only what they keep.
-    pub fn scan<R>(&self, read: impl FnOnce(&[String]) -> R) -> R {
-        read(&self.0.read().unwrap_or_else(|err| err.into_inner()))
+    /// Reads the sorted entries in place; callers copy only what they keep.
+    pub fn scan<R>(&self, read: impl FnOnce(&[SuggestionEntry]) -> R) -> R {
+        read(&self.entries.read().unwrap_or_else(|err| err.into_inner()))
     }
 }
 

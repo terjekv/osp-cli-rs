@@ -393,37 +393,52 @@ impl SuggestionEngine {
     /// cloning; an empty stub lists the first names of the first non-empty
     /// catalogue rather than scoring every value.
     fn catalog_suggestions(&self, catalogs: &[ValueCatalog], stub: &str) -> Vec<SuggestionOutput> {
-        let ranked = |hits: Vec<(u32, String)>| {
+        let ranked = |hits: Vec<(u32, SuggestionEntry)>| {
             hits.into_iter()
-                .map(|(score, value)| {
-                    SuggestionOutput::Item(entry_to_suggestion(
-                        &SuggestionEntry::value(value),
-                        score,
-                    ))
-                })
+                .map(|(score, entry)| SuggestionOutput::Item(entry_to_suggestion(&entry, score)))
                 .collect::<Vec<_>>()
         };
         if stub.is_empty() {
             let first = catalogs
                 .iter()
-                .map(|catalog| catalog.matching("", CATALOG_MATCH_LIMIT))
-                .find(|values| !values.is_empty())
+                .map(|catalog| {
+                    catalog.scan(|entries| {
+                        entries
+                            .iter()
+                            .take(CATALOG_MATCH_LIMIT)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .find(|entries| !entries.is_empty())
                 .unwrap_or_default();
             return ranked(
                 first
                     .into_iter()
-                    .map(|value| (MATCH_SCORE_EMPTY_STUB, value))
+                    .map(|entry| (MATCH_SCORE_EMPTY_STUB, entry))
                     .collect(),
             );
         }
         let stub_lc = fold_case(stub);
         for catalog in catalogs {
-            let hits =
-                catalog.scan(|values| {
-                    best(values.iter().filter_map(|value| {
-                        Some((self.match_score(&stub_lc, value)?, value.as_str()))
-                    }))
-                });
+            let hits = catalog.scan(|entries| {
+                best(entries.iter().filter_map(|entry| {
+                    let score = match catalog.matcher {
+                        Some(matches) => matches(entry, &stub_lc).then_some(
+                            if fold_case(&entry.value) == stub_lc {
+                                MATCH_SCORE_EXACT
+                            } else {
+                                MATCH_SCORE_PREFIX_BASE
+                            },
+                        ),
+                        None => std::iter::once(&entry.value)
+                            .chain(&entry.aliases)
+                            .filter_map(|value| self.match_score(&stub_lc, value))
+                            .min(),
+                    }?;
+                    Some((score, entry))
+                }))
+            });
             if !hits.is_empty() {
                 return ranked(hits);
             }
@@ -431,16 +446,15 @@ impl SuggestionEngine {
         if stub.chars().count() < TYPO_RESCUE_MIN_CHARS {
             return Vec::new();
         }
-        for catalog in catalogs {
-            let hits = catalog.scan(|values| {
-                best(values.iter().filter_map(|value| {
-                    // Compare the leading label so a shared domain suffix
-                    // cannot make every hostname look alike.
-                    let label = value.split('.').next().unwrap_or(value);
+        for catalog in catalogs.iter().filter(|catalog| catalog.matcher.is_none()) {
+            let hits = catalog.scan(|entries| {
+                best(entries.iter().filter_map(|entry| {
+                    // Compare the leading label, not the shared domain suffix.
+                    let label = entry.value.split('.').next().unwrap_or(&entry.value);
                     let similarity = strsim::jaro_winkler(&stub_lc, &fold_case(label));
                     (similarity >= TYPO_RESCUE_MIN_SIMILARITY).then(|| {
                         let distance = ((1.0 - similarity) * 10_000.0) as u32;
-                        (MATCH_SCORE_TYPO_BASE + distance, value.as_str())
+                        (MATCH_SCORE_TYPO_BASE + distance, entry)
                     })
                 }))
             });
@@ -715,12 +729,16 @@ pub fn closest_values(catalogs: &[ValueCatalog], text: &str, limit: usize) -> Ve
 }
 
 /// The best-scoring catalogue hits, lowest score first, then alphabetical.
-fn best<'a>(hits: impl Iterator<Item = (u32, &'a str)>) -> Vec<(u32, String)> {
+fn best<'a>(hits: impl Iterator<Item = (u32, &'a SuggestionEntry)>) -> Vec<(u32, SuggestionEntry)> {
     let mut hits = hits.collect::<Vec<_>>();
-    hits.sort_unstable_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(right.1)));
+    hits.sort_unstable_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.value.cmp(&right.1.value))
+    });
     hits.into_iter()
         .take(CATALOG_MATCH_LIMIT)
-        .map(|(score, value)| (score, value.to_owned()))
+        .map(|(score, entry)| (score, entry.clone()))
         .collect()
 }
 
