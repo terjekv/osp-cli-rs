@@ -49,6 +49,18 @@ Inspect one theme:
 osp theme list '|' dracula
 ```
 
+Choose a theme interactively:
+
+```bash
+osp theme preview
+```
+
+Up/Down or Tab/Shift-Tab select a theme and immediately recolour the picker,
+table and sample messages. End focuses `[ Save ]`; Enter saves `theme.name`
+through the config writer with `--permanent`. `[ Exit ]`, Esc and q discard the
+selection. A terminal of at least 60×12 is required. `theme preview NAME` applies
+a theme for the current process or REPL session without saving it.
+
 Switch theme for the current process or REPL session:
 
 ```bash

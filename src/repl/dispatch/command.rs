@@ -236,6 +236,7 @@ fn line_end_offset(lines: &[&str], line_count: usize) -> usize {
 pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
     let show_intro_on_reload = match command {
         Commands::Config(args) => match &args.command {
+            ConfigCommands::Edit(_) => false,
             ConfigCommands::Set(set) if !set.dry_run => config_key_change_requires_intro(&set.key),
             ConfigCommands::Unset(unset) if !unset.dry_run => {
                 config_key_change_requires_intro(&unset.key)
@@ -264,7 +265,14 @@ pub(super) fn command_side_effects(command: &Commands) -> CommandSideEffects {
         {
             false
         }
-        Commands::Theme(args) if matches!(args.command, ThemeCommands::Use(_)) => true,
+        Commands::Theme(args)
+            if matches!(
+                args.command,
+                ThemeCommands::Use(_) | ThemeCommands::Preview(_)
+            ) =>
+        {
+            true
+        }
         _ => return CommandSideEffects::default(),
     };
     CommandSideEffects {
@@ -344,6 +352,14 @@ pub(super) fn execute_repl_command_dispatch(
                 stages,
                 side_effects,
             } = *invocation;
+            let picker = matches!(
+                &command,
+                Commands::Theme(crate::cli::ThemeArgs {
+                    command: ThemeCommands::Preview(crate::cli::ThemePreviewArgs { name: None })
+                }) | Commands::Config(crate::cli::ConfigArgs {
+                    command: ConfigCommands::Edit(_)
+                })
+            );
             let output = run_repl_command_with_progress(
                 state,
                 history,
@@ -356,6 +372,8 @@ pub(super) fn execute_repl_command_dispatch(
                 },
             )?;
             let execute_finished = Instant::now();
+            let restart_repl = side_effects.restart_repl
+                && (!picker || !matches!(output.body, crate::app::CommandBody::None));
             let exit_code = output.exit_code;
             let rendered = render_repl_command_output(
                 &state.runtime,
@@ -367,11 +385,7 @@ pub(super) fn execute_repl_command_dispatch(
                 sink,
             )?;
             Ok(super::ExecutedReplLine::invocation(
-                finalize_repl_command(
-                    rendered,
-                    side_effects.restart_repl,
-                    side_effects.show_intro_on_reload,
-                ),
+                finalize_repl_command(rendered, restart_repl, side_effects.show_intro_on_reload),
                 exit_code,
                 effective.ui.debug_level,
                 parse_finished,

@@ -112,13 +112,10 @@ impl<'a> BuiltinExecutor<'a> {
                 args,
             )
             .map(Some),
-            Commands::Theme(args) => theme_cmd::run_theme_command(
-                &mut self.session.config_overrides,
-                self.runtime,
-                surface.ui(),
-                args,
-            )
-            .map(Some),
+            Commands::Theme(args) => {
+                theme_cmd::run_theme_command(self.session, self.runtime, surface.ui(), args)
+                    .map(Some)
+            }
             Commands::Config(args) => {
                 config_cmd::run_config_command(self.runtime, self.session, surface.ui(), args)
                     .map(Some)

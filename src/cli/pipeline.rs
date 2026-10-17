@@ -61,8 +61,8 @@ pub(crate) struct ParsedCommandLine {
 /// let config = resolver.resolve(ResolveOptions::default()).unwrap();
 ///
 /// let parsed = parse_command_text_with_aliases("theme list | dracula | H P", &config).unwrap();
-/// assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
-/// assert_eq!(parsed.stages, vec!["H P"]);
+/// assert_eq!(parsed.tokens, vec!["theme", "list"]);
+/// assert_eq!(parsed.stages, vec!["dracula", "H P"]);
 /// ```
 pub(crate) fn parse_command_text_with_aliases(
     text: &str,
@@ -474,8 +474,8 @@ mod tests {
 
         let parsed =
             parse_command_text_with_aliases("theme list | dracula | H P", &config).unwrap();
-        assert_eq!(parsed.tokens, vec!["theme", "show", "dracula"]);
-        assert_eq!(parsed.stages, vec!["H P"]);
+        assert_eq!(parsed.tokens, vec!["theme", "list"]);
+        assert_eq!(parsed.stages, vec!["dracula", "H P"]);
     }
 
     #[test]

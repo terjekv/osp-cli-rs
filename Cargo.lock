@@ -2158,6 +2158,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "crossterm 0.29.0",
  "directories",
  "insta",
  "jaq-core",

@@ -73,7 +73,7 @@ pub use style::StyleOverrides;
 #[cfg(test)]
 pub(crate) use style::ThemeStyler;
 pub(crate) use text::{
-    crop_display_width, display_width, sanitize_human_text, visible_inline_text,
+    crop_display_width, display_width, sanitize_human_text, visible_inline_text, wrap_display_width,
 };
 #[cfg(test)]
 pub(crate) use theme::DEFAULT_THEME_NAME;
@@ -313,4 +313,5 @@ mod document_tests;
 #[cfg(test)]
 mod tests;
 
+pub mod picker;
 pub mod prompt;

@@ -47,6 +47,20 @@ Useful switches:
 - `--permanent`
   - persist the change when running inside the REPL
 
+## Interactive editing
+
+Run `osp config edit` in a terminal, or `osp config edit ui.format` to start on
+a particular key. The right pane shows the staged value, current source layer
+and schema documentation. Up/Down select keys; Tab or Left/Right cycle boolean
+and enum values. Enter edits other values inline; Ctrl-U clears the editor.
+
+End focuses `[ Save ]`. Enter applies changed keys through `config set`, using
+its default store and scope (including `config.default-target`). In a REPL this
+normally changes the session only. `[ Exit ]`, Esc and q discard staged edits.
+Secret values remain redacted and inline secret input is masked. Validation
+errors stay in the picker. The picker needs a terminal of at least 60×12;
+`config get KEY` and `config set KEY VALUE` work non-interactively.
+
 ## Display names
 
 Set the current user's greeting name; quotes are optional:

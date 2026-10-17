@@ -430,9 +430,19 @@ pub(crate) enum ThemeCommands {
     /// List available themes.
     #[command(display_order = 10)]
     List,
+    /// Preview themes interactively, or apply a named theme for this session.
+    #[command(display_order = 11)]
+    Preview(ThemePreviewArgs),
     /// Set active theme.
     #[command(display_order = 12)]
     Use(ThemeUseArgs),
+}
+
+/// Arguments for `theme preview`.
+#[derive(Debug, Args)]
+pub(crate) struct ThemePreviewArgs {
+    /// Theme to apply for this process; omit to choose and save interactively.
+    pub name: Option<String>,
 }
 
 /// Arguments for `theme use`.
@@ -640,6 +650,8 @@ pub(crate) struct HistoryPruneArgs {
 /// Configuration inspection and mutation commands.
 #[derive(Subcommand)]
 pub(crate) enum ConfigCommands {
+    /// Edit configuration interactively; Save uses config set's default target.
+    Edit(ConfigEditArgs),
     /// Show the resolved configuration view.
     #[command(display_order = 10)]
     Show(ConfigShowArgs),
@@ -659,6 +671,13 @@ pub(crate) enum ConfigCommands {
     /// Run config-specific diagnostics.
     #[command(display_order = 15)]
     Doctor,
+}
+
+/// Arguments for `config edit`.
+#[derive(Debug, Args)]
+pub(crate) struct ConfigEditArgs {
+    /// Initially selected config key.
+    pub key: Option<String>,
 }
 
 /// Arguments for `config show`.

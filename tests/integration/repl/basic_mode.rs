@@ -89,10 +89,15 @@ fn repl_basic_mode_runs_help_and_exit_without_tty() {
         documents[2], selected,
         "last should replay the saved pipeline"
     );
-    assert_eq!(documents[3][0]["id"], "nord");
-    assert_eq!(documents[3][0]["name"], "Nord");
+    let raw_nord = documents[3]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "nord")
+        .unwrap();
+    assert_eq!(raw_nord["name"], "Nord");
     assert_eq!(
-        documents[3][0]["accent"], "#88c0d0",
+        raw_nord["accent"], "#88c0d0",
         "raw replay should retain the theme palette"
     );
     let before_failure = serde_json::json!([{"id": "dracula", "name": "Dracula"}]);

@@ -98,7 +98,7 @@ fn repl_tab_accepts_single_visible_completion() {
         session.wait_for_output_since(accepted, "\x1b[?25h", Duration::from_secs(3)),
         "expected accepted completion to repaint the input",
     );
-    session.type_text(" show dracula");
+    session.type_text(" list | dracula");
     let start = session.output_len();
     session.write_bytes(b"\r");
     let result = json_result(&session, start);
@@ -163,8 +163,12 @@ fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
     );
     let start = session.output_len();
     session.write_bytes(b"\r");
-    let result = json_result(&session, start);
-    assert_eq!(result[0]["id"], selections[1]);
+    assert!(session.wait_for_plain_output_since(
+        start,
+        &format!("active theme set to: {}", selections[1]),
+        Duration::from_secs(3)
+    ));
+    assert!(session.wait_for_editor_since(start, Duration::from_secs(3)));
 
     session.write_bytes(b"exit\r\r");
     assert!(

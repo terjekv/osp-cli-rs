@@ -51,6 +51,7 @@ pub(crate) fn run_config_command(
     args: ConfigArgs,
 ) -> Result<CommandOutput> {
     match args.command {
+        ConfigCommands::Edit(args) => picker::run(runtime, session, ui, args.key),
         ConfigCommands::Show(show) => Ok(CommandOutput::output(
             rows_to_output_result(config_show_rows(runtime, show)),
             None,
@@ -466,6 +467,35 @@ fn config_entry_row(
     }
 
     row.build()
+}
+
+pub(super) fn set_picker_value(
+    runtime: &AppRuntime,
+    session: &mut AppSession,
+    ui: &UiState,
+    key: String,
+    value: String,
+    permanent: bool,
+) -> Result<CommandOutput> {
+    run_config_set(
+        runtime,
+        session,
+        ui,
+        ConfigSetArgs {
+            key,
+            value: vec![value],
+            display_user: None,
+            from_file: None,
+            scope: ConfigScopeArgs::default(),
+            store: ConfigStoreArgs {
+                save: permanent,
+                ..ConfigStoreArgs::default()
+            },
+            dry_run: false,
+            yes: true,
+            explain: false,
+        },
+    )
 }
 
 fn run_config_set(
@@ -1135,6 +1165,8 @@ fn validate_write_scopes(
 
     Ok(())
 }
+
+mod picker;
 
 #[cfg(test)]
 mod tests;

@@ -1,15 +1,15 @@
 //! `theme` builtin command implementation.
 //!
-//! Theme behavior is intentionally small: inspect available themes, show one
-//! theme definition, or set an in-process theme override for the current run.
+//! Palette inspection and live theme selection share the normal renderer and
+//! configuration writer. Temporary selection remains an in-process override.
 
-use crate::app::{AppRuntime, UiState};
+use crate::app::{AppRuntime, AppSession, UiState};
 use crate::app::{CommandOutput, resolve_known_theme_name};
 use crate::cli::rows::output::rows_to_output_result;
-use crate::cli::{ThemeArgs, ThemeCommands, ThemeUseArgs};
+use crate::cli::{ThemeArgs, ThemeCommands, ThemePreviewArgs, ThemeUseArgs};
 use crate::completion::{CompletionNode, SuggestionEntry};
-use crate::config::{ConfigLayer, Scope};
-use crate::core::output_model::{DisplayRule, OutputResult};
+use crate::config::Scope;
+use crate::core::output_model::{DisplayRule, OutputResult, RenderRecommendation};
 use crate::core::row::Row;
 use crate::ui::theme::{DEFAULT_THEME_NAME, normalize_theme_name};
 use crate::ui::theme_catalog::{ThemeCatalog, ThemeSource};
@@ -17,12 +17,15 @@ use clap::Command;
 use miette::Result;
 
 pub(crate) fn run_theme_command(
-    config_overrides: &mut ConfigLayer,
+    session: &mut AppSession,
     runtime: &AppRuntime,
     ui: &UiState,
     args: ThemeArgs,
 ) -> Result<CommandOutput> {
     match args.command {
+        ThemeCommands::Preview(ThemePreviewArgs { name: None }) => {
+            preview::run(runtime, session, ui)
+        }
         ThemeCommands::List => {
             let rows = theme_list_rows(&runtime.themes, &ui.render_settings.theme_name);
             let mut output = rows_to_output_result(rows);
@@ -42,12 +45,20 @@ pub(crate) fn run_theme_command(
                 .map(str::to_string)
                 .to_vec(),
             );
+            output.meta.render_recommendation = Some(RenderRecommendation::Format(
+                crate::core::output::OutputFormat::Table,
+            ));
             add_palette_styles(&mut output);
             Ok(CommandOutput::output(output, None))
         }
-        ThemeCommands::Use(ThemeUseArgs { name }) => {
+        ThemeCommands::Preview(ThemePreviewArgs { name: Some(name) })
+        | ThemeCommands::Use(ThemeUseArgs { name }) => {
             let selected = resolve_known_theme_name(&name, &runtime.themes)?;
-            config_overrides.replace_scoped("theme.name", selected.clone().into(), Scope::global());
+            session.config_overrides.replace_scoped(
+                "theme.name",
+                selected.clone().into(),
+                Scope::global(),
+            );
 
             let mut result = CommandOutput::exit(0);
             result
@@ -191,7 +202,6 @@ mod tests {
     use crate::app::CommandOutput;
     use crate::app::UiState;
     use crate::cli::{ThemeArgs, ThemeCommands};
-    use crate::config::ConfigLayer;
     use crate::core::output::OutputFormat;
     use crate::core::row::Row;
     use crate::ui::RenderSettings;
@@ -274,10 +284,10 @@ mod tests {
         );
         builder.themes = Some(themes);
         let state = builder.build();
-        let mut overrides = ConfigLayer::default();
+        let mut session = state.session;
 
         let result = run_theme_command(
-            &mut overrides,
+            &mut session,
             &state.runtime,
             &ui,
             ThemeArgs {
@@ -320,3 +330,5 @@ mod tests {
         assert_eq!(use_theme.args[0].suggestions[0].value, "nord");
     }
 }
+
+mod preview;

@@ -235,8 +235,8 @@ impl ReplScopeStack {
     /// scope.enter("theme");
     ///
     /// assert_eq!(
-    ///     scope.prefixed_tokens(&["show".to_string(), "dracula".to_string()]),
-    ///     vec!["theme".to_string(), "show".to_string(), "dracula".to_string()]
+    ///     scope.prefixed_tokens(&["use".to_string(), "dracula".to_string()]),
+    ///     vec!["theme".to_string(), "use".to_string(), "dracula".to_string()]
     /// );
     /// ```
     pub fn prefixed_tokens(&self, tokens: &[String]) -> Vec<String> {
@@ -897,10 +897,10 @@ mod tests {
         scope.enter("theme");
 
         assert_eq!(
-            scope.prefixed_tokens(&["show".to_string(), "dracula".to_string()]),
+            scope.prefixed_tokens(&["use".to_string(), "dracula".to_string()]),
             vec![
                 "theme".to_string(),
-                "show".to_string(),
+                "use".to_string(),
                 "dracula".to_string()
             ]
         );
