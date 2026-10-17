@@ -679,7 +679,15 @@ fn run_native_command(
         } else {
             ""
         };
-        eprintln!("→ {elevation}{line}");
+        let mut messages = crate::ui::messages::MessageBuffer::default();
+        messages.success(format!("→ {elevation}{line}"));
+        super::command_output::emit_messages_for_ui(
+            runtime.config.resolved(),
+            &input.invocation.ui,
+            &messages,
+            input.invocation.ui.verbosity,
+            &mut super::StdIoUiSink,
+        );
     }
     let progress_renderer = input.progress_sink.map(|sink| NativeProgressRenderer {
         config: runtime.config.resolved(),
@@ -1175,7 +1183,15 @@ fn run_external_plugin_command(
             .record_history(&state.session.native_context, command, args)
             .map_err(|e| miette!("{e:#}"))?
     {
-        eprintln!("→ {line}");
+        let mut messages = crate::ui::messages::MessageBuffer::default();
+        messages.success(format!("→ {line}"));
+        super::command_output::emit_messages_for_ui(
+            state.runtime.config.resolved(),
+            &invocation.ui,
+            &messages,
+            invocation.ui.verbosity,
+            &mut super::StdIoUiSink,
+        );
     }
     let args = resolution
         .as_ref()
