@@ -910,8 +910,21 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
                 _ => {}
             }
         }
-        for value in record.values_mut() {
-            shorten(value, limit, &mut total);
+        if let Some(columns) = &output.meta.display_columns {
+            // Hidden sections must not contribute to the visible row count.
+            let mut value = Value::Object(std::mem::take(record));
+            for column in columns {
+                if let Some(value) = display_path_mut(&mut value, column) {
+                    shorten(value, limit, &mut total);
+                }
+            }
+            if let Value::Object(fields) = value {
+                *record = fields;
+            }
+        } else {
+            for value in record.values_mut() {
+                shorten(value, limit, &mut total);
+            }
         }
     }
     (total > 0).then_some((limited, total))

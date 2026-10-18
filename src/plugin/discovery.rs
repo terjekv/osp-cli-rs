@@ -234,6 +234,17 @@ impl PluginManager {
 }
 
 fn executable_name(path: &Path) -> Option<String> {
+    let file = path.file_name()?.to_str()?;
+    #[cfg(windows)]
+    let file = file
+        .strip_suffix(".exe")
+        .or_else(|| file.strip_suffix(".cmd"))
+        .or_else(|| file.strip_suffix(".bat"))
+        .unwrap_or(file);
+    let name = file.strip_prefix("osp-")?;
+    if name.is_empty() || Path::new(name).extension().is_some() {
+        return None;
+    }
     if !path.is_file() {
         return None;
     }
@@ -244,13 +255,5 @@ fn executable_name(path: &Path) -> Option<String> {
             return None;
         }
     }
-    let file = path.file_name()?.to_str()?;
-    #[cfg(windows)]
-    let file = file
-        .strip_suffix(".exe")
-        .or_else(|| file.strip_suffix(".cmd"))
-        .or_else(|| file.strip_suffix(".bat"))
-        .unwrap_or(file);
-    let name = file.strip_prefix("osp-")?;
-    (!name.is_empty() && Path::new(name).extension().is_none()).then(|| name.to_string())
+    Some(name.to_string())
 }
