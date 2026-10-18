@@ -119,6 +119,8 @@ fn run_repl_cycle(
     );
 
     run_repl(cycle.run_config, |event, history| {
+        lifecycle::seed_native_context(&state.runtime, &state.session, &state.clients)
+            .map_err(|err| anyhow::anyhow!("{err:#}"))?;
         let line = match event {
             crate::repl::ReplEvent::Line(line) => line,
             crate::repl::ReplEvent::RootLine(line) => {

@@ -210,6 +210,7 @@ fn build_repl_cycle_run_config(
                 .map_err(|e| miette::miette!("{e:#}"))?;
         }
     }
+    seed_native_context(runtime, session, clients)?;
     let view = ReplViewContext::from_parts(runtime, session);
 
     let product_status =
@@ -292,6 +293,52 @@ pub(crate) fn build_cycle_chrome_output(
     }
     out.push_str(pending_output);
     out
+}
+
+/// Fill only absent selections, using the active identity and cached product data.
+pub(super) fn seed_native_context(
+    runtime: &AppRuntime,
+    session: &AppSession,
+    clients: &AppClients,
+) -> Result<()> {
+    session.native_context.activate(runtime);
+    let enabled = runtime
+        .config
+        .resolved()
+        .get_string_list("context.seed")
+        .unwrap_or_default();
+    if enabled.is_empty() {
+        return Ok(());
+    }
+    let identity = runtime
+        .access_policy()
+        .map(|policy| policy.effective_identity(runtime.config.resolved()))
+        .unwrap_or_default();
+    let mut changed = false;
+    for (entry, command) in crate::app::runtime::visible_native_commands(&runtime.auth, clients) {
+        let selected = session.native_context.for_service(entry.name);
+        for (kind, value) in command.context_seeds(runtime.config.resolved(), &identity) {
+            if enabled.contains(&kind)
+                && crate::context::KINDS.contains(&kind.as_str())
+                && crate::context::valid_value(&value)
+                && !session
+                    .native_context
+                    .context_entries()
+                    .iter()
+                    .any(|entry| entry.kind == kind)
+            {
+                selected.set_context_value(kind, value);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        session
+            .native_context
+            .save_context()
+            .map_err(|e| miette::miette!("{e:#}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

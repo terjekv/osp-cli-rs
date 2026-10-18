@@ -130,6 +130,12 @@ live only for the REPL process. Services may opt a kind into persistence: those
 entries load before the first prompt and are ignored by one-shot commands.
 `context` itself is REPL-only.
 
+`context.seed` defaults to `["account", "netgroup"]`; set it to `[]` to disable
+seeding. Native integrations may offer defaults through `context_seeds` using
+local identity or cached data. The host fills only empty kinds after loading
+persisted context, and checks again before commands so a background cache can
+arrive later. Selections remain scoped to the active identity and profile.
+
 ## Shell Scope
 
 Suggested commands match the current prompt. Inside `orch`, both `task …` and

@@ -886,6 +886,13 @@ pub trait NativeCommand: Send + Sync {
         &[]
     }
 
+    /// Offers local or cached defaults for empty REPL context kinds.
+    /// Called before prompts and commands; never fetch or wait for remote data.
+    /// The host applies `context.seed` and preserves existing selections.
+    fn context_seeds(&self, _config: &ResolvedConfig, _identity: &str) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
     /// Builds the plugin-protocol style description for this command.
     fn describe(&self) -> DescribeCommandV1 {
         let mut describe = DescribeCommandV1::from_clap(self.command());

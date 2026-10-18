@@ -63,6 +63,12 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: None,
             },
             BuiltinKey {
+                key: "context.seed",
+                schema: SchemaEntry::string_list()
+                    .with_doc("Context kinds seeded from cached session defaults; [] disables"),
+                default: Some(ConfigValue::from(vec!["account".into(), "netgroup".into()])),
+            },
+            BuiltinKey {
                 key: "user.name",
                 schema: SchemaEntry::string()
                     .with_doc("Short user name used in prompts and interpolation"),
