@@ -270,3 +270,26 @@ pub mod context;
 
 /// Daily background snapshots for native integrations.
 pub mod snapshot;
+
+/// Runs independent jobs on up to eight scoped threads, returning results in input order; panics propagate.
+pub fn parallel<T: Send, F: FnOnce() -> T + Send>(jobs: impl IntoIterator<Item = F>) -> Vec<T> {
+    std::thread::scope(|scope| {
+        let mut jobs = jobs.into_iter();
+        let mut results = Vec::new();
+        loop {
+            let handles = jobs
+                .by_ref()
+                .take(8)
+                .map(|job| scope.spawn(job))
+                .collect::<Vec<_>>();
+            if handles.is_empty() {
+                return results;
+            }
+            results.extend(handles.into_iter().map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            }));
+        }
+    })
+}

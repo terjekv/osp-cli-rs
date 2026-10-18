@@ -950,12 +950,12 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
 
     fn flush(&self) -> anyhow::Result<()> {
         if let Some(event) = self.pending.borrow_mut().take() {
-            if let Some(delay) = self
+            if self
                 .last_draw
                 .get()
-                .and_then(|last| std::time::Duration::from_millis(250).checked_sub(last.elapsed()))
+                .is_some_and(|last| last.elapsed() < std::time::Duration::from_millis(250))
             {
-                std::thread::sleep(delay);
+                return Ok(());
             }
             self.draw(event, self.stages, false)?;
             self.last_draw.set(Some(std::time::Instant::now()));
