@@ -205,7 +205,12 @@ Clipboard copy is opt-in:
 - `--copy` on supported commands
 - DSL `| Y`
 
-Copy rendering always uses the plain-safe path even when visible output is
+`| LESS` explicitly pages output and `| EDITOR` opens a temporary document.
+These sinks stack with `| Y` in any order, after all data verbs. With EDITOR,
+copying uses the edited text. REPL Alt+L, Alt+E and Alt+Y act on the last rendered
+command output without running it again; see [REPL.md](REPL.md#shortcuts-and-terminal-bells).
+
+Without EDITOR, copy rendering uses the plain-safe path even when visible output is
 rich. That is deliberate. Clipboard content should be stable, pasteable text,
 not ANSI-decorated terminal output.
 

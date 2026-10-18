@@ -21,6 +21,8 @@ pub enum ReplActionKey {
     Function(u8),
     /// Alt+Enter, which inserts a suggested command without submitting it.
     AltEnter,
+    /// Alt+L, Alt+E or Alt+Y for output actions.
+    Alt(char),
 }
 
 impl std::fmt::Display for ReplActionKey {
@@ -28,6 +30,7 @@ impl std::fmt::Display for ReplActionKey {
         match self {
             Self::Function(key) => write!(f, "F{key}"),
             Self::AltEnter => f.write_str("Alt+Enter"),
+            Self::Alt(key) => write!(f, "Alt+{}", key.to_ascii_uppercase()),
         }
     }
 }
@@ -58,12 +61,15 @@ impl ReplAction {
         let key = match key.map(|key| key.trim().to_ascii_lowercase()) {
             Some(key) if key == "none" => None,
             Some(key) if key == "alt+enter" => Some(ReplActionKey::AltEnter),
+            Some(key) if key == "alt+l" => Some(ReplActionKey::Alt('l')),
+            Some(key) if key == "alt+e" => Some(ReplActionKey::Alt('e')),
+            Some(key) if key == "alt+y" => Some(ReplActionKey::Alt('y')),
             Some(key) => Some(ReplActionKey::Function(
                 key.strip_prefix('f')
                     .and_then(|key| key.parse::<u8>().ok())
                     .filter(|key| (2..=12).contains(key))
                     .ok_or_else(|| {
-                        anyhow::anyhow!("repl.bindings.{id}: use F2..F12, Alt+Enter or none")
+                        anyhow::anyhow!("repl.bindings.{id}: use F2..F12, Alt+Enter, Alt+L, Alt+E, Alt+Y or none")
                     })?,
             )),
             None => Some(ReplActionKey::Function(default_key)),
@@ -72,6 +78,7 @@ impl ReplAction {
             key.is_none_or(|key| match key {
                 ReplActionKey::Function(key) => (2..=12).contains(&key),
                 ReplActionKey::AltEnter => true,
+                ReplActionKey::Alt(key) => matches!(key, 'l' | 'e' | 'y'),
             }),
             "unsupported action key"
         );

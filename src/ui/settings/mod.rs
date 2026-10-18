@@ -961,6 +961,8 @@ mod tests {
                 display_column_labels: None,
                 column_align: Vec::new(),
                 wants_copy: false,
+                wants_page: false,
+                wants_editor: false,
                 grouped: true,
                 document_rows: false,
                 document_entry_gap: None,

@@ -53,7 +53,17 @@ const VERBS: &[VerbInfo] = &[
     VerbInfo {
         verb: "Y",
         summary: "Mark output for copy",
-        help: "Y. Copy the current output. Example: P id | Y.",
+        help: "Y. Copy rendered output, or the text left after EDITOR closes. Sinks must follow data verbs and may be in any order. Example: P id | EDITOR | Y.",
+    },
+    VerbInfo {
+        verb: "LESS",
+        summary: "Page output",
+        help: "LESS. Page rendered output even when short, using $PAGER or less. Without a terminal, print normally. Example: P id | LESS | Y.",
+    },
+    VerbInfo {
+        verb: "EDITOR",
+        summary: "Open output in editor",
+        help: "EDITOR. Open rendered output in $VISUAL, $EDITOR or vi; wait, then delete the temporary file. Requires a terminal. Y copies the edited text. Example: P id | EDITOR | Y.",
     },
     VerbInfo {
         verb: "H",

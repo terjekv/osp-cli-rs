@@ -158,6 +158,28 @@ fn run_repl_cycle(
                     },
                 ));
             }
+            crate::repl::ReplEvent::Action(
+                id @ ("output.page" | "output.editor" | "output.copy"),
+            ) => {
+                let Some((text, format)) = &state.session.last_rendered_output else {
+                    return Ok(crate::repl::ReplResult::Print(
+                        "No previous output.\n".into(),
+                    ));
+                };
+                match id {
+                    "output.page" => {
+                        use crate::app::sink::UiSink;
+                        crate::app::sink::StdIoUiSink
+                            .write_stdout_paged(text, &crate::app::sink::pager_command());
+                    }
+                    "output.editor" => {
+                        crate::app::sink::edit_output(text, *format, true)
+                            .map_err(|err| anyhow::anyhow!("{err}"))?;
+                    }
+                    _ => crate::ui::clipboard::ClipboardService::new().copy_text(text)?,
+                }
+                return Ok(crate::repl::ReplResult::Continue);
+            }
             crate::repl::ReplEvent::Action(id) => {
                 return crate::app::external::run_repl_action(state, id)
                     .map_err(|err| anyhow::Error::from_boxed(err.into()));

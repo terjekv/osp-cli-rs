@@ -366,6 +366,11 @@ impl<'a> ProgressUiSink<'a> {
 }
 
 impl UiSink for ProgressUiSink<'_> {
+    fn write_stdout_paged(&mut self, text: &str, pager: &str) {
+        self.clear_progress();
+        self.inner.write_stdout_paged(text, pager);
+    }
+
     fn write_stdout(&mut self, text: &str) {
         self.inner.write_stdout(text);
     }
@@ -495,4 +500,79 @@ pub(crate) fn write_diagnostics(
         }
     }
     sink.write_stderr(&rendered);
+}
+
+/// Pager command shared by automatic paging, explicit sinks and REPL actions.
+pub(crate) fn pager_command() -> String {
+    std::env::var("PAGER")
+        .ok()
+        .filter(|pager| !pager.trim().is_empty())
+        .unwrap_or_else(|| "less -R".to_string())
+}
+
+/// Removes terminal styling while retaining delimited output's tabs.
+pub(crate) fn plain_output(text: &str) -> String {
+    text.split('\t')
+        .map(crate::ui::sanitize_human_text)
+        .collect::<Vec<_>>()
+        .join("\t")
+}
+
+/// Opens a private temporary document and waits; only pipeline editors return edits.
+pub(crate) fn edit_output(
+    text: &str,
+    format: crate::core::output::OutputFormat,
+    read_only: bool,
+) -> miette::Result<String> {
+    use miette::{IntoDiagnostic, WrapErr, miette};
+    if !(io::stdin().is_terminal() && io::stdout().is_terminal()) {
+        return Err(miette!("EDITOR requires an interactive terminal"));
+    }
+    let extension = match format {
+        crate::core::output::OutputFormat::Json => ".json",
+        _ => ".txt",
+    };
+    let mut file = tempfile::Builder::new()
+        .prefix("osp-output-")
+        .suffix(extension)
+        .tempfile()
+        .into_diagnostic()
+        .wrap_err("failed to create editor document")?;
+    file.write_all(plain_output(text).as_bytes())
+        .into_diagnostic()?;
+    file.flush().into_diagnostic()?;
+    if read_only {
+        let mut permissions = file.as_file().metadata().into_diagnostic()?.permissions();
+        permissions.set_readonly(true);
+        file.as_file()
+            .set_permissions(permissions)
+            .into_diagnostic()?;
+    }
+    let editor = ["VISUAL", "EDITOR"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "vi".to_string());
+    let words = shell_words::split(&editor)
+        .into_diagnostic()
+        .wrap_err("invalid editor command")?;
+    let (program, args) = words
+        .split_first()
+        .ok_or_else(|| miette!("empty editor command"))?;
+    let status = Command::new(program)
+        .args(args)
+        .arg(file.path())
+        .status()
+        .into_diagnostic()
+        .wrap_err("failed to open editor")?;
+    if !status.success() {
+        return Err(miette!("editor exited with {status}"));
+    }
+    if read_only {
+        Ok(String::new())
+    } else {
+        std::fs::read_to_string(file.path())
+            .into_diagnostic()
+            .wrap_err("failed to read edited output")
+    }
 }

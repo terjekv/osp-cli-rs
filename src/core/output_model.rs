@@ -195,6 +195,10 @@ pub struct OutputMeta {
     pub column_align: Vec<ColumnAlignment>,
     /// Whether the result should be easy to copy as plain text.
     pub wants_copy: bool,
+    /// Explicitly page rendered output, regardless of its length.
+    pub wants_page: bool,
+    /// Open rendered output in an editor before any copy sink.
+    pub wants_editor: bool,
     /// Whether the payload represents grouped data, including collections inside
     /// a semantic document. Pipeline continuations preserve this identity;
     /// service field names alone must never set it.

@@ -91,7 +91,9 @@ distinct addresses.
 | `L` | `L count [offset]`; negative count selects the tail | `L 10 20`, `L -5` |
 | `Z` | Collapse group headers/aggregates into summary rows | `G provider \| A count \| Z` |
 | `C` | Count the current selection | `F stale=true \| C` |
-| `Y` | Mark output for copying | `P id \| Y` |
+| `Y` | Copy output (after editing when combined with EDITOR) | `P id \| Y` |
+| `LESS` | Page rendered output, even when short | `P id \| LESS` |
+| `EDITOR` | Open rendered output in an editor | `P id \| EDITOR \| Y` |
 | `H` | `H [verb]`; show syntax and examples | `H S` |
 | `V` | Value-only quick search | `V running` |
 | `K` | Key-only quick search | `K requester` |
@@ -100,6 +102,17 @@ distinct addresses.
 | `U` | `U field`; unroll a list while retaining parent data | `U contacts` |
 | `JQ` | Run a quoted jq expression | `JQ '.[] \| .id'` |
 | `VALUE` / `VAL` | Extract selected fields as value rows; no operand extracts all | `VALUE status.name` |
+
+`--value` and `VALUE`/`VAL` render one entry per line; JSON remains an array.
+
+`LESS`, `EDITOR` and `Y` must follow all data verbs. They may appear in any
+order. `LESS` uses `$PAGER` or `less -R`, overriding the automatic length check
+and `ui.pager=never`; without a terminal it prints normally. `EDITOR` requires
+an interactive terminal and uses `$VISUAL`, then `$EDITOR`, then `vi`. The host
+waits for it to close and deletes the private temporary file (`.json` for JSON,
+`.txt` for other supported formats), including on failure. `Y` copies the text
+left in the editor, regardless of sink order. Paging shows the rendered command
+output; editor changes only feed copying.
 
 The existing `VAL` spelling remains supported. No new verb synonyms are added.
 Verbs are case-insensitive. An unknown single-letter verb is an error;

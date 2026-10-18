@@ -1950,6 +1950,9 @@ fn adapt_dynamic_value_for_schema(
             Some(&[
                 "none",
                 "alt+enter",
+                "alt+l",
+                "alt+e",
+                "alt+y",
                 "f2",
                 "f3",
                 "f4",

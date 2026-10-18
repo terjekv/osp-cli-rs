@@ -83,9 +83,17 @@ pub fn apply_pipeline(rows: Vec<Row>, stages: &[String]) -> Result<OutputResult>
 /// ```
 pub fn apply_output_pipeline(output: OutputResult, stages: &[String]) -> Result<OutputResult> {
     let mut output = output;
+    let mut sinks = false;
     for stage in stages {
         let stages = resolve_stage_keys(&output, std::slice::from_ref(stage))?;
         let compiled = CompiledPipeline::from_parsed(parse_stage_list(&stages)?)?;
+        for stage in &compiled.stages {
+            if stage.is_sink() {
+                sinks = true;
+            } else {
+                anyhow::ensure!(!sinks, "LESS, EDITOR and Y must follow all data verbs");
+            }
+        }
         output = run_compiled(output, &compiled)?;
     }
     Ok(output)
@@ -286,6 +294,8 @@ pub(crate) fn run_compiled(
         // Once a real stage runs, only the transformed rows may be shown.
         output.meta.display_limit = None;
         output.meta.wants_copy |= matches!(stage, CompiledStage::Copy);
+        output.meta.wants_page |= matches!(stage, CompiledStage::Page);
+        output.meta.wants_editor |= matches!(stage, CompiledStage::Editor);
         let narrows = stage.quick_plan().is_some_and(|plan| {
             rows.partitions
                 .iter()
@@ -342,7 +352,7 @@ pub(crate) fn apply_stage(items: RowSet, stage: &CompiledStage) -> Result<RowSet
         CompiledStage::Aggregate(plan) => aggregate::apply_set(items, plan),
         CompiledStage::Collapse => collapse::apply_set(items),
         CompiledStage::CountMacro => aggregate::count_set(items),
-        CompiledStage::Copy => Ok(items),
+        CompiledStage::Copy | CompiledStage::Page | CompiledStage::Editor => Ok(items),
         CompiledStage::Clean => items.map_rows(|rows| Ok(question::clean_rows(rows))),
         CompiledStage::Jq(expr) => jq::apply_set(items, expr),
         CompiledStage::Quick(_)

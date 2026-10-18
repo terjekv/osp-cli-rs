@@ -171,6 +171,23 @@ pub(crate) fn resolved_product_actions(
         hint.key = Some(crate::repl::ReplActionKey::AltEnter);
     }
     actions.push(hint);
+    for (id, label, key) in [
+        ("output.page", "Page last output", 'l'),
+        ("output.editor", "View last output in editor", 'e'),
+        ("output.copy", "Copy last output", 'y'),
+    ] {
+        let mut action = crate::repl::ReplAction::resolve(id, label, 2, runtime.config.resolved())
+            .map_err(|e| miette::miette!("{e:#}"))?;
+        if runtime
+            .config
+            .resolved()
+            .get_string(&format!("repl.bindings.{id}"))
+            .is_none()
+        {
+            action.key = Some(crate::repl::ReplActionKey::Alt(key));
+        }
+        actions.push(action);
+    }
     for (_, command) in crate::app::runtime::visible_native_commands(&runtime.auth, clients) {
         actions.extend(
             command

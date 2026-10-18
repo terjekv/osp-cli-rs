@@ -29,6 +29,8 @@ pub(crate) enum CompiledStage {
     Collapse,
     CountMacro,
     Copy,
+    Page,
+    Editor,
     Unroll(unroll::UnrollPlan),
     Clean,
     Question(quick::QuickPlan),
@@ -95,7 +97,16 @@ impl CompiledStage {
                     }
                     Ok(Self::CountMacro)
                 }
-                "Y" => Ok(Self::Copy),
+                "Y" | "LESS" | "EDITOR" => {
+                    if !stage.spec.trim().is_empty() {
+                        return Err(anyhow!("{} takes no arguments", stage.verb));
+                    }
+                    Ok(match stage.verb.as_str() {
+                        "LESS" => Self::Page,
+                        "EDITOR" => Self::Editor,
+                        _ => Self::Copy,
+                    })
+                }
                 "U" => Ok(Self::Unroll(unroll::compile(&stage.spec)?)),
                 "?" => {
                     let trimmed = stage.spec.trim();
@@ -128,11 +139,17 @@ impl CompiledStage {
         }
     }
 
+    pub(crate) fn is_sink(&self) -> bool {
+        matches!(self, Self::Copy | Self::Page | Self::Editor)
+    }
+
     pub(crate) fn behavior(&self) -> StageBehavior {
         match self {
             Self::Quick(_)
             | Self::Filter(_)
             | Self::Copy
+            | Self::Page
+            | Self::Editor
             | Self::Question(_)
             | Self::ValueQuick(_)
             | Self::KeyQuick(_) => StageBehavior {

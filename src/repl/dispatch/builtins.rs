@@ -522,6 +522,10 @@ fn execute_last_result_builtin(
         &stages,
         Some(sink),
     )?;
+    session.last_rendered_output = Some((
+        crate::app::sink::plain_output(&rendered),
+        last.output.output_format(&invocation.ui.render_settings),
+    ));
     Ok(ReplResult::Print(rendered))
 }
 

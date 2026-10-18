@@ -58,6 +58,8 @@ pub(crate) fn plugin_data_to_output_result(
                 })
                 .unwrap_or_default(),
             wants_copy: false,
+            wants_page: false,
+            wants_editor: false,
             grouped: false,
             document_rows: false,
             document_entry_gap: None,
@@ -451,6 +453,8 @@ mod tests {
                 display_column_labels: None,
                 column_align: Vec::new(),
                 wants_copy: false,
+                wants_page: false,
+                wants_editor: false,
                 grouped: true,
                 document_rows: false,
                 document_entry_gap: None,

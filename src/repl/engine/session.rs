@@ -81,14 +81,18 @@ where
     if submission.exit_on_interrupt {
         bindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::CtrlD);
     }
+    let mut action_keys = std::collections::HashSet::new();
     for action in &actions {
         if let Some(key) = action.key {
             let (modifiers, code) = match key {
                 crate::repl::ReplActionKey::Function(key) => (KeyModifiers::NONE, KeyCode::F(key)),
                 crate::repl::ReplActionKey::AltEnter => (KeyModifiers::ALT, KeyCode::Enter),
+                crate::repl::ReplActionKey::Alt(key) => (KeyModifiers::ALT, KeyCode::Char(key)),
             };
             anyhow::ensure!(
-                bindings.find_binding(modifiers, code).is_none(),
+                action_keys.insert((modifiers, code))
+                    && (matches!(key, crate::repl::ReplActionKey::Alt(_))
+                        || bindings.find_binding(modifiers, code).is_none()),
                 "conflicting action key {key}"
             );
             bindings.add_binding(

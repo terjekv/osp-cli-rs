@@ -337,6 +337,19 @@ osp --format json --render-mode plain plugins list
 Products choose named actions and bindings; basic and JSON sessions omit product
 shortcuts. See [EMBEDDING.md](EMBEDDING.md#repl-product-hooks) for the host API.
 
+The `last` result cache retains data stages, without repeating output sinks.
+
+Alt+L pages the last rendered command output, Alt+E opens a read-only temporary
+copy in `$VISUAL` / `$EDITOR` / `vi`, and Alt+Y copies it. These actions never
+execute the command or pipeline again; editor changes are discarded. Before
+any output is available they show a brief hint. Alt+L and Alt+Y replace the
+editor's downcase-word and yank-pop bindings.
+
+Configure `repl.bindings.output.page`, `repl.bindings.output.editor` and
+`repl.bindings.output.copy` with F2–F12, Alt+Enter, Alt+L, Alt+E, Alt+Y or `none`.
+The output shortcuts are available in interactive sessions; basic and JSON
+sessions omit shortcuts as above.
+
 ### Terminal bells
 
 `repl.notifications.sound = "off" | "bell"` is the master policy (library default
@@ -391,7 +404,7 @@ and positional/value completion entries are excluded.
 Alt+Enter inserts the command from the most recent structured `hint: Run …`
 into the input line. Press Enter to execute, or edit it first. The command is
 formatted for the current shell. Set `repl.bindings.hint.insert` to `Alt+Enter`
-(the default), `F2` through `F12`, or `none`; duplicate bindings are rejected.
+(the default), `F2` through `F12`, `Alt+L`, `Alt+E`, `Alt+Y`, or `none`; duplicate bindings are rejected.
 Hints without a command do not replace the remembered command. Native commands
 produce hints with `NativeCommandContext::run_hint`; `CommandScope::run_hint`
 retains recovery commands in errors. No terminal text is scraped.

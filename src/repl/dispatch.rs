@@ -169,6 +169,33 @@ pub(crate) fn execute_repl_plugin_line(
     line: &str,
     sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
+    let previous = state.session.last_rendered_output.take();
+    let result = execute_recorded_repl_line(state, history, line, sink);
+    if state.session.last_rendered_output.is_none() {
+        state.session.last_rendered_output = match &result {
+            Ok(executed) => match &executed.result {
+                ReplResult::Print(text) | ReplResult::Restart { output: text, .. }
+                    if !text.is_empty() =>
+                {
+                    Some((
+                        crate::app::sink::plain_output(text),
+                        state.runtime.ui.render_settings.format,
+                    ))
+                }
+                _ => previous,
+            },
+            Err(_) => previous,
+        };
+    }
+    result
+}
+
+fn execute_recorded_repl_line(
+    state: &mut crate::app::AppState,
+    history: &SharedHistory,
+    line: &str,
+    sink: Option<&mut dyn UiSink>,
+) -> Result<ExecutedReplLine> {
     let recording = state.session.recording.clone();
     let Some((_scope, capture)) = recording.enter(line, state.runtime.config.resolved()) else {
         return execute_repl_line_inner(state, history, line, sink);

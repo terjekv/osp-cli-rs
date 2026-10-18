@@ -294,6 +294,8 @@ pub(crate) struct AppSession {
     pub scope: ReplScopeStack,
     /// Raw output plus pipeline stages from the most recent successful REPL command.
     pub(crate) last_success: Option<LastSuccess>,
+    /// Last rendered command document and its format, without running replay stages.
+    pub(crate) last_rendered_output: Option<(String, crate::core::output::OutputFormat)>,
     /// Summary of the most recent failed REPL command.
     pub last_failure: Option<LastFailure>,
     /// Session-scoped config overrides layered above persisted config.
@@ -491,7 +493,16 @@ impl AppSession {
         }
         self.last_success = Some(LastSuccess {
             output: std::sync::Arc::new(output),
-            stages: stages.to_vec(),
+            stages: stages
+                .iter()
+                .filter(|stage| {
+                    !matches!(
+                        stage.trim().to_ascii_uppercase().as_str(),
+                        "Y" | "LESS" | "EDITOR"
+                    )
+                })
+                .cloned()
+                .collect(),
         });
     }
 
@@ -597,6 +608,7 @@ impl Default for AppSession {
             startup_prompt_timing_pending: true,
             scope: ReplScopeStack::default(),
             last_success: None,
+            last_rendered_output: None,
             last_failure: None,
             config_overrides: ConfigLayer::default(),
         }

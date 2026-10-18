@@ -469,7 +469,7 @@ running an interactive login hook. Actions bypass user history, alias expansion,
 shell navigation, last-command expansion and pagination reset. The same editor
 retains its draft and byte cursor across normal return, cancellation and errors.
 
-Bindings accept F2–F12, Alt+Enter or `none`; duplicate bindings are rejected.
+Bindings accept F2–F12, Alt+Enter, Alt+L, Alt+E, Alt+Y or `none`; duplicate action bindings are rejected. Alt letter bindings override the editor defaults.
 Products supply a default and a human label. Basic and JSON
 sessions have no product shortcuts. Existing Ctrl+R, Ctrl+L and pagination keys
 keep their meanings.
