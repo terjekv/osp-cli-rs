@@ -1209,7 +1209,6 @@ impl NativeCommandRegistry {
     fn catalog_with_completion(&self, augment_completion: bool) -> Vec<CommandCatalogEntry> {
         self.commands
             .values()
-            .filter(|command| !augment_completion || !command.command().is_hide_set())
             .map(|command| {
                 let mut describe = command.describe();
                 describe.inherit_auth_from_parents();
@@ -1217,6 +1216,7 @@ impl NativeCommandRegistry {
                 if augment_completion {
                     command.augment_completion(&mut completion);
                     attach_word_resolvers(&mut completion, &command.command(), command, &[]);
+                    completion.hidden = command.command().is_hide_set();
                 }
                 CommandCatalogEntry {
                     name: completion.name.clone(),

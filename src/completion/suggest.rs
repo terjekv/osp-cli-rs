@@ -466,6 +466,7 @@ impl SuggestionEngine {
         let stub_lc = fold_case(stub);
         node.children
             .iter()
+            .filter(|(_, child)| !child.hidden)
             .filter_map(|(name, child)| {
                 let score = self.match_score(&stub_lc, name)?;
                 Some(Suggestion {

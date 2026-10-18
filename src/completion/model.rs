@@ -559,6 +559,8 @@ pub struct CompletionNode {
     pub sort: Option<String>,
     /// Whether an exact token should commit scope even without a trailing delimiter.
     pub exact_token_commits: bool,
+    /// Callable and recognized, but never suggested.
+    pub hidden: bool,
     /// This node expects the next token to be a key chosen from `children`.
     pub value_key: bool,
     /// This node is itself a terminal value that can be suggested/accepted.

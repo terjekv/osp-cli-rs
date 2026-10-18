@@ -45,7 +45,7 @@ fn collect_help_paths(
     prefix: &str,
     rows: &mut Vec<crate::core::row::Row>,
 ) {
-    if spec.value_key || spec.value_leaf {
+    if spec.value_key || spec.value_leaf || spec.hidden {
         return;
     }
     let path = format!("{prefix}{}", spec.name);

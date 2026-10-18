@@ -84,6 +84,7 @@ pub(crate) fn build_repl_surface(
 
     let mut overview_entries = specs
         .iter()
+        .filter(|spec| !spec.hidden)
         .filter_map(|spec| {
             let summary = match spec.name.as_str() {
                 "quit" => return None,
