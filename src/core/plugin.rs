@@ -506,6 +506,9 @@ pub struct ResponseMetaV1 {
     /// itself their stable machine contract.
     #[serde(default)]
     pub preserve_json_document: bool,
+    /// Human-only notes after the result; absent from JSON and DSL data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_notes: Vec<String>,
     /// Native-only human supplements, rendered on stderr without changing payload data.
     #[serde(skip)]
     pub detail_columns: Vec<String>,

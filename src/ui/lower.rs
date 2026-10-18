@@ -45,7 +45,11 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         .display_columns
         .as_ref()
         .is_some_and(|columns| !columns.is_empty());
-    if plan.format != OutputFormat::Json && is_empty && !declared_empty_table {
+    if plan.format != OutputFormat::Json
+        && is_empty
+        && !declared_empty_table
+        && output.meta.display_notes.is_empty()
+    {
         return Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
                 text: "No results.".to_string(),
@@ -954,6 +958,7 @@ pub(crate) fn json_value(output: &OutputResult) -> Value {
 
 fn lower_table_doc(output: &OutputResult) -> Doc {
     match &output.items {
+        OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
         OutputItems::Rows(rows) => Doc {
             blocks: vec![Block::Table(table_from_rows(
                 rows,

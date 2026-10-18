@@ -171,6 +171,7 @@ impl NativeCommand for TestNativeCommand {
             meta: ResponseMetaV1 {
                 context_not_found: false,
                 detail_columns: Vec::new(),
+                display_notes: Vec::new(),
                 context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["command".to_string(), "args".to_string()]),

@@ -34,7 +34,9 @@ pub(crate) fn plugin_data_to_output_result(
         items: OutputItems::Rows(rows),
         document,
         meta: OutputMeta {
-            display_notes: Vec::new(),
+            display_notes: meta
+                .map(|meta| meta.display_notes.clone())
+                .unwrap_or_default(),
             context: meta.map(|m| m.context.clone()).unwrap_or_default(),
             key_index,
             display_columns: meta.and_then(|meta| meta.columns.clone()),
@@ -101,6 +103,7 @@ mod tests {
             Some(&ResponseMetaV1 {
                 context_not_found: false,
                 detail_columns: Vec::new(),
+                display_notes: Vec::new(),
                 context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec!["name".to_string(), "count".to_string()]),
@@ -130,6 +133,7 @@ mod tests {
             Some(&ResponseMetaV1 {
                 context_not_found: false,
                 detail_columns: Vec::new(),
+                display_notes: Vec::new(),
                 context: Default::default(),
                 format_hint: Some("table".to_string()),
                 columns: Some(vec![

@@ -1486,6 +1486,7 @@ mod tests {
                         meta: ResponseMetaV1 {
                             context_not_found: false,
                             detail_columns: Vec::new(),
+                            display_notes: Vec::new(),
                             context: Default::default(),
                             format_hint: Some("json".to_string()),
                             columns: None,
@@ -1610,6 +1611,7 @@ mod tests {
                 meta: ResponseMetaV1 {
                     context_not_found: false,
                     detail_columns: Vec::new(),
+                    display_notes: Vec::new(),
                     context: Default::default(),
                     format_hint: Some("json".to_string()),
                     columns: None,
@@ -1792,6 +1794,7 @@ mod tests {
             meta: ResponseMetaV1 {
                 context_not_found: false,
                 detail_columns: Vec::new(),
+                display_notes: Vec::new(),
                 context: Default::default(),
                 format_hint: Some("json".to_string()),
                 columns: None,
