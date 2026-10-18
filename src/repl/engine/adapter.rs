@@ -42,6 +42,10 @@ impl ReplCompleter {
         self
     }
 
+    pub(crate) fn command_prefixes_enabled(&self) -> bool {
+        self.command_prefixes
+    }
+
     pub(crate) fn with_history(mut self, history: SharedHistory) -> Self {
         self.history = Some(history);
         self

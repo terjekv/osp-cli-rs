@@ -251,7 +251,6 @@ fn build_repl_hinter(
 ) -> ReplHinter {
     let color = |spec: &Option<String>| spec.as_deref().and_then(color_from_style_spec);
     let error_color = color(&appearance.error_highlight_style).unwrap_or(Color::Red);
-    let error_style = appearance.ansi_colors.then(|| Style::new().fg(error_color));
     ReplHinter::new(
         ReplCompleter::new(tree.clone(), line_projector.clone())
             .with_command_prefixes(appearance.command_prefixes)
@@ -260,8 +259,8 @@ fn build_repl_hinter(
             .with_command_prefixes(appearance.command_prefixes),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),
-        error_style,
     )
+    .with_command_limit(appearance.command_hint_limit)
 }
 
 fn build_repl_keybindings() -> reedline::Keybindings {

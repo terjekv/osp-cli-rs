@@ -267,6 +267,8 @@ Useful REPL config keys:
 - `repl.input_mode`
 - `command.prefixes`
   - `off | interactive | always`; see [COMPLETION.md](COMPLETION.md)
+- `repl.hint.command_limit`
+  - Maximum names in typing hints, default `3`; `0` hides multiple-match lists.
 - `repl.tab_mode`
   - `tab | always | after_<n>_letters`; see [COMPLETION.md](COMPLETION.md)
 

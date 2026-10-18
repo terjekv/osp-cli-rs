@@ -303,6 +303,12 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("interactive")),
             },
             BuiltinKey {
+                key: "repl.hint.command_limit",
+                schema: SchemaEntry::integer()
+                    .with_doc("Maximum command names in typing hints; zero or less hides lists"),
+                default: Some(ConfigValue::from(3)),
+            },
+            BuiltinKey {
                 key: "repl.tab_mode",
                 schema: SchemaEntry::string().with_doc(
                     "When typing opens the REPL completion menu: tab, always, or after_<n>_letters",

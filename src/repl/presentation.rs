@@ -488,6 +488,15 @@ pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance
         .with_command_prefixes(
             crate::command_words::CommandPrefixes::from_config(view.config).enabled(true),
         )
+        .with_command_hint_limit(
+            view.config
+                .get("repl.hint.command_limit")
+                .and_then(|value| match value.reveal() {
+                    ConfigValue::Integer(value) => usize::try_from((*value).max(0)).ok(),
+                    _ => None,
+                })
+                .unwrap_or(3),
+        )
         .with_history_menu_rows(history_menu_rows);
     if !resolved.color {
         return appearance.build();

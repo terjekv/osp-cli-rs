@@ -3,10 +3,10 @@
 //! reedline paints a hinter's output right after the input line, so one
 //! hinter carries both pieces: muted text that would complete the line
 //! (accepted with Right or End, one word with Alt-Right) and, on the line
-//! below, what the word at the cursor means or what is wrong with the line.
-//! While a command's positional usage is shown, its description takes one more
-//! line above the usage, whatever the terminal width, so the hint height stays
-//! stable while the arguments are typed.
+//! below, guidance for the command or argument at the cursor.
+//! A unique command shows its canonical usage and description on one line.
+//! While arguments are being entered, the full positional usage retains its
+//! description above it.
 //! reedline hides hints while a menu is open and when a line is submitted, so
 //! neither reaches the scrollback.
 //!
@@ -20,17 +20,16 @@ use unicode_width::UnicodeWidthStr;
 
 use super::adapter::ReplCompleter;
 use super::editor::PaintedLine;
-use crate::completion::CompletionRequest;
-use crate::repl::highlight::{LineProblem, LineProblemKind, ReplHighlighter};
+use crate::completion::{CompletionAnalysis, CompletionRequest};
+use crate::repl::highlight::ReplHighlighter;
 
 /// The hint lines below the input.
 struct Status {
     /// The command's description, on its own line above `text`.
     description: Option<String>,
     text: String,
-    problem: bool,
-    /// Byte range of `text` naming the slot at the cursor.
-    active: Option<Range<usize>>,
+    /// Byte ranges to emphasize after measuring and cropping plain text.
+    bold: Vec<Range<usize>>,
 }
 
 impl Status {
@@ -38,8 +37,7 @@ impl Status {
         Self {
             description: None,
             text,
-            problem: false,
-            active: None,
+            bold: Vec::new(),
         }
     }
 }
@@ -50,7 +48,7 @@ pub(crate) struct ReplHinter {
     painted: PaintedLine,
     // `None` turns the inline suggestion off; unstyled it would look typed.
     style: Option<Style>,
-    error_style: Option<Style>,
+    command_limit: usize,
     inline: String,
 }
 
@@ -60,14 +58,13 @@ impl ReplHinter {
         highlighter: ReplHighlighter,
         painted: PaintedLine,
         style: Option<Style>,
-        error_style: Option<Style>,
     ) -> Self {
         Self {
             completer,
             highlighter,
             painted,
             style,
-            error_style,
+            command_limit: 3,
             inline: String::new(),
         }
     }
@@ -107,15 +104,60 @@ impl ReplHinter {
         if let Some(expanded) = self.completer.expand_bang_request(line) {
             return Some(Status::line(expanded));
         }
-        if let Some(problem) = self.highlighter.problem(line, pos) {
-            return Some(Status {
-                problem: true,
-                ..Status::line(self.describe_problem(line, &problem))
-            });
-        }
-
         let analysis = self.completer.analyze(line, pos);
         let engine = self.completer.engine();
+        if let Some(names) = self.command_matches(&analysis) {
+            if names.len() == 1 {
+                let name = &names[0];
+                let canonical = analysis
+                    .context
+                    .matched_path
+                    .iter()
+                    .map(String::as_str)
+                    .chain(std::iter::once(name.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    + " ";
+                let selected = engine.analyze(&canonical, canonical.len());
+                let path = &selected.context.matched_path;
+                let node = engine.node_at(path)?;
+                let (mut text, active) = engine
+                    .positional_usage(&selected)
+                    .unwrap_or_else(|| (path.join(" "), None));
+                if let Some(description) = node
+                    .tooltip
+                    .as_deref()
+                    .filter(|text| !text.trim().is_empty())
+                {
+                    text.push_str("  ");
+                    text.push_str(description);
+                }
+                return Some(Status {
+                    bold: active.into_iter().collect(),
+                    ..Status::line(text)
+                });
+            }
+            if names.len() < 2 || names.len() > self.command_limit {
+                return None;
+            }
+            let mut status = Status::line(String::new());
+            for name in names {
+                if !status.text.is_empty() {
+                    status.text.push_str("  ");
+                }
+                let start = status.text.len();
+                status.text.push_str(&name);
+                if self.completer.command_prefixes_enabled()
+                    && let Some(len) = engine.command_prefix_len(&analysis, &name)
+                {
+                    status.bold.push(start..start + len);
+                }
+            }
+            return Some(status);
+        }
+        if self.highlighter.problem(line, pos).is_some() {
+            return None;
+        }
         if !matches!(analysis.request, CompletionRequest::FlagValues { .. })
             && let Some((usage, active)) = engine.positional_usage(&analysis)
         {
@@ -125,7 +167,7 @@ impl ReplHinter {
                 .filter(|tooltip| !tooltip.trim().is_empty());
             return Some(Status {
                 description,
-                active,
+                bold: active.into_iter().collect(),
                 ..Status::line(usage)
             });
         }
@@ -167,64 +209,47 @@ impl ReplHinter {
         Some(Status::line(status))
     }
 
-    fn describe_problem(&mut self, line: &str, problem: &LineProblem) -> String {
-        let word = line.get(problem.start..problem.end).unwrap_or_default();
-        let path = match &problem.kind {
-            LineProblemKind::UnknownCommand { parent } => parent,
-            LineProblemKind::UnknownFlag { command } => command,
+    pub(crate) fn with_command_limit(mut self, limit: usize) -> Self {
+        self.command_limit = limit;
+        self
+    }
+
+    fn command_matches(&self, analysis: &CompletionAnalysis) -> Option<Vec<String>> {
+        let CompletionRequest::Positionals {
+            context_path,
+            show_subcommands: true,
+            ..
+        } = &analysis.request
+        else {
+            return None;
         };
-        let scope = self
-            .completer
-            .engine()
-            .node_at(&[])
-            .map(|root| root.name.as_str())
-            .unwrap_or_default();
-        let display_path = std::iter::once(scope)
-            .chain(path.iter().map(String::as_str))
-            .filter(|word| !word.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut message = match &problem.kind {
-            LineProblemKind::UnknownCommand { .. } if display_path.is_empty() => {
-                format!("unknown command '{word}'")
-            }
-            LineProblemKind::UnknownCommand { parent }
-                if self.completer.engine().node_at(parent).is_some_and(|node| {
-                    node.children
-                        .values()
-                        .any(|child| child.value_key || child.value_leaf)
-                }) =>
-            {
-                if parent.first().is_some_and(|command| command == "config") {
-                    format!("unknown config key '{word}'")
-                } else {
-                    format!("unknown value '{word}' for '{}'", display_path)
-                }
-            }
-            LineProblemKind::UnknownCommand { .. } => {
-                format!("unknown command '{word}' for '{}'", display_path)
-            }
-            LineProblemKind::UnknownFlag { .. } if display_path.is_empty() => {
-                format!("unknown flag '{word}'")
-            }
-            LineProblemKind::UnknownFlag { .. } => {
-                format!("unknown flag '{word}' for '{}'", display_path)
-            }
-        };
-        // The completer's fuzzy rescue ranks the closest real word first.
-        let prefix = line.get(..problem.end).unwrap_or(line);
-        let flag_name = word.split_once('=').map_or(word, |(name, _)| name);
-        if let Some(closest) = self
-            .completer
-            .complete(prefix, prefix.len())
-            .suggestions()
-            .iter()
-            .map(|suggestion| suggestion.value.clone())
-            .find(|value| value != flag_name)
+        let node = self.completer.engine().node_at(context_path)?;
+        if node.value_key
+            || node.value_leaf
+            || !node
+                .children
+                .values()
+                .any(|child| !child.value_key && !child.value_leaf)
         {
-            message.push_str(&format!("; did you mean '{closest}'?"));
+            return None;
         }
-        message
+        if let Some(child) = node.children.get(&analysis.cursor.token_stub)
+            && !child.value_key
+            && !child.value_leaf
+        {
+            return Some(vec![analysis.cursor.token_stub.clone()]);
+        }
+        Some(
+            node.children
+                .iter()
+                .filter(|(name, child)| {
+                    !child.value_key
+                        && !child.value_leaf
+                        && name.starts_with(&analysis.cursor.token_stub)
+                })
+                .map(|(name, _)| name.clone())
+                .collect(),
+        )
     }
 }
 
@@ -243,7 +268,22 @@ impl Hinter for ReplHinter {
         } else {
             self.completer.complete(line, pos).suggestions().to_vec()
         };
-        self.inline = if use_ansi_coloring
+        let analysis = self.completer.analyze(line, pos);
+        let command_matches = self.command_matches(&analysis);
+        let command_valid = command_matches
+            .as_ref()
+            .is_none_or(|names| names.len() == 1)
+            && self.highlighter.problem(line, pos).is_none();
+        let candidates = if let Some(names) = &command_matches {
+            candidates
+                .into_iter()
+                .filter(|candidate| names.contains(&candidate.value))
+                .collect::<Vec<_>>()
+        } else {
+            candidates
+        };
+        self.inline = if command_valid
+            && use_ansi_coloring
             && self.style.is_some()
             && pos == line.len()
             && !line.trim().is_empty()
@@ -261,15 +301,10 @@ impl Hinter for ReplHinter {
         if let Some(Status {
             description,
             text: status,
-            problem,
-            active,
+            bold,
         }) = self.status(line, pos, &candidates)
         {
-            let style = if problem {
-                self.error_style
-            } else {
-                self.style
-            };
+            let style = self.style;
             // Reedline's CRLF normalization drops the text after a leading LF.
             if let Some(description) = description {
                 out.push_str("\r\n");
@@ -277,20 +312,23 @@ impl Hinter for ReplHinter {
             }
             out.push_str("\r\n");
             let status = fit_terminal_width(&status);
-            if let Some(active) = active
-                .map(|range| range.start..range.end.min(status.len()))
-                .filter(|range| range.start < range.end && status.get(range.clone()).is_some())
-            {
-                let end = active.end;
-                out.push_str(&paint(&status[..active.start], style));
+            let mut end = 0;
+            for range in bold {
+                let range = range.start..range.end.min(status.len());
+                if range.start < end
+                    || range.start >= range.end
+                    || status.get(range.clone()).is_none()
+                {
+                    continue;
+                }
+                out.push_str(&paint(&status[end..range.start], style));
                 out.push_str(&paint(
-                    &status[active.start..end],
+                    &status[range.clone()],
                     style.map(|style| style.bold()),
                 ));
-                out.push_str(&paint(&status[end..], style));
-            } else {
-                out.push_str(&paint(&status, style));
+                end = range.end;
             }
+            out.push_str(&paint(&status[end..], style));
         }
         out
     }
@@ -405,7 +443,6 @@ mod tests {
             ReplHighlighter::new(tree(), Color::Green, Color::Red, None),
             PaintedLine::default(),
             Some(Style::new()),
-            Some(Style::new()),
         )
     }
 
@@ -420,7 +457,7 @@ mod tests {
     fn hint_completes_the_only_candidate_and_names_it_unit() {
         let (inline, out) = paint("orch vm cr");
         assert_eq!(inline, "eate");
-        assert_eq!(out, "eate\r\ncreate  Create a VM");
+        assert_eq!(out, "eate\r\norch vm create  Create a VM");
         for (line, expected, slot) in [
             (
                 "orch vm power ",
@@ -447,13 +484,10 @@ mod tests {
     }
 
     #[test]
-    fn hint_reports_unknown_words_with_the_closest_match_unit() {
+    fn hint_keeps_unknown_command_words_quiet_unit() {
         let (inline, out) = paint("orch vm fnd ");
         assert_eq!(inline, "");
-        assert_eq!(
-            out,
-            "\r\nunknown command 'fnd' for 'orch vm'; did you mean 'find'?"
-        );
+        assert_eq!(out, "");
     }
 
     #[test]

@@ -31,16 +31,28 @@ It does not call remote systems while you are pressing tab.
 - **Muted text after the cursor** suggests the rest of the line: the newest
   history entry that extends it, or the only completion for the current word.
   Right or End accepts it; Alt-Right accepts one word.
-- **The line under the prompt** shows the command's declared positional usage,
+- **While typing a command**, one matching command shows its canonical name,
+  next arguments and description on one line. Two or three matches show only
+  their names, with executable prefixes in bold. More matches or an unknown
+  command show no guidance until the input narrows. These hints never execute
+  a correction or show flag names as command suggestions.
+- **While entering arguments**, the line under the prompt shows the declared positional usage,
   with the current slot in bold: `<NAME>` is required, `[NAME]` is optional,
   and `…` permits repeated values. Filled slots use bare names. A `·` separates
   usage from help or the current slot's choices (`on | off`, for example).
   Flag values retain their own help. Commands without positional declarations
-  show their usual description and missing required flags. Errors name the
-  invalid word. The status stays on one terminal row.
+  show their usual description and missing required flags. Typing hints stay
+  quiet about invalid words; execution errors still appear after Enter.
+  Each hint line stays on one terminal row.
 - **Red** marks the first word that cannot be valid: an unknown subcommand or
   flag. A word still being typed is not marked while it can grow into a valid
   one.
+
+`repl.hint.command_limit` sets the maximum number of command names shown in
+these typing hints (default `3`). `config set repl.hint.command_limit 0`
+hides multiple-match lists while retaining a unique command's description;
+negative values also behave as zero. Lists above the limit show nothing.
+This setting does not limit the Tab menu.
 
 `repl.tab_mode` chooses when typing opens the menu without Tab:
 
