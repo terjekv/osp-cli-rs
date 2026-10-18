@@ -43,12 +43,24 @@ or explicitly deleted features. Record every distinct removed assertion and
 its retained owner in [coverage-ownership.md](coverage-ownership.md), which also
 lists unresolved pre-existing coverage gaps.
 
-For a focused edit/test loop, keep default test threads and select the owning
-target (and optionally a test-name filter):
+For a focused edit/test loop, keep default test threads, use your own
+`CARGO_TARGET_DIR`, and select the owning target plus an existing name filter.
+Prefix each command with
+`CARGO_BUILD_JOBS=6 RUST_TEST_THREADS=6 nice -n 15 python3 scripts/run-hermetic-cargo.py --`.
+Times are for a one-line edit with a warm target:
 
-```sh
-CARGO_BUILD_JOBS=6 RUST_TEST_THREADS=6 CARGO_TARGET_DIR="$HOME/.cache/osp-target/test-speed" nice -n 15 python3 scripts/run-hermetic-cargo.py -- cargo test --locked --test integration
-```
+| Changed | Command | Time |
+| --- | --- | ---: |
+| Private logic in `src/**` | `cargo test --locked --lib history_store` | ~3s |
+| Public App/REPL workflow | `cargo test --locked --test integration repl::` | ~3s |
+| Terminal behaviour | `cargo test --locked --test e2e history::` | ~5s |
+| Before handing off | `cargo test --locked` | ~13s |
+
+`--lib` does not build the `osp` binary. Integration, contract and e2e targets do.
+Downstream app contracts also cover framework edits; see that repository's
+`tests/README.md`. `cargo-nextest` works here too: 1052 tests in about 7-8s, with no
+failures. It skips the 80 doctests, so the total is about the same as `cargo test`.
+It stays optional.
 
 The dev/test profiles retain line tables for local backtraces and omit dependency
 debug information. The thin `osp` entrypoint has no unit tests; binary behavior
