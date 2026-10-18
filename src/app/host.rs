@@ -1346,6 +1346,11 @@ fn add_native_command_help(
         .catalog()
         .into_iter()
         .filter(|entry| auth.is_external_command_visible(&entry.name))
+        .filter(|entry| {
+            native_commands
+                .command(&entry.name)
+                .is_some_and(|command| !command.command().is_hide_set())
+        })
         .map(|entry| DocumentEntry {
             name: entry.name,
             description: entry.about.trim().to_string(),

@@ -60,6 +60,7 @@ pub(crate) fn visible_native_commands<'a>(
             clients
                 .native_commands()
                 .command(&entry.name)
+                .filter(|command| !command.command().is_hide_set())
                 .map(|command| (entry, command))
         })
 }
