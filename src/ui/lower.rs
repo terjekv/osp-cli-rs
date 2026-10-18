@@ -85,7 +85,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
 
     if output.meta.document_rows && plan.format == OutputFormat::Value {
-        let items = output
+        let items: Vec<String> = output
             .as_rows()
             .unwrap_or_default()
             .iter()
@@ -101,16 +101,18 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }
                 row.iter()
                     .filter(|(key, value)| key.as_str() != "section" && !value.is_null())
-                    .map(|(_, value)| display_value(value))
+                    .flat_map(|(_, value)| match value {
+                        Value::Array(items) => items.iter().map(display_value).collect(),
+                        value => vec![display_value(value)],
+                    })
                     .collect()
             })
             .collect();
         let mut doc = Doc {
-            blocks: vec![Block::List(ListBlock {
-                items,
+            blocks: vec![Block::Paragraph(ParagraphBlock {
+                text: items.join("\n"),
                 indent: 0,
                 inline_markup: false,
-                auto_grid: false,
             })],
         };
         sanitize_doc(&mut doc);
@@ -833,19 +835,14 @@ fn lower_value_doc(output: &OutputResult) -> Doc {
         .flat_map(|row| row_value_displays(row, &output.meta.key_index))
         .collect::<Vec<_>>();
 
-    let blocks = match values.len() {
-        0 => Vec::new(),
-        1 => vec![Block::Paragraph(ParagraphBlock {
-            text: values[0].clone(),
+    let blocks = if values.is_empty() {
+        Vec::new()
+    } else {
+        vec![Block::Paragraph(ParagraphBlock {
+            text: values.join("\n"),
             indent: 0,
             inline_markup: false,
-        })],
-        _ => vec![Block::List(ListBlock {
-            items: values,
-            indent: 0,
-            inline_markup: false,
-            auto_grid: false,
-        })],
+        })]
     };
 
     Doc { blocks }
@@ -1056,7 +1053,11 @@ fn ordered_keys<'a>(
 fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
     ordered_keys(key_order, row.keys())
         .filter_map(|key| row.get(key))
-        .filter(|value| !value.is_null())
+        .flat_map(|value| match value {
+            Value::Array(items) => items.iter().collect::<Vec<_>>(),
+            Value::Null => Vec::new(),
+            value => vec![value],
+        })
         .map(display_value)
         .collect()
 }

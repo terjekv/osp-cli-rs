@@ -304,7 +304,8 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
         "Clear history",
         "true",
         "4",
-        "alice, bob",
+        "alice",
+        "bob",
     ] {
         assert!(
             values.lines().any(|line| line.trim() == expected),
