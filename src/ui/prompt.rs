@@ -1,6 +1,28 @@
 //! Line input shared by command prompts and the REPL terminal protocol.
 
 use std::io::{self, IsTerminal, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Set while a person answers a prompt, so progress spinners stop painting over it.
+pub(crate) static PROMPT_OPEN: AtomicBool = AtomicBool::new(false);
+
+struct PromptOpen(bool);
+
+impl PromptOpen {
+    fn enter() -> Self {
+        let previous = PROMPT_OPEN.swap(true, Ordering::SeqCst);
+        // Holding the lock waits out a spinner frame mid-draw before clearing its line.
+        let mut stderr = io::stderr().lock();
+        let _ = write!(stderr, "\r\x1b[2K").and_then(|()| stderr.flush());
+        Self(previous)
+    }
+}
+
+impl Drop for PromptOpen {
+    fn drop(&mut self) {
+        PROMPT_OPEN.store(self.0, Ordering::SeqCst);
+    }
+}
 
 /// Read a response, excluding terminal cursor reports left by an editor query.
 ///
@@ -67,6 +89,7 @@ pub fn confirm_phrase(phrase: &str) -> io::Result<bool> {
 }
 
 fn ask_line(question: &str) -> io::Result<Option<String>> {
+    let _open = PromptOpen::enter();
     let mut stderr = io::stderr().lock();
     stderr.write_all(super::sanitize_human_text(question).as_bytes())?;
     stderr.flush()?;
@@ -92,6 +115,7 @@ pub fn read_text(question: &str) -> io::Result<Option<String>> {
 /// Replay and redirected input are rejected before writing the question.
 pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
     require_interactive()?;
+    let _open = PromptOpen::enter();
     match rpassword::prompt_password(super::sanitize_human_text(question)) {
         Ok(answer) => Ok(Some(answer)),
         Err(error)
@@ -114,6 +138,7 @@ pub fn read_path(label: &str) -> io::Result<Option<String>> {
             "file prompt requires an interactive terminal",
         ));
     }
+    let _open = PromptOpen::enter();
     crate::repl::read_path(label)
 }
 

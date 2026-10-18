@@ -243,6 +243,9 @@ impl StderrSpinner {
             .saturating_sub(1);
         let line = crate::ui::crop_display_width(&format!("{frame} {text}"), width);
         let mut stderr = io::stderr().lock();
+        if crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst) {
+            return;
+        }
         let _ = write!(stderr, "\r\x1b[2K{line}").and_then(|()| stderr.flush());
     }
 }
