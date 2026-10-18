@@ -231,6 +231,8 @@
 pub mod app;
 /// Command-line argument types and CLI parsing helpers.
 pub mod cli;
+/// Shared canonical command-word resolution and prefix policy.
+pub mod command_words;
 /// Structured command and pipe completion types.
 pub mod completion;
 /// Layered configuration schema, loading, and resolution.

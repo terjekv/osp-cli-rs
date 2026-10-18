@@ -207,6 +207,10 @@ pub struct OutputMeta {
     pub document_rows: bool,
     /// Optional minimum gap after aligned document entry names.
     pub document_entry_gap: Option<usize>,
+    /// Commands that require literal spelling in this help listing.
+    pub document_literal_commands: Vec<String>,
+    /// This help listing describes commands handled by the prefix resolver.
+    pub document_command_prefixes: bool,
     /// Use clap long-help entry layout for builtin option descriptions.
     pub document_long_help: bool,
     /// Preferred renderer for this result, when known.

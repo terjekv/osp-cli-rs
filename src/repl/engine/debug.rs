@@ -263,7 +263,10 @@ fn build_debug_completion_session(
         UndoBehavior::CreateUndoPoint,
     );
 
-    let completer = Box::new(ReplCompleter::new(tree.clone(), line_projector));
+    let completer = Box::new(
+        ReplCompleter::new(tree.clone(), line_projector)
+            .with_command_prefixes(appearance.is_none_or(|appearance| appearance.command_prefixes)),
+    );
     let menu = if let Some(appearance) = appearance {
         build_completion_menu(appearance)
     } else {

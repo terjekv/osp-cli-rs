@@ -287,9 +287,11 @@ fn walk_line(
         if !in_path {
             continue;
         }
-        if let Some(child) = node.children.get(token) {
-            walk.commands.insert((span.start, span.end));
-            path.push(token.to_string());
+        if let Some((canonical, child)) = node.resolve_child(token) {
+            if !typing || canonical == token {
+                walk.commands.insert((span.start, span.end));
+            }
+            path.push(canonical.clone());
             scopes.push(child);
             node = child;
             continue;

@@ -363,6 +363,7 @@ pub struct ReplAppearance {
     pub hint_style: Option<String>,
     /// Whether the host resolved ANSI color for the editor session.
     pub(crate) ansi_colors: bool,
+    pub(crate) command_prefixes: bool,
     /// Maximum number of visible rows in the history search menu.
     pub history_menu_rows: u16,
 }
@@ -398,6 +399,7 @@ impl Default for ReplAppearance {
             error_highlight_style: None,
             hint_style: None,
             ansi_colors: true,
+            command_prefixes: true,
             history_menu_rows: DEFAULT_HISTORY_MENU_ROWS,
         }
     }
@@ -479,6 +481,11 @@ impl ReplAppearanceBuilder {
     /// If omitted, the builder keeps the default history-menu row count.
     pub fn with_history_menu_rows(mut self, history_menu_rows: u16) -> Self {
         self.appearance.history_menu_rows = history_menu_rows;
+        self
+    }
+
+    pub(crate) fn with_command_prefixes(mut self, enabled: bool) -> Self {
+        self.appearance.command_prefixes = enabled;
         self
     }
 

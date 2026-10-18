@@ -91,6 +91,7 @@ fn escape_inline_markup(mut document: Document) -> Document {
 #[cfg(test)]
 fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::RenderSettings {
     crate::ui::RenderSettings {
+        command_prefixes: crate::command_words::CommandPrefixes::Off,
         format: crate::core::output::OutputFormat::Auto,
         format_explicit: true,
         guide_default_format: true,
@@ -157,6 +158,8 @@ mod tests {
         frame: crate::ui::section_chrome::SectionFrameStyle,
     ) -> ResolvedRenderSettings {
         ResolvedRenderSettings {
+            command_prefixes_enabled: false,
+            document_literal_commands: Vec::new(),
             backend: RenderBackend::Plain,
             color: false,
             unicode: false,

@@ -192,6 +192,8 @@ pub struct RenderRuntime {
 /// - `runtime` carries the ambient facts used to resolve the auto knobs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderSettings {
+    /// Execution policy used to expose usable command prefixes in help.
+    pub command_prefixes: crate::command_words::CommandPrefixes,
     pub format: OutputFormat,
     pub format_explicit: bool,
     /// Render semantic documents as guides unless an explicit format is selected.
@@ -218,6 +220,7 @@ pub struct RenderSettings {
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
+            command_prefixes: Default::default(),
             format: OutputFormat::Auto,
             format_explicit: false,
             guide_default_format: true,
@@ -470,6 +473,7 @@ fn presentation_seeded_value(presentation: UiPresentation, key: &str) -> Option<
 }
 
 fn sync_render_config_overrides(settings: &mut RenderSettings, config: &ResolvedConfig) {
+    settings.command_prefixes = crate::command_words::CommandPrefixes::from_config(config);
     if let Some(value) = config_int(config, "ui.margin")
         && value >= 0
     {
@@ -526,6 +530,10 @@ pub enum RenderProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedRenderSettings {
+    /// Whether help may emphasize executable command abbreviations.
+    pub command_prefixes_enabled: bool,
+    /// Literal-only commands in the current help document.
+    pub document_literal_commands: Vec<String>,
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
@@ -613,6 +621,11 @@ impl RenderSettings {
         let theme_name = theme::normalize_theme_name(&theme.id);
 
         ResolvedRenderSettings {
+            command_prefixes_enabled: self.command_prefixes.enabled(!matches!(
+                self.runtime.command_scope,
+                crate::core::CommandScope::OneShot
+            )),
+            document_literal_commands: Vec::new(),
             backend,
             color: backend == RenderBackend::Rich && self.resolve_color_mode(),
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
@@ -966,6 +979,8 @@ mod tests {
                 grouped: true,
                 document_rows: false,
                 document_entry_gap: None,
+                document_literal_commands: Vec::new(),
+                document_command_prefixes: false,
                 document_long_help: false,
                 render_recommendation: None,
                 display_limit: None,

@@ -234,6 +234,7 @@ fn dispatch_external_invocation(
                 state,
                 NativeRunInput {
                     args,
+                    source_args: args,
                     action: None,
                     stages: &parsed.stages,
                     invocation,
@@ -270,6 +271,7 @@ struct NativeParse {
     matches: std::result::Result<clap::ArgMatches, clap::Error>,
     path: crate::core::command_policy::CommandPath,
     render_help: bool,
+    prefixes: bool,
 }
 
 impl NativeParse {
@@ -277,15 +279,18 @@ impl NativeParse {
         command: &dyn crate::native::NativeCommand,
         name: &str,
         args: &[String],
+        prefixes: bool,
     ) -> Result<Self> {
-        let args = command.normalize_args(args).map_err(|error| {
-            crate::app::report_anyhow_with_context(
-                error,
-                crate::app::host::ErrorContext::Operation(
-                    "failed to normalize native command arguments",
-                ),
-            )
-        })?;
+        let args = command
+            .normalize_invocation_args(args, prefixes)
+            .map_err(|error| {
+                crate::app::report_anyhow_with_context(
+                    error,
+                    crate::app::host::ErrorContext::Operation(
+                        "failed to normalize native command arguments",
+                    ),
+                )
+            })?;
         let grammar = command.command();
         let matches = grammar
             .clone()
@@ -300,6 +305,7 @@ impl NativeParse {
             matches,
             path,
             render_help,
+            prefixes,
         })
     }
 }
@@ -351,7 +357,7 @@ fn refresh_native_parse(
     }
     if intent.requirement == ExternalPathAccessRequirement::Visible && parsed.render_help {
         match refreshed {
-            Ok(true) => match NativeParse::new(command, &name, args) {
+            Ok(true) => match NativeParse::new(command, &name, args, parsed.prefixes) {
                 Ok(parsed) => return Ok(parsed),
                 Err(error) => {
                     tracing::debug!(command = %name, error = %error, "refreshed native help arguments could not be normalized; using cached help")
@@ -372,7 +378,7 @@ fn refresh_native_parse(
             ),
         )
     })? {
-        NativeParse::new(command, &name, args)
+        NativeParse::new(command, &name, args, parsed.prefixes)
     } else {
         Ok(parsed)
     }
@@ -402,7 +408,10 @@ fn run_native_invocation(
         );
         before_external_dispatch(&mut state.runtime, &input_path, "command")?;
         state.reload_config_after_access_hook()?;
-        let parsed = NativeParse::new(command, name, args)?;
+        let prefixes =
+            crate::command_words::CommandPrefixes::from_config(state.runtime.config.resolved())
+                .enabled(state.runtime.context.terminal_kind() == crate::app::TerminalKind::Repl);
+        let parsed = NativeParse::new(command, name, args, prefixes)?;
         let intent = NativeIntent::from_parse(&parsed);
         before_external_execution(
             &mut state.runtime,
@@ -433,12 +442,21 @@ fn run_native_invocation(
             let tokens = std::iter::once(name.to_string())
                 .chain(parsed.args.iter().cloned())
                 .collect::<Vec<_>>();
-            let (document, _, _) = crate::cli::command_help_document(
+            let (document, root, _) = crate::cli::command_help_document(
                 state.runtime.auth.visible_help_command(parsed.grammar, &[]),
                 &tokens,
                 &invocation.ui.render_settings.runtime.command_scope,
             );
-            return Ok(CommandOutput::document(document));
+            let mut output = document.to_output_result();
+            output.meta.document_command_prefixes = true;
+            if root {
+                output.meta.document_literal_commands = command
+                    .literal_commands()
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect();
+            }
+            return Ok(CommandOutput::output(output, None));
         }
         if let Err(error) = parsed.matches {
             state.session.native_context.activate(&state.runtime);
@@ -485,6 +503,7 @@ fn run_native_invocation(
             &mut state.session,
             NativeRunInput {
                 args: &parsed.args,
+                source_args: args,
                 action: None,
                 stages: input.stages,
                 invocation,
@@ -583,6 +602,7 @@ pub(crate) fn run_repl_action(
                 &mut state.session,
                 NativeRunInput {
                     args: &[],
+                    source_args: &[],
                     action: Some(id),
                     stages: &[],
                     invocation: &invocation,
@@ -607,6 +627,7 @@ pub(crate) fn run_repl_action(
 
 struct NativeRunInput<'args, 'stages, 'invocation, 'sink> {
     args: &'args [String],
+    source_args: &'args [String],
     action: Option<&'args str>,
     stages: &'stages [String],
     invocation: &'invocation ResolvedInvocation,
@@ -671,7 +692,12 @@ fn run_native_command(
         .unwrap_or(input.args);
     if let Some(resolution) = &resolution
         && let Some(line) = resolution
-            .record_history(&session.native_context, &service, input.args)
+            .record_history(
+                &session.native_context,
+                &service,
+                input.args,
+                input.source_args,
+            )
             .map_err(|e| miette!("{e:#}"))?
     {
         let elevation = if input.elevation.is_elevated() {
@@ -1042,6 +1068,8 @@ fn plan_external_invocation(
     let inline_command = match super::command_plan::parse_inline_command(
         &parsed.tokens,
         super::command_plan::CommandSurface::External,
+        crate::command_words::CommandPrefixes::from_config(runtime.config.resolved())
+            .enabled(runtime.context.terminal_kind() == TerminalKind::Repl),
     )? {
         super::command_plan::InlineCommandPlan::Command(command) => command,
         super::command_plan::InlineCommandPlan::Help(_) => {
@@ -1180,7 +1208,7 @@ fn run_external_plugin_command(
     }
     if let Some(resolution) = &resolution
         && let Some(line) = resolution
-            .record_history(&state.session.native_context, command, args)
+            .record_history(&state.session.native_context, command, args, args)
             .map_err(|e| miette!("{e:#}"))?
     {
         let mut messages = crate::ui::messages::MessageBuffer::default();

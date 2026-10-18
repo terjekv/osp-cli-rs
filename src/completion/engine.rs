@@ -135,6 +135,11 @@ impl CompletionEngine {
             &parsed.full_cmd,
             cursor.token_stub.as_str(),
         );
+        // Keep source spans and the active stub intact; callbacks see canonical commands.
+        canonicalize_command_path(&mut parsed.cursor_cmd, &context.matched_path);
+        let (_, full_path) = TreeResolver::new(self.suggester.tree())
+            .resolve_context(&command_path_tokens(&parsed.full_cmd));
+        canonicalize_command_path(&mut parsed.full_cmd, &full_path);
         let request = self.build_completion_request(&parsed.cursor_cmd, &cursor, &context);
 
         CompletionAnalysis {
@@ -169,6 +174,32 @@ impl CompletionEngine {
             };
         }
         MatchKind::Value
+    }
+
+    pub(crate) fn command_prefix_len(
+        &self,
+        analysis: &CompletionAnalysis,
+        value: &str,
+    ) -> Option<usize> {
+        if !matches!(
+            self.classify_match(analysis, value),
+            MatchKind::Command | MatchKind::Subcommand
+        ) {
+            return None;
+        }
+        if analysis.context.matched_path.is_empty() && self.suggester.tree().root.name.is_empty() {
+            return Some(value.len());
+        }
+        let nodes = TreeResolver::new(self.suggester.tree()).resolved_nodes(&analysis.context);
+        value
+            .char_indices()
+            .map(|(i, c)| i + c.len_utf8())
+            .find(|&end| {
+                nodes
+                    .context_node
+                    .resolve_child(&value[..end])
+                    .is_some_and(|(name, _)| name == value)
+            })
     }
 
     /// Returns the tree node at an exact command path.
@@ -521,6 +552,19 @@ fn command_path_tokens(cmd: &CommandLine) -> Vec<String> {
         .cloned()
         .chain(cmd.positional_args().cloned())
         .collect()
+}
+
+fn canonicalize_command_path(cmd: &mut CommandLine, path: &[String]) {
+    let words = cmd
+        .head
+        .iter_mut()
+        .chain(cmd.tail.iter_mut().filter_map(|item| match item {
+            TailItem::Positional(word) => Some(word),
+            TailItem::Flag(_) => None,
+        }));
+    for (word, canonical) in words.zip(path) {
+        word.clone_from(canonical);
+    }
 }
 
 fn positional_arg_index(

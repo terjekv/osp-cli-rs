@@ -133,6 +133,7 @@ pub(super) fn build_interactive_editor(
     let tree = completion_tree;
     let completer = Box::new(
         ReplCompleter::new(tree.clone(), line_projector.clone())
+            .with_command_prefixes(appearance.command_prefixes)
             .with_history(history_store.clone()),
     );
     let completion_menu = SharedCompletionMenu::new(build_completion_menu(appearance));
@@ -252,7 +253,9 @@ fn build_repl_hinter(
     let error_color = color(&appearance.error_highlight_style).unwrap_or(Color::Red);
     let error_style = appearance.ansi_colors.then(|| Style::new().fg(error_color));
     ReplHinter::new(
-        ReplCompleter::new(tree.clone(), line_projector.clone()).with_history(history.clone()),
+        ReplCompleter::new(tree.clone(), line_projector.clone())
+            .with_command_prefixes(appearance.command_prefixes)
+            .with_history(history.clone()),
         ReplHighlighter::new(tree.clone(), Color::Default, error_color, line_projector),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),

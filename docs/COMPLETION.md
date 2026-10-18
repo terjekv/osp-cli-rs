@@ -51,6 +51,25 @@ It does not call remote systems while you are pressing tab.
 
 Any positive count is accepted. Unrecognized values fall back to `tab`.
 
+## Command prefixes
+
+`command.prefixes` controls native command-word abbreviations:
+
+- `interactive` (default): accept unique prefixes in the REPL.
+- `always`: also accept them in one-shot shell invocations.
+- `off`: require full command words and suggest the exact command instead.
+
+Change it with `config set command.prefixes always` (or `off`/`interactive`).
+The top-level command name remains exact. Exact subcommand names win over
+longer matches; ambiguous prefixes list canonical command paths. Typo hints
+never execute the suggested command. Argument values are not abbreviated.
+Native commands can reserve literal controls such as login and logout.
+
+Tab works with partial input in every mode and inserts full canonical names.
+Rich help and completion menus bold the shortest executable prefix when
+abbreviations are enabled; plain and JSON output keep ordinary names. Scoped
+integration menus omit global utilities, which still work by their exact names.
+
 ## Shell Completion Scripts
 
 Generate a static script for your shell with:

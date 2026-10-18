@@ -28,7 +28,24 @@ pub(crate) enum InlineCommandPlan {
 pub(crate) fn parse_inline_command(
     tokens: &[String],
     surface: CommandSurface,
+    prefixes: bool,
 ) -> Result<InlineCommandPlan> {
+    let grammar = crate::cli::InlineCommandCli::command();
+    let normalized;
+    let tokens = if let Some(command) = tokens
+        .first()
+        .and_then(|name| grammar.find_subcommand(name))
+    {
+        normalized = std::iter::once(tokens[0].clone())
+            .chain(
+                crate::command_words::normalize(command, &tokens[1..], prefixes, &[])
+                    .map_err(|error| miette!("{error}"))?,
+            )
+            .collect::<Vec<_>>();
+        &normalized
+    } else {
+        tokens
+    };
     match parse_inline_command_tokens(tokens) {
         Ok(command) => Ok(InlineCommandPlan::Command(command)),
         Err(error) => {

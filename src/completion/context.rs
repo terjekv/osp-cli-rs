@@ -29,7 +29,7 @@ impl<'a> TreeResolver<'a> {
             if token == "|" || token.starts_with('-') {
                 break;
             }
-            let Some(child) = node.children.get(token) else {
+            let Some((_, child)) = node.resolve_child(token) else {
                 break;
             };
             matched += 1;
@@ -76,11 +76,11 @@ impl<'a> TreeResolver<'a> {
         let mut matched = Vec::new();
 
         for segment in path {
-            let Some(next) = node.children.get(segment) else {
+            let Some((canonical, next)) = node.resolve_child(segment) else {
                 break;
             };
             node = next;
-            matched.push(segment.clone());
+            matched.push(canonical.clone());
             if node.value_leaf {
                 break;
             }
@@ -92,7 +92,7 @@ impl<'a> TreeResolver<'a> {
     pub(crate) fn resolve_exact(&self, path: &[String]) -> Option<&'a CompletionNode> {
         let mut node = &self.tree.root;
         for (index, segment) in path.iter().enumerate() {
-            node = node.children.get(segment)?;
+            node = node.resolve_child(segment)?.1;
             if node.value_leaf && index + 1 < path.len() {
                 return None;
             }

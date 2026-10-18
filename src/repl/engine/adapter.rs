@@ -22,6 +22,7 @@ pub(crate) struct ReplCompleter {
     engine: CompletionEngine,
     line_projector: Option<LineProjector>,
     history: Option<SharedHistory>,
+    command_prefixes: bool,
 }
 
 impl ReplCompleter {
@@ -30,11 +31,17 @@ impl ReplCompleter {
             engine: CompletionEngine::new(tree),
             line_projector,
             history: None,
+            command_prefixes: true,
         }
     }
 }
 
 impl ReplCompleter {
+    pub(crate) fn with_command_prefixes(mut self, enabled: bool) -> Self {
+        self.command_prefixes = enabled;
+        self
+    }
+
     pub(crate) fn with_history(mut self, history: SharedHistory) -> Self {
         self.history = Some(history);
         self
@@ -87,7 +94,9 @@ impl Completer for ReplCompleter {
             .unwrap_or_else(|| LineProjection::passthrough(line));
         // Completion runs against the projected line so host-only flags and
         // aliases do not distort command-path or DSL suggestions.
-        let (cursor_state, outputs) = self.engine.complete(&projected.line, pos);
+        let analysis = self.engine.analyze(&projected.line, pos);
+        let outputs = self.engine.suggestions_for_analysis(&analysis);
+        let cursor_state = &analysis.cursor;
         let span = Span {
             start: cursor_state.replace_range.start,
             end: cursor_state.replace_range.end,
@@ -122,13 +131,30 @@ impl Completer for ReplCompleter {
         let mut suggestions = ranked
             .into_iter()
             .filter(|item| !hidden_suggestions.contains(&item.text))
-            .map(|item| Suggestion {
-                value: item.text,
-                description: item.meta,
-                extra: item.display.map(|display| vec![display]),
-                span,
-                append_whitespace: true,
-                ..Suggestion::default()
+            .map(|item| {
+                let prefix = (self.command_prefixes
+                    && item
+                        .display
+                        .as_deref()
+                        .is_none_or(|display| display == item.text))
+                .then(|| self.engine.command_prefix_len(&analysis, &item.text))
+                .flatten();
+                let extra = if let Some(prefix) = prefix {
+                    Some(vec![
+                        item.display.unwrap_or_else(|| item.text.clone()),
+                        format!("osp-prefix:{prefix}"),
+                    ])
+                } else {
+                    item.display.map(|display| vec![display])
+                };
+                Suggestion {
+                    value: item.text,
+                    description: item.meta,
+                    extra,
+                    span,
+                    append_whitespace: true,
+                    ..Suggestion::default()
+                }
             })
             .collect::<Vec<_>>();
 

@@ -45,9 +45,9 @@ mod tree;
 
 pub use engine::CompletionEngine;
 pub use model::{
-    ArgNode, CommandLine, CompletionNode, CompletionTree, ContextScope, CursorState,
-    DynamicCompletion, FlagCompletions, FlagHints, FlagNode, FlagOccurrence, QuoteStyle,
-    Suggestion, SuggestionEntry, SuggestionOutput, TailItem, ValueCatalog, ValueType,
+    ArgNode, CommandLine, CommandWordResolver, CompletionNode, CompletionTree, ContextScope,
+    CursorState, DynamicCompletion, FlagCompletions, FlagHints, FlagNode, FlagOccurrence,
+    QuoteStyle, Suggestion, SuggestionEntry, SuggestionOutput, TailItem, ValueCatalog, ValueType,
 };
 pub use parse::CommandLineParser;
 pub use suggest::closest_values;

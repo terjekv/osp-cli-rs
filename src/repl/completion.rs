@@ -257,11 +257,8 @@ fn scoped_completion_root(root: &CompletionNode, path: &[String]) -> CompletionN
     }
     let mut scoped = node.clone();
     scoped.name = path.join(" ");
-    for &command in super::input::REPL_GLOBAL_COMMANDS {
-        if let Some(global) = root.children.get(command) {
-            scoped.children.insert(command.to_string(), global.clone());
-        }
-    }
+    // Global utilities remain available by exact name through dispatch, but
+    // should not crowd this scope's menu or participate in its abbreviations.
     scoped
 }
 

@@ -22,9 +22,12 @@ pub fn plan_output(
     } else {
         profile
     };
+    let mut resolved = resolve_settings(settings, effective_profile);
+    resolved.command_prefixes_enabled &= output.meta.document_command_prefixes;
+    resolved.document_literal_commands = output.meta.document_literal_commands.clone();
     RenderPlan {
         format,
-        settings: resolve_settings(settings, effective_profile),
+        settings: resolved,
         document_entry_gap: output.meta.document_entry_gap,
         document_long_help: output.meta.document_long_help,
     }

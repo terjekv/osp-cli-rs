@@ -99,6 +99,7 @@ pub(super) fn parse_repl_invocation(
     let command = match app::command_plan::parse_inline_command(
         &scoped_tokens,
         app::command_plan::CommandSurface::Repl,
+        crate::command_words::CommandPrefixes::from_config(runtime.config.resolved()).enabled(true),
     )? {
         app::command_plan::InlineCommandPlan::Command(Some(command)) => command,
         app::command_plan::InlineCommandPlan::Command(None) => {

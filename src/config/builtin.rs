@@ -296,6 +296,13 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("auto")),
             },
             BuiltinKey {
+                key: "command.prefixes",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(["off", "interactive", "always"])
+                    .with_doc("Accept unique command prefixes: off, interactive, or always"),
+                default: Some(ConfigValue::from("interactive")),
+            },
+            BuiltinKey {
                 key: "repl.tab_mode",
                 schema: SchemaEntry::string().with_doc(
                     "When typing opens the REPL completion menu: tab, always, or after_<n>_letters",

@@ -811,6 +811,22 @@ pub trait NativeCommand: Send + Sync {
     /// into custom descriptions or completion metadata.
     fn command(&self) -> Command;
 
+    /// Root commands that require literal spelling even when prefixes are enabled.
+    fn literal_commands(&self) -> &[&str] {
+        &[]
+    }
+
+    /// Normalizes command words using the host execution policy, then product arguments.
+    fn normalize_invocation_args(&self, args: &[String], prefixes: bool) -> Result<Vec<String>> {
+        let args = crate::command_words::normalize(
+            &self.command(),
+            args,
+            prefixes,
+            self.literal_commands(),
+        )?;
+        self.normalize_args(&args)
+    }
+
     /// Converts supplied arguments to the canonical command grammar.
     ///
     /// The host calls this before native clap parsing and command-path
@@ -825,6 +841,9 @@ pub trait NativeCommand: Send + Sync {
     /// do not add inferred request constraints. This runs before authorization:
     /// use only local configuration or cached metadata, without network calls
     /// or execution side effects. Return an error for ambiguous normalization.
+    /// Interactive completion also calls this with partial command paths to
+    /// resolve alternate words. It accepts only length-preserving changes to
+    /// the last command word and keeps canonical names in menus.
     fn normalize_args(&self, args: &[String]) -> Result<Vec<String>> {
         Ok(args.to_vec())
     }
@@ -1118,7 +1137,7 @@ impl NativeCommandRegistry {
             tokens
         };
         let native = self.command(tokens.first()?)?;
-        let args = native.normalize_args(&tokens[1..]).ok()?;
+        let args = native.normalize_invocation_args(&tokens[1..], true).ok()?;
         let command = native.command();
         // Templates can put {} in typed value slots. Keep the resolved command path.
         let matches = command
@@ -1196,6 +1215,7 @@ impl NativeCommandRegistry {
                 let mut completion = command.completion();
                 if augment_completion {
                     command.augment_completion(&mut completion);
+                    attach_word_resolvers(&mut completion, &command.command(), command, &[]);
                 }
                 CommandCatalogEntry {
                     name: completion.name.clone(),
@@ -1224,6 +1244,34 @@ impl NativeCommandRegistry {
             collect_command_auth(&mut registry, &describe, &[]);
         }
         registry
+    }
+}
+
+fn attach_word_resolvers(
+    node: &mut CompletionNode,
+    grammar: &clap::Command,
+    command: &Arc<dyn NativeCommand>,
+    path: &[String],
+) {
+    if !grammar.has_subcommands() {
+        return;
+    }
+    let native = Arc::clone(command);
+    let prefix = path.to_vec();
+    node.word_resolver = Some(crate::completion::CommandWordResolver::new(move |word| {
+        let mut args = prefix.clone();
+        args.push(word.to_owned());
+        let normalized = native.normalize_invocation_args(&args, true).ok()?;
+        (normalized.len() == args.len() && normalized.starts_with(&prefix))
+            .then(|| normalized.last().cloned())
+            .flatten()
+    }));
+    for child in grammar.get_subcommands() {
+        if let Some(node) = node.children.get_mut(child.get_name()) {
+            let mut path = path.to_vec();
+            path.push(child.get_name().to_owned());
+            attach_word_resolvers(node, child, command, &path);
+        }
     }
 }
 

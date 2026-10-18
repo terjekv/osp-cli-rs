@@ -266,6 +266,32 @@ impl PartialEq for DynamicCompletion {
 }
 impl Eq for DynamicCompletion {}
 
+/// Resolves an alternate command word to its canonical child name.
+/// Callbacks must use local grammar only; they never add menu entries.
+#[derive(Clone)]
+pub struct CommandWordResolver(std::sync::Arc<ResolveCommandWord>);
+
+type ResolveCommandWord = dyn Fn(&str) -> Option<String> + Send + Sync;
+
+impl CommandWordResolver {
+    pub(crate) fn new(resolve: impl Fn(&str) -> Option<String> + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(resolve))
+    }
+}
+
+impl std::fmt::Debug for CommandWordResolver {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("CommandWordResolver(..)")
+    }
+}
+
+impl PartialEq for CommandWordResolver {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for CommandWordResolver {}
+
 /// Positional argument definition for one command slot.
 ///
 /// This is declarative completion metadata, not parser state. One `ArgNode`
@@ -551,9 +577,18 @@ pub struct CompletionNode {
     pub flag_hints: Option<FlagHints>,
     /// Optional local callback for context-dependent flag and positional completion.
     pub dynamic: Option<DynamicCompletion>,
+    /// Optional command-word normalization shared with native execution.
+    pub word_resolver: Option<CommandWordResolver>,
 }
 
 impl CompletionNode {
+    pub(crate) fn resolve_child(&self, word: &str) -> Option<(&String, &Self)> {
+        self.children.get_key_value(word).or_else(|| {
+            let canonical = (self.word_resolver.as_ref()?.0)(word)?;
+            self.children.get_key_value(&canonical)
+        })
+    }
+
     /// Sets the hidden sort key for this node.
     pub fn sort(mut self, sort: impl Into<String>) -> Self {
         self.sort = Some(sort.into());

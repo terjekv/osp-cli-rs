@@ -749,6 +749,22 @@ impl MenuCore {
             } else {
                 display.to_string()
             };
+            let display = if let Some(prefix) = suggestion
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get(1))
+                .and_then(|value| value.strip_prefix("osp-prefix:"))
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|&prefix| display.is_char_boundary(prefix))
+            {
+                format!(
+                    "\x1b[1m{}\x1b[22m{}",
+                    &display[..prefix],
+                    &display[prefix..]
+                )
+            } else {
+                display
+            };
             format!(
                 "{}{}{:>empty$}{}{}",
                 styled,

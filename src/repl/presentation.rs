@@ -485,6 +485,9 @@ pub(crate) fn build_repl_appearance(view: ReplViewContext<'_>) -> ReplAppearance
 
     let appearance = ReplAppearance::builder()
         .with_ansi_colors(resolved.color)
+        .with_command_prefixes(
+            crate::command_words::CommandPrefixes::from_config(view.config).enabled(true),
+        )
         .with_history_menu_rows(history_menu_rows);
     if !resolved.color {
         return appearance.build();

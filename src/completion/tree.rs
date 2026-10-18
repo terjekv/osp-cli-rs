@@ -263,7 +263,20 @@ impl CompletionNode {
             .collect();
         // Native metadata previously crossed the sorted wire flag map.
         required_common.sort();
+        let names = command
+            .get_subcommands()
+            .filter(|child| !child.is_hide_set())
+            .map(|child| child.get_name().to_owned())
+            .collect::<Vec<_>>();
+        let word_resolver = (!names.is_empty()).then(|| {
+            crate::completion::CommandWordResolver::new(move |word| {
+                crate::command_words::resolve(word, names.iter().map(String::as_str))
+                    .ok()
+                    .flatten()
+            })
+        });
         Self {
+            word_resolver,
             name: command.get_name().to_string(),
             tooltip: clap_meta::plain(command.get_about()),
             args: command

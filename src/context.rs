@@ -443,14 +443,27 @@ impl Resolution {
         session: &NativeSessionContext,
         service: &str,
         before: &[String],
+        source: &[String],
     ) -> Result<Option<String>> {
         if self.args == before {
             return Ok(None);
         }
+        let mut after = self.args.clone();
+        let before = if source.len() == before.len() {
+            // Keep shorthand words while retaining only the context-filled changes.
+            for ((value, canonical), typed) in after.iter_mut().zip(before).zip(source) {
+                if value == canonical {
+                    value.clone_from(typed);
+                }
+            }
+            source
+        } else {
+            before
+        };
         let expansion = HistoryExpansion {
             service: service.into(),
             before: before.to_vec(),
-            after: self.args.clone(),
+            after,
         };
         session.set_value("context.executed", serde_json::to_string(&expansion)?);
         let binding = session.binding.read().unwrap_or_else(|e| e.into_inner());
