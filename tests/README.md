@@ -1,6 +1,6 @@
 # Library tests
 
-Run from the library root with `CARGO_BUILD_JOBS=4` and a task-specific
+Run from the library root with `CARGO_BUILD_JOBS=6`, `RUST_TEST_THREADS=6`, `nice -n 15`, and a task-specific
 `CARGO_TARGET_DIR`. Use `python3 scripts/confidence.py --check test` for the
 full hermetic suite. Focused checks are `--check integration`, `--check contracts`
 and `--check e2e`. Keep the runner's prerequisites and static/public-doc checks.
@@ -42,3 +42,14 @@ remove only mapped duplicates, private details already covered at a boundary,
 or explicitly deleted features. Record every distinct removed assertion and
 its retained owner in [coverage-ownership.md](coverage-ownership.md), which also
 lists unresolved pre-existing coverage gaps.
+
+For a focused edit/test loop, keep default test threads and select the owning
+target (and optionally a test-name filter):
+
+```sh
+CARGO_BUILD_JOBS=6 RUST_TEST_THREADS=6 CARGO_TARGET_DIR="$HOME/.cache/osp-target/test-speed" nice -n 15 python3 scripts/run-hermetic-cargo.py -- cargo test --locked --test integration
+```
+
+The dev/test profiles retain line tables for local backtraces and omit dependency
+debug information. The thin `osp` entrypoint has no unit tests; binary behavior
+is exercised by the process and PTY contracts rather than an empty test harness.

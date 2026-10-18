@@ -28,6 +28,7 @@ name = "osp_cli"
 [[bin]]
 name = "osp"
 path = "src/bin/osp.rs"
+test = false
 
 [dependencies]
 chrono = "0.4"
@@ -71,13 +72,13 @@ predicates = "3.1"
 proptest = "1.6"
 
 [profile.dev]
-debug = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = 0
 
 [profile.test]
-debug = 1
+debug = "line-tables-only"
 
 [profile.test.package."*"]
 debug = 0
