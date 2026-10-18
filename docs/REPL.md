@@ -128,6 +128,7 @@ Changing profile, effective identity or service endpoint hides foreign values;
 switching back restores them. Logout removes the service's values. Most kinds
 live only for the REPL process. Services may opt a kind into persistence: those
 entries load before the first prompt and are ignored by one-shot commands.
+An opted-in shared kind also persists when set by another command or `context set`.
 `context` itself is REPL-only.
 
 `context.seed` defaults to `["account", "netgroup"]`; set it to `[]` to disable

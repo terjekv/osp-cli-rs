@@ -96,6 +96,20 @@ pub(crate) struct ContextBinding {
     saved: Vec<NativeSessionContextEntry>,
     secrets: Vec<String>,
 }
+impl ContextBinding {
+    fn persists(&self, entry: &NativeSessionContextEntry) -> bool {
+        if shared(&entry.kind) {
+            self.persisted
+                .values()
+                .any(|kinds| kinds.contains(&entry.kind))
+        } else {
+            self.persisted
+                .get(&entry.service)
+                .is_some_and(|kinds| kinds.contains(&entry.kind))
+        }
+    }
+}
+
 impl NativeSessionContext {
     pub(crate) fn activate(&self, runtime: &crate::app::AppRuntime) {
         let config = runtime.config();
@@ -175,13 +189,7 @@ impl NativeSessionContext {
                 .unwrap_or_else(|e| e.into_inner());
             let stored: Vec<_> = stored
                 .into_iter()
-                .filter(|e| {
-                    binding
-                        .persisted
-                        .get(&e.service)
-                        .is_some_and(|k| k.contains(&e.kind))
-                        && valid_value(&e.value)
-                })
+                .filter(|e| binding.persists(e) && valid_value(&e.value))
                 .collect();
             binding.saved = stored.clone();
             for entry in stored {
@@ -206,12 +214,7 @@ impl NativeSessionContext {
             .unwrap_or_else(|e| e.into_inner());
         let stored: Vec<_> = entries
             .values()
-            .filter(|e| {
-                binding
-                    .persisted
-                    .get(&e.service)
-                    .is_some_and(|k| k.contains(&e.kind))
-            })
+            .filter(|e| binding.persists(e))
             .cloned()
             .collect();
         if let Some(path) = context_path() {
