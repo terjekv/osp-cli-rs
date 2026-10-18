@@ -98,7 +98,6 @@ pub fn normalize(
     let mut result = args.to_vec();
     let mut selected = grammar;
     let mut path = vec![grammar.get_name().to_owned()];
-    let mut disabled_prefix = false;
     for (index, word) in args.iter().enumerate() {
         if word.starts_with('-') || !selected.has_subcommands() {
             break;
@@ -120,16 +119,16 @@ pub fn normalize(
             selected = child;
             continue;
         }
+        if !enabled || selected.get_positionals().next().is_some() {
+            break;
+        }
         let candidates = names
             .iter()
             .copied()
             .filter(|name| index != 0 || !excluded.contains(name))
             .collect::<Vec<_>>();
         let canonical = match resolve(word, candidates.iter().copied()) {
-            Ok(Some(name)) => {
-                disabled_prefix |= !enabled && name != *word;
-                name
-            }
+            Ok(Some(name)) => name,
             Err(matches) => anyhow::bail!(
                 "Ambiguous command: {}",
                 matches
@@ -146,12 +145,6 @@ pub fn normalize(
             break;
         };
         selected = child;
-    }
-    if disabled_prefix {
-        anyhow::bail!(
-            "Command abbreviations are disabled. Use `{}`.",
-            path.join(" ")
-        );
     }
     Ok(result)
 }
