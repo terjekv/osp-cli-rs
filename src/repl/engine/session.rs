@@ -256,7 +256,8 @@ fn build_repl_hinter(
         ReplCompleter::new(tree.clone(), line_projector.clone())
             .with_command_prefixes(appearance.command_prefixes)
             .with_history(history.clone()),
-        ReplHighlighter::new(tree.clone(), Color::Default, error_color, line_projector),
+        ReplHighlighter::new(tree.clone(), Color::Default, error_color, line_projector)
+            .with_command_prefixes(appearance.command_prefixes),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),
         error_style,

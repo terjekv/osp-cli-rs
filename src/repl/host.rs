@@ -308,14 +308,26 @@ fn run_repl_debug_highlight(
         .as_deref()
         .and_then(crate::repl::color_from_style_spec)
         .unwrap_or(nu_ansi_term::Color::Green);
-    let spans = crate::repl::debug_highlight(
-        &prepared.completion_tree,
-        &args.line,
-        command_color,
-        Some(input::build_repl_ui_line_projector(
-            runtime.config.resolved(),
-        )),
-    );
+    let projector = Some(input::build_repl_ui_line_projector(
+        runtime.config.resolved(),
+    ));
+    let spans = if prepared.appearance.command_prefixes {
+        crate::repl::debug_highlight(
+            &prepared.completion_tree,
+            &args.line,
+            command_color,
+            projector,
+        )
+    } else {
+        super::highlight::ReplHighlighter::new(
+            prepared.completion_tree.clone(),
+            command_color,
+            nu_ansi_term::Color::Red,
+            projector,
+        )
+        .with_command_prefixes(prepared.appearance.command_prefixes)
+        .classify_debug(&args.line)
+    };
     let payload = serde_json::json!({
         "line": args.line,
         "projected_line": projected_line.line,

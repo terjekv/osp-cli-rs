@@ -60,6 +60,7 @@ pub struct HighlightDebugSpan {
 }
 
 pub(crate) struct ReplHighlighter {
+    command_prefixes: bool,
     tree: CompletionTree,
     parser: CommandLineParser,
     command_color: Color,
@@ -75,6 +76,7 @@ impl ReplHighlighter {
         line_projector: Option<LineProjector>,
     ) -> Self {
         Self {
+            command_prefixes: true,
             tree,
             parser: CommandLineParser,
             command_color,
@@ -83,13 +85,24 @@ impl ReplHighlighter {
         }
     }
 
+    pub(crate) fn with_command_prefixes(mut self, enabled: bool) -> Self {
+        self.command_prefixes = enabled;
+        self
+    }
+
     fn walk(&self, line: &str, cursor: usize) -> LineWalk {
         let projected = self
             .line_projector
             .as_ref()
             .map(|project| project(line))
             .unwrap_or_else(|| LineProjection::passthrough(line));
-        walk_line(&self.tree.root, &self.parser, &projected.line, cursor)
+        walk_line(
+            &self.tree.root,
+            &self.parser,
+            &projected.line,
+            cursor,
+            self.command_prefixes,
+        )
     }
 
     /// Returns the first word on `line` that cannot be valid, if any.
@@ -139,7 +152,7 @@ impl ReplHighlighter {
             .collect()
     }
 
-    fn classify_debug(&self, line: &str) -> Vec<HighlightDebugSpan> {
+    pub(crate) fn classify_debug(&self, line: &str) -> Vec<HighlightDebugSpan> {
         self.classify(line, line.len())
             .into_iter()
             .map(|span| HighlightDebugSpan {
@@ -218,13 +231,14 @@ struct LineWalk {
 ///
 /// A word is only wrong when the tree is sure: an unknown subcommand under a
 /// command that takes no free positionals, or a flag no command on the path
-/// declares. A word at the cursor that still prefixes a valid choice is being
-/// typed and is left alone. Pipe stages are the DSL's business.
+/// declares. Executable prefixes are commands even at the cursor; ambiguous
+/// prefixes still being typed are left alone. Pipe stages are the DSL's business.
 fn walk_line(
     root: &CompletionNode,
     parser: &CommandLineParser,
     projected_line: &str,
     cursor: usize,
+    command_prefixes: bool,
 ) -> LineWalk {
     if crate::repl::history_store::split_bang_request(projected_line).is_some() {
         return LineWalk {
@@ -287,10 +301,13 @@ fn walk_line(
         if !in_path {
             continue;
         }
-        if let Some((canonical, child)) = node.resolve_child(token) {
-            if !typing || canonical == token {
-                walk.commands.insert((span.start, span.end));
-            }
+        let resolved = if command_prefixes {
+            node.resolve_child(token)
+        } else {
+            node.children.get_key_value(token)
+        };
+        if let Some((canonical, child)) = resolved {
+            walk.commands.insert((span.start, span.end));
             path.push(canonical.clone());
             scopes.push(child);
             node = child;

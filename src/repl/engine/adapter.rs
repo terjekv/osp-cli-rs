@@ -211,12 +211,10 @@ pub(crate) fn build_repl_highlighter(
         .as_deref()
         .and_then(color_from_style_spec)
         .unwrap_or(Color::Red);
-    Some(ReplHighlighter::new(
-        tree.clone(),
-        command_color?,
-        error_color,
-        line_projector,
-    ))
+    Some(
+        ReplHighlighter::new(tree.clone(), command_color?, error_color, line_projector)
+            .with_command_prefixes(appearance.command_prefixes),
+    )
 }
 
 pub(crate) fn style_with_fg_bg(fg: Option<Color>, bg: Option<Color>) -> Style {

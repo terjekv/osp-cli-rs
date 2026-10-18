@@ -53,6 +53,11 @@ Any positive count is accepted. Unrecognized values fall back to `tab`.
 
 ## Command prefixes
 
+A uniquely resolvable command prefix uses the valid-command colour immediately,
+including the word still at the cursor. Ambiguous prefixes remain uncoloured
+while being typed. With prefix execution disabled, only full names receive
+valid-command highlighting.
+
 `command.prefixes` controls native command-word abbreviations:
 
 - `interactive` (default): accept unique prefixes in the REPL.
