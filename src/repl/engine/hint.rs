@@ -169,8 +169,23 @@ impl ReplHinter {
 
     fn describe_problem(&mut self, line: &str, problem: &LineProblem) -> String {
         let word = line.get(problem.start..problem.end).unwrap_or_default();
+        let path = match &problem.kind {
+            LineProblemKind::UnknownCommand { parent } => parent,
+            LineProblemKind::UnknownFlag { command } => command,
+        };
+        let scope = self
+            .completer
+            .engine()
+            .node_at(&[])
+            .map(|root| root.name.as_str())
+            .unwrap_or_default();
+        let display_path = std::iter::once(scope)
+            .chain(path.iter().map(String::as_str))
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         let mut message = match &problem.kind {
-            LineProblemKind::UnknownCommand { parent } if parent.is_empty() => {
+            LineProblemKind::UnknownCommand { .. } if display_path.is_empty() => {
                 format!("unknown command '{word}'")
             }
             LineProblemKind::UnknownCommand { parent }
@@ -183,17 +198,17 @@ impl ReplHinter {
                 if parent.first().is_some_and(|command| command == "config") {
                     format!("unknown config key '{word}'")
                 } else {
-                    format!("unknown value '{word}' for '{}'", parent.join(" "))
+                    format!("unknown value '{word}' for '{}'", display_path)
                 }
             }
-            LineProblemKind::UnknownCommand { parent } => {
-                format!("unknown command '{word}' for '{}'", parent.join(" "))
+            LineProblemKind::UnknownCommand { .. } => {
+                format!("unknown command '{word}' for '{}'", display_path)
             }
-            LineProblemKind::UnknownFlag { command } if command.is_empty() => {
+            LineProblemKind::UnknownFlag { .. } if display_path.is_empty() => {
                 format!("unknown flag '{word}'")
             }
-            LineProblemKind::UnknownFlag { command } => {
-                format!("unknown flag '{word}' for '{}'", command.join(" "))
+            LineProblemKind::UnknownFlag { .. } => {
+                format!("unknown flag '{word}' for '{}'", display_path)
             }
         };
         // The completer's fuzzy rescue ranks the closest real word first.

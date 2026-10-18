@@ -256,6 +256,7 @@ fn scoped_completion_root(root: &CompletionNode, path: &[String]) -> CompletionN
         node = child;
     }
     let mut scoped = node.clone();
+    scoped.name = path.join(" ");
     for &command in super::input::REPL_GLOBAL_COMMANDS {
         if let Some(global) = root.children.get(command) {
             scoped.children.insert(command.to_string(), global.clone());
@@ -338,13 +339,14 @@ fn apply_shell_root_controls(root: &mut CompletionNode) {
     });
     suggestions.dedup_by(|left, right| left.value == right.value);
 
-    // Keep root args in sync with current child commands so an empty stub
-    // still suggests shell-local commands from the scoped root.
-    root.args = vec![ArgNode {
-        name: Some("command".to_string()),
-        suggestions,
-        ..ArgNode::default()
-    }];
+    // Preserve shell positionals; only synthesize the command list when absent.
+    if root.args.is_empty() {
+        root.args = vec![ArgNode {
+            name: Some("command".to_string()),
+            suggestions,
+            ..ArgNode::default()
+        }];
+    }
 }
 
 fn inject_invocation_flags(node: &mut CompletionNode) {

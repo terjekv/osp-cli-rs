@@ -292,6 +292,13 @@ pub struct ArgNode {
 }
 
 impl ArgNode {
+    pub(crate) fn accepts_value(&self, value: &str) -> bool {
+        self.suggestions.is_empty()
+            || self.suggestions.iter().any(|entry| {
+                entry.value == value || entry.aliases.iter().any(|alias| alias == value)
+            })
+    }
+
     /// Creates an argument node with a visible argument name.
     ///
     /// # Examples

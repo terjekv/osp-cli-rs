@@ -296,14 +296,11 @@ fn walk_line(
         }
         in_path = false;
 
-        // The root's positional is the synthetic command list, so any word
-        // there must name a command; elsewhere positionals are free values.
-        let takes_values = !path.is_empty() && !node.args.is_empty();
-        let names_root_word = node
+        let accepts_value = node
             .args
-            .iter()
-            .any(|arg| arg.suggestions.iter().any(|entry| entry.value == token));
-        if node.children.is_empty() || node.value_key || takes_values || names_root_word {
+            .first()
+            .is_some_and(|arg| arg.accepts_value(token));
+        if node.children.is_empty() || node.value_key || accepts_value {
             continue;
         }
         let prefixes_a_command = node.children.keys().any(|name| name.starts_with(token));

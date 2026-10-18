@@ -191,17 +191,31 @@ impl CompletionEngine {
         }
         let path = &analysis.context.matched_path;
         let node = self.node_at(path)?;
-        if path.is_empty() || node.args.is_empty() {
+        if node.args.is_empty() {
             return None;
         }
         let path_tokens = command_path_tokens(&analysis.parsed.cursor_cmd);
+        if path.is_empty() {
+            let arg = node.args.first()?;
+            let word = path_tokens.first()?;
+            if node.children.contains_key(word) || !arg.accepts_value(word) {
+                return None;
+            }
+            if let Some(tooltip) = arg.tooltip.as_ref().filter(|text| !text.trim().is_empty()) {
+                return Some((tooltip.clone(), None));
+            }
+        }
         let index =
             positional_arg_index(&path_tokens, &analysis.cursor.token_stub, path.len(), node);
         let active_index = match &analysis.request {
             CompletionRequest::Positionals { arg_index, .. } => Some(*arg_index),
             _ => None,
         };
-        let mut text = path.join(" ");
+        let mut text = if path.is_empty() {
+            node.name.clone()
+        } else {
+            path.join(" ")
+        };
         let mut active = None;
         for (slot, arg) in node.args.iter().enumerate() {
             let name = arg.name.as_deref().filter(|name| !name.is_empty())?;
