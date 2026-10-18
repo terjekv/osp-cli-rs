@@ -949,14 +949,8 @@ impl NativeProgressSink for NativeProgressRenderer<'_, '_> {
     }
 
     fn flush(&self) -> anyhow::Result<()> {
+        // emit() already drops throttled intermediate frames; an explicit flush draws the latest one.
         if let Some(event) = self.pending.borrow_mut().take() {
-            if self
-                .last_draw
-                .get()
-                .is_some_and(|last| last.elapsed() < std::time::Duration::from_millis(250))
-            {
-                return Ok(());
-            }
             self.draw(event, self.stages, false)?;
             self.last_draw.set(Some(std::time::Instant::now()));
         }
