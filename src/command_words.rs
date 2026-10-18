@@ -52,6 +52,27 @@ pub fn resolve<'a>(
     }
 }
 
+/// Suggests prefix matches, or the nearest command using execution's typo distance.
+pub(crate) fn suggestions(word: &str, names: &[&str]) -> Vec<String> {
+    let prefixes = names
+        .iter()
+        .copied()
+        .filter(|name| !word.is_empty() && name.starts_with(word))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if !prefixes.is_empty() {
+        return prefixes.into_iter().collect();
+    }
+    let distance = if word.chars().count() >= 4 { 2 } else { 1 };
+    names
+        .iter()
+        .map(|name| (strsim::levenshtein(word, &name.to_ascii_lowercase()), *name))
+        .filter(|(score, _)| *score <= distance)
+        .min()
+        .map(|(_, name)| vec![name.to_owned()])
+        .unwrap_or_default()
+}
+
 /// Returns the shortest prefix that resolves to `name`, including exact precedence.
 pub fn shortest_prefix(name: &str, names: &[&str]) -> usize {
     name.char_indices()
@@ -77,17 +98,21 @@ pub fn normalize(
     let mut result = args.to_vec();
     let mut selected = grammar;
     let mut path = vec![grammar.get_name().to_owned()];
-    let mut correction = false;
     let mut disabled_prefix = false;
     for (index, word) in args.iter().enumerate() {
         if word.starts_with('-') || !selected.has_subcommands() {
             break;
         }
-        let names = selected
+        let mut names = selected
             .get_subcommands()
             .filter(|child| !child.is_hide_set())
             .map(clap::Command::get_name)
             .collect::<Vec<_>>();
+        // Clap adds help when building the grammar used by completion and parsing.
+        if !selected.is_disable_help_subcommand_set() && selected.find_subcommand("help").is_none()
+        {
+            names.push("help");
+        }
         // Explicit clap aliases retain their existing meaning, but are never suggested.
         if let Some(child) = selected.find_subcommand(word) {
             result[index] = child.get_name().to_owned();
@@ -102,7 +127,7 @@ pub fn normalize(
             .collect::<Vec<_>>();
         let canonical = match resolve(word, candidates.iter().copied()) {
             Ok(Some(name)) => {
-                disabled_prefix |= !enabled;
+                disabled_prefix |= !enabled && name != *word;
                 name
             }
             Err(matches) => anyhow::bail!(
@@ -113,19 +138,7 @@ pub fn normalize(
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Ok(None) => {
-                let distance = if word.chars().count() >= 4 { 2 } else { 1 };
-                let Some((_, name)) = candidates
-                    .iter()
-                    .map(|name| (strsim::levenshtein(word, name), name))
-                    .filter(|(score, _)| *score <= distance)
-                    .min()
-                else {
-                    break;
-                };
-                correction = true;
-                (*name).to_owned()
-            }
+            Ok(None) => break,
         };
         result[index] = canonical.clone();
         path.push(canonical.clone());
@@ -133,9 +146,6 @@ pub fn normalize(
             break;
         };
         selected = child;
-    }
-    if correction {
-        anyhow::bail!("Did you mean `{}`?", path.join(" "));
     }
     if disabled_prefix {
         anyhow::bail!(

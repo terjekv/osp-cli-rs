@@ -298,18 +298,13 @@ fn matching_external_command_entries<'a>(
 
 fn closest_external_command(catalog: &[CommandCatalogEntry], command: &str) -> Option<String> {
     let command = command.trim().to_ascii_lowercase();
-    let max_distance = if command.chars().count() >= 4 { 2 } else { 1 };
-    catalog
+    let names = catalog
         .iter()
-        .map(|entry| {
-            (
-                strsim::levenshtein(&command, &entry.name.to_ascii_lowercase()),
-                &entry.name,
-            )
-        })
-        .filter(|(distance, _)| *distance <= max_distance)
-        .min_by(|left, right| left.cmp(right))
-        .map(|(_, name)| name.clone())
+        .map(|entry| entry.name.as_str())
+        .collect::<Vec<_>>();
+    crate::command_words::suggestions(&command, &names)
+        .into_iter()
+        .next()
 }
 
 pub(crate) fn normalize_profile_override(value: Option<String>) -> Option<String> {

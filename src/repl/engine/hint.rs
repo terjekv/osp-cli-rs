@@ -21,7 +21,7 @@ use unicode_width::UnicodeWidthStr;
 use super::adapter::ReplCompleter;
 use super::editor::PaintedLine;
 use crate::completion::{CompletionAnalysis, CompletionRequest};
-use crate::repl::highlight::ReplHighlighter;
+use crate::repl::highlight::{LineProblemKind, ReplHighlighter};
 
 /// The hint lines below the input.
 struct Status {
@@ -104,6 +104,27 @@ impl ReplHinter {
         if let Some(expanded) = self.completer.expand_bang_request(line) {
             return Some(Status::line(expanded));
         }
+        if let Some(problem) = self.highlighter.problem(line, pos) {
+            if let LineProblemKind::UnknownCommand { parent } = problem.kind {
+                let node = self.completer.engine().node_at(&parent)?;
+                let names = node
+                    .children
+                    .iter()
+                    .filter(|(_, child)| !child.hidden && !child.value_key && !child.value_leaf)
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>();
+                let word = &line[problem.start..problem.end];
+                let names = crate::command_words::suggestions(word, &names);
+                let (last, rest) = names.split_last()?;
+                let choices = if rest.is_empty() {
+                    last.clone()
+                } else {
+                    format!("{} or {last}", rest.join(", "))
+                };
+                return Some(Status::line(format!("Did you mean {choices}?")));
+            }
+            return None;
+        }
         let analysis = self.completer.analyze(line, pos);
         let engine = self.completer.engine();
         if let Some(names) = self.command_matches(&analysis) {
@@ -154,9 +175,6 @@ impl ReplHinter {
                 }
             }
             return Some(status);
-        }
-        if self.highlighter.problem(line, pos).is_some() {
-            return None;
         }
         if !matches!(analysis.request, CompletionRequest::FlagValues { .. })
             && let Some((usage, active)) = engine.positional_usage(&analysis)
@@ -243,7 +261,8 @@ impl ReplHinter {
             node.children
                 .iter()
                 .filter(|(name, child)| {
-                    !child.value_key
+                    !child.hidden
+                        && !child.value_key
                         && !child.value_leaf
                         && name.starts_with(&analysis.cursor.token_stub)
                 })
@@ -484,10 +503,10 @@ mod tests {
     }
 
     #[test]
-    fn hint_keeps_unknown_command_words_quiet_unit() {
+    fn hint_suggests_unknown_command_words_unit() {
         let (inline, out) = paint("orch vm fnd ");
         assert_eq!(inline, "");
-        assert_eq!(out, "");
+        assert_eq!(out, "\r\nDid you mean find?");
     }
 
     #[test]

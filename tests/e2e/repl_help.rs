@@ -24,7 +24,7 @@ fn run_repl_command(command: &str, colored: bool) -> (String, String) {
     let start = session.output_len();
     session.type_text(command);
     session.write_bytes(b"\r");
-    let expected = if command == "config sho" {
+    let expected = if command == "config shwo" {
         "Unknown command"
     } else if matches!(command, "help help" | "help --help") {
         "invalid help target"
@@ -106,7 +106,7 @@ fn repl_invalid_subcommand_suggests_the_valid_command_end_to_end() {
     if crate::isolation::isolated_test() {
         return;
     }
-    let (_, plain) = run_repl_command("config sho", false);
+    let (_, plain) = run_repl_command("config shwo", false);
     assert!(plain.contains("Unknown command"), "output={plain:?}");
     assert!(
         plain.contains("hint: Did you mean config show?"),

@@ -216,11 +216,7 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
     let output_start = session.output_len();
     session.write_bytes(b"theme\r");
     assert!(
-        session.wait_for_output_since(
-            output_start,
-            "Inspect and apply themes",
-            Duration::from_secs(1),
-        ),
+        session.wait_for_output_since(output_start, "Usage", Duration::from_secs(1),),
         "bare theme help stalled; output:\n{}",
         session.output_snapshot(4000),
     );

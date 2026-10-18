@@ -191,15 +191,14 @@ impl CompletionEngine {
             return Some(value.len());
         }
         let nodes = TreeResolver::new(self.suggester.tree()).resolved_nodes(&analysis.context);
-        value
-            .char_indices()
-            .map(|(i, c)| i + c.len_utf8())
-            .find(|&end| {
-                nodes
-                    .context_node
-                    .resolve_child(&value[..end])
-                    .is_some_and(|(name, _)| name == value)
-            })
+        let names = nodes
+            .context_node
+            .children
+            .iter()
+            .filter(|(_, child)| !child.hidden && !child.value_key && !child.value_leaf)
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        Some(crate::command_words::shortest_prefix(value, &names))
     }
 
     /// Returns the tree node at an exact command path.

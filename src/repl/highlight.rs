@@ -315,10 +315,10 @@ fn walk_line(
         }
         in_path = false;
 
-        let accepts_value = node
-            .args
-            .first()
-            .is_some_and(|arg| arg.accepts_value(token));
+        let accepts_value = node.args.first().is_some_and(|arg| {
+            // Synthesized command menus are constrained; positional suggestions are not.
+            arg.name.as_deref() != Some("command") || arg.accepts_value(token)
+        });
         if node.children.is_empty() || node.value_key || accepts_value {
             continue;
         }

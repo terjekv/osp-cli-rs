@@ -602,7 +602,7 @@ fn repl_dispatch_and_classification_cover_representative_line_categories_unit() 
         ("intro | H", ObservedDispatchKind::DslHelp),
         ("help", ObservedDispatchKind::ShortcutHelp),
         ("intro", ObservedDispatchKind::Command),
-        ("config sho", ObservedDispatchKind::Error),
+        ("config shwo", ObservedDispatchKind::Error),
         ("intro --wat | config", ObservedDispatchKind::Error),
     ];
 
@@ -674,9 +674,9 @@ fn execute_repl_plugin_line_records_failures_and_inline_help_unit() {
     assert!(state.session.prompt_timing.badge().is_some());
 
     let mut sink = crate::app::BufferedUiSink::default();
-    execute_repl_plugin_line(&mut state, &history, "config sho", Some(&mut sink))
+    execute_repl_plugin_line(&mut state, &history, "config shwo", Some(&mut sink))
         .expect("syntax errors should render through the sink");
-    assert!(sink.stderr.contains("Unknown command 'config sho'"));
+    assert!(sink.stderr.contains("Unknown command 'config shwo'"));
     assert!(sink.stderr.contains("error:"));
 }
 
