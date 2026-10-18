@@ -823,7 +823,8 @@ impl MenuCore {
         if use_ansi_coloring {
             format!(
                 "{}{}{:>pad$}{}",
-                colors.description_style.prefix(),
+                // The meta line describes the selected item, so it shares its highlight.
+                colors.selected_text_style.prefix(),
                 truncated,
                 "",
                 RESET,
