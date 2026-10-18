@@ -330,13 +330,24 @@ fn build_candidate_menu(appearance: &ReplAppearance, name: &str) -> OspCompletio
         .as_deref()
         .and_then(color_from_style_spec);
 
+    let description_color = appearance
+        .hint_style
+        .as_deref()
+        .and_then(color_from_style_spec);
+    let description_style = style_with_fg_bg(description_color.or(text_color), background_color);
+    let description_style = if description_color.is_none() {
+        description_style.dimmed()
+    } else {
+        description_style
+    };
+
     OspCompletionMenu::default()
         .with_name(name)
         .with_marker("")
         .with_description_rows(1)
         .with_column_padding(2)
         .with_text_style(style_with_fg_bg(text_color, background_color))
-        .with_description_text_style(style_with_fg_bg(text_color, highlight_color))
+        .with_description_text_style(description_style)
         .with_match_text_style(style_with_fg_bg(text_color, background_color))
         .with_selected_text_style(style_with_fg_bg(text_color, highlight_color))
         .with_selected_match_text_style(style_with_fg_bg(text_color, highlight_color))

@@ -15,7 +15,9 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const PROGRESS_DELAY: Duration = Duration::from_secs(1);
 
 use terminal_size::{Height, Width, terminal_size_of};
 
@@ -197,8 +199,8 @@ impl UiSink for StdIoUiSink {
 
 /// Owns one stderr animation; dropping it stops the worker and clears the line.
 pub struct StderrSpinner {
-    stop: mpsc::Sender<()>,
-    worker: Option<thread::JoinHandle<()>>,
+    stop: mpsc::Sender<Option<String>>,
+    worker: Option<thread::JoinHandle<bool>>,
 }
 
 impl StderrSpinner {
@@ -210,32 +212,41 @@ impl StderrSpinner {
             &['|', '/', '-', '\\'][..]
         };
         let (stop, stopped) = mpsc::channel();
-        Self::draw(frames[0], &text);
         let worker = thread::Builder::new()
             .name("osp-progress".into())
             .spawn(move || {
-                let mut frame = 1;
-                while matches!(
-                    stopped.recv_timeout(Duration::from_millis(80)),
-                    Err(mpsc::RecvTimeoutError::Timeout)
-                ) {
-                    Self::draw(frames[frame % frames.len()], &text);
-                    frame += 1;
+                let mut next_draw = Instant::now() + PROGRESS_DELAY;
+                let mut text = text;
+                let mut frame = 0;
+                let mut drawn = false;
+                loop {
+                    let delay = next_draw.saturating_duration_since(Instant::now());
+                    match stopped.recv_timeout(delay) {
+                        Ok(Some(update)) => text = update,
+                        Ok(None) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                    if Instant::now() >= next_draw {
+                        drawn |= Self::draw(frames[frame % frames.len()], &text);
+                        frame += 1;
+                        next_draw = Instant::now() + Duration::from_millis(80);
+                    }
                 }
-            });
-        match worker {
-            Ok(worker) => Some(Self {
-                stop,
-                worker: Some(worker),
-            }),
-            Err(_) => {
-                let _ = write!(io::stderr(), "\r\x1b[2K");
-                None
-            }
-        }
+                drawn
+            })
+            .ok()?;
+        Some(Self {
+            stop,
+            worker: Some(worker),
+        })
     }
 
-    fn draw(frame: char, text: &str) {
+    fn update(&self, text: &str) {
+        let text = crate::ui::sanitize_human_text(text).trim().to_owned();
+        let _ = self.stop.send(Some(text));
+    }
+
+    fn draw(frame: char, text: &str) -> bool {
         // Leave the final cell free so terminal autowrap never moves the cursor.
         let width = terminal_size_of(io::stderr())
             .map(|(Width(width), _)| usize::from(width))
@@ -244,17 +255,22 @@ impl StderrSpinner {
         let line = crate::ui::crop_display_width(&format!("{frame} {text}"), width);
         let mut stderr = io::stderr().lock();
         if crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst) {
-            return;
+            return false;
         }
         let _ = write!(stderr, "\r\x1b[2K{line}").and_then(|()| stderr.flush());
+        true
     }
 }
 
 impl Drop for StderrSpinner {
     fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        let _ = self.stop.send(None);
+        let drawn = self
+            .worker
+            .take()
+            .is_some_and(|worker| worker.join().unwrap_or(false));
+        if !drawn {
+            return;
         }
         let mut stderr = io::stderr().lock();
         let _ = write!(stderr, "\r\x1b[2K").and_then(|()| stderr.flush());
@@ -265,6 +281,7 @@ impl Drop for StderrSpinner {
 pub(crate) struct ProgressUiSink<'a> {
     inner: &'a mut dyn UiSink,
     previous_lines: usize,
+    started: Option<Instant>,
     spinner: Option<StderrSpinner>,
     unicode: bool,
 }
@@ -274,6 +291,7 @@ impl<'a> ProgressUiSink<'a> {
         Self {
             inner,
             previous_lines: 0,
+            started: None,
             spinner: None,
             unicode,
         }
@@ -290,7 +308,7 @@ impl<'a> ProgressUiSink<'a> {
     }
 
     pub(crate) fn can_replace(&self) -> bool {
-        self.previous_lines > 0 || self.spinner.is_some()
+        self.started.is_some()
     }
 
     fn display_width(text: &str) -> usize {
@@ -380,12 +398,21 @@ impl UiSink for ProgressUiSink<'_> {
                 .stderr_height()
                 .is_none_or(|height| physical_lines < height);
         if can_replace {
-            self.clear_progress();
+            let started = *self.started.get_or_insert_with(Instant::now);
+            self.erase_previous();
             if text.trim_end_matches('\n').lines().count() == 1 {
+                if let Some(spinner) = &self.spinner {
+                    spinner.update(text);
+                    return;
+                }
                 self.spinner = self.inner.start_progress_spinner(text, self.unicode);
                 if self.spinner.is_some() {
                     return;
                 }
+            }
+            self.spinner.take();
+            if started.elapsed() < PROGRESS_DELAY {
+                return;
             }
         } else {
             self.clear_progress();
@@ -395,6 +422,7 @@ impl UiSink for ProgressUiSink<'_> {
     }
 
     fn clear_progress(&mut self) {
+        self.started = None;
         self.spinner.take();
         self.erase_previous();
     }

@@ -605,13 +605,17 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             &mut terminal,
         )
         .expect("live presentations should fit the terminal or append safely");
-        assert!(terminal.output.stderr.contains("running"));
-        assert!(terminal.output.stderr.contains("completed"));
-        assert!(terminal.output.stderr.contains("db01.uio.no"));
+        let appends_progress = height <= 2 || resize_height.is_some();
+        assert_eq!(terminal.output.stderr.contains("running"), appends_progress);
         assert_eq!(
-            terminal.output.stderr.contains("\x1b[2K"),
-            height > 2 && resize_height.is_none()
+            terminal.output.stderr.contains("completed"),
+            appends_progress
         );
+        assert_eq!(
+            terminal.output.stderr.contains("db01.uio.no"),
+            appends_progress
+        );
+        assert!(!terminal.output.stderr.contains("\x1b[2K"));
         assert!(terminal.output.stdout.contains("db01.uio.no"));
     }
     let mut filtered = BufferedUiSink::default();
@@ -681,8 +685,8 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
             let (captured, status) =
                 crate::pty_support::capture(pair, command, std::time::Duration::from_secs(20));
             assert!(status.success(), "{captured}");
-            assert!(captured.contains("running"));
-            assert!(captured.contains("completed"));
+            assert_eq!(captured.contains("state.name:  running"), height <= 2);
+            assert_eq!(captured.contains("completed"), height <= 2);
             assert!(captured.contains("db01.uio.no"));
             assert!(captured.contains("4 CPU / 8 GiB"), "{captured}");
         }

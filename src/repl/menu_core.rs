@@ -729,6 +729,26 @@ impl MenuCore {
 
         if use_ansi_coloring {
             let empty_space = col_width.saturating_sub(display_width);
+            let display = if let Some(label_width) = self.working_details.list_label_width {
+                let description_start = label_width + LIST_DESCRIPTION_GAP;
+                let mut split = display.len();
+                let mut width = 0;
+                for (index, ch) in display.char_indices() {
+                    if width >= description_start {
+                        split = index;
+                        break;
+                    }
+                    width += ch.width().unwrap_or(0);
+                }
+                let (label, description) = display.split_at(split);
+                let mut description_style = colors.description_style;
+                if selected {
+                    description_style.background = colors.selected_text_style.background;
+                }
+                format!("{label}{RESET}{}{description}", description_style.prefix())
+            } else {
+                display.to_string()
+            };
             format!(
                 "{}{}{:>empty$}{}{}",
                 styled,
