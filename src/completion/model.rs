@@ -400,6 +400,18 @@ impl ArgNode {
 pub struct ValueCatalog {
     entries: std::sync::Arc<std::sync::RwLock<Vec<SuggestionEntry>>>,
     pub(super) matcher: Option<fn(&SuggestionEntry, &str) -> bool>,
+    before_read: std::sync::Arc<CatalogReadHook>,
+}
+
+type CatalogLoader = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Default)]
+struct CatalogReadHook(std::sync::RwLock<Option<CatalogLoader>>);
+
+impl std::fmt::Debug for CatalogReadHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CatalogReadHook")
+    }
 }
 
 impl PartialEq for ValueCatalog {
@@ -410,6 +422,17 @@ impl PartialEq for ValueCatalog {
 impl Eq for ValueCatalog {}
 
 impl ValueCatalog {
+    /// Installs a shared local snapshot loader, invoked before reading entries.
+    /// The hook must not perform network I/O or recursively read this catalogue.
+    /// Use weak references when the loader's owner also holds the catalogue.
+    pub fn set_before_read(&self, load: impl Fn() + Send + Sync + 'static) {
+        *self
+            .before_read
+            .0
+            .write()
+            .unwrap_or_else(|err| err.into_inner()) = Some(std::sync::Arc::new(load));
+    }
+
     /// Uses a local semantic matcher instead of fuzzy matching and typo rescue.
     /// The matcher receives the entry and case-folded stub; it must not do I/O.
     pub fn with_matcher(matcher: fn(&SuggestionEntry, &str) -> bool) -> Self {
@@ -455,6 +478,15 @@ impl ValueCatalog {
 
     /// Reads the sorted entries in place; callers copy only what they keep.
     pub fn scan<R>(&self, read: impl FnOnce(&[SuggestionEntry]) -> R) -> R {
+        let load = self
+            .before_read
+            .0
+            .read()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone();
+        if let Some(load) = load {
+            load();
+        }
         read(&self.entries.read().unwrap_or_else(|err| err.into_inner()))
     }
 }
