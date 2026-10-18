@@ -448,7 +448,7 @@ impl SuggestionEngine {
                 best(entries.iter().filter_map(|entry| {
                     // Compare the leading label, not the shared domain suffix.
                     let label = entry.value.split('.').next().unwrap_or(&entry.value);
-                    let similarity = strsim::jaro_winkler(&stub_lc, &fold_case(label));
+                    let similarity = strsim::jaro_winkler(&stub_lc, &folded_candidate(label));
                     (similarity >= TYPO_RESCUE_MIN_SIMILARITY).then(|| {
                         let distance = ((1.0 - similarity) * 10_000.0) as u32;
                         (MATCH_SCORE_TYPO_BASE + distance, entry)
@@ -519,7 +519,7 @@ impl SuggestionEngine {
             return Some(MATCH_SCORE_EMPTY_STUB);
         }
 
-        let candidate_lc = fold_case(candidate);
+        let candidate_lc = folded_candidate(candidate);
 
         if stub_lc == candidate_lc {
             return Some(MATCH_SCORE_EXACT);
@@ -729,15 +729,31 @@ pub fn closest_values(catalogs: &[ValueCatalog], text: &str, limit: usize) -> Ve
 /// The best-scoring catalogue hits, lowest score first, then alphabetical.
 fn best<'a>(hits: impl Iterator<Item = (u32, &'a SuggestionEntry)>) -> Vec<(u32, SuggestionEntry)> {
     let mut hits = hits.collect::<Vec<_>>();
-    hits.sort_unstable_by(|left, right| {
+    let compare = |left: &(u32, &SuggestionEntry), right: &(u32, &SuggestionEntry)| {
         left.0
             .cmp(&right.0)
             .then_with(|| left.1.value.cmp(&right.1.value))
-    });
+    };
+    if hits.len() > CATALOG_MATCH_LIMIT {
+        hits.select_nth_unstable_by(CATALOG_MATCH_LIMIT, compare);
+        hits.truncate(CATALOG_MATCH_LIMIT);
+    }
+    hits.sort_unstable_by(compare);
     hits.into_iter()
-        .take(CATALOG_MATCH_LIMIT)
         .map(|(score, entry)| (score, entry.clone()))
         .collect()
+}
+
+// Lowercase ASCII is already folded; preserve Unicode folding for other text.
+fn folded_candidate(candidate: &str) -> std::borrow::Cow<'_, str> {
+    if candidate
+        .bytes()
+        .all(|byte| byte.is_ascii() && !byte.is_ascii_uppercase())
+    {
+        std::borrow::Cow::Borrowed(candidate)
+    } else {
+        std::borrow::Cow::Owned(fold_case(candidate))
+    }
 }
 
 fn boundary_prefix_index(candidate: &str, stub: &str) -> Option<usize> {
