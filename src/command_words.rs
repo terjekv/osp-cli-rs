@@ -98,6 +98,7 @@ pub fn normalize(
     let mut result = args.to_vec();
     let mut selected = grammar;
     let mut path = vec![grammar.get_name().to_owned()];
+    let mut effect = grammar.get::<crate::NativeEffect>().copied();
     for (index, word) in args.iter().enumerate() {
         if word.starts_with('-') || !selected.has_subcommands() {
             break;
@@ -116,6 +117,7 @@ pub fn normalize(
         if let Some(child) = selected.find_subcommand(word) {
             result[index] = child.get_name().to_owned();
             path.push(child.get_name().to_owned());
+            effect = child.get::<crate::NativeEffect>().copied().or(effect);
             selected = child;
             continue;
         }
@@ -139,6 +141,18 @@ pub fn normalize(
             ),
             Ok(None) => break,
         };
+        let child = selected.find_subcommand(&canonical);
+        let child_effect = child
+            .and_then(|child| child.get::<crate::NativeEffect>().copied())
+            .or(effect);
+        if matches!(child_effect, Some(crate::NativeEffect::Write)) {
+            return Err(crate::core::CommandError::new(
+                "Commands that write require the full verb",
+            )
+            .with_action(format!("Did you mean {} {canonical}?", path.join(" ")))
+            .into());
+        }
+        effect = child_effect;
         result[index] = canonical.clone();
         path.push(canonical.clone());
         let Some(child) = selected.find_subcommand(&canonical) else {
