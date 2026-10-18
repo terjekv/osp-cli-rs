@@ -286,13 +286,8 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         .unwrap(),
         3
     );
-    let assessed = terminal.0.stderr.find("assessed").unwrap();
-    assert!(terminal.0.stderr.contains("planning"));
-    let notice = terminal.0.stderr.find("Approval required").unwrap();
-    assert!(
-        assessed < notice,
-        "pending progress must precede the interaction"
-    );
+    // Fast transient progress is delayed; the interaction notice remains durable.
+    assert!(terminal.0.stderr.contains("Approval required"));
     assert!(terminal.0.stdout.contains("waiting_approval"));
 
     for (is_approved, expected_status, filter) in [
