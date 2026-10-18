@@ -1238,7 +1238,23 @@ fn is_excluded_command(command: &str, exclude_patterns: &[String]) -> bool {
 }
 
 pub(super) fn is_sensitive_line(line: &str) -> bool {
-    shell_words::split(line).map_or(true, |tokens| has_sensitive_arguments(&tokens))
+    // Every history write rescans all records, and classifying `config set` builds the full
+    // clap tree; the answer depends only on the line, so remember it.
+    static SEEN: std::sync::LazyLock<Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::LazyLock::new(Default::default);
+    if let Some(&sensitive) = SEEN.lock().ok().as_ref().and_then(|seen| seen.get(line)) {
+        return sensitive;
+    }
+    let sensitive =
+        shell_words::split(line).map_or(true, |tokens| has_sensitive_arguments(&tokens));
+    if let Ok(mut seen) = SEEN.lock() {
+        // shortcut: drops the whole memo when full, fine for history-sized working sets.
+        if seen.len() >= 4096 {
+            seen.clear();
+        }
+        seen.insert(line.to_owned(), sensitive);
+    }
+    sensitive
 }
 
 fn is_sensitive_argument(token: &str) -> bool {
