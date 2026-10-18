@@ -784,6 +784,20 @@ pub(crate) struct ConfigUnsetArgs {
 }
 
 impl Cli {
+    /// Resolves startup configuration without constructing command clients.
+    pub fn resolve_config(
+        &self,
+        product_defaults: ConfigLayer,
+        terminal: &str,
+    ) -> miette::Result<crate::config::ResolvedConfig> {
+        crate::app::bootstrap::resolve_runtime_config(
+            crate::app::RuntimeConfigRequest::new(self.profile.clone(), Some(terminal))
+                .with_runtime_load(self.runtime_load_options())
+                .with_product_defaults(product_defaults)
+                .with_session_layer(crate::app::build_cli_session_layer(self)),
+        )
+    }
+
     pub(crate) fn append_static_session_overrides(&self, layer: &mut ConfigLayer) {
         if let Some(user) = self
             .user

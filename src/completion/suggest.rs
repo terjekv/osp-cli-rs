@@ -50,13 +50,13 @@ struct PositionalRequest<'a> {
 /// Generates ranked completion suggestions from a completion tree and cursor analysis.
 #[derive(Debug, Clone)]
 pub(crate) struct SuggestionEngine {
-    tree: CompletionTree,
+    tree: std::sync::Arc<CompletionTree>,
 }
 
 impl SuggestionEngine {
     /// Creates a suggestion engine for the provided completion tree.
-    pub fn new(tree: CompletionTree) -> Self {
-        Self { tree }
+    pub fn new(tree: impl Into<std::sync::Arc<CompletionTree>>) -> Self {
+        Self { tree: tree.into() }
     }
 
     pub(super) fn tree(&self) -> &CompletionTree {

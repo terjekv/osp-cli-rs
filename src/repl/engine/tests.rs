@@ -512,11 +512,11 @@ fn evaluate_repl_submission_handles_restart_and_error_paths_unit() {
 #[test]
 fn highlighter_builder_requires_command_color_unit() {
     let tree = completion_tree_with_config_show();
-    let none = build_repl_highlighter(&tree, &super::ReplAppearance::default(), None);
+    let none = build_repl_highlighter(tree.clone(), &super::ReplAppearance::default(), None);
     assert!(none.is_none());
 
     let some = build_repl_highlighter(
-        &tree,
+        tree.clone(),
         &ReplAppearance::builder()
             .with_command_highlight_style(Some("green".to_string()))
             .build(),
@@ -686,7 +686,7 @@ fn run_repl_with_reason_and_basic_input_detection_cover_basic_and_interactive_mo
             },
             reason,
             &mut submission,
-            |basic_prompt, _submission| {
+            |basic_prompt, _submission, _after_paint| {
                 basic_calls += 1;
                 assert_eq!(basic_prompt.left(), "left");
                 Ok(ReplResult::Exit(7))

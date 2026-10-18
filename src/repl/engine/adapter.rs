@@ -26,7 +26,10 @@ pub(crate) struct ReplCompleter {
 }
 
 impl ReplCompleter {
-    pub(crate) fn new(tree: CompletionTree, line_projector: Option<LineProjector>) -> Self {
+    pub(crate) fn new(
+        tree: impl Into<std::sync::Arc<CompletionTree>>,
+        line_projector: Option<LineProjector>,
+    ) -> Self {
         Self {
             engine: CompletionEngine::new(tree),
             line_projector,
@@ -202,7 +205,7 @@ pub fn default_pipe_verbs() -> BTreeMap<String, String> {
 }
 
 pub(crate) fn build_repl_highlighter(
-    tree: &CompletionTree,
+    tree: impl Into<std::sync::Arc<CompletionTree>>,
     appearance: &ReplAppearance,
     line_projector: Option<LineProjector>,
 ) -> Option<ReplHighlighter> {
@@ -216,7 +219,7 @@ pub(crate) fn build_repl_highlighter(
         .and_then(color_from_style_spec)
         .unwrap_or(Color::Red);
     Some(
-        ReplHighlighter::new(tree.clone(), command_color?, error_color, line_projector)
+        ReplHighlighter::new(tree, command_color?, error_color, line_projector)
             .with_command_prefixes(appearance.command_prefixes),
     )
 }

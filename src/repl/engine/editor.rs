@@ -289,7 +289,6 @@ impl Prompt for OspPrompt {
     }
 
     fn render_prompt_indicator(&self, _prompt_mode: PromptEditMode) -> Cow<'_, str> {
-        crate::startup_trace::first_prompt_rendered();
         Cow::Borrowed(self.indicator.as_str())
     }
 

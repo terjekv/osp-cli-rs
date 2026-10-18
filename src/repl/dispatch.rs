@@ -360,12 +360,14 @@ fn execute_repl_line_inner(
         Ok(mut executed) => {
             if refresh_completion {
                 executed.result = match executed.result {
-                    ReplResult::Continue => {
-                        command::finalize_repl_command(String::new(), true, false)
-                    }
-                    ReplResult::Print(output) => {
-                        command::finalize_repl_command(output, true, false)
-                    }
+                    ReplResult::Continue => ReplResult::Restart {
+                        output: String::new(),
+                        reload: crate::repl::ReplReloadKind::Completion,
+                    },
+                    ReplResult::Print(output) => ReplResult::Restart {
+                        output,
+                        reload: crate::repl::ReplReloadKind::Completion,
+                    },
                     result @ ReplResult::ReplaceInput(_) => {
                         state.session.native_context.request_completion_refresh();
                         result
@@ -454,7 +456,10 @@ fn execute_repl_line_inner(
             let exit_code = crate::app::classify_exit_code(&err);
             tracing::info!(target: "osp", exit_code, elapsed_ms = started.elapsed().as_millis(), "finished");
             let result = if refresh_completion {
-                command::finalize_repl_command(String::new(), true, false)
+                ReplResult::Restart {
+                    output: String::new(),
+                    reload: crate::repl::ReplReloadKind::Completion,
+                }
             } else {
                 ReplResult::Continue
             };

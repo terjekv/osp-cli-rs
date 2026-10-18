@@ -230,6 +230,9 @@ pub(crate) fn resolve_external_command_source(
         auth.external_command_access(command),
         ExternalPathAccessRequirement::Visible,
     )?;
+    if clients.native_commands().command(command).is_some() {
+        return Ok(ExternalCommandSource::Native);
+    }
     let catalog = invocation_command_catalog(auth, clients, command)?;
     let matching = matching_external_command_entries(&catalog, command);
     let has_native = matching.iter().any(|entry| is_native_command_entry(entry));
@@ -260,6 +263,14 @@ pub(crate) fn canonical_external_command_name(
     clients: &AppClients,
     command: &str,
 ) -> Result<String> {
+    if let Some((name, _)) = clients
+        .native_commands()
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(command.trim()))
+        && auth.is_external_command_visible(name)
+    {
+        return Ok(name.to_string());
+    }
     let catalog = invocation_command_catalog(auth, clients, command)?;
     Ok(matching_external_command_entries(&catalog, command)
         .first()

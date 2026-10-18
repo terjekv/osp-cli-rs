@@ -804,6 +804,12 @@ pub trait NativeCommand: Send + Sync {
     /// The registered command name must remain stable across configurations.
     fn configure(&self, _config: &ResolvedConfig) {}
 
+    /// Configures command state for an actual interactive startup or a one-shot.
+    /// REPL debug commands use REPL config but are still one-shot invocations.
+    fn configure_runtime(&self, config: &ResolvedConfig, _interactive: bool) {
+        self.configure(config);
+    }
+
     /// Returns the unbuilt clap command definition for this command.
     ///
     /// The host sets its invocation-specific binary name before clap caches usage
@@ -1056,9 +1062,9 @@ pub struct NativeCommandRegistry {
 }
 
 impl NativeCommandRegistry {
-    pub(crate) fn configure(&self, config: &ResolvedConfig) {
+    pub(crate) fn configure(&self, config: &ResolvedConfig, interactive: bool) {
         for command in self.commands.values() {
-            command.configure(config);
+            command.configure_runtime(config, interactive);
         }
     }
 
@@ -1127,6 +1133,12 @@ impl NativeCommandRegistry {
     /// reuse human-typed names without normalizing them first.
     pub fn command(&self, name: &str) -> Option<&Arc<dyn NativeCommand>> {
         self.commands.get(&normalize_name(name))
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &Arc<dyn NativeCommand>)> {
+        self.commands
+            .iter()
+            .map(|(name, command)| (name.as_str(), command))
     }
 
     /// Resolves parsed argv through clap, so values cannot impersonate command names.
@@ -1210,21 +1222,21 @@ impl NativeCommandRegistry {
         self.commands
             .values()
             .map(|command| {
+                let grammar = command.command();
                 let mut describe = command.describe();
                 describe.inherit_auth_from_parents();
                 let mut completion = command.completion();
                 if augment_completion {
                     command.augment_completion(&mut completion);
-                    attach_word_resolvers(&mut completion, &command.command(), command, &[]);
-                    completion.hidden = command.command().is_hide_set();
+                    attach_word_resolvers(&mut completion, &grammar, command, &[]);
+                    completion.hidden = grammar.is_hide_set();
                 }
                 CommandCatalogEntry {
                     name: completion.name.clone(),
-                    about: crate::core::clap_metadata::plain(command.command().get_about())
+                    about: crate::core::clap_metadata::plain(grammar.get_about())
                         .unwrap_or_default(),
                     auth: describe.auth.clone(),
-                    subcommands: command
-                        .command()
+                    subcommands: grammar
                         .get_subcommands()
                         .filter(|child| !child.is_hide_set())
                         .map(|child| child.get_name().to_string())

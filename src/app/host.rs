@@ -420,7 +420,7 @@ fn handle_clap_parse_error(
                 sink.write_stderr(&config.ignored_keys_warning());
                 let _phase = tracing::info_span!(target: "osp_startup", "native command configure")
                     .entered();
-                app.native_commands.configure(config);
+                app.native_commands.configure(config, false);
             }
             let (mut body, root_help, long_help) = crate::cli::command_help_document(
                 command.clone(),

@@ -46,7 +46,7 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
     match shell_exit {
         crate::repl::ReplResult::Restart {
             output: text,
-            reload: crate::repl::ReplReloadKind::Default,
+            reload: crate::repl::ReplReloadKind::Completion,
         } => {
             assert!(text.contains("Leaving orch shell"));
         }

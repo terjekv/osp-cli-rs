@@ -262,7 +262,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
     {
         let _phase =
             tracing::info_span!(target: "osp_startup", "native command configure").entered();
-        native_commands.configure(&config);
+        native_commands.configure(&config, context.is_repl());
     }
     let clients = super::AppClients::new(plugins, native_commands);
     let auth = {

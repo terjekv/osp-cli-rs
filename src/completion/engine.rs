@@ -37,7 +37,8 @@ impl CompletionEngine {
     ///
     /// Analysis and suggestion ranking share the tree; global context-only
     /// flags are cached up front.
-    pub fn new(tree: CompletionTree) -> Self {
+    pub fn new(tree: impl Into<std::sync::Arc<CompletionTree>>) -> Self {
+        let tree = tree.into();
         let global_context_flags = collect_global_context_flags(&tree.root);
         Self {
             parser: CommandLineParser,

@@ -93,7 +93,7 @@ pub(super) fn execute_repl_shortcut(
             let entered = enter_repl_shell(state, &command, &invocation, sink)?;
             Ok(ReplResult::Restart {
                 output: entered,
-                reload: ReplReloadKind::Default,
+                reload: ReplReloadKind::Completion,
             })
         }
     }
@@ -176,7 +176,7 @@ pub(super) fn handle_repl_exit_request(session: &mut AppSession) -> ReplResult {
         crate::app::session::ReplExitTransition::ExitRoot => ReplResult::Exit(0),
         crate::app::session::ReplExitTransition::LeftShell { frame } => ReplResult::Restart {
             output: render_repl_shell_leave_message(&frame),
-            reload: ReplReloadKind::Default,
+            reload: ReplReloadKind::Completion,
         },
     }
 }
@@ -508,7 +508,7 @@ mod tests {
             handle_repl_exit_request(&mut state.session),
             ReplResult::Restart {
                 output: text,
-                reload: ReplReloadKind::Default,
+                reload: ReplReloadKind::Completion,
             } if text.contains("Leaving ldap shell")
         ));
     }
@@ -603,7 +603,7 @@ mod tests {
         match rendered {
             ReplResult::Restart {
                 output: text,
-                reload: ReplReloadKind::Default,
+                reload: ReplReloadKind::Completion,
             } => assert!(text.contains("Entering ldap shell")),
             other => panic!("unexpected repl result: {other:?}"),
         }
@@ -653,7 +653,7 @@ mod tests {
         match rendered {
             ReplResult::Restart {
                 output: text,
-                reload: ReplReloadKind::Default,
+                reload: ReplReloadKind::Completion,
             } => assert!(text.contains("Entering ldap shell")),
             other => panic!("unexpected repl result: {other:?}"),
         }

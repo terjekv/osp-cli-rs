@@ -147,6 +147,8 @@ impl ReplTabMode {
 /// Controls how a command-triggered REPL restart should be presented.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplReloadKind {
+    /// Rebuild the editor surface without reloading runtime configuration.
+    Completion,
     /// Rebuild the REPL and continue without reprinting the intro surface.
     Default,
     /// Rebuild the REPL and re-render the intro/help chrome.

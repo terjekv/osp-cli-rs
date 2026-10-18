@@ -70,8 +70,16 @@ fn run_plugin_repl_inner(state: &mut AppState) -> Result<i32> {
 
     loop {
         // 1. Prepare the next REPL cycle from current runtime/session state.
-        let cycle = loop_state.prepare_cycle(state)?;
-        start_native_completion_refreshes(&state.runtime, &state.clients, startup_refresh);
+        let mut cycle = loop_state.prepare_cycle(state)?;
+        let on_start = cycle.run_config.on_start.take();
+        let auth = state.runtime.auth.clone();
+        let registry = state.clients.native_commands().clone();
+        cycle.run_config.on_start = Some(std::sync::Arc::new(move |session| {
+            if let Some(start) = &on_start {
+                start(session);
+            }
+            start_native_completion_refreshes(&auth, &registry, startup_refresh);
+        }));
         startup_refresh = false;
 
         // 2. Print any intro/help chrome and pending restart output.
@@ -94,19 +102,17 @@ fn run_plugin_repl_inner(state: &mut AppState) -> Result<i32> {
 }
 
 fn start_native_completion_refreshes(
-    runtime: &AppRuntime,
-    clients: &crate::app::AppClients,
+    auth: &AuthState,
+    registry: &crate::native::NativeCommandRegistry,
     startup: bool,
 ) {
-    clients
-        .native_commands()
-        .refresh_completion_in_background(|name, command| {
-            if !runtime.auth.external_command_access(name).is_runnable() {
-                return false;
-            }
-            let requested = command.take_completion_fetch_request();
-            startup || requested
-        });
+    registry.refresh_completion_in_background(|name, command| {
+        if !auth.external_command_access(name).is_runnable() {
+            return false;
+        }
+        let requested = command.take_completion_fetch_request();
+        startup || requested
+    });
 }
 
 fn run_repl_cycle(
@@ -448,7 +454,7 @@ mod tests {
         assert!(denied.is_visible());
         assert!(!denied.is_runnable());
 
-        start_native_completion_refreshes(&runtime, &clients, true);
+        start_native_completion_refreshes(&runtime.auth, clients.native_commands(), true);
 
         assert_eq!(observed.recv_timeout(Duration::from_secs(1)), Ok("allowed"));
         assert!(observed.recv_timeout(Duration::from_millis(100)).is_err());

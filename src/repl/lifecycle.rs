@@ -87,7 +87,7 @@ impl ReplLoopState {
                 Some(code)
             }
             ReplResult::Restart { output, reload } => {
-                self.pending_reload = true;
+                self.pending_reload = !matches!(reload, ReplReloadKind::Completion);
                 self.show_intro = matches!(reload, ReplReloadKind::WithIntro);
                 if self.show_intro {
                     self.pending_output = output;
@@ -136,7 +136,7 @@ impl ReplCycle {
         };
 
         Ok(Self {
-            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared)?,
+            run_config: build_repl_cycle_run_config(runtime, session, clients, prepared, actions)?,
             help_text: intro_text,
             clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
         })
@@ -203,29 +203,26 @@ fn build_repl_cycle_run_config(
     session: &AppSession,
     clients: &AppClients,
     prepared: PreparedReplSurfaceState,
+    actions: Vec<crate::repl::ReplAction>,
 ) -> Result<ReplRunConfig> {
     session.native_context.activate(runtime);
-    for entry in clients.native_commands().catalog() {
-        if let Some(command) = clients.native_commands().command(&entry.name) {
-            session.native_context.register_context(
-                &entry.name,
-                command.context_origin(runtime.config.resolved()),
-                command.persisted_context_kinds(),
-                &command.command(),
-                command.context_kinds(),
-            );
-        }
+    for (name, command) in clients.native_commands().iter() {
+        session.native_context.register_context(
+            name,
+            command.context_origin(runtime.config.resolved()),
+            command.persisted_context_kinds(),
+            &command.command(),
+            command.context_kinds(),
+        );
     }
     session
         .native_context
         .load_context()
         .map_err(|e| miette::miette!("{e:#}"))?;
-    for entry in clients.native_commands().catalog() {
-        if let Some(command) = clients.native_commands().command(&entry.name) {
-            command
-                .migrate_context(&session.native_context)
-                .map_err(|e| miette::miette!("{e:#}"))?;
-        }
+    for (_, command) in clients.native_commands().iter() {
+        command
+            .migrate_context(&session.native_context)
+            .map_err(|e| miette::miette!("{e:#}"))?;
     }
     seed_native_context(runtime, session, clients)?;
     let view = ReplViewContext::from_parts(runtime, session);
@@ -259,7 +256,7 @@ fn build_repl_cycle_run_config(
     )))
     .build();
     config.exit_on_interrupt = runtime.definition.repl_line_handler.is_some();
-    config.actions = resolved_product_actions(runtime, clients)?;
+    config.actions = actions;
     if runtime.ui.render_settings.format != crate::core::output::OutputFormat::Json {
         let commands = crate::app::runtime::visible_native_commands(&runtime.auth, clients)
             .map(|(_, command)| command.clone())
@@ -332,8 +329,8 @@ pub(super) fn seed_native_context(
         .map(|policy| policy.effective_identity(runtime.config.resolved()))
         .unwrap_or_default();
     let mut changed = false;
-    for (entry, command) in crate::app::runtime::visible_native_commands(&runtime.auth, clients) {
-        let selected = session.native_context.for_service(entry.name);
+    for (name, command) in crate::app::runtime::visible_native_commands(&runtime.auth, clients) {
+        let selected = session.native_context.for_service(name);
         for (kind, value) in command.context_seeds(runtime.config.resolved(), &identity) {
             if enabled.contains(&kind)
                 && crate::context::KINDS.contains(&kind.as_str())

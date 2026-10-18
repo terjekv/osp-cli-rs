@@ -26,6 +26,7 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) tab_mode: ReplTabMode,
     pub(crate) line_projector: Option<LineProjector>,
     pub(crate) actions: Vec<crate::repl::ReplAction>,
+    pub(crate) after_paint: Box<dyn FnMut() + Send>,
 }
 
 pub(crate) struct SubmissionContext<'a, F> {
@@ -75,6 +76,7 @@ where
         tab_mode,
         line_projector,
         actions,
+        after_paint,
     } = config;
 
     let mut bindings = build_repl_keybindings();
@@ -113,6 +115,8 @@ where
             Some(bindings),
         )
     };
+    // Reedline enters the idle callback after flushing its initial repaint.
+    editor = editor.with_idle_callback(after_paint);
     drive_interactive_editor(
         &appearance,
         &history_store,
@@ -130,7 +134,7 @@ pub(super) fn build_interactive_editor(
     history_store: SharedHistory,
     bindings: Option<reedline::Keybindings>,
 ) -> Reedline {
-    let tree = completion_tree;
+    let tree = std::sync::Arc::new(completion_tree);
     let completer = Box::new(
         ReplCompleter::new(tree.clone(), line_projector.clone())
             .with_command_prefixes(appearance.command_prefixes)
@@ -145,7 +149,7 @@ pub(super) fn build_interactive_editor(
         painted.clone(),
         &history_store,
     );
-    let highlighter = build_repl_highlighter(&tree, appearance, line_projector);
+    let highlighter = build_repl_highlighter(tree.clone(), appearance, line_projector);
     let edit_mode = Box::new(AutoCompleteEmacs::new(
         Emacs::new(bindings.unwrap_or_else(build_repl_keybindings)),
         completion_menu.clone(),
@@ -215,16 +219,20 @@ where
 pub(crate) fn run_repl_basic<F>(
     prompt: &OspPrompt,
     submission: &mut SubmissionContext<'_, F>,
+    after_paint: Box<dyn FnMut() + Send>,
 ) -> Result<ReplResult>
 where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     crate::repl::notices::attach_basic();
+    let mut after_paint = Some(after_paint);
     crate::startup_trace::begin_first_prompt();
     loop {
         print!("{}{}", prompt.left(), prompt.indicator());
         io::stdout().flush()?;
-        crate::startup_trace::first_prompt_rendered();
+        if let Some(mut after_paint) = after_paint.take() {
+            after_paint();
+        }
 
         let mut line = String::new();
         let read = crate::ui::prompt::read_line(&mut line)?;
@@ -243,7 +251,7 @@ where
 }
 
 fn build_repl_hinter(
-    tree: &CompletionTree,
+    tree: &std::sync::Arc<CompletionTree>,
     appearance: &ReplAppearance,
     line_projector: Option<LineProjector>,
     painted: PaintedLine,

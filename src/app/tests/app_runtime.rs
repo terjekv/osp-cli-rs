@@ -352,7 +352,7 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
         result,
         crate::repl::ReplResult::Restart {
             output,
-            reload: crate::repl::ReplReloadKind::Default,
+            reload: crate::repl::ReplReloadKind::Completion,
         } if output.contains("refreshed")
     ));
 }

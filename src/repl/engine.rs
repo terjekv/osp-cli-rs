@@ -160,7 +160,11 @@ fn run_repl_with_reason<F, B, I>(
 ) -> Result<ReplResult>
 where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
-    B: FnMut(&OspPrompt, &mut SubmissionContext<'_, F>) -> Result<ReplResult>,
+    B: FnMut(
+        &OspPrompt,
+        &mut SubmissionContext<'_, F>,
+        Box<dyn FnMut() + Send>,
+    ) -> Result<ReplResult>,
     I: FnMut(
         InteractiveLoopConfig<'_>,
         SharedHistory,
@@ -178,18 +182,22 @@ where
         on_start,
     } = context;
 
+    let owner = basic_reason
+        .is_none()
+        .then(crate::repl::notices::SessionOwner::new);
+    let session = owner.as_ref().map(|owner| owner.0.clone());
+    let mut on_start = on_start;
+    let after_paint = Box::new(move || {
+        crate::startup_trace::first_prompt_rendered();
+        if let Some(start) = on_start.take() {
+            start(session.clone());
+        }
+    });
     if let Some(reason) = basic_reason {
         warn_basic_input_once(reason);
-        if let Some(start) = on_start {
-            start(None);
-        }
-        return run_basic_fn(&prompt, submission);
+        return run_basic_fn(&prompt, submission, after_paint);
     }
 
-    let owner = crate::repl::notices::SessionOwner::new();
-    if let Some(start) = &on_start {
-        start(Some(owner.0.clone()));
-    }
     run_interactive_fn(
         InteractiveLoopConfig {
             prompt: &prompt,
@@ -198,6 +206,7 @@ where
             tab_mode,
             line_projector,
             actions,
+            after_paint,
         },
         history_store,
         submission,

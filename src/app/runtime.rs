@@ -43,26 +43,10 @@ use crate::ui::theme_catalog::ThemeCatalog;
 pub(crate) fn visible_native_commands<'a>(
     auth: &'a AuthState,
     clients: &'a AppClients,
-) -> impl Iterator<
-    Item = (
-        crate::plugin::CommandCatalogEntry,
-        &'a Arc<dyn crate::NativeCommand>,
-    ),
-> + 'a {
-    clients
-        .native_commands()
-        .catalog()
-        .into_iter()
-        .filter_map(|entry| {
-            if !auth.external_command_access(&entry.name).is_visible() {
-                return None;
-            }
-            clients
-                .native_commands()
-                .command(&entry.name)
-                .filter(|command| !command.command().is_hide_set())
-                .map(|command| (entry, command))
-        })
+) -> impl Iterator<Item = (&'a str, &'a Arc<dyn crate::NativeCommand>)> + 'a {
+    clients.native_commands().iter().filter(|(name, command)| {
+        auth.external_command_access(name).is_visible() && !command.command().is_hide_set()
+    })
 }
 
 /// Identifies which top-level host surface is currently active.
@@ -606,7 +590,7 @@ impl AppRuntime {
 }
 
 /// Declared external authentication and the shared product access hook.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct AuthState {
     access_policy: Option<Arc<dyn AccessPolicy>>,
     command_auth: BTreeMap<CommandPath, DescribeCommandAuthV1>,

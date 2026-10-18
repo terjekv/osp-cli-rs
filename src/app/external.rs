@@ -586,7 +586,7 @@ pub(crate) fn run_repl_action(
         &crate::cli::invocation::InvocationOptions::default(),
     );
     let commands = super::runtime::visible_native_commands(&state.runtime.auth, &state.clients)
-        .map(|(entry, command)| (entry, command.clone()))
+        .map(|(name, command)| (name.to_string(), command.clone()))
         .collect::<Vec<_>>();
     for (entry, command) in commands {
         if command
@@ -606,7 +606,7 @@ pub(crate) fn run_repl_action(
                     action: Some(id),
                     stages: &[],
                     invocation: &invocation,
-                    command_path: entry.name.clone(),
+                    command_path: entry.to_string(),
                     elevation: InvocationElevation::Ordinary,
                     progress_sink: Some(&mut sink),
                 },

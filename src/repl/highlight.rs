@@ -61,7 +61,7 @@ pub struct HighlightDebugSpan {
 
 pub(crate) struct ReplHighlighter {
     command_prefixes: bool,
-    tree: CompletionTree,
+    tree: std::sync::Arc<CompletionTree>,
     parser: CommandLineParser,
     command_color: Color,
     error_color: Color,
@@ -70,14 +70,14 @@ pub(crate) struct ReplHighlighter {
 
 impl ReplHighlighter {
     pub(crate) fn new(
-        tree: CompletionTree,
+        tree: impl Into<std::sync::Arc<CompletionTree>>,
         command_color: Color,
         error_color: Color,
         line_projector: Option<LineProjector>,
     ) -> Self {
         Self {
             command_prefixes: true,
-            tree,
+            tree: tree.into(),
             parser: CommandLineParser,
             command_color,
             error_color,
