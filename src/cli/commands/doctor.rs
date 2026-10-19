@@ -46,6 +46,7 @@ pub(crate) fn run_doctor_command(
             None,
         )),
         DoctorCommands::All => run_doctor_all(runtime, session, clients, ui),
+        DoctorCommands::External(_) => unreachable!("app diagnostics use native dispatch"),
     }
 }
 

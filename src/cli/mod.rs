@@ -369,6 +369,17 @@ pub(crate) struct PluginsArgs {
     pub command: PluginsCommands,
 }
 
+impl Commands {
+    pub(crate) fn with_app_doctor(self) -> Self {
+        match self {
+            Self::Doctor(DoctorArgs {
+                command: Some(DoctorCommands::External(args)),
+            }) => Self::External(std::iter::once("doctor".to_owned()).chain(args).collect()),
+            command => command,
+        }
+    }
+}
+
 /// Top-level doctor command arguments.
 #[derive(Debug, Args)]
 pub(crate) struct DoctorArgs {
@@ -395,6 +406,9 @@ pub(crate) enum DoctorCommands {
     /// Show theme diagnostics.
     #[command(display_order = 14)]
     Theme,
+    /// App-registered diagnostics, dispatched through the native command registry.
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 /// Built-in plugin management subcommands.
@@ -881,7 +895,8 @@ pub(crate) fn runtime_load_options_from_flags(
 pub(crate) fn parse_inline_command_tokens(
     tokens: &[String],
 ) -> Result<Option<Commands>, clap::Error> {
-    InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str)).map(|parsed| parsed.command)
+    InlineCommandCli::try_parse_from(tokens.iter().map(String::as_str))
+        .map(|parsed| parsed.command.map(Commands::with_app_doctor))
 }
 
 pub(crate) fn passive_command(command: clap::Command) -> clap::Command {

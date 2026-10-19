@@ -62,10 +62,16 @@ pub(crate) fn build_repl_surface(
         specs.push(clap_command_spec(command, help_layout));
     }
 
-    specs.push(clap_command_spec(
-        &doctor_cmd::doctor_command(),
-        help_layout,
-    ));
+    let mut doctor = clap_command_spec(&doctor_cmd::doctor_command(), help_layout);
+    if let Some(app) = catalog.iter().find(|entry| entry.name == CMD_DOCTOR) {
+        for (name, child) in &app.completion.children {
+            doctor
+                .children
+                .entry(name.clone())
+                .or_insert_with(|| child.clone());
+        }
+    }
+    specs.push(doctor);
     let def = theme_cmd::theme_command();
     let mut spec = clap_command_spec(&def, help_layout);
     theme_cmd::augment_theme_completion(&mut spec, view.themes);
@@ -294,7 +300,15 @@ pub(crate) fn collect_alias_entries(config: &crate::config::ResolvedConfig) -> V
 fn command_spec_from_catalog(entry: &CommandCatalogEntry) -> Option<CompletionNode> {
     if matches!(
         entry.name.as_str(),
-        "help" | "last" | "exit" | "quit" | CMD_PLUGINS | CMD_THEME | CMD_CONFIG | CMD_HISTORY
+        "help"
+            | "last"
+            | "exit"
+            | "quit"
+            | CMD_DOCTOR
+            | CMD_PLUGINS
+            | CMD_THEME
+            | CMD_CONFIG
+            | CMD_HISTORY
     ) {
         return None;
     }

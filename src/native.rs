@@ -1114,6 +1114,10 @@ impl NativeCommandRegistry {
     }
 
     /// Registers or replaces a native command by normalized command name.
+    ///
+    /// A native `doctor` command adds app diagnostics under `doctor NAME`.
+    /// Framework subcommands (`all`, `config`, `last`, `plugins`, `theme`)
+    /// remain reserved; `doctor all` never invokes app diagnostics.
     pub fn register(&mut self, command: impl NativeCommand + 'static) {
         let mut next = (*self.commands).clone();
         let command = Arc::new(command) as Arc<dyn NativeCommand>;
