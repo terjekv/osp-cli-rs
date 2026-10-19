@@ -382,7 +382,7 @@ repl.history.exclude = []
     assert_eq!(session_payload["scope"], "profile:tsd terminal:cli");
     assert!(
         String::from_utf8_lossy(&session.stderr)
-            .contains("config set ui.width 96 --permanent --profile tsd --terminal cli")
+            .contains("config set ui.width 96 --config --profile tsd --terminal cli")
     );
     let fresh = run(&[
         "--json",

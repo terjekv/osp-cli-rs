@@ -45,7 +45,7 @@ Useful switches:
 - `--session`
   - force an in-memory change
 - `--permanent`
-  - persist the change when running inside the REPL
+  - force persistence even when `config.default-target` is `session`
 
 ## Interactive editing
 
@@ -55,8 +55,8 @@ and schema documentation. Up/Down select keys; Tab or Left/Right cycle boolean
 and enum values. Enter edits other values inline; Ctrl-U clears the editor.
 
 End focuses `[ Save ]`. Enter applies changed keys through `config set`, using
-its default store and scope (including `config.default-target`). In a REPL this
-normally changes the session only. `[ Exit ]`, Esc and q discard staged edits.
+its default store and scope (including `config.default-target`). This normally
+saves to the active profile. `[ Exit ]`, Esc and q discard staged edits.
 Secret values remain redacted and inline secret input is masked. Validation
 errors stay in the picker. The picker needs a terminal of at least 60×12;
 `config get KEY` and `config set KEY VALUE` work non-interactively.
@@ -410,29 +410,34 @@ Compatibility note:
 ## REPL Config Writes
 
 Without a configured `config.default-target` or explicit scope/store flags,
-store choice depends on where you run the command:
+both one-shot CLI and REPL writes persist for the active profile:
 
-- in one-shot CLI, `config set` defaults to the persistent config store
-- in the REPL, `config set` defaults to the session store
-- use `--permanent`, `--config`, or `--secrets` for persistence
+- `config set KEY VALUE` saves to the persistent config store
+- product-declared secret keys automatically use the secrets store, even with
+  `--config`; other keys can use `--secrets` explicitly
 - use `--session` to force in-memory session behavior
+
+For a secret key, omit `VALUE` to enter it at a hidden terminal prompt without
+echo or history. Inline values remain supported but are excluded from REPL
+history. Non-interactive callers must supply a value or use `--from-file -`
+to read it from stdin.
 
 `config.default-target` chooses the default destination for future writes:
 `session` is temporary, `global` is saved for all profiles, and any other value
-names a saved profile. Explicit `--session`, `--profile`, `--global`, or
-`--permanent` flags override the corresponding default. `--terminal repl` or
-`--terminal cli` further narrows applicability. Without a configured default,
-REPL writes are temporary and one-shot writes persist for the active profile.
+names a saved profile. Explicit `--session`, `--profile`, `--global`,
+`--config`, `--secrets`, or `--permanent` flags override the corresponding
+default. Declared secrets always use the secrets store for persistent writes.
+`--terminal repl` or `--terminal cli` further narrows applicability.
 
 ```text
-config set config.default-target uio --permanent --global
+config set config.default-target uio --global
 config set ui.margin 2
 config set ui.margin 4 --session
 ```
 
 The first command saves the default destination for all profiles. Subsequent
 plain writes go to profile `uio`; the last command remains temporary. Successful
-temporary writes show a concrete `--permanent` command with the resolved scope.
+temporary writes show a concrete `--config` command with the resolved scope.
 `config set --dry-run --explain` retains the proposed value and destination and
 adds a `current` explanation of the key before the write.
 

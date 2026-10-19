@@ -747,8 +747,8 @@ pub(crate) struct ConfigExplainArgs {
 pub(crate) struct ConfigSetArgs {
     /// Config key to write.
     pub key: String,
-    /// Config value to write. Multiple words are joined with spaces.
-    #[arg(num_args = 1.., required_unless_present = "from_file", conflicts_with = "from_file")]
+    /// Config value to write. Multiple words are joined with spaces; secret keys prompt if omitted.
+    #[arg(num_args = 1.., conflicts_with = "from_file")]
     pub value: Vec<String>,
 
     /// Account whose display name to set; defaults to the current user.

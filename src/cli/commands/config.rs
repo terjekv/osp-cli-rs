@@ -5,7 +5,7 @@
 //! and scope rules used at runtime.
 
 use super::resolve_terminal_selector;
-use crate::app::{AppRuntime, AppSession, TerminalKind, UiState};
+use crate::app::{AppRuntime, AppSession, UiState};
 use crate::app::{
     CommandOutput, RuntimeConfigRequest, config_explain_json, config_explain_result,
     config_value_to_json_for_key, explain_runtime_config, format_scope, is_sensitive_key,
@@ -629,8 +629,26 @@ fn run_config_set(
     };
     let schema = ConfigSchema::default().with_product_defaults(runtime.product_defaults());
     schema.validate_writable_key(&key).into_diagnostic()?;
+    let declared_secret = is_declared_secret_key(runtime, &key);
     let input = match (args.value.as_slice(), &args.from_file) {
         (values, None) if !values.is_empty() => values.join(" "),
+        ([], None) => {
+            use std::io::IsTerminal;
+            if !declared_secret && !is_sensitive_key(&key) {
+                return Err(miette!(
+                    "the following required arguments were not provided: <VALUE>"
+                ));
+            }
+            if crate::ui::prompt::input_is_replay() || !std::io::stderr().is_terminal() {
+                return Err(miette!(
+                    "the following required arguments were not provided: <VALUE>\nhint: use --from-file - to read the value from stdin"
+                ));
+            }
+            crate::ui::prompt::read_hidden(&format!("{key}: "))
+                .into_diagnostic()
+                .wrap_err("failed to read secret config value")?
+                .ok_or_else(|| miette!("config set cancelled"))?
+        }
         ([], Some(path)) => {
             let content = if path == std::path::Path::new("-") {
                 use std::io::Read;
@@ -671,6 +689,11 @@ fn run_config_set(
             }
         })
         .wrap_err("invalid value for key")?;
+    let value = if declared_secret {
+        value.into_secret()
+    } else {
+        value
+    };
     validate_bootstrap_value(&key, &value)
         .map_err(|err| {
             if args.from_file.is_some() {
@@ -753,9 +776,13 @@ fn run_config_set(
             .map(format_scope)
             .unwrap_or_else(|| "global".to_string())
     );
-    if matches!(store, ConfigStore::Session) && !args.dry_run && !is_sensitive_key(&key) {
+    if matches!(store, ConfigStore::Session)
+        && !args.dry_run
+        && !declared_secret
+        && !is_sensitive_key(&key)
+    {
         for scope in &scopes {
-            let mut options = " --permanent".to_string();
+            let mut options = " --config".to_string();
             if let Some(profile) = &scope.profile {
                 options.push_str(&format!(" --profile {}", escape_for_shell(profile)));
             } else {
@@ -871,6 +898,16 @@ impl Edit<'_> {
     }
 }
 
+fn is_declared_secret_key(runtime: &AppRuntime, key: &str) -> bool {
+    let key_map = runtime.config.resolved().key_map;
+    let canonical = key_map.canonical(key);
+    runtime
+        .product_defaults()
+        .entries()
+        .iter()
+        .any(|entry| entry.value.is_secret() && key_map.canonical(&entry.key) == canonical)
+}
+
 fn resolve_edit_target(
     runtime: &AppRuntime,
     key: &str,
@@ -878,7 +915,10 @@ fn resolve_edit_target(
     store: &ConfigStoreArgs,
 ) -> Result<(ConfigStore, Vec<Scope>)> {
     let target = ConfigWriteTarget::from_args(scope, store).with_default(runtime);
-    let store = resolve_config_store(runtime, &target);
+    let mut store = resolve_config_store(&target);
+    if store != ConfigStore::Session && is_declared_secret_key(runtime, key) {
+        store = ConfigStore::Secrets;
+    }
     validate_store_key(store, key)?;
     let scopes = resolve_config_scopes(runtime, &target)
         .wrap_err_with(|| format!("failed to resolve config scopes for key `{key}`"))?;
@@ -1138,18 +1178,11 @@ impl ConfigWriteTarget {
     }
 }
 
-fn resolve_config_store(runtime: &AppRuntime, args: &ConfigWriteTarget) -> ConfigStore {
+fn resolve_config_store(args: &ConfigWriteTarget) -> ConfigStore {
     match args.store {
         ConfigStoreTarget::Session => ConfigStore::Session,
-        ConfigStoreTarget::Config => ConfigStore::Config,
+        ConfigStoreTarget::Config | ConfigStoreTarget::Default => ConfigStore::Config,
         ConfigStoreTarget::Secrets => ConfigStore::Secrets,
-        ConfigStoreTarget::Default => {
-            if matches!(runtime.context.terminal_kind(), TerminalKind::Repl) {
-                ConfigStore::Session
-            } else {
-                ConfigStore::Config
-            }
-        }
     }
 }
 

@@ -230,7 +230,7 @@ The root REPL is silent on exit by default. Set `repl.exit_message` when a
 product or profile wants a sign-off:
 
 ```text
-config set repl.exit_message 'So long, and thanks for all the fish!' --permanent
+config set repl.exit_message 'So long, and thanks for all the fish!'
 ```
 
 The message is printed for root `exit`, `quit`, or end-of-input. Leaving a
@@ -238,19 +238,18 @@ command shell keeps its existing `Leaving … shell` message instead.
 
 ## Config Writes Inside The REPL
 
-Inside the REPL, `config set` defaults to session storage unless
+Inside the REPL, `config set` saves to the active profile unless
 `config.default-target` or explicit scope/store flags select another
-destination. Use `--session` to force a temporary change and `--permanent` to
-request persistence. [CONFIG.md](CONFIG.md#repl-config-writes) explains store
+destination. Use `--session` to force a temporary change.
+[CONFIG.md](CONFIG.md#repl-config-writes) explains store
 and scope selection.
 
 ```text
 config set ui.format json
-config set ui.format json --permanent
+config set ui.format json --session
 ```
 
-Use the first form when you want to experiment. Use `--permanent` when you have
-decided the setting should become part of your stored config.
+The first form saves the setting; the second changes only the current session.
 
 Theme, presentation, and prompt-related changes rebuild the REPL on the next
 cycle so the new state becomes visible immediately.

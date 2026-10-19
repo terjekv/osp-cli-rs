@@ -111,13 +111,13 @@ mixing rather than JSON formatting.
 ## Symptom: A Config Change Did Not Stick
 
 Without a configured `config.default-target` or explicit scope/store flags,
-REPL writes use session storage. Use `--session` to force a temporary change or
-`--permanent` to request persistence. See
+REPL writes persist for the active profile. Use `--session` for a temporary
+change, or `--config` to override a `config.default-target` of `session`. See
 [config write destinations](CONFIG.md#repl-config-writes).
 
 ```text
 config set ui.format json
-config set ui.format json --permanent
+config set ui.format json --config
 ```
 
 To see which setting takes precedence, run:

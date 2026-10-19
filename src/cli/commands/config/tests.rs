@@ -228,52 +228,32 @@ fn with_temp_config_paths<T>(callback: impl FnOnce(PathBuf, PathBuf) -> T) -> T 
 
 #[test]
 fn resolve_config_store_and_names_cover_defaults_and_explicit_targets_unit() {
-    let temp_cli = ConfigTestFixture::new(TerminalKind::Cli);
-    let temp_repl = ConfigTestFixture::new(TerminalKind::Repl);
     let args = write_target(ConfigScopeTarget::ActiveProfile);
 
-    assert!(matches!(
-        resolve_config_store(&temp_repl.runtime, &args),
-        ConfigStore::Session
-    ));
-    assert!(matches!(
-        resolve_config_store(&temp_cli.runtime, &args),
-        ConfigStore::Config
-    ));
+    assert!(matches!(resolve_config_store(&args), ConfigStore::Config));
 
-    let fixture = ConfigTestFixture::new(TerminalKind::Repl);
-    let repl = &fixture;
     assert!(matches!(
-        resolve_config_store(
-            &repl.runtime,
-            &ConfigWriteTarget {
-                scope: ConfigScopeTarget::ActiveProfile,
-                terminal: None,
-                store: ConfigStoreTarget::Session,
-            }
-        ),
+        resolve_config_store(&ConfigWriteTarget {
+            scope: ConfigScopeTarget::ActiveProfile,
+            terminal: None,
+            store: ConfigStoreTarget::Session,
+        }),
         ConfigStore::Session
     ));
     assert!(matches!(
-        resolve_config_store(
-            &repl.runtime,
-            &ConfigWriteTarget {
-                scope: ConfigScopeTarget::ActiveProfile,
-                terminal: None,
-                store: ConfigStoreTarget::Secrets,
-            }
-        ),
+        resolve_config_store(&ConfigWriteTarget {
+            scope: ConfigScopeTarget::ActiveProfile,
+            terminal: None,
+            store: ConfigStoreTarget::Secrets,
+        }),
         ConfigStore::Secrets
     ));
     assert!(matches!(
-        resolve_config_store(
-            &repl.runtime,
-            &ConfigWriteTarget {
-                scope: ConfigScopeTarget::ActiveProfile,
-                terminal: None,
-                store: ConfigStoreTarget::Config,
-            }
-        ),
+        resolve_config_store(&ConfigWriteTarget {
+            scope: ConfigScopeTarget::ActiveProfile,
+            terminal: None,
+            store: ConfigStoreTarget::Config,
+        }),
         ConfigStore::Config
     ));
     assert_eq!(config_store_name(ConfigStore::Session), "session");
@@ -537,11 +517,13 @@ fn validate_write_scopes_and_session_lookup_cover_invalid_and_present_paths_unit
 #[test]
 fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
     let mut set_fixture = ConfigTestFixture::new(TerminalKind::Repl);
+    let mut set_args = config_set_args("ui.format", "json");
+    set_args.store.session = true;
     let set_result = run_config_set(
         &set_fixture.runtime,
         &mut set_fixture.session,
         &set_fixture.ui,
-        config_set_args("ui.format", "json"),
+        set_args,
     )
     .expect("session config set should succeed");
 
@@ -571,10 +553,12 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
         crate::config::ConfigValue::from("json"),
         Scope::profile(&active_profile),
     );
+    let mut unset_args = config_unset_args("ui.format");
+    unset_args.store.session = true;
     let unset_result = run_config_unset(
         &unset_context.runtime,
         &mut unset_context.session,
-        config_unset_args("ui.format"),
+        unset_args,
     )
     .expect("session config unset should succeed");
 
@@ -592,6 +576,7 @@ fn run_config_set_and_unset_cover_session_paths_and_explain_output_unit() {
 
     let mut explain_args = config_set_args("ui.format", "json");
     explain_args.explain = true;
+    explain_args.store.session = true;
     let mut explain_fixture =
         ConfigTestFixture::with_format(TerminalKind::Repl, OutputFormat::Json);
     let result = run_config_set(
