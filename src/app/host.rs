@@ -1101,6 +1101,21 @@ fn clap_error_action(
     command_path: Option<&str>,
     scope: &crate::core::CommandScope,
 ) -> String {
+    if let Some(values) = error
+        .get(clap::error::ContextKind::SuggestedValue)
+        .or_else(|| error.get(clap::error::ContextKind::ValidValue))
+    {
+        let values = match values {
+            clap::error::ContextValue::String(value) => vec![format!("`{value}`")],
+            clap::error::ContextValue::Strings(values) => {
+                values.iter().map(|value| format!("`{value}`")).collect()
+            }
+            _ => Vec::new(),
+        };
+        if !values.is_empty() {
+            return format!("Use {}.", values.join(" or "));
+        }
+    }
     let suggestions = match error.get(clap::error::ContextKind::SuggestedSubcommand) {
         Some(clap::error::ContextValue::Strings(suggestions)) => suggestions.as_slice(),
         _ => &[],
