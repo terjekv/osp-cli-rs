@@ -30,7 +30,7 @@ jobs:
       - name: Install native Linux linker and contract services
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lld dbus-daemon gnome-keyring libglib2.0-bin
+          sudo apt-get install --yes lld ripgrep dbus-daemon gnome-keyring libglib2.0-bin
           ld.lld --version
 
       - name: Cache Rust build artifacts
@@ -65,8 +65,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install nightly Rust with Miri
-        uses: dtolnay/rust-toolchain@nightly-2026-10-16
+        uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-10-16
           components: miri
 
       - name: Install native Linux linker

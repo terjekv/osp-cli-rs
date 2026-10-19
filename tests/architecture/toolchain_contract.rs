@@ -48,7 +48,18 @@ fn assert_job_toolchain(source: &str, job: &str, channel: &str) {
         !lines.contains(&"    if: false"),
         "toolchain verification job {job} must be enabled",
     );
-    let workflow_ref = format!("dtolnay/rust-toolchain@{channel}");
+    let action_ref = if channel.starts_with("nightly-") {
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.trim() == format!("toolchain: {channel}")),
+            "job {job} should select pinned nightly {channel} through with.toolchain",
+        );
+        "nightly"
+    } else {
+        channel
+    };
+    let workflow_ref = format!("dtolnay/rust-toolchain@{action_ref}");
     assert!(
         lines.iter().any(|line| {
             line.trim().strip_prefix("uses:").is_some_and(|reference| {
