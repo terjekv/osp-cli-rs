@@ -84,6 +84,11 @@ pub enum DisplayRule {
         /// Ordered literal and field spans in the displayed value.
         parts: Vec<DisplayPart>,
     },
+    /// Render a field with the theme's warning style in human output only.
+    Warning {
+        /// Canonical field selector.
+        field: String,
+    },
     /// Paint a colour/style specification using its own style in terminal cells.
     ValueStyle {
         /// Canonical string field containing a validated style specification.

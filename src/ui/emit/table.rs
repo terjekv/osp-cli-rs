@@ -99,6 +99,7 @@ mod tests {
         let table = TableBlock {
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
+                value_style: None,
                 key: "count".to_string(),
                 value: KeyValueValue::Scalar("1".to_string()),
                 indent: None,

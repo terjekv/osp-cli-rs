@@ -69,6 +69,7 @@ pub struct ThemeStyler<'a> {
     pub(crate) enabled: bool,
     pub(crate) theme: &'a ThemeDefinition,
     pub(crate) overrides: &'a StyleOverrides,
+    pub(crate) value_token: Option<StyleToken>,
 }
 
 impl<'a> ThemeStyler<'a> {
@@ -77,6 +78,7 @@ impl<'a> ThemeStyler<'a> {
             enabled,
             theme,
             overrides,
+            value_token: None,
         }
     }
 
@@ -89,7 +91,10 @@ impl<'a> ThemeStyler<'a> {
     }
 
     pub fn paint_value(&self, text: &str) -> String {
-        self.paint(text, value_style_token(text))
+        self.paint(
+            text,
+            self.value_token.unwrap_or_else(|| value_style_token(text)),
+        )
     }
 
     /// Style inline code without treating ordinary prose as a data value.

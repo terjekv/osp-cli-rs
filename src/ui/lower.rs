@@ -152,6 +152,7 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
     if plan.settings.color && plan.format != OutputFormat::Json {
         apply_value_styles(&mut doc.blocks, style_source);
+        apply_warning_styles(&mut doc.blocks, style_source, &plan.settings);
     }
     if plan.format != OutputFormat::Json {
         sanitize_doc(&mut doc);
@@ -728,6 +729,53 @@ fn format_date(text: &str, pattern: &str) -> Option<String> {
     Some(result)
 }
 
+fn apply_warning_styles(
+    blocks: &mut [Block],
+    output: &OutputResult,
+    settings: &crate::ui::settings::ResolvedRenderSettings,
+) {
+    use crate::core::DisplayRule;
+    use crate::ui::style::{StyleToken, style_spec};
+    let warns = |key: &str| {
+        output
+            .meta
+            .display_rules
+            .iter()
+            .any(|rule| matches!(rule, DisplayRule::Warning { field } if field == key))
+    };
+    for block in blocks {
+        match block {
+            Block::Section(section) => apply_warning_styles(&mut section.blocks, output, settings),
+            Block::KeyValue(block) => {
+                for row in &mut block.rows {
+                    if warns(&row.key) {
+                        row.value_style = Some(StyleToken::Warning);
+                    }
+                }
+            }
+            Block::Table(table) => {
+                for (index, key) in table.headers.iter().enumerate() {
+                    if warns(key) {
+                        table.cell_styles.resize_with(table.rows.len(), Vec::new);
+                        for styles in &mut table.cell_styles {
+                            styles.resize(table.headers.len(), None);
+                            styles[index] = Some(
+                                style_spec(
+                                    &settings.theme,
+                                    &settings.style_overrides,
+                                    StyleToken::Warning,
+                                )
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
     use crate::core::output_model::DisplayRule;
     let columns = output
@@ -1167,6 +1215,7 @@ fn key_value_from_map(map: &Map<String, Value>, preferred_keys: &[String]) -> Ke
         rows: ordered_keys(preferred_keys, map.keys())
             .filter_map(|key| {
                 map.get(key).map(|value| KeyValueRow {
+                    value_style: None,
                     key: key.clone(),
                     value: lower_key_value_value(value, false),
                     indent: None,
@@ -1186,6 +1235,7 @@ struct MregRecordBuilder {
 impl MregRecordBuilder {
     fn push_row(&mut self, key: &str, value: KeyValueValue, depth: usize) {
         self.pending_rows.push(KeyValueRow {
+            value_style: None,
             key: key.to_string(),
             value,
             indent: (depth > 0).then(|| " ".repeat(depth * 2)),
@@ -1360,6 +1410,7 @@ fn table_from_group(
     ) {
         if let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key)) {
             summary.push(KeyValueRow {
+                value_style: None,
                 key: key.clone(),
                 value: lower_key_value_value(value, false),
                 indent: None,
@@ -1428,6 +1479,7 @@ fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> 
         rows: map
             .iter()
             .map(|(key, value)| KeyValueRow {
+                value_style: None,
                 key: key.clone(),
                 value: lower_key_value_value(value, true),
                 indent: Some(" ".repeat(indent)),

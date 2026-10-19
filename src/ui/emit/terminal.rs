@@ -571,7 +571,11 @@ fn format_summary(
                 "{}{} {}",
                 styler.paint(&display_key(row), StyleToken::Key),
                 styler.paint(":", StyleToken::Punctuation),
-                styler.paint_value(scalar_text(&row.value).unwrap_or_default())
+                ThemeStyler {
+                    value_token: row.value_style,
+                    ..*styler
+                }
+                .paint_value(scalar_text(&row.value).unwrap_or_default())
             )
         })
         .collect::<Vec<_>>()
@@ -598,6 +602,11 @@ fn emit_plain_row_lines(
     settings: &ResolvedRenderSettings,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
+    let value_styler = ThemeStyler {
+        value_token: row.value_style.or(styler.value_token),
+        ..*styler
+    };
+    let styler = &value_styler;
     let effective_indent = format!("{base_indent}{}", row.indent.as_deref().unwrap_or_default());
     let display_key = display_key(row);
     let display_key_width = UnicodeWidthStr::width(display_key.as_str());

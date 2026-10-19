@@ -386,7 +386,8 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         } => !created(network) && !created(used) && !created(field),
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
-        DisplayRule::ValueStyle { field, .. }
+        DisplayRule::Warning { field }
+        | DisplayRule::ValueStyle { field, .. }
         | DisplayRule::NullText { field, .. }
         | DisplayRule::Date { field, .. }
         | DisplayRule::Decimal { field, .. }

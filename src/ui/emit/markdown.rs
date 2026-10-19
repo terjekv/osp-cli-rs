@@ -335,6 +335,7 @@ mod tests {
         let table = TableBlock {
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
+                value_style: None,
                 key: "team".to_string(),
                 value: KeyValueValue::Scalar("prod".to_string()),
                 indent: None,

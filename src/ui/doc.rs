@@ -92,6 +92,7 @@ pub struct KeyValueBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyValueRow {
+    pub value_style: Option<crate::ui::style::StyleToken>,
     pub key: String,
     pub value: KeyValueValue,
     pub indent: Option<String>,

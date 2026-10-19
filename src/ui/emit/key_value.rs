@@ -43,12 +43,14 @@ mod tests {
     #[test]
     fn display_key_adds_counts_for_multiline_collection_values_unit() {
         let scalar = KeyValueRow {
+            value_style: None,
             key: "uid".to_string(),
             value: KeyValueValue::Scalar("alice".to_string()),
             indent: None,
             gap: None,
         };
         let scalar_array = KeyValueRow {
+            value_style: None,
             key: "groups".to_string(),
             value: KeyValueValue::Array(vec![
                 KeyValueValue::Scalar("dev".to_string()),
