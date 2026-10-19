@@ -18,7 +18,7 @@ pub(crate) fn render(output: &OutputResult, format: OutputFormat) -> String {
         let fields = cells
             .into_iter()
             .map(|cell| {
-                let cell = skim::helper::item::strip_ansi(&cell).0;
+                let cell = crate::ui::text::strip_ansi(&cell);
                 if cell.contains([delimiter, '"', '\r', '\n']) {
                     format!("\"{}\"", cell.replace('"', "\"\""))
                 } else {

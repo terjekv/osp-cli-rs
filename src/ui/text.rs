@@ -1,6 +1,12 @@
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(crate) fn sanitize_human_text(raw: &str) -> String {
+    let mut output = strip_ansi(raw);
+    output.retain(|ch| ch == '\n' || !ch.is_control());
+    output
+}
+
+pub(crate) fn strip_ansi(raw: &str) -> String {
     let mut output = String::new();
     let mut chars = raw.chars();
     while let Some(ch) = chars.next() {
@@ -12,9 +18,7 @@ pub(crate) fn sanitize_human_text(raw: &str) -> String {
             },
             '\u{009b}' => consume_csi(&mut chars),
             '\u{009d}' => consume_osc(&mut chars),
-            '\n' => output.push(ch),
-            _ if !ch.is_control() => output.push(ch),
-            _ => {}
+            _ => output.push(ch),
         }
     }
     output

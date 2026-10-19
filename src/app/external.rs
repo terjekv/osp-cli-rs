@@ -1423,12 +1423,6 @@ mod tests {
     use crate::plugin::PluginManager;
     use crate::ui::RenderSettings;
     use clap::Command;
-    #[cfg(unix)]
-    #[cfg(unix)]
-    #[cfg(unix)]
-    #[cfg(all(unix, miri))]
-    use std::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(all(unix, not(miri)))]
     #[derive(Clone, Copy)]
     enum NativeOutcomeKind {
         Help,
