@@ -586,6 +586,7 @@ fn run(
                     .ok_or_else(|| miette!("unknown product action: {name}"))?;
                 let diagnostics = crate::diagnostics::DiagnosticSink::default();
                 let _scope = diagnostics.enter();
+                state.runtime.ui = invocation_ui.ui.clone();
                 match (flag.run)(&mut state.runtime) {
                     Ok(message) => {
                         let evidence = diagnostics.render(invocation_ui.ui.verbosity, false);
@@ -669,7 +670,16 @@ fn prepare_host_run(
     {
         let _phase = tracing::info_span!(target: "osp_startup", "startup hook").entered();
         if let Some(policy) = &app.access_policy {
+            let base_verbosity = state.runtime.ui.verbosity;
+            state.runtime.ui.verbosity = resolve_invocation_ui(
+                state.runtime.config.resolved(),
+                &state.runtime.ui,
+                invocation,
+            )
+            .ui
+            .verbosity;
             policy.startup(&mut state.runtime)?;
+            state.runtime.ui.verbosity = base_verbosity;
         }
     }
     let invocation_ui = resolve_invocation_ui(

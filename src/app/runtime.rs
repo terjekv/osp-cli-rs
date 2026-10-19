@@ -537,6 +537,16 @@ impl AppRuntime {
         &self.config
     }
 
+    /// Returns the effective verbosity for startup hooks and product actions.
+    pub fn verbosity(&self) -> MessageLevel {
+        self.ui.verbosity
+    }
+
+    /// Returns the active human output settings.
+    pub fn render_settings(&self) -> &RenderSettings {
+        &self.ui.render_settings
+    }
+
     /// Returns the UI state derived from the current config snapshot.
     #[cfg(test)]
     pub(crate) fn ui(&self) -> &UiState {
