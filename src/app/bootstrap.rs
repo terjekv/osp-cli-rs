@@ -120,7 +120,8 @@ pub(crate) fn prepare_runtime_config(
             None,
             request.session_layer,
         )
-        .load_layers()?;
+        .load_layers()
+        .map_err(|error| request.product_defaults.key_map.error(error))?;
         let resolver = crate::config::ConfigResolver::from_loaded_layers_with_schema(
             layers.clone(),
             crate::config::ConfigSchema::default(),

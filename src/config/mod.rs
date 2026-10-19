@@ -88,6 +88,7 @@ mod defaults;
 mod error;
 mod explain;
 mod interpolate;
+mod keys;
 mod loader;
 mod resolver;
 mod runtime;
@@ -109,6 +110,7 @@ pub(crate) use defaults::{
     DEFAULT_REPL_HISTORY_MAX_ENTRIES, DEFAULT_REPL_HISTORY_MENU_ROWS, DEFAULT_UI_WIDTH_MAX,
 };
 pub use error::{ConfigError, TomlParseDiagnostic};
+pub(crate) use keys::ConfigKeyMap;
 pub use loader::{
     ChainedLoader, ConfigLoader, EnvSecretsLoader, EnvVarLoader, LoadedLayers, LoaderPipeline,
     SecretsTomlLoader, StaticLayerLoader, TomlFileLoader,

@@ -198,7 +198,14 @@ fn config_show_rows(runtime: &AppRuntime, args: ConfigShowArgs) -> Vec<Row> {
     entries.sort_by_key(|(key, _)| *key);
     let mut rows = entries
         .into_iter()
-        .map(|(key, entry)| config_entry_row(key, entry, args.output.sources, args.output.raw))
+        .map(|(key, entry)| {
+            config_entry_row(
+                &runtime.config.resolved().display_key(key),
+                entry,
+                args.output.sources,
+                args.output.raw,
+            )
+        })
         .collect::<Vec<_>>();
     for role in crate::core::style::ColorRole::ALL {
         if runtime.config.resolved().get(role.key()).is_none() {
@@ -212,8 +219,9 @@ fn config_show_rows(runtime: &AppRuntime, args: ConfigShowArgs) -> Vec<Row> {
 fn run_config_get(
     runtime: &AppRuntime,
     session: &AppSession,
-    args: ConfigGetArgs,
+    mut args: ConfigGetArgs,
 ) -> Result<CommandOutput> {
+    args.key = runtime.config.resolved().display_key(&args.key);
     if runtime.launch.runtime_load.include_env
         && let Some(path) = std::env::var_os("OSP_CONFIG_FILE")
         && !std::path::Path::new(&path).exists()
@@ -597,7 +605,10 @@ fn run_config_set(
     ui: &UiState,
     args: ConfigSetArgs,
 ) -> Result<CommandOutput> {
-    let requested_key = args.key.trim().to_ascii_lowercase();
+    let requested_key = runtime
+        .config
+        .resolved()
+        .display_key(&args.key.trim().to_ascii_lowercase());
     let key = if requested_key == "user.display_name" {
         let user = args
             .display_user
@@ -777,7 +788,10 @@ fn run_config_unset(
     session: &mut AppSession,
     args: ConfigUnsetArgs,
 ) -> Result<CommandOutput> {
-    let key = args.key.trim().to_ascii_lowercase();
+    let key = runtime
+        .config
+        .resolved()
+        .display_key(&args.key.trim().to_ascii_lowercase());
     ConfigSchema::default()
         .validate_writable_key(&key)
         .into_diagnostic()?;
@@ -881,11 +895,15 @@ fn apply_scoped_edit(
     edit: Edit<'_>,
     dry_run: bool,
 ) -> Result<Vec<Row>> {
+    let key_map = runtime.config.resolved().key_map;
+    let canonical = key_map.canonical(key);
+    let key = canonical.as_str();
+    key_map.normalize_layer(&mut session.config_overrides);
     let paths = config_write_paths(runtime.launch.runtime_load, store)?;
     let mut rows = Vec::new();
     for scope in scopes {
         let mut row = RowBuilder::new();
-        row.insert("key", key);
+        row.insert("key", runtime.config.resolved().display_key(key));
         if let Edit::Set { value, .. } = edit {
             let display_value = if matches!(store, ConfigStore::Secrets) {
                 value.clone().into_secret()
@@ -938,18 +956,20 @@ fn apply_scoped_edit(
                     path = %target_path.display(), dry_run,
                     "persisting config {}", edit.name()
                 );
-                let options = store_edit_options(store, dry_run);
+                let options = store_edit_options(store, dry_run).with_key_map(key_map);
                 let result = match edit {
                     Edit::Set { value, .. } => {
                         set_scoped_value_in_toml(target_path, key, value, scope, options)
                     }
                     Edit::Unset => unset_scoped_value_in_toml(target_path, key, scope, options),
                 }
+                .map_err(|error| key_map.error(error))
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     format!(
-                        "failed to persist config {} for key `{key}` at {}",
+                        "failed to persist config {} for key `{}` at {}",
                         edit.name(),
+                        key_map.display(key),
                         target_path.display()
                     )
                 })?;
@@ -1261,15 +1281,19 @@ fn edit_secret(
     let secret_store = selected_secret_store(runtime.config.resolved(), &paths)
         .into_diagnostic()
         .wrap_err("failed to select secrets backend")?;
-    let options = store_edit_options(ConfigStore::Secrets, dry_run);
+    let key_map = runtime.config.resolved().key_map;
+    let canonical = key_map.canonical(key);
+    let key = canonical.as_str();
+    let options = store_edit_options(ConfigStore::Secrets, dry_run).with_key_map(key_map);
     match edit {
         Edit::Set { value, .. } => secret_store.set_scoped(key, value, scope, options),
         Edit::Unset => secret_store.unset_scoped(key, scope, options),
     }
+    .map_err(|error| key_map.error(error))
     .into_diagnostic()
     .wrap_err_with(|| match edit {
-        Edit::Set { .. } => format!("failed to persist secret `{key}`"),
-        Edit::Unset => format!("failed to remove secret `{key}`"),
+        Edit::Set { .. } => format!("failed to persist secret `{}`", key_map.display(key)),
+        Edit::Unset => format!("failed to remove secret `{}`", key_map.display(key)),
     })
 }
 

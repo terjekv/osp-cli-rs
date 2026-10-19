@@ -26,16 +26,21 @@ struct PlaceholderSpan {
 struct Interpolator {
     raw: HashMap<String, ConfigValue>,
     cache: HashMap<String, ConfigValue>,
+    key_map: super::ConfigKeyMap,
 }
 
 impl Interpolator {
-    fn from_resolved_values(values: &BTreeMap<String, ResolvedValue>) -> Self {
+    fn from_resolved_values(
+        values: &BTreeMap<String, ResolvedValue>,
+        key_map: super::ConfigKeyMap,
+    ) -> Self {
         Self {
             raw: values
                 .iter()
                 .map(|(key, value)| (key.clone(), value.raw_value.clone()))
                 .collect(),
             cache: HashMap::new(),
+            key_map,
         }
     }
 
@@ -189,11 +194,14 @@ impl Interpolator {
         let ConfigValue::String(template) = value.reveal() else {
             return Ok(None);
         };
-        let parsed = parse_template_with_sensitivity(
+        let mut parsed = parse_template_with_sensitivity(
             key,
             template,
             value.is_secret() || is_sensitive_key(key),
         )?;
+        for placeholder in &mut parsed.placeholders {
+            placeholder.name = self.key_map.canonical(&placeholder.name);
+        }
         Ok((!parsed.placeholders.is_empty()).then_some(parsed))
     }
 
@@ -203,6 +211,8 @@ impl Interpolator {
         placeholder: &str,
         stack: &mut Vec<String>,
     ) -> Result<ConfigValue, ConfigError> {
+        let placeholder = self.key_map.canonical(placeholder);
+        let placeholder = placeholder.as_str();
         if !self.raw.contains_key(placeholder) {
             return Err(ConfigError::UnresolvedPlaceholder {
                 key: key.to_string(),
@@ -274,19 +284,21 @@ impl Interpolator {
 
 pub(crate) fn interpolate_all(
     values: &mut BTreeMap<String, ResolvedValue>,
+    key_map: super::ConfigKeyMap,
 ) -> Result<(), ConfigError> {
-    Interpolator::from_resolved_values(values).apply_all(values)
+    Interpolator::from_resolved_values(values, key_map).apply_all(values)
 }
 
 pub(crate) fn explain_interpolation(
     key: &str,
     pre_interpolated: &BTreeMap<String, ResolvedValue>,
     final_values: &BTreeMap<String, ResolvedValue>,
+    key_map: super::ConfigKeyMap,
 ) -> Result<Option<ExplainInterpolation>, ConfigError> {
     // Explain traces follow the raw selected template graph, but each
     // placeholder step also records the final adapted value so callers can see
     // where type/schema changes happened after interpolation.
-    Interpolator::from_resolved_values(pre_interpolated).explain(
+    Interpolator::from_resolved_values(pre_interpolated, key_map).explain(
         key,
         pre_interpolated,
         final_values,
@@ -389,7 +401,7 @@ mod tests {
             ),
         ]);
 
-        interpolate_all(&mut values).expect("interpolation should succeed");
+        interpolate_all(&mut values, Default::default()).expect("interpolation should succeed");
 
         let token = &values["auth.token"].value;
         assert!(token.is_secret());
@@ -420,9 +432,10 @@ mod tests {
             ),
         ]);
         let mut final_values = pre.clone();
-        interpolate_all(&mut final_values).expect("interpolation should succeed");
+        interpolate_all(&mut final_values, Default::default())
+            .expect("interpolation should succeed");
 
-        let explain = explain_interpolation("repl.prompt", &pre, &final_values)
+        let explain = explain_interpolation("repl.prompt", &pre, &final_values, Default::default())
             .expect("explain should succeed")
             .expect("template should be explained");
 

@@ -22,7 +22,7 @@ pub(super) fn run(
             "config edit requires a terminal; use `config get KEY` and `config set KEY VALUE`"
         ));
     }
-    let schema = ConfigSchema::default();
+    let schema = ConfigSchema::default().with_product_defaults(runtime.product_defaults());
     let keys = schema
         .entries()
         .map(|(key, _)| key)
@@ -72,7 +72,7 @@ pub(super) fn run(
                 })
                 .unwrap_or_default();
             Ok(Entry {
-                key: key.into(),
+                key: runtime.config.resolved().display_key(key),
                 original: value.clone(),
                 value,
                 source: resolved
@@ -89,6 +89,7 @@ pub(super) fn run(
         .iter()
         .map(|entry| entry.key.clone())
         .collect::<Vec<_>>();
+    let initial_key = initial_key.map(|key| runtime.config.resolved().display_key(&key));
     let initial = match initial_key {
         Some(key) => labels
             .iter()
@@ -160,6 +161,7 @@ impl Config<'_> {
     fn validate(&self, selected: usize, value: &str) -> Result<()> {
         let key = &self.entries[selected].key;
         let value = ConfigSchema::default()
+            .with_product_defaults(self.runtime.product_defaults())
             .parse_input_value(key, value)
             .into_diagnostic()?;
         validate_bootstrap_value(key, &value).into_diagnostic()?;

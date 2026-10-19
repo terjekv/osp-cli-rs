@@ -541,6 +541,7 @@ const REMOVED_KEYS: &[&str] = &[
 #[derive(Debug, Clone)]
 pub(crate) struct ConfigSchema {
     entries: BTreeMap<String, SchemaEntry>,
+    key_map: super::ConfigKeyMap,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -559,6 +560,7 @@ impl ConfigSchema {
     fn builtin() -> Self {
         let mut schema = Self {
             entries: BTreeMap::new(),
+            key_map: Default::default(),
         };
         for builtin in super::builtin::builtin_keys() {
             schema.insert(builtin.key, builtin.schema.clone());
@@ -655,13 +657,13 @@ impl ConfigSchema {
 
     /// Product Boolean defaults also define the type of their extension writes.
     pub(crate) fn with_product_defaults(mut self, defaults: &ConfigLayer) -> Self {
+        self.key_map = defaults.key_map;
         for entry in defaults.entries() {
-            if entry.key.starts_with("extensions.")
+            let key = self.key_map.canonical(&entry.key);
+            if key.starts_with("extensions.")
                 && matches!(entry.value.reveal(), ConfigValue::Bool(_))
             {
-                self.entries
-                    .entry(entry.key.clone())
-                    .or_insert_with(SchemaEntry::boolean);
+                self.entries.entry(key).or_insert_with(SchemaEntry::boolean);
             }
         }
         self
@@ -702,6 +704,16 @@ impl ConfigSchema {
     /// );
     /// ```
     pub fn parse_input_value(&self, key: &str, raw: &str) -> Result<ConfigValue, ConfigError> {
+        let key = self.key_map.canonical(key);
+        self.parse_canonical_input_value(&key, raw)
+            .map_err(|error| self.key_map.error(error))
+    }
+
+    fn parse_canonical_input_value(
+        &self,
+        key: &str,
+        raw: &str,
+    ) -> Result<ConfigValue, ConfigError> {
         if !self.is_known_key(key) {
             return Err(ConfigError::UnknownConfigKeys {
                 keys: vec![key.to_string()],
@@ -805,7 +817,7 @@ impl ConfigSchema {
     }
 }
 
-fn builtin_config_schema() -> &'static ConfigSchema {
+pub(super) fn builtin_config_schema() -> &'static ConfigSchema {
     static BUILTIN_SCHEMA: OnceLock<ConfigSchema> = OnceLock::new();
     BUILTIN_SCHEMA.get_or_init(ConfigSchema::builtin)
 }
@@ -940,12 +952,20 @@ pub struct LayerEntry {
 /// Ordered collection of config entries from one source layer.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigLayer {
+    pub(crate) key_map: super::ConfigKeyMap,
     pub(crate) entries: Vec<LayerEntry>,
     // Empty profile tables still declare valid profile names.
     pub(crate) declared_profiles: BTreeSet<String>,
 }
 
 impl ConfigLayer {
+    /// Declares the product namespace whose keys users enter without a prefix.
+    /// Framework keys and explicit extension paths retain their meaning.
+    pub fn with_extension_namespace(mut self, namespace: &'static str) -> Self {
+        self.key_map = super::ConfigKeyMap::new(namespace);
+        self
+    }
+
     /// Returns the entries in insertion order.
     pub fn entries(&self) -> &[LayerEntry] {
         &self.entries
@@ -975,6 +995,9 @@ impl ConfigLayer {
     /// assert_eq!(base.entries()[2].value.to_string(), "nord");
     /// ```
     pub fn extend_from_layer(&mut self, other: &ConfigLayer) {
+        if other.key_map != super::ConfigKeyMap::default() {
+            self.key_map = other.key_map;
+        }
         self.entries.extend(other.entries().iter().cloned());
         self.declared_profiles
             .extend(other.declared_profiles.iter().cloned());
@@ -1448,6 +1471,7 @@ pub(crate) struct BootstrapConfigExplain {
 /// without letting them masquerade as normal runtime keys.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedConfig {
+    pub(crate) key_map: super::ConfigKeyMap,
     pub(crate) active_profile: String,
     pub(crate) terminal: Option<String>,
     pub(crate) known_profiles: BTreeSet<String>,
@@ -1457,6 +1481,11 @@ pub struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
+    /// Returns the user-facing spelling of a canonical product key.
+    pub fn display_key(&self, key: &str) -> String {
+        self.key_map.display(&normalize_identifier(key))
+    }
+
     pub(crate) fn ignored_keys_warning(&self) -> String {
         if self.ignored_keys.is_empty() {
             return String::new();
@@ -1494,7 +1523,9 @@ impl ResolvedConfig {
 
     /// Returns the resolved value for a key.
     pub fn get(&self, key: &str) -> Option<&ConfigValue> {
-        self.values.get(key).map(|entry| &entry.value)
+        self.values
+            .get(&self.key_map.canonical(key))
+            .map(|entry| &entry.value)
     }
 
     /// Returns the resolved string value for a key.
@@ -1609,7 +1640,7 @@ impl ResolvedConfig {
 
     /// Returns the full resolved entry for a runtime-visible key.
     pub fn get_value_entry(&self, key: &str) -> Option<&ResolvedValue> {
-        self.values.get(key)
+        self.values.get(&self.key_map.canonical(key))
     }
 
     /// Returns the resolved alias entry for a key.

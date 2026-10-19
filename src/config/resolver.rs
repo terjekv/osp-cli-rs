@@ -68,6 +68,20 @@ impl ConfigResolver {
         layers: LoadedLayers,
         schema: ConfigSchema,
     ) -> Self {
+        let key_map = layers.defaults.key_map;
+        let schema = schema.with_product_defaults(&layers.defaults);
+        let mut layers = layers;
+        for layer in [
+            &mut layers.defaults,
+            &mut layers.presentation,
+            &mut layers.file,
+            &mut layers.secrets,
+            &mut layers.env,
+            &mut layers.cli,
+            &mut layers.session,
+        ] {
+            key_map.normalize_layer(layer);
+        }
         Self { layers, schema }
     }
 
@@ -79,6 +93,10 @@ impl ConfigResolver {
     /// Replaces the built-in defaults layer.
     pub fn set_defaults(&mut self, layer: ConfigLayer) {
         self.layers.defaults = layer;
+        *self = Self::from_loaded_layers_with_schema(
+            std::mem::take(&mut self.layers),
+            self.schema.clone(),
+        );
     }
 
     /// Resolves all configured layers into the final runtime config.
@@ -104,6 +122,7 @@ impl ConfigResolver {
     /// ```
     pub fn resolve(&self, options: ResolveOptions) -> Result<ResolvedConfig, ConfigError> {
         self.resolve_with_interpolation(options, true)
+            .map_err(|error| self.layers.defaults.key_map.error(error))
     }
 
     pub(crate) fn resolve_raw(
@@ -111,6 +130,7 @@ impl ConfigResolver {
         options: ResolveOptions,
     ) -> Result<ResolvedConfig, ConfigError> {
         self.resolve_with_interpolation(options, false)
+            .map_err(|error| self.layers.defaults.key_map.error(error))
     }
 
     fn resolve_with_interpolation(
@@ -126,6 +146,7 @@ impl ConfigResolver {
         let frame = prepare_resolution(self.layers(), options)?;
         let resolved = self.resolve_maps_for_frame(&frame, interpolate)?;
         let config = ResolvedConfig {
+            key_map: self.layers.defaults.key_map,
             active_profile: frame.active_profile,
             terminal: frame.terminal,
             known_profiles: frame.known_profiles,
@@ -181,6 +202,16 @@ impl ConfigResolver {
         key: &str,
         options: ResolveOptions,
     ) -> Result<ConfigExplain, ConfigError> {
+        let key = self.layers.defaults.key_map.canonical(key);
+        self.explain_canonical_key(&key, options)
+            .map_err(|error| self.layers.defaults.key_map.error(error))
+    }
+
+    fn explain_canonical_key(
+        &self,
+        key: &str,
+        options: ResolveOptions,
+    ) -> Result<ConfigExplain, ConfigError> {
         if key.eq_ignore_ascii_case("profile.default") {
             return explain_default_profile_key(self.layers(), options);
         }
@@ -196,8 +227,12 @@ impl ConfigResolver {
         // Explaining interpolation intentionally re-reads the pre-interpolated
         // values so the trace shows the original placeholder chain rather than
         // the already-expanded end state.
-        let interpolation =
-            explain_interpolation(key, &resolved.pre_interpolated, &resolved.final_values)?;
+        let interpolation = explain_interpolation(
+            key,
+            &resolved.pre_interpolated,
+            &resolved.final_values,
+            self.layers.defaults.key_map,
+        )?;
 
         Ok(build_runtime_explain(
             key,
@@ -237,7 +272,7 @@ impl ConfigResolver {
         // interpolated/adapted view.
         let mut final_values = pre_interpolated.clone();
         if interpolate {
-            interpolate_all(&mut final_values)?;
+            interpolate_all(&mut final_values, self.layers.defaults.key_map)?;
             self.schema.validate_and_adapt(&mut final_values)?;
         }
 
@@ -384,6 +419,8 @@ impl ResolvedConfig {
         key: &str,
         value: &ConfigValue,
     ) -> Result<(), ConfigError> {
+        let key = self.key_map.canonical(key);
+        let key = key.as_str();
         if is_bootstrap_only_key(key) || is_alias_key(key) {
             return Ok(());
         }
@@ -399,7 +436,7 @@ impl ResolvedConfig {
                 origin: None,
             },
         );
-        interpolate_all(&mut values)
+        interpolate_all(&mut values, self.key_map).map_err(|error| self.key_map.error(error))
     }
 }
 

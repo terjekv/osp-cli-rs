@@ -122,6 +122,11 @@ pub struct Cli {
     #[arg(long = "defaults-only", global = true)]
     pub defaults_only: bool,
 
+    /// Override one config value for this invocation (repeatable).
+    #[arg(short = 'c', long = "set", value_name = "KEY=VALUE", global = true,
+        value_parser = parse_config_override)]
+    config_overrides: Vec<(String, String)>,
+
     /// Add one or more plugin discovery directories.
     #[arg(long = "plugin-dir", global = true)]
     pub plugin_dirs: Vec<PathBuf>,
@@ -144,6 +149,14 @@ pub struct Cli {
     /// Top-level built-in or plugin command selection.
     #[command(subcommand)]
     pub(crate) command: Option<Commands>,
+}
+
+fn parse_config_override(raw: &str) -> Result<(String, String), String> {
+    let (key, value) = raw.split_once('=').ok_or("expected KEY=VALUE")?;
+    if key.trim().is_empty() {
+        return Err("expected a nonempty config key".into());
+    }
+    Ok((key.trim().to_ascii_lowercase(), value.to_owned()))
 }
 
 impl Cli {
@@ -820,6 +833,9 @@ impl Cli {
                 self.presentation.map(UiPresentation::from)
             },
         );
+        for (key, value) in &self.config_overrides {
+            layer.set(key.clone(), value.clone());
+        }
     }
 }
 

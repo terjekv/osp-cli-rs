@@ -29,14 +29,27 @@ use crate::normalize::normalize_identifier;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[must_use = "TomlStoreEditOptions must be passed to a TOML store edit function to have any effect"]
 pub struct TomlStoreEditOptions {
+    key_map: super::ConfigKeyMap,
     mode: TomlStoreEditMode,
     secret_permissions: TomlSecretPermissions,
 }
 
 impl TomlStoreEditOptions {
+    /// Uses the same product namespace as the application's defaults layer.
+    pub fn with_extension_namespace(mut self, namespace: &'static str) -> Self {
+        self.key_map = super::ConfigKeyMap::new(namespace);
+        self
+    }
+
+    pub(crate) fn with_key_map(mut self, key_map: super::ConfigKeyMap) -> Self {
+        self.key_map = key_map;
+        self
+    }
+
     /// Creates edit options for a normal persisted write.
     pub const fn new() -> Self {
         Self {
+            key_map: super::ConfigKeyMap::empty(),
             mode: TomlStoreEditMode::Persist,
             secret_permissions: TomlSecretPermissions::ProcessDefault,
         }
@@ -46,6 +59,7 @@ impl TomlStoreEditOptions {
     /// without writing the file.
     pub const fn dry_run() -> Self {
         Self {
+            key_map: super::ConfigKeyMap::empty(),
             mode: TomlStoreEditMode::DryRun,
             secret_permissions: TomlSecretPermissions::ProcessDefault,
         }
@@ -194,6 +208,8 @@ fn edit_scoped_value_in_toml(
     value: Option<&ConfigValue>,
     options: TomlStoreEditOptions,
 ) -> Result<TomlEditResult, ConfigError> {
+    let canonical = options.key_map.canonical(key);
+    let key = canonical.as_str();
     let normalized_scope = normalize_scope(scope.clone());
     validate_dotted_key(key)?;
     let schema = crate::config::ConfigSchema::default();
@@ -216,16 +232,50 @@ fn edit_scoped_value_in_toml(
         .as_table_mut()
         .ok_or(ConfigError::TomlRootMustBeTable)?;
 
-    let previous = match value {
-        Some(value) => set_scoped_value(
-            root_table,
-            &normalized_scope,
-            key,
-            &value,
-            matches!(options.mode, TomlStoreEditMode::FillEmpty),
-        )?,
-        None => unset_dotted_value(root_table, &normalized_scope, key)?,
+    let display = options.key_map.display(key);
+    let stored = stored_scope_paths(root_table, &normalized_scope);
+    let canonical_parts = dotted_key_parts(key)?;
+    let display_parts = dotted_key_parts(&display)?;
+    // Match the loader's table traversal and last-entry-wins order.
+    let (first, second) = if display > canonical {
+        (&display_parts, &canonical_parts)
+    } else {
+        (&canonical_parts, &display_parts)
     };
+    let previous = stored
+        .iter()
+        .rev()
+        .find_map(|path| {
+            let table = get_table_path(root_table, path).ok().flatten()?;
+            read_dotted_value(table, first).or_else(|| read_dotted_value(table, second))
+        })
+        .map(|value| ConfigValue::from_toml(key, value))
+        .transpose()?;
+    if value.is_some()
+        && matches!(options.mode, TomlStoreEditMode::FillEmpty)
+        && previous.as_ref().is_some_and(
+            |value| !matches!(value.reveal(), ConfigValue::String(text) if text.trim().is_empty()),
+        )
+    {
+        return Ok(TomlEditResult { previous });
+    }
+    if display != key {
+        unset_dotted_value(root_table, &normalized_scope, &display)?;
+        unset_dotted_value(root_table, &normalized_scope, key)?;
+    }
+    let write_key = if options.strict_secret_permissions() {
+        key
+    } else {
+        &display
+    };
+    match value {
+        Some(value) => {
+            set_scoped_value(root_table, &normalized_scope, write_key, &value, false)?;
+        }
+        None => {
+            unset_dotted_value(root_table, &normalized_scope, write_key)?;
+        }
+    }
 
     if options.should_write() {
         write_toml_root(path, &root, options.strict_secret_permissions())?;

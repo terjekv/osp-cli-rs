@@ -101,6 +101,7 @@ fn validate_and_adapt_converts_runtime_visible_string_values() {
 #[test]
 fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
     let resolved = ResolvedConfig {
+        key_map: Default::default(),
         ignored_keys: Vec::new(),
         active_profile: "ops".to_string(),
         terminal: Some("repl".to_string()),
@@ -153,6 +154,7 @@ fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
     assert!(resolved.aliases().contains_key("alias.lookup"));
 
     let resolved = ResolvedConfig {
+        key_map: Default::default(),
         ignored_keys: Vec::new(),
         active_profile: "default".to_string(),
         terminal: Some("repl".to_string()),
@@ -213,6 +215,7 @@ fn resolved_config_helpers_read_scalar_list_secret_and_alias_views_unit() {
     );
 
     let resolved = ResolvedConfig {
+        key_map: Default::default(),
         ignored_keys: Vec::new(),
         active_profile: "ops".to_string(),
         terminal: None,

@@ -27,7 +27,7 @@ pub(crate) fn config_explain_result(
     request: RuntimeConfigRequest,
     args: ConfigExplainArgs,
 ) -> Result<CommandOutput> {
-    let explain = explain_runtime_config(request, &args.key)?;
+    let explain = explain_runtime_config(request, &config.display_key(&args.key))?;
 
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
@@ -77,8 +77,9 @@ pub(crate) fn explain_runtime_config(
     request: RuntimeConfigRequest,
     key: &str,
 ) -> Result<ConfigExplain> {
+    let key = request.product_defaults.key_map.display(key);
     prepare_runtime_config(request, false)
-        .and_then(|prepared| prepared.explain_key(key))
+        .and_then(|prepared| prepared.explain_key(&key))
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to explain config key `{key}`"))
 }
@@ -187,7 +188,7 @@ pub(crate) fn config_explain_json(
     show_secrets: bool,
 ) -> serde_json::Value {
     let mut root = serde_json::Map::new();
-    root.insert("key".to_string(), explain.key.clone().into());
+    root.insert("key".to_string(), config.display_key(&explain.key).into());
     // Keep the resolution phase explicit in output so bootstrap-only keys such
     // as `profile.default` are not mistaken for ordinary runtime config.
     root.insert(
@@ -279,7 +280,10 @@ pub(crate) fn config_explain_json(
         let mut steps = Vec::new();
         for step in &interpolation.steps {
             let mut item = serde_json::Map::new();
-            item.insert("placeholder".to_string(), step.placeholder.clone().into());
+            item.insert(
+                "placeholder".to_string(),
+                config.display_key(&step.placeholder).into(),
+            );
             item.insert(
                 "raw_value".to_string(),
                 redact_value_json(&step.placeholder, &step.raw_value, show_secrets),
@@ -459,6 +463,8 @@ pub(crate) fn push_missing_config_key_messages(
     config: &ResolvedConfig,
     key: &str,
 ) -> crate::core::CommandError {
+    let key = config.display_key(key);
+    let key = key.as_str();
     let (title, error) = if let Some((_, entry)) = ConfigSchema::default()
         .entries()
         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
@@ -497,6 +503,7 @@ pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<Str
         .chain(config.aliases().keys())
         .cloned()
         .chain(schema_keys)
+        .map(|key| config.display_key(&key))
         .filter(|candidate| fold_case(candidate) != key_lc)
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()

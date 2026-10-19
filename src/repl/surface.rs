@@ -513,8 +513,8 @@ pub(crate) fn config_set_key_specs(
                 Vec::new()
             };
 
-            let mut spec =
-                crate::completion::ConfigKeySpec::new(key).value_suggestions(value_suggestions);
+            let mut spec = crate::completion::ConfigKeySpec::new(view.config.display_key(key))
+                .value_suggestions(value_suggestions);
             if let Some(doc) = entry.doc() {
                 spec = spec.tooltip(doc);
             }
@@ -527,7 +527,7 @@ pub(crate) fn config_set_key_specs(
                 .values()
                 .keys()
                 .filter(|key| schema.entries().all(|(known, _)| known != key.as_str()))
-                .map(crate::completion::ConfigKeySpec::new),
+                .map(|key| crate::completion::ConfigKeySpec::new(view.config.display_key(key))),
         )
         .collect()
 }
