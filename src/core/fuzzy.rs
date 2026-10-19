@@ -97,6 +97,13 @@ fn subsequence_match(
         return Some((0, indices));
     }
 
+    if allow_word_skip
+        && query_lc.chars().count() >= 3
+        && strsim::levenshtein(&candidate_lc, &query_lc) == 1
+    {
+        return Some((1, candidate_lc.char_indices().map(|(idx, _)| idx).collect()));
+    }
+
     let mut indices = Vec::new();
     let mut search_start = 0usize;
     for query_ch in query_lc.chars() {
