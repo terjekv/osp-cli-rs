@@ -162,8 +162,12 @@ The REPL keeps history for two different jobs:
 - navigation through previous commands
 - history expansion when you want to replay or adapt an earlier command
 
-An accepted command stays in navigation and persistent history when execution
-fails. Unknown commands and invalid syntax are removed after dispatch. The
+By default, a line whose first command word resolves in the current scope stays
+in navigation and persistent history, including bad flags, unknown later
+subcommands and execution failures. Unknown first words are removed after
+dispatch. `repl.history.record = all | commands | off` selects all eligible
+submissions, this default command policy, or no recording. This keeps fixable
+attempts while dropping junk; privacy rules and exclusions always apply. The
 entered bang request expands in the editor on Tab; Enter echoes and executes
 the expanded command and keeps it as the last command when it is accepted,
 including after an execution failure.

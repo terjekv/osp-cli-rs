@@ -382,6 +382,13 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from(true)),
             },
             BuiltinKey {
+                key: "repl.history.record",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(["all", "commands", "off"])
+                    .with_doc("Record all eligible lines, recognized command attempts, or nothing"),
+                default: Some(ConfigValue::from("commands")),
+            },
+            BuiltinKey {
                 key: "repl.history.dedupe",
                 schema: SchemaEntry::boolean()
                     .with_doc("Whether duplicate history entries are collapsed"),

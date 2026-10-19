@@ -117,11 +117,33 @@ pub(crate) fn build_history_config(runtime: &AppRuntime, session: &AppSession) -
 
 pub(crate) fn repl_history_enabled(config: &ResolvedConfig) -> bool {
     config.get_bool("repl.history.enabled").unwrap_or(true)
+        && config.get_string("repl.history.record") != Some("off")
         && config_usize(
             config,
             "repl.history.max_entries",
             DEFAULT_REPL_HISTORY_MAX_ENTRIES as usize,
         ) > 0
+}
+
+pub(crate) fn admits_repl_line(state: &crate::app::AppState, line: &str) -> bool {
+    let config = state.runtime.config.resolved();
+    if !repl_history_enabled(config) || !state.session.history_enabled {
+        return false;
+    }
+    if config.get_string("repl.history.record") == Some("all") {
+        return true;
+    }
+    let catalog = crate::app::authorized_command_catalog_for(
+        &state.runtime.auth,
+        &state.clients,
+        state.clients.native_commands().completion_catalog(),
+    );
+    super::input::has_repl_command(
+        line,
+        super::ReplViewContext::from_parts(&state.runtime, &state.session),
+        &catalog,
+    )
+    .unwrap_or(false)
 }
 
 pub(crate) fn run_history_repl_command(

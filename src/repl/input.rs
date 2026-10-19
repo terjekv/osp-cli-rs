@@ -235,6 +235,38 @@ pub(crate) fn build_repl_ui_line_projector(config: &ResolvedConfig) -> LineProje
     })
 }
 
+pub(crate) fn has_repl_command(
+    line: &str,
+    view: super::ReplViewContext<'_>,
+    catalog: &[crate::plugin::CommandCatalogEntry],
+) -> Result<bool> {
+    let projected = project_repl_ui_line(line, view.config)?;
+    let Some(first) = CommandLineParser
+        .tokenize_with_spans(&projected.line)
+        .into_iter()
+        .next()
+    else {
+        return Ok(false);
+    };
+    let word = first.value.as_str();
+    // Pagination controls are dispatched before the scoped command grammar.
+    if matches!(word, "next" | "prev") {
+        return Ok(true);
+    }
+    let surface = super::surface::build_repl_surface(view, catalog);
+    let tree = super::completion::build_repl_completion_tree(view, &surface)?;
+    let known = if crate::command_words::CommandPrefixes::from_config(view.config).enabled(true) {
+        tree.root.resolve_child(word).is_some()
+    } else {
+        tree.root.children.contains_key(word)
+    };
+    Ok(known
+        || ((!view.scope.is_root())
+            && (REPL_GLOBAL_COMMANDS.contains(&word)
+                || is_repl_shellable_command(view.config, word))
+            && surface.specs.iter().any(|spec| spec.name == word)))
+}
+
 pub(crate) fn help_alias_target_at(tokens: &[String], command_index: usize) -> Option<&str> {
     tokens.get(command_index + 1).map(String::as_str)
 }

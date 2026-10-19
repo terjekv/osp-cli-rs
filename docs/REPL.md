@@ -205,6 +205,12 @@ See [COMPLETION.md](COMPLETION.md).
 
 `history clear PATTERN [--preview] [--force]` deletes matching displayed lines in the current history scope: matching starts at the beginning, `*` and `?` are wildcards, and a trailing `*` is implicit. More than 100 matches require `--force`; `--preview` lists the original history numbers without deleting. Root history includes shell prefixes; inside a shell the prefix is stripped, as in `history list` and Ctrl-R.
 
+`repl.history.record` defaults to `commands`, retaining lines whose first command
+word resolves in the current scope even when later arguments or execution fail:
+keep fixable attempts, drop junk. `all` records every otherwise eligible line;
+`off` disables recording. The existing history enablement switches, privacy rules
+and exclusions still apply.
+
 ## Command Aliases
 
 Use the `alias` wrapper for ordinary alias work instead of spelling config

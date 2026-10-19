@@ -526,19 +526,19 @@ impl OspHistoryStore {
         self.expand(&command, self.shell_prefix().as_deref(), elevated)
     }
 
-    /// Commit the editor's pending record, or save an accepted basic-mode replay.
+    /// Commit the editor's pending record, or save an admitted basic-mode replay.
     ///
     /// A sourced child must leave an unrelated pending parent record alone.
     pub(crate) fn finalize_execution(
         &mut self,
         input: &str,
         resolved: &str,
-        accepted: bool,
+        admitted: bool,
     ) -> Result<()> {
         if input.starts_with(' ') {
             return Ok(());
         }
-        let keep = accepted && !is_sensitive_line(input) && !self.is_command_excluded(resolved);
+        let keep = admitted && !is_sensitive_line(input) && !self.is_command_excluded(resolved);
         if input != resolved {
             let original = apply_shell_prefix(input, self.shell_prefix().as_deref());
             let expanded = apply_shell_prefix(resolved, self.shell_prefix().as_deref());

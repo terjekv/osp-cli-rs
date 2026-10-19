@@ -220,10 +220,18 @@ ui.format = "json"
 [terminal.repl]
 profile.default = "tsd"
 repl.history.enabled = true
+repl.history.record = "commands"
 
 [terminal.repl.profile.tsd]
 ui.format = "table"
 ```
+
+`repl.history.record` defaults to `commands`: keep attempts whose first command
+word resolves in the current REPL scope, even if later arguments or execution
+fail, so fixable attempts stay available while junk is dropped. Use `all` to
+record every otherwise eligible submission or `off` to disable recording.
+`repl.history.enabled = false` and session switches still disable recording;
+privacy rules and exclusions apply in every mode.
 
 Notes:
 

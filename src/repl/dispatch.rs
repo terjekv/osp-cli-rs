@@ -242,8 +242,25 @@ fn execute_repl_line_inner(
     } else {
         line.to_string()
     };
-    let mut keep_history = false;
+    let mut privacy_allows_history = false;
+    let mut admitted = false;
     let execution = (|| {
+        if let Some(command) = builtins::parse_bang_command(line)? {
+            match builtins::execute_bang_command(&mut state.session, history, line, command)? {
+                ReplResult::ReplaceInput(expanded) => {
+                    sink.write_stderr(&format!("{expanded}\n"));
+                    resolved = expanded;
+                }
+                result => return Ok(ExecutedReplLine::flat(result, state.runtime.ui.debug_level)),
+            }
+        }
+        // Alias expansion needs the live execution config, which the generic
+        // history backend does not own. Classify before a command can edit it.
+        privacy_allows_history =
+            input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved()).is_ok_and(
+                |parsed| !super::history_store::has_sensitive_arguments(&parsed.dispatch_tokens),
+            );
+        admitted = super::history::admits_repl_line(state, &resolved);
         if let Some(rest) = line.trim_start().strip_prefix("osp")
             && rest.starts_with(char::is_whitespace)
         {
@@ -265,21 +282,6 @@ fn execute_repl_line_inner(
                 ));
             }
         }
-        if let Some(command) = builtins::parse_bang_command(line)? {
-            match builtins::execute_bang_command(&mut state.session, history, line, command)? {
-                ReplResult::ReplaceInput(expanded) => {
-                    sink.write_stderr(&format!("{expanded}\n"));
-                    resolved = expanded;
-                }
-                result => return Ok(ExecutedReplLine::flat(result, state.runtime.ui.debug_level)),
-            }
-        }
-        // Alias expansion needs the live execution config, which the generic
-        // history backend does not own. Classify before a command can edit it.
-        keep_history = input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved())
-            .is_ok_and(|parsed| {
-                !super::history_store::has_sensitive_arguments(&parsed.dispatch_tokens)
-            });
         if !matches!(resolved.trim(), "next" | "prev") {
             state.session.native_context.clear_pagination();
         }
@@ -323,13 +325,13 @@ fn execute_repl_line_inner(
         accepted = false;
     }
     if let Err(err) = history
-        .with(|store| store.finalize_execution(line, &resolved, accepted && keep_history))
+        .with(|store| store.finalize_execution(line, &resolved, admitted && privacy_allows_history))
         .map_err(anyhow::Error::msg)
         .and_then(|result| result)
     {
         sink.write_stderr(&format!("failed to update REPL history: {err}\n"));
     }
-    if accepted && keep_history && !is_repl_bang_request(&resolved) {
+    if accepted && privacy_allows_history && !is_repl_bang_request(&resolved) {
         let _ = history.with(|store| store.remember_command(&resolved));
     }
     for command in state.session.repl_feedback.take_history() {
