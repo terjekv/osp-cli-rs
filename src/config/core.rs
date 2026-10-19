@@ -1523,9 +1523,7 @@ impl ResolvedConfig {
 
     /// Returns the resolved value for a key.
     pub fn get(&self, key: &str) -> Option<&ConfigValue> {
-        self.values
-            .get(&self.key_map.canonical(key))
-            .map(|entry| &entry.value)
+        self.get_value_entry(key).map(|entry| &entry.value)
     }
 
     /// Returns the resolved string value for a key.
@@ -1640,7 +1638,10 @@ impl ResolvedConfig {
 
     /// Returns the full resolved entry for a runtime-visible key.
     pub fn get_value_entry(&self, key: &str) -> Option<&ResolvedValue> {
-        self.values.get(&self.key_map.canonical(key))
+        // Canonical keys (all internal reads) skip the allocation in `canonical`.
+        self.values
+            .get(key)
+            .or_else(|| self.values.get(&self.key_map.canonical(key)))
     }
 
     /// Returns the resolved alias entry for a key.

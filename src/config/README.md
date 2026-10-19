@@ -58,7 +58,7 @@ keys still fail validation. The retired-key list belongs to the config schema.
 Products can declare their namespace on their defaults layer with
 `ConfigLayer::default().with_extension_namespace("site")`. Keys outside the
 framework schema then accept a short spelling in files, `OSP__...` and
-`OSP_SECRET__...` variables, `--set KEY=VALUE` / `-c KEY=VALUE`, and config
+`OSP_SECRET__...` variables and config
 commands. Explicit extension paths remain compatible. Resolved maps and
 secret identities keep canonical keys; config output and completion use short
 keys. Direct TOML writers can pass the same namespace through

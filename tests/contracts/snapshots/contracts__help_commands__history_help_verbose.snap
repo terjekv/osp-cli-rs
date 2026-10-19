@@ -24,8 +24,6 @@ Usage: osp history [OPTIONS] <COMMAND>
       --defaults-only
           Use only built-in defaults and explicit in-memory overrides.
           This is stricter than combining `--no-env` and `--no-config-file`: it also disables env/path bootstrap discovery through `HOME`, `XDG_*`, `OSP_CONFIG_FILE`, and `OSP_SECRETS_FILE`.
-  -c, --set <KEY=VALUE>
-          Override one config value for this invocation (repeatable)
       --plugin-dir <PLUGIN_DIRS>
           Add one or more plugin discovery directories
       --theme <THEME>

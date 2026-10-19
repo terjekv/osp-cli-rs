@@ -119,7 +119,6 @@ candidates value osp config get --presentation c
             ("root", "config"),
             ("command", "get"),
             ("flag", "--sources"),
-            ("flag", "--set"),
             ("value", "compact"),
         ]
     );
