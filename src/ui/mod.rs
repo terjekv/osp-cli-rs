@@ -290,11 +290,15 @@ pub(crate) fn copy_output_to_clipboard(
     settings: &RenderSettings,
     clipboard: &clipboard::ClipboardService,
 ) -> Result<(), clipboard::ClipboardError> {
+    let settings = RenderSettings {
+        margin: 0,
+        ..settings.clone()
+    };
     clipboard.copy_text(&render(
         output,
         &RenderRequest {
             profile: RenderProfile::CopySafe,
-            ..RenderRequest::new(settings)
+            ..RenderRequest::new(&settings)
         },
     ))
 }
