@@ -283,7 +283,12 @@ fn execute_repl_line_inner(
         if !matches!(resolved.trim(), "next" | "prev") {
             state.session.native_context.clear_pagination();
         }
-        let plan = classify_repl_line(&state.runtime, &state.session, &resolved)?;
+        let plan = classify_repl_line(
+            &state.runtime,
+            &state.session,
+            state.clients.native_commands(),
+            &resolved,
+        )?;
         let parse_finished = Instant::now();
         execute_repl_line_plan(
             ReplExecutionContext {
@@ -481,6 +486,7 @@ fn is_doctor_request(line: &str, config: &crate::config::ResolvedConfig) -> bool
 fn classify_repl_line(
     runtime: &AppRuntime,
     session: &AppSession,
+    native_commands: &crate::NativeCommandRegistry,
     line: &str,
 ) -> Result<ReplLinePlan> {
     // 1. Classify builtins and blank lines before any normal parsing.
@@ -520,7 +526,7 @@ fn classify_repl_line(
     }
 
     // 4. Resolve the remaining line as ordinary command/help dispatch.
-    classify_repl_command_plan(runtime, session, parsed)
+    classify_repl_command_plan(runtime, session, native_commands, parsed)
 }
 
 fn classify_builtin_or_blank(raw: &str) -> Result<Option<ReplLinePlan>> {
@@ -573,10 +579,14 @@ fn classify_repl_local_plan(
 fn classify_repl_command_plan(
     runtime: &AppRuntime,
     session: &AppSession,
+    native_commands: &crate::NativeCommandRegistry,
     parsed: input::ReplParsedLine,
 ) -> Result<ReplLinePlan> {
     Ok(ReplLinePlan::Command(Box::new(parse_repl_invocation(
-        runtime, session, &parsed,
+        runtime,
+        session,
+        native_commands,
+        &parsed,
     )?)))
 }
 
@@ -709,7 +719,13 @@ pub(crate) fn classify_repl_line_kind(
     session: &AppSession,
     line: &str,
 ) -> Result<ReplLinePlanKind> {
-    Ok(classify_repl_line(runtime, session, line)?.kind())
+    Ok(classify_repl_line(
+        runtime,
+        session,
+        &crate::NativeCommandRegistry::default(),
+        line,
+    )?
+    .kind())
 }
 
 #[cfg(test)]

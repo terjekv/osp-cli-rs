@@ -44,6 +44,7 @@ pub(super) struct ParsedClapHelp<'a> {
 pub(super) fn parse_repl_invocation(
     runtime: &AppRuntime,
     session: &AppSession,
+    native_commands: &crate::NativeCommandRegistry,
     parsed: &input::ReplParsedLine,
 ) -> Result<ParsedReplDispatch> {
     let mut scanned = scan_command_tokens(&parsed.dispatch_tokens)?;
@@ -110,6 +111,7 @@ pub(super) fn parse_repl_invocation(
                 effective.help_level,
                 &scoped_tokens,
                 &err.to_string(),
+                native_commands,
                 &effective.ui.render_settings.runtime.command_scope,
             );
             let mut output = document.to_output_result();
@@ -161,10 +163,16 @@ fn render_repl_parse_help(
     help_level: crate::core::document::HelpLevel,
     tokens: &[String],
     error_text: &str,
+    native_commands: &crate::NativeCommandRegistry,
     scope: &crate::core::CommandScope,
 ) -> (Document, bool) {
     let parsed = parse_clap_help(error_text);
-    let (mut view, long_help) = crate::cli::inline_help_document(tokens, scope);
+    use clap::CommandFactory;
+    let command = crate::cli::commands::doctor::with_app_commands(
+        crate::cli::InlineCommandCli::command(),
+        native_commands,
+    );
+    let (mut view, _, long_help) = crate::cli::command_help_document(command, tokens, scope);
     extend_with_invocation_help(&mut view, help_level);
     if error_text.starts_with("error:")
         && let Some(summary) = parsed.summary

@@ -54,6 +54,23 @@ pub(crate) fn doctor_command() -> clap::Command {
     crate::cli::builtin_command("doctor")
 }
 
+pub(crate) fn with_app_commands(
+    command: clap::Command,
+    registry: &crate::NativeCommandRegistry,
+) -> clap::Command {
+    let Some(native) = registry.command("doctor") else {
+        return command;
+    };
+    command.mut_subcommand("doctor", |mut doctor| {
+        for child in native.command().get_subcommands() {
+            if doctor.find_subcommand(child.get_name()).is_none() {
+                doctor = doctor.subcommand(child.clone());
+            }
+        }
+        doctor
+    })
+}
+
 #[derive(Serialize)]
 struct CredentialDiagnostics<'a> {
     service: &'a str,

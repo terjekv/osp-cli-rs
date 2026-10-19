@@ -61,8 +61,13 @@ fn parse_repl_invocation_invalid_help_alias_paths_cover_help_and_error_unit() {
         result,
         effective,
         stages,
-    } = parse_repl_invocation(&state.runtime, &state.session, &parsed)
-        .expect("invalid help alias should render guide help")
+    } = parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &parsed,
+    )
+    .expect("invalid help alias should render guide help")
     else {
         panic!("expected help dispatch");
     };
@@ -85,7 +90,12 @@ fn parse_repl_invocation_invalid_help_alias_paths_cover_help_and_error_unit() {
         dispatch_tokens: vec!["help".to_string()],
         stages: vec!["config".to_string()],
     };
-    let err = match parse_repl_invocation(&state.runtime, &state.session, &staged) {
+    let err = match parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &staged,
+    ) {
         Ok(_) => panic!("staged invalid help alias should fail"),
         Err(err) => err,
     };
@@ -100,7 +110,12 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         dispatch_tokens: Vec::new(),
         stages: Vec::new(),
     };
-    let err = match parse_repl_invocation(&state.runtime, &state.session, &empty) {
+    let err = match parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &empty,
+    ) {
         Ok(_) => panic!("empty parsed line should fail here"),
         Err(err) => err,
     };
@@ -108,7 +123,12 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
 
     let parsed = ReplParsedLine::parse("config show --wat", state.runtime.config.resolved())
         .expect("line should parse");
-    let err = match parse_repl_invocation(&state.runtime, &state.session, &parsed) {
+    let err = match parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &parsed,
+    ) {
         Ok(_) => panic!("unknown argument should be reported as a syntax error"),
         Err(err) => err,
     };
@@ -125,8 +145,13 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         .expect("bare theme line should parse");
     let ParsedReplDispatch::Help {
         result, effective, ..
-    } = parse_repl_invocation(&state.runtime, &state.session, &parsed)
-        .expect("missing theme subcommand should turn into inline help")
+    } = parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &parsed,
+    )
+    .expect("missing theme subcommand should turn into inline help")
     else {
         panic!("expected help dispatch");
     };
@@ -149,7 +174,12 @@ fn parse_repl_invocation_covers_missing_command_and_inline_help_errors_unit() {
         state.runtime.config.resolved(),
     )
     .expect("line should parse");
-    let err = match parse_repl_invocation(&state.runtime, &state.session, &staged) {
+    let err = match parse_repl_invocation(
+        &state.runtime,
+        &state.session,
+        state.clients.native_commands(),
+        &staged,
+    ) {
         Ok(_) => panic!("staged inline help parse errors should fail"),
         Err(err) => err,
     };

@@ -422,17 +422,10 @@ fn handle_clap_parse_error(
                     .entered();
                 app.native_commands.configure(config, false);
             }
-            let mut command = command.clone();
-            if let Some(native) = app.native_commands.command("doctor") {
-                command = command.mut_subcommand("doctor", |mut doctor| {
-                    for child in native.command().get_subcommands() {
-                        if doctor.find_subcommand(child.get_name()).is_none() {
-                            doctor = doctor.subcommand(child.clone());
-                        }
-                    }
-                    doctor
-                });
-            }
+            let command = crate::cli::commands::doctor::with_app_commands(
+                command.clone(),
+                &app.native_commands,
+            );
             let (mut body, root_help, long_help) = crate::cli::command_help_document(
                 command.clone(),
                 &tokens,
