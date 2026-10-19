@@ -1356,6 +1356,7 @@ fn add_native_command_help(
     let entries = native_commands
         .catalog()
         .into_iter()
+        .filter(|entry| entry.name != "doctor")
         .filter(|entry| auth.is_external_command_visible(&entry.name))
         .filter(|entry| {
             native_commands

@@ -3,8 +3,11 @@ use unicode_width::UnicodeWidthStr;
 use crate::ui::doc::{KeyValueRow, KeyValueValue};
 
 pub(super) fn display_key(row: &KeyValueRow) -> String {
+    let counted_label = row.key.rsplit_once('(').is_some_and(|(_, count)| {
+        count.ends_with(')') && count.starts_with(|c: char| c.is_ascii_digit())
+    });
     match &row.value {
-        KeyValueValue::Array(items) if should_include_count(items) => {
+        KeyValueValue::Array(items) if should_include_count(items) && !counted_label => {
             format!("{} ({})", row.key, items.len())
         }
         _ => row.key.clone(),
@@ -13,6 +16,7 @@ pub(super) fn display_key(row: &KeyValueRow) -> String {
 
 pub(super) fn aligned_display_key_width(rows: &[KeyValueRow]) -> usize {
     rows.iter()
+        .filter(|row| !matches!(&row.value, KeyValueValue::Array(items) if items.len() > 5 && items.iter().all(|item| scalar_text(item).is_some())))
         .map(|row| UnicodeWidthStr::width(display_key(row).as_str()))
         .max()
         .unwrap_or(0)
