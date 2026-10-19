@@ -284,19 +284,15 @@ pub(crate) fn run_scanned_with_sink_and_app(
     let (parsed, help_command) = {
         let _phase = tracing::info_span!(target: "osp_startup", "clap parse").entered();
         let mut command = Cli::command();
-        for &(name, help, key, _) in &app.config_flags {
+        for (argument, key, _) in &app.config_flags {
             let conflicts = app
                 .config_flags
                 .iter()
-                .filter(|&&(other, _, other_key, _)| other != name && other_key == key)
-                .map(|&(other, _, _, _)| other);
-            command = command.arg(
-                clap::Arg::new(name)
-                    .long(name)
-                    .help(help)
-                    .action(clap::ArgAction::SetTrue)
-                    .conflicts_with_all(conflicts),
-            );
+                .filter(|(other, other_key, _)| {
+                    other.get_id() != argument.get_id() && other_key == key
+                })
+                .map(|(other, _, _)| other.get_id().clone());
+            command = command.arg(argument.clone().conflicts_with_all(conflicts));
         }
         for flag in &app.action_flags {
             let mut arg = clap::Arg::new(flag.name).long(flag.name).help(flag.help);
@@ -353,7 +349,7 @@ pub(crate) fn run_scanned_with_sink_and_app(
                 ));
             }
             let _phase = tracing::info_span!(target: "osp_startup", "command execution").entered();
-            sink.write_stdout(&crate::cli::render_shell_completions(args));
+            sink.write_stdout(&crate::cli::render_shell_completions(args, &help_command));
             Ok(0)
         }
         Ok(mut cli) => {
@@ -373,9 +369,14 @@ fn product_config_overrides(
     matches: &clap::ArgMatches,
 ) -> crate::config::ConfigLayer {
     let mut overrides = crate::config::ConfigLayer::default();
-    for &(name, _, key, value) in &app.config_flags {
-        if matches.get_flag(name) {
-            overrides.set(key, value);
+    for (argument, key, fixed) in &app.config_flags {
+        let name = argument.get_id().as_str();
+        if let Some(value) = fixed {
+            if matches.get_flag(name) {
+                overrides.set(*key, *value);
+            }
+        } else if let Some(value) = matches.get_many::<String>(name) {
+            overrides.set(*key, value.cloned().collect::<Vec<_>>().join(","));
         }
     }
     for flag in &app.action_flags {

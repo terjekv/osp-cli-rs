@@ -294,6 +294,7 @@ pub(crate) struct SchemaEntry {
     writable: bool,
     allowed_values: Option<Vec<String>>,
     positive_integer: bool,
+    integer_range: Option<std::ops::RangeInclusive<i64>>,
     runtime_visible: bool,
     bootstrap_phase: Option<BootstrapPhase>,
     bootstrap_scope_rule: Option<BootstrapScopeRule>,
@@ -321,6 +322,7 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
+            integer_range: None,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -338,6 +340,7 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
+            integer_range: None,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -355,6 +358,7 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
+            integer_range: None,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -373,6 +377,7 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
+            integer_range: None,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -390,6 +395,7 @@ impl SchemaEntry {
             writable: true,
             allowed_values: None,
             positive_integer: false,
+            integer_range: None,
             runtime_visible: true,
             bootstrap_phase: None,
             bootstrap_scope_rule: None,
@@ -455,6 +461,13 @@ impl SchemaEntry {
     pub fn positive_integer() -> Self {
         let mut entry = Self::integer();
         entry.positive_integer = true;
+        entry
+    }
+
+    /// Restricts an integer to an inclusive range.
+    fn integer_range(range: std::ops::RangeInclusive<i64>) -> Self {
+        let mut entry = Self::integer();
+        entry.integer_range = Some(range);
         entry
     }
 
@@ -658,6 +671,7 @@ impl ConfigSchema {
     /// Product Boolean defaults also define the type of their extension writes.
     pub(crate) fn with_product_defaults(mut self, defaults: &ConfigLayer) -> Self {
         self.key_map = defaults.key_map;
+        self.entries.extend(defaults.schema_entries.clone());
         for entry in defaults.entries() {
             let key = self.key_map.canonical(&entry.key);
             if key.starts_with("extensions.")
@@ -954,6 +968,7 @@ pub struct LayerEntry {
 pub struct ConfigLayer {
     pub(crate) key_map: super::ConfigKeyMap,
     pub(crate) entries: Vec<LayerEntry>,
+    schema_entries: BTreeMap<String, SchemaEntry>,
     // Empty profile tables still declare valid profile names.
     pub(crate) declared_profiles: BTreeSet<String>,
 }
@@ -963,6 +978,15 @@ impl ConfigLayer {
     /// Framework keys and explicit extension paths retain their meaning.
     pub fn with_extension_namespace(mut self, namespace: &'static str) -> Self {
         self.key_map = super::ConfigKeyMap::new(namespace);
+        self
+    }
+
+    /// Restricts a product integer key on runtime resolution and config writes.
+    pub fn with_integer_range(mut self, key: &str, range: std::ops::RangeInclusive<i64>) -> Self {
+        self.schema_entries.insert(
+            self.key_map.canonical(key),
+            SchemaEntry::integer_range(range),
+        );
         self
     }
 
@@ -998,6 +1022,7 @@ impl ConfigLayer {
         if other.key_map != super::ConfigKeyMap::default() {
             self.key_map = other.key_map;
         }
+        self.schema_entries.extend(other.schema_entries.clone());
         self.entries.extend(other.entries().iter().cloned());
         self.declared_profiles
             .extend(other.declared_profiles.iter().cloned());
@@ -1733,7 +1758,8 @@ pub(crate) fn validate_bootstrap_value(key: &str, value: &ConfigValue) -> Result
 /// Returns whether a config, environment or error-detail name is sensitive.
 pub fn is_sensitive_key(key: &str) -> bool {
     let normalized = key.to_ascii_lowercase();
-    normalized.contains("password")
+    !normalized.ends_with(".password_attempts")
+        && (normalized.contains("password")
         || normalized.contains("passwd")
         || normalized.contains("credential")
         || normalized.contains("token")
@@ -1751,7 +1777,7 @@ pub fn is_sensitive_key(key: &str) -> bool {
         // A bare `key` field names something (`config get` prints `key: theme.name`);
         // `api_key`, `ssh_key` and `foo.key` hold key material.
         || (normalized != "key" && normalized.split('_').any(|part| part == "key"))
-        || normalized.ends_with(".key")
+        || normalized.ends_with(".key"))
 }
 
 fn adapt_value_for_schema(
@@ -1958,6 +1984,19 @@ fn validate_value_constraints(
         return Err(ConfigError::InvalidConfigValue {
             key: key.to_string(),
             reason: "expected a positive integer".to_string(),
+        });
+    }
+
+    if let Some(range) = &schema.integer_range
+        && !matches!(value.reveal(), ConfigValue::Integer(current) if range.contains(current))
+    {
+        return Err(ConfigError::InvalidConfigValue {
+            key: key.to_owned(),
+            reason: format!(
+                "expected an integer from {} to {}",
+                range.start(),
+                range.end()
+            ),
         });
     }
 

@@ -266,10 +266,12 @@ pub(crate) struct CompletionsArgs {
     pub shell: clap_complete::Shell,
 }
 
-pub(crate) fn render_shell_completions(args: CompletionsArgs) -> String {
+pub(crate) fn render_shell_completions(args: CompletionsArgs, full: &clap::Command) -> String {
     // Hidden commands are REPL-only or internal, so the scripts leave them out.
-    let full = Cli::command();
     let mut command = clap::Command::new("osp")
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .disable_help_subcommand(true)
         .version(env!("CARGO_PKG_VERSION"))
         .args(full.get_arguments().cloned())
         .subcommands(

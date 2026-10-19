@@ -144,7 +144,7 @@ pub(crate) struct AppDefinition {
     product_defaults: ConfigLayer,
     product_help_options: Vec<(String, String)>,
     action_flags: Vec<ProductActionFlag>,
-    config_flags: Vec<(&'static str, &'static str, &'static str, &'static str)>,
+    config_flags: Vec<(clap::Arg, &'static str, Option<&'static str>)>,
     access_policy: Option<Arc<dyn AccessPolicy>>,
     pub(crate) repl_line_handler: Option<Arc<ReplLineHandler>>,
 }
@@ -315,9 +315,23 @@ impl App {
         key: &'static str,
         value: &'static str,
     ) -> Self {
+        Arc::make_mut(&mut self.definition).config_flags.push((
+            clap::Arg::new(name)
+                .long(name)
+                .help(help)
+                .action(clap::ArgAction::SetTrue),
+            key,
+            Some(value),
+        ));
+        self
+    }
+
+    /// Registers a root option whose value sets invocation-only configuration.
+    /// The argument owns validation and possible values for shell completion.
+    pub fn with_config_value_flag(mut self, argument: clap::Arg, key: &'static str) -> Self {
         Arc::make_mut(&mut self.definition)
             .config_flags
-            .push((name, help, key, value));
+            .push((argument, key, None));
         self
     }
 
