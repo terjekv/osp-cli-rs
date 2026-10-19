@@ -640,8 +640,11 @@ fn run_config_set(
                 ));
             }
             if crate::ui::prompt::input_is_replay() || !std::io::stderr().is_terminal() {
-                return Err(miette!(
-                    "the following required arguments were not provided: <VALUE>\nhint: use --from-file - to read the value from stdin"
+                return Err(miette::Report::new(
+                    crate::core::CommandError::new(
+                        "the following required arguments were not provided: <VALUE>",
+                    )
+                    .with_action("Use --from-file - to read the value from stdin."),
                 ));
             }
             crate::ui::prompt::read_hidden(&format!("{key}: "))
