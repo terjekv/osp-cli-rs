@@ -823,6 +823,8 @@ pub trait NativeCommand: Send + Sync {
     }
 
     /// Normalizes command words using the host execution policy, then product arguments.
+    /// Completion and highlighting also call this: use local state only and
+    /// never wait on locks held across remote I/O.
     fn normalize_invocation_args(&self, args: &[String], prefixes: bool) -> Result<Vec<String>> {
         let args = crate::command_words::normalize(
             &self.command(),
@@ -937,8 +939,8 @@ pub trait NativeCommand: Send + Sync {
     /// Adds runtime-owned suggestions to the otherwise static completion tree.
     ///
     /// The host calls this only while preparing an interactive completion
-    /// surface. Implementations should cache any remote data they use so REPL
-    /// editing never performs network I/O per keystroke.
+    /// surface. Read local snapshots only, including in attached callbacks;
+    /// never wait on locks held across remote I/O. Refresh data in the background.
     fn augment_completion(&self, _completion: &mut CompletionNode) {}
 
     /// Returns a cached, single-line product status for the right prompt.
@@ -989,6 +991,8 @@ pub trait NativeCommand: Send + Sync {
     /// after [`Self::take_completion_fetch_request`] requests another fetch.
     /// Implementations may perform remote I/O here, then atomically replace
     /// the snapshot read by [`NativeCommand::augment_completion`].
+    /// Release all editor-visible locks before fetching; snapshots may be up
+    /// to an hour stale.
     fn refresh_completion(&self) -> Result<()> {
         Ok(())
     }

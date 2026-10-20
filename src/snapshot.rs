@@ -1,4 +1,4 @@
-//! Origin-bound daily snapshots and coalesced background refresh for native commands.
+//! Origin-bound hourly snapshots and coalesced background refresh for native commands.
 //! Fetching and validation belong to the integration; failures retain published data.
 
 use anyhow::Result;
@@ -64,9 +64,9 @@ pub fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
-/// Whether a timestamp is within the daily refresh interval.
+/// Whether a timestamp is within the hourly refresh interval.
 pub fn fresh(at: u64) -> bool {
-    at > 0 && now().saturating_sub(at) < 24 * 60 * 60
+    at > 0 && now().saturating_sub(at) < 60 * 60
 }
 /// Coalesces background refreshes, retaining an explicit force request in flight.
 #[derive(Default)]
