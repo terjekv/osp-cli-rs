@@ -16,6 +16,15 @@ Completion works from already-known local information:
 
 It does not call remote systems while you are pressing tab.
 
+Value completion searches the inserted value and its description separately.
+Exact values rank first, followed by value prefixes and other literal value
+matches. Description matches compete with value typo rescue and fuzzy matches;
+accepting a description match still inserts the value. Word boundaries include
+punctuation and spaces. Separator normalization preserves ordinary value scores,
+so dotted addresses retain their ranking. Catalogue typo rescue requires at
+least four characters and compares the leading label at a Jaro-Winkler floor of
+0.85. Catalogue tiers and their result limits still apply.
+
 ## While You Type
 
 - **Tab** completes like a shell first: a single match, or an exact word no
