@@ -769,6 +769,7 @@ fn app_session_helpers_cover_public_session_surface_unit() {
 #[test]
 fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
     let response = ResponseV1 {
+        source: None,
         protocol_version: 1,
         ok: false,
         data: serde_json::json!({
@@ -821,6 +822,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
     );
 
     let response = ResponseV1 {
+        source: None,
         protocol_version: 1,
         ok: true,
         data: serde_json::json!([{"uid": "alice"}]),
@@ -863,6 +865,7 @@ fn prepare_plugin_response_handles_failures_and_pipeline_hints_unit() {
 #[test]
 fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
     let response = ResponseV1 {
+        source: None,
         protocol_version: 1,
         ok: false,
         data: serde_json::json!({}),
@@ -901,6 +904,7 @@ fn plugin_failure_diagnostics_keep_backend_evidence_out_of_the_terse_message() {
 #[test]
 fn prepared_plugin_response_maps_into_cli_command_result_unit() {
     let response = ResponseV1 {
+        source: None,
         protocol_version: 1,
         ok: false,
         data: serde_json::json!({}),

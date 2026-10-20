@@ -60,8 +60,13 @@ pub(crate) struct CommandOutput {
     pub(crate) preserve_process_output: bool,
     pub(crate) messages: MessageBuffer,
     pub(crate) body: CommandBody,
+    pub(crate) source: Option<Value>,
+    /// Retained with both documents so plain `last` repeats this selection.
+    pub(crate) use_source: bool,
     pub(crate) format_hint: Option<OutputFormat>,
     pub(crate) progress_replace: bool,
+    /// Native display supplements, suppressed when the source is selected.
+    pub(crate) display_details: String,
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
@@ -77,8 +82,11 @@ impl CommandOutput {
             preserve_process_output: false,
             messages: MessageBuffer::default(),
             body: CommandBody::None,
+            source: None,
+            use_source: false,
             format_hint: None,
             progress_replace: false,
+            display_details: String::new(),
             stderr_text: String::new(),
             failure_report: None,
             hint_command: None,
@@ -153,7 +161,7 @@ impl CommandOutput {
                         } else {
                             column.clone()
                         };
-                        render_detail_fields(&path, value, &mut result.stderr_text);
+                        render_detail_fields(&path, value, &mut result.display_details);
                     }
                 }
             }
@@ -173,13 +181,38 @@ impl CommandOutput {
         }
         Self {
             body,
+            source: self.source.clone(),
+            use_source: self.use_source,
             format_hint: self.format_hint,
             progress_replace: false,
             ..Self::exit(0)
         }
     }
 
+    /// Selects the document before rendering, recording or running any pipeline.
+    fn select_source(&mut self) {
+        if self.use_source
+            && let Some(source) = self.source.take()
+        {
+            let context = match &self.body {
+                CommandBody::Output(output) => output.meta.context.clone(),
+                _ => Default::default(),
+            };
+            self.body = CommandBody::Output(Box::new(plugin_data_to_output_result(
+                source,
+                Some(&ResponseMetaV1 {
+                    preserve_json_document: true,
+                    context,
+                    ..ResponseMetaV1::default()
+                }),
+            )));
+            self.format_hint = None;
+            self.display_details.clear();
+        }
+    }
+
     pub(crate) fn apply_stages(&mut self, stages: &[String]) -> Result<()> {
+        self.select_source();
         if stages.is_empty() {
             return Ok(());
         }
@@ -389,6 +422,7 @@ pub(crate) fn run_cli_command(
         {
             sink.write_stderr(&format!("{backtrace}\n"));
         }
+        sink.write_stderr(&result.display_details);
         if !result.stderr_text.is_empty() {
             sink.write_stderr(&result.stderr_text);
         }
@@ -438,6 +472,7 @@ pub(crate) fn run_cli_command(
     {
         sink.write_stderr(&format!("{backtrace}\n"));
     }
+    sink.write_stderr(&result.display_details);
     if !result.stderr_text.is_empty() {
         sink.write_stderr(&result.stderr_text);
     }
@@ -661,6 +696,7 @@ pub(crate) fn cli_result_from_plugin_response(
         .filter(|message| response.ok || message.level != MessageLevel::Success)
         .collect::<Vec<_>>();
     let mut result = CommandOutput::from_data(response.data, &response.meta, &messages, stages);
+    result.source = response.source;
     if !response.ok {
         let report = if let Some(error) = response.error {
             let action = error.details.get("action").and_then(Value::as_str);
@@ -802,17 +838,23 @@ pub(crate) fn render_saved_repl_output(
     ui: &UiState,
     output: &CommandOutput,
     stages: &[String],
+    source: bool,
     sink: Option<&mut dyn UiSink>,
-) -> Result<String> {
-    if let Some(recording) = crate::repl::recording::current() {
-        recording.observe(&output.body.json_value());
-    }
+) -> Result<(String, OutputFormat)> {
     let mut staged = output.saved();
+    staged.use_source |= source;
+    staged.select_source();
+    if let Some(recording) = crate::repl::recording::current() {
+        recording.observe(&staged.body.json_value());
+    }
     let context = match &staged.body {
         CommandBody::Text(_) | CommandBody::Json(_)
             if stages.is_empty() && !ui.render_settings.format_explicit =>
         {
-            return Ok(staged.render(config, &ui.render_settings));
+            return Ok((
+                staged.render(config, &ui.render_settings),
+                staged.output_format(&ui.render_settings),
+            ));
         }
         CommandBody::Text(_) => "failed to replay staged textual output",
         CommandBody::Json(_) => "failed to replay staged JSON output",
@@ -824,10 +866,11 @@ pub(crate) fn render_saved_repl_output(
     };
     staged.apply_stages(stages).wrap_err(context)?;
     let rendered = staged.render(config, &ui.render_settings);
-    match sink {
-        Some(sink) => apply_output_sinks(config, ui, &staged, rendered, sink),
-        None => Ok(rendered),
-    }
+    let rendered = match sink {
+        Some(sink) => apply_output_sinks(config, ui, &staged, rendered, sink)?,
+        None => rendered,
+    };
+    Ok((rendered, staged.output_format(&ui.render_settings)))
 }
 
 pub(crate) fn render_repl_command(
@@ -839,6 +882,8 @@ pub(crate) fn render_repl_command(
     mut result: CommandOutput,
     sink: &mut dyn UiSink,
 ) -> Result<String> {
+    let saved = result.saved();
+    result.select_source();
     if let Some(recording) = crate::repl::recording::current() {
         recording.observe(&result.body.json_value());
     }
@@ -870,7 +915,6 @@ pub(crate) fn render_repl_command(
     if !result.messages.is_empty() {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
     }
-    let saved = result.saved();
     let context = match &result.body {
         CommandBody::Text(_) => "failed to apply staged textual output pipeline",
         CommandBody::Json(_) => "failed to apply staged JSON output pipeline",
@@ -885,6 +929,7 @@ pub(crate) fn render_repl_command(
         result.output_format(&ui.render_settings),
     ));
     let rendered = apply_output_sinks(config, ui, &result, rendered, sink)?;
+    sink.write_stderr(&result.display_details);
     if !result.stderr_text.is_empty() {
         sink.write_stderr(&result.stderr_text);
     }

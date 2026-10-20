@@ -55,6 +55,7 @@ impl NativeCommand for NativeSubjectCommand {
             .map_err(|_| anyhow::anyhow!("context lock poisoned"))? =
             Some(context.session_context.clone());
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{"host": host}]),
