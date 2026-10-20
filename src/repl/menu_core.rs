@@ -755,6 +755,7 @@ impl MenuCore {
                 .and_then(|extra| extra.get(1))
                 .and_then(|value| value.strip_prefix("osp-prefix:"))
                 .and_then(|value| value.parse::<usize>().ok())
+                .filter(|_| !selected)
                 .filter(|&prefix| display.is_char_boundary(prefix))
             {
                 format!(
