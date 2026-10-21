@@ -314,13 +314,15 @@ impl Hinter for ReplHinter {
         use_ansi_coloring: bool,
         _cwd: &str,
     ) -> String {
+        let analysis = self.completer.analyze(line, pos);
         self.painted.set(line, pos);
+        self.painted
+            .set_inside_quote(analysis.cursor.quote_style.is_some());
         let candidates = if line.trim().is_empty() {
             Vec::new()
         } else {
             self.completer.complete(line, pos).suggestions().to_vec()
         };
-        let analysis = self.completer.analyze(line, pos);
         let command_matches = self.command_matches(&analysis);
         let command_valid = command_matches
             .as_ref()

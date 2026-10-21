@@ -32,6 +32,7 @@ pub(crate) struct PaintedLine(Arc<Mutex<PaintedLineState>>);
 struct PaintedLineState {
     line: String,
     cursor: usize,
+    inside_quote: bool,
     revision: u64,
     history_suggestions: Vec<String>,
     history_index: usize,
@@ -49,6 +50,16 @@ impl PaintedLine {
         painted.line.push_str(line);
         painted.cursor = cursor;
         painted.revision = painted.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn set_inside_quote(&self, inside_quote: bool) {
+        let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        painted.inside_quote = inside_quote;
+    }
+
+    fn inside_quote(&self) -> bool {
+        let painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        painted.inside_quote
     }
 
     pub(crate) fn history_suggestion(&self, suggestions: Vec<String>) -> Option<String> {
@@ -143,12 +154,16 @@ impl AutoCompleteEmacs {
 
     /// Whether typing these commands should open a closed menu.
     ///
-    /// A `-` inside a word such as a hostname is not a flag trigger.
+    /// Open quotes suppress typing triggers. A `-` inside a word such as a
+    /// hostname is not a flag trigger.
     /// Spaces are handled by the token commit below.
     fn opens_menu_at(&self, commands: &[EditCommand], word_len: Option<usize>) -> bool {
         let [EditCommand::InsertChar(ch)] = commands else {
             return false;
         };
+        if self.painted.inside_quote() {
+            return false;
+        }
         (self.complete_on.flag && *ch == '-' && word_len == Some(0))
             || (!ch.is_whitespace()
                 && self
@@ -276,7 +291,10 @@ impl EditMode for AutoCompleteEmacs {
                 // selection already in the buffer, instead of letting reedline
                 // refresh it with the next token's candidates.
                 let mut events = vec![ReedlineEvent::Esc, ReedlineEvent::Edit(commands)];
-                if self.complete_on.space && word_len.is_some_and(|len| len > 0) {
+                if self.complete_on.space
+                    && !self.painted.inside_quote()
+                    && word_len.is_some_and(|len| len > 0)
+                {
                     events.push(self.auto_open());
                 }
                 ReedlineEvent::Multiple(events)

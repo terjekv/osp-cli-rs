@@ -71,6 +71,7 @@ This setting does not limit the Tab menu.
 Combine triggers in a list, for example `["flag", "space", "after_3_letters"]`.
 Any positive count is accepted; unknown entries are ignored. `[]` disables
 opening while typing. Tab and Ctrl-Space remain available with any list.
+Typing triggers stay inactive inside open quotes.
 
 ## Command prefixes
 
