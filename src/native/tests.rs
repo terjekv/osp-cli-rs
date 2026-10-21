@@ -210,6 +210,7 @@ impl NativeCommand for TestNativeCommand {
         _context: &NativeCommandContext<'_>,
     ) -> anyhow::Result<NativeCommandOutcome> {
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{ "args": args }]),

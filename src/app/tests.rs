@@ -162,6 +162,7 @@ impl NativeCommand for TestNativeCommand {
         }
 
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{ "command": "ldap", "args": args }]),

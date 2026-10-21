@@ -58,6 +58,7 @@ fn invocation_ui_and_format_hints_overlay_runtime_defaults_unit() {
         1,
     );
     let invocation = InvocationOptions {
+        source: true,
         format: Some(OutputFormat::Json),
         mode: Some(RenderMode::Rich),
         color: Some(ColorMode::Always),
@@ -69,6 +70,7 @@ fn invocation_ui_and_format_hints_overlay_runtime_defaults_unit() {
 
     let resolved = resolve_invocation_ui(&config, &ui, &invocation);
 
+    assert!(resolved.source);
     assert_eq!(resolved.ui.render_settings.format, OutputFormat::Json);
     assert!(resolved.ui.render_settings.format_explicit);
     assert_eq!(resolved.ui.render_settings.mode, RenderMode::Rich);

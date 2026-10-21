@@ -61,6 +61,7 @@ impl NativeCommand for CredentialProbe {
         )?;
         assert_eq!(matches.subcommand_name(), Some("read"));
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{"resource": "db01", "cpu": 4, "ready": true}]),
@@ -232,6 +233,7 @@ impl NativeCommand for ApprovalWorkflow {
         context.flush_progress()?;
         Ok(NativeCommandOutcome::ResponseWithExit {
             response: Box::new(ResponseV1 {
+                source: None,
                 protocol_version: PLUGIN_PROTOCOL_V1,
                 ok: true,
                 data: json!([{

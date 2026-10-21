@@ -63,6 +63,7 @@ That includes:
 
 - DSL pipes
 - `--format` and format shorthands like `--json`
+- `--source` to select the source record before rendering or pipes
 - `-v/-q/-d`
 
 Failures use the same renderer as one-shot commands: `error:`, an optional
@@ -88,10 +89,15 @@ For successful results, the REPL also keeps the last replayable output:
   - replay the last successful result with its original pipe stages
 - `last --raw`
   - show the pre-pipeline payload from that same successful command
+- `last --source`
+  - select the saved source record before replaying the original pipeline
+  - combine with `--raw` to skip that pipeline and inspect the full source
+  - without a separate source, use the command's normal data and presentation
 - `last | state`, `last --json`, `last --raw | P name`
   - use normal output formats and DSL stages without another service request
   - new stages follow the saved pipeline; `--raw` skips that saved pipeline
   - replay keeps the saved result intact, so later `last` calls start from it
+  - plain `last` retains the original command's source/display selection
 - `doctor last`
   - stays failure-only
 

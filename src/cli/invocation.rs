@@ -37,6 +37,20 @@ impl InvocationAlias {
 
 pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
     InvocationFlag {
+        long: "--source",
+        short: None,
+        value_name: None,
+        choices: Vec::new,
+        aliases: &[],
+        help: "Show the source record before display shaping",
+        completion_help: None,
+        set: |o, _, _| {
+            o.source = true;
+            Ok(())
+        },
+        is_set: |o| o.source,
+    },
+    InvocationFlag {
         long: "--format",
         short: None,
         value_name: Some("FORMAT"),
@@ -225,6 +239,7 @@ pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct InvocationOptions {
+    pub(crate) source: bool,
     pub(crate) format: Option<OutputFormat>,
     pub(crate) mode: Option<RenderMode>,
     pub(crate) color: Option<ColorMode>,
@@ -286,6 +301,7 @@ impl InvocationOptions {
                 )
             })?;
         }
+        self.source |= other.source;
         self.verbose = self.verbose.saturating_add(other.verbose);
         self.quiet = self.quiet.saturating_add(other.quiet);
         self.debug = self.debug.saturating_add(other.debug);
@@ -583,12 +599,36 @@ mod tests {
     }
 
     #[test]
+    fn source_selection_scans_cli_and_repl_and_merges_alias_flags() {
+        let scanned =
+            scan_cli_argv(&["osp", "--source", "config", "show", "--json"].map(OsString::from));
+        assert!(scanned.error.is_none());
+        assert!(scanned.invocation.source);
+        assert_eq!(scanned.invocation.format, Some(OutputFormat::Json));
+        assert_eq!(scanned.argv, ["osp", "config", "show"].map(OsString::from));
+
+        let scanned = scan(&["last", "--source", "--raw"]);
+        assert!(scanned.invocation.source);
+        assert_eq!(scanned.tokens, ["last", "--raw"]);
+        let mut merged = InvocationOptions::default();
+        merged
+            .merge(scanned.invocation)
+            .expect("alias flags should merge");
+        assert!(merged.source);
+        assert_eq!(
+            scan(&["config", "show", "--", "--source"]).tokens,
+            ["config", "show", "--", "--source"]
+        );
+    }
+
+    #[test]
     fn scan_command_tokens_covers_host_flags_aliases_clusters_and_trace_unit() {
         let scanned = scan(&["ldap", "user", "oistes", "--json", "-vv"]);
         assert_eq!(scanned.tokens, vec!["ldap", "user", "oistes"]);
         assert_eq!(
             scanned.invocation,
             InvocationOptions {
+                source: false,
                 format: Some(OutputFormat::Json),
                 mode: None,
                 color: None,
@@ -685,6 +725,11 @@ mod tests {
     fn invocation_help_hidden_completion_and_cli_argv_follow_visibility_and_flag_only_inputs_unit()
     {
         let rendered = invocation_help_view(crate::core::document::HelpLevel::Verbose).rows();
+        assert!(
+            rendered
+                .iter()
+                .any(|row| row.get("name").and_then(serde_json::Value::as_str) == Some("--source"))
+        );
         assert!(rendered.iter().any(|row| {
             row.get("name")
                 .and_then(serde_json::Value::as_str)

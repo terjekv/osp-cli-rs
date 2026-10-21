@@ -157,6 +157,7 @@ CLI, such as:
 
 - `--format`
 - `--json`
+- `--source`
 - `--verbose`
 - `--quiet`
 - `--debug`
