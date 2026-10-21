@@ -246,11 +246,11 @@ impl EditMode for AutoCompleteEmacs {
             self.last_argument = false;
             return ReedlineEvent::Repaint;
         }
-        let parsed = self.inner.parse_event(
-            event
-                .try_into()
-                .expect("previously validated reedline event"),
-        );
+        // The event came from a ReedlineRawEvent, so converting it back cannot fail.
+        let Ok(event) = event.try_into() else {
+            return ReedlineEvent::None;
+        };
+        let parsed = self.inner.parse_event(event);
         // Keys can arrive before the next paint; never cycle a stale prefix.
         if !matches!(parsed, ReedlineEvent::Resize(..) | ReedlineEvent::Repaint) {
             self.painted.clear_history_suggestions();
