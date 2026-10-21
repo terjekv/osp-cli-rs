@@ -22,7 +22,11 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 2. reedline applies the event. Tab on a closed menu reaches
    `OspCompletionMenu::complete_like_shell` through partial completion.
 3. reedline paints: highlighter, then the hinter, then an open menu. The hinter
-   records the painted line in `PaintedLine` for the next key.
+   records the painted line and ranked history suggestions in `PaintedLine`.
+   Ctrl-Right advances its shared index and requests a repaint. Input or cursor
+   changes reset the index; intervening key edits discard stale suggestions.
+   Accepted inline text is shared too: reedline parses a whole key batch before
+   repainting, so a cycle followed immediately by Right must use the new choice.
 
 ## Constraints that shape the code
 

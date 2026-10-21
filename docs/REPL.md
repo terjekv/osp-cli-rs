@@ -275,7 +275,8 @@ Useful REPL config keys:
 - `repl.hint.command_limit`
   - Maximum names in typing hints, default `3`; `0` hides multiple-match lists.
 - `repl.autosuggest`
-  - Inline suggestions, default `true`; status/help guidance stays enabled.
+  - Inline suggestions, default `true`; Ctrl-Right cycles history choices at
+    the end of input with the menu closed. Status/help guidance stays enabled.
 - `repl.complete_on`
   - List of `flag`, `space`, `after_<n>_letters`; default `["flag"]`.
     See [COMPLETION.md](COMPLETION.md).

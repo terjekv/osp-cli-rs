@@ -33,7 +33,10 @@ It does not call remote systems while you are pressing tab.
   often among the last 200 prefix matches. Equal counts prefer recency. History
   must agree with a unique command-tree completion; otherwise that completion
   supplies the suggestion.
-  Right or End accepts it; Alt-Right accepts one word.
+  Right or End accepts it; Alt-Right accepts one word. Ctrl-Right cycles through
+  distinct eligible history suggestions in the same ranking order, wrapping at
+  the end, when the cursor is at the end of input and the menu is closed.
+  Editing or moving the cursor resets the cycle.
   `repl.autosuggest=false` hides this inline text without hiding the status line.
 - **While typing a command**, one matching command shows its canonical name,
   next arguments and description on one line. Two or three matches show only

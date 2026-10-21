@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Cycle distinct inline history suggestions with Ctrl-Right at the end of
+  input while the menu is closed. Editing or moving the cursor resets cycling;
+  Right/End still accept the full suggestion and Alt-Right accepts one word.
+
 - Rank inline history suggestions within the last 200 prefix matches. Recency
   wins unless another command is at least three times as frequent; ties retain
   recency, and suggestions still agree with unique command-tree completions.

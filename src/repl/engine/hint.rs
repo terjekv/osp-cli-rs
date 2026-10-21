@@ -53,7 +53,6 @@ pub(crate) struct ReplHinter {
     style: Option<Style>,
     command_limit: usize,
     autosuggest: bool,
-    inline: String,
 }
 
 impl ReplHinter {
@@ -71,7 +70,6 @@ impl ReplHinter {
             style,
             command_limit: 3,
             autosuggest,
-            inline: String::new(),
         }
     }
 
@@ -84,9 +82,8 @@ impl ReplHinter {
         candidates: &[Suggestion],
     ) -> String {
         let from_tree = only_extension(line, candidates);
-        self.history_suggestions(line, history, from_tree.as_deref())
-            .into_iter()
-            .next()
+        self.painted
+            .history_suggestion(self.history_suggestions(line, history, from_tree.as_deref()))
             .or(from_tree)
             .unwrap_or_default()
     }
@@ -337,7 +334,7 @@ impl Hinter for ReplHinter {
         } else {
             candidates
         };
-        self.inline = if self.autosuggest
+        let inline = if self.autosuggest
             && command_valid
             && use_ansi_coloring
             && self.style.is_some()
@@ -346,6 +343,7 @@ impl Hinter for ReplHinter {
         {
             self.inline_suggestion(line, history, &candidates)
         } else {
+            self.painted.history_suggestion(Vec::new());
             String::new()
         };
 
@@ -353,7 +351,8 @@ impl Hinter for ReplHinter {
             Some(style) if use_ansi_coloring => style.paint(text).to_string(),
             _ => text.to_string(),
         };
-        let mut out = paint(&self.inline, self.style);
+        let mut out = paint(&inline, self.style);
+        self.painted.set_inline(inline);
         if let Some(Status {
             description,
             text: status,
@@ -390,14 +389,15 @@ impl Hinter for ReplHinter {
     }
 
     fn complete_hint(&self) -> String {
-        self.inline.clone()
+        self.painted.inline()
     }
 
     fn next_hint_token(&self) -> String {
-        let word = self.inline.trim_start();
-        let lead = self.inline.len() - word.len();
+        let inline = self.painted.inline();
+        let word = inline.trim_start();
+        let lead = inline.len() - word.len();
         let end = word.find(char::is_whitespace).unwrap_or(word.len());
-        self.inline[..lead + end].to_string()
+        inline[..lead + end].to_string()
     }
 }
 
