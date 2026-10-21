@@ -24,6 +24,7 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) completion_tree: CompletionTree,
     pub(crate) appearance: ReplAppearance,
     pub(crate) complete_on: ReplCompleteOn,
+    pub(crate) autosuggest: bool,
     pub(crate) line_projector: Option<LineProjector>,
     pub(crate) actions: Vec<crate::repl::ReplAction>,
     pub(crate) after_paint: Box<dyn FnMut() + Send>,
@@ -74,6 +75,7 @@ where
         completion_tree,
         appearance,
         complete_on,
+        autosuggest,
         line_projector,
         actions,
         after_paint,
@@ -110,6 +112,7 @@ where
             completion_tree,
             &appearance,
             complete_on,
+            autosuggest,
             line_projector,
             history_store.clone(),
             Some(bindings),
@@ -130,6 +133,7 @@ pub(super) fn build_interactive_editor(
     completion_tree: CompletionTree,
     appearance: &ReplAppearance,
     complete_on: ReplCompleteOn,
+    autosuggest: bool,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
     bindings: Option<reedline::Keybindings>,
@@ -148,6 +152,7 @@ pub(super) fn build_interactive_editor(
         line_projector.clone(),
         painted.clone(),
         &history_store,
+        autosuggest,
     );
     let highlighter = build_repl_highlighter(tree.clone(), appearance, line_projector);
     let edit_mode = Box::new(AutoCompleteEmacs::new(
@@ -256,6 +261,7 @@ fn build_repl_hinter(
     line_projector: Option<LineProjector>,
     painted: PaintedLine,
     history: &SharedHistory,
+    autosuggest: bool,
 ) -> ReplHinter {
     let color = |spec: &Option<String>| spec.as_deref().and_then(color_from_style_spec);
     let error_color = color(&appearance.error_highlight_style).unwrap_or(Color::Red);
@@ -267,6 +273,7 @@ fn build_repl_hinter(
             .with_command_prefixes(appearance.command_prefixes),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),
+        autosuggest,
     )
     .with_command_limit(appearance.command_hint_limit)
 }

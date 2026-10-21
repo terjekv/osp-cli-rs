@@ -212,6 +212,8 @@ pub struct ReplRunConfig {
     pub input_mode: ReplInputMode,
     /// Chooses when typing opens the completion menu.
     pub complete_on: ReplCompleteOn,
+    /// Whether inline suggestions are enabled; status guidance is independent.
+    pub autosuggest: bool,
     /// Optional renderer for the right-hand prompt.
     pub prompt_right: Option<PromptRightRenderer>,
     /// Optional projector used before completion/highlighting analysis.
@@ -238,6 +240,7 @@ impl ReplRunConfig {
             history_config,
             input_mode: ReplInputMode::Auto,
             complete_on: ReplCompleteOn::default(),
+            autosuggest: true,
             prompt_right: None,
             line_projector: None,
             actions: Vec::new(),
@@ -311,6 +314,12 @@ impl ReplRunConfigBuilder {
     /// If omitted, the config keeps [`ReplCompleteOn::default()`].
     pub fn with_complete_on(mut self, complete_on: ReplCompleteOn) -> Self {
         self.config.complete_on = complete_on;
+        self
+    }
+
+    /// Enables or disables inline suggestions, which default to enabled.
+    pub fn with_autosuggest(mut self, autosuggest: bool) -> Self {
+        self.config.autosuggest = autosuggest;
         self
     }
 

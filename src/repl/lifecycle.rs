@@ -19,7 +19,7 @@ use super::history;
 use super::input;
 use super::presentation::{
     build_repl_appearance, build_repl_prompt, build_repl_prompt_right_renderer, render_repl_intro,
-    repl_complete_on, repl_input_mode,
+    repl_autosuggest, repl_complete_on, repl_input_mode,
 };
 use super::surface;
 
@@ -246,6 +246,7 @@ fn build_repl_cycle_run_config(
     .with_appearance(prepared.appearance)
     .with_input_mode(repl_input_mode(runtime.config.resolved()))
     .with_complete_on(repl_complete_on(runtime.config.resolved()))
+    .with_autosuggest(repl_autosuggest(runtime.config.resolved()))
     .with_prompt_right(Some(build_repl_prompt_right_renderer(
         view,
         session.prompt_timing.clone(),

@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Add `repl.autosuggest` (default `true`) and `with_autosuggest` on the public
+  run-config builder. Disabling it hides inline text while retaining status
+  and help guidance below the input.
+
 - Replace `repl.tab_mode` and the public `ReplTabMode` API with the trigger list
   `repl.complete_on` and `ReplCompleteOn`. The run-config builder now exposes
   `with_complete_on`; defaults open on flag starts, and an empty list leaves

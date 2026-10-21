@@ -43,4 +43,6 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 
 - **Key binding:** `build_repl_keybindings` in `session.rs`.
 - **When typing opens the menu:** `AutoCompleteEmacs::opens_menu_at`.
+- **Inline suggestions:** `ReplHinter` gates them on `repl.autosuggest`,
+  independently of the status line.
 - **What the status line says:** `ReplHinter::status`.

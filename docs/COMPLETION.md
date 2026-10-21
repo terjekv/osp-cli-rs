@@ -31,6 +31,7 @@ It does not call remote systems while you are pressing tab.
 - **Muted text after the cursor** suggests the rest of the line: the newest
   history entry that extends it, or the only completion for the current word.
   Right or End accepts it; Alt-Right accepts one word.
+  `repl.autosuggest=false` hides this inline text without hiding the status line.
 - **While typing a command**, one matching command shows its canonical name,
   next arguments and description on one line. Two or three matches show only
   their names, with executable prefixes in bold. More matches or an unknown

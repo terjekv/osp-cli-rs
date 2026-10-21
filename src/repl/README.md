@@ -27,7 +27,7 @@ It sits at the host layer and imports `app`, `cli`, `completion`, `config`,
 
 - **New REPL setting:** declare the default and schema
   entry in `config/builtin.rs`, read it in `presentation.rs`, carry it on
-  `ReplRunConfig`. `repl.complete_on` is a small worked example.
+  `ReplRunConfig`. `repl.complete_on` and `repl.autosuggest` are worked examples.
 - **Builtin that only makes sense interactively:** `dispatch/builtins.rs`.
 - **Completion looks wrong for a command:** first check the tree with
   `debug-complete`. If the data is right, the problem is in `engine/` or the

@@ -49,6 +49,7 @@ pub(crate) struct ReplHinter {
     // `None` turns the inline suggestion off; unstyled it would look typed.
     style: Option<Style>,
     command_limit: usize,
+    autosuggest: bool,
     inline: String,
 }
 
@@ -58,6 +59,7 @@ impl ReplHinter {
         highlighter: ReplHighlighter,
         painted: PaintedLine,
         style: Option<Style>,
+        autosuggest: bool,
     ) -> Self {
         Self {
             completer,
@@ -65,6 +67,7 @@ impl ReplHinter {
             painted,
             style,
             command_limit: 3,
+            autosuggest,
             inline: String::new(),
         }
     }
@@ -301,7 +304,8 @@ impl Hinter for ReplHinter {
         } else {
             candidates
         };
-        self.inline = if command_valid
+        self.inline = if self.autosuggest
+            && command_valid
             && use_ansi_coloring
             && self.style.is_some()
             && pos == line.len()
@@ -462,6 +466,7 @@ mod tests {
             ReplHighlighter::new(tree(), Color::Green, Color::Red, None),
             PaintedLine::default(),
             Some(Style::new()),
+            true,
         )
     }
 

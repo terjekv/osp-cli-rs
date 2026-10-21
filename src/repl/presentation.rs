@@ -115,6 +115,10 @@ pub(crate) fn repl_input_mode(config: &ResolvedConfig) -> ReplInputMode {
         .unwrap_or(ReplInputMode::Auto)
 }
 
+pub(crate) fn repl_autosuggest(config: &ResolvedConfig) -> bool {
+    config.get_bool("repl.autosuggest").unwrap_or(true)
+}
+
 pub(crate) fn repl_complete_on(config: &ResolvedConfig) -> crate::repl::ReplCompleteOn {
     config
         .get_string_list("repl.complete_on")
