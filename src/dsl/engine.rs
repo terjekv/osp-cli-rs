@@ -393,6 +393,7 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         | DisplayRule::Decimal { field, .. }
         | DisplayRule::TextLimit { field, .. }
         | DisplayRule::Compose { field, .. }
+        | DisplayRule::Notice { field }
         | DisplayRule::Hyperlink { field }
         | DisplayRule::Bytes { field }
         | DisplayRule::RelativeTimestamp { field }
