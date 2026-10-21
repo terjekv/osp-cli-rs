@@ -93,7 +93,7 @@ impl BackgroundRefresh {
         let worker = move || loop {
             let force = gate.force_requested.swap(false, Ordering::AcqRel);
             if let Err(error) = refresh(force) {
-                tracing::debug!(%error, "completion snapshot refresh failed; retaining cache");
+                tracing::debug!(target: "osp::diagnostic", %error, "completion snapshot refresh failed; retaining cache");
             }
             gate.refreshing.store(false, Ordering::Release);
             if !gate.force_requested.load(Ordering::Acquire)
@@ -104,7 +104,7 @@ impl BackgroundRefresh {
         };
         if let Err(error) = std::thread::Builder::new().name(name.into()).spawn(worker) {
             self.refreshing.store(false, Ordering::Release);
-            tracing::debug!(%error, "could not start completion snapshot refresh");
+            tracing::debug!(target: "osp::diagnostic", %error, "could not start completion snapshot refresh");
         }
     }
 }
