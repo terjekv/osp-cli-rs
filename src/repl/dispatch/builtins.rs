@@ -209,11 +209,12 @@ fn execute_each_command(
     let mut ui = state.runtime.ui.clone();
     ui.render_settings.format = crate::core::output::OutputFormat::Json;
     ui.render_settings.format_explicit = true;
-    let rendered = crate::app::render_saved_repl_output(
+    let (rendered, _) = crate::app::render_saved_repl_output(
         state.runtime.config.resolved(),
         &ui,
         &last.output,
         &stages,
+        false,
         None,
     )?;
     let values: serde_json::Value =
@@ -515,17 +516,15 @@ fn execute_last_result_builtin(
         last.stages.clone()
     };
     stages.extend(parsed.stages);
-    let rendered = crate::app::render_saved_repl_output(
+    let (rendered, format) = crate::app::render_saved_repl_output(
         runtime.config.resolved(),
         &invocation.ui,
         &last.output,
         &stages,
+        invocation.source,
         Some(sink),
     )?;
-    session.last_rendered_output = Some((
-        crate::app::sink::plain_output(&rendered),
-        last.output.output_format(&invocation.ui.render_settings),
-    ));
+    session.last_rendered_output = Some((crate::app::sink::plain_output(&rendered), format));
     Ok(ReplResult::Print(rendered))
 }
 
@@ -594,6 +593,89 @@ mod tests {
     }
 
     struct PageCommand;
+
+    struct SourceReplayCommand;
+
+    impl NativeCommand for SourceReplayCommand {
+        fn command(&self) -> Command {
+            Command::new("source-replay")
+        }
+
+        fn execute(
+            &self,
+            _args: &[String],
+            _context: &NativeCommandContext<'_>,
+        ) -> anyhow::Result<NativeCommandOutcome> {
+            let mut response =
+                crate::core::plugin::ResponseV1::ok(serde_json::json!({"name": "display"}));
+            response.source = Some(serde_json::json!({"name": "server", "server_field": "kept"}));
+            response.meta.preserve_json_document = true;
+            Ok(NativeCommandOutcome::Response(Box::new(response)))
+        }
+    }
+
+    #[test]
+    fn last_selects_saved_source_and_combines_it_with_raw_and_new_stages() {
+        let history = history();
+        for source in [false, true] {
+            let mut state = app_state_with_registry(
+                crate::native::NativeCommandRegistry::new().with_command(SourceReplayCommand),
+            );
+            let mut sink = crate::app::sink::BufferedUiSink::default();
+            let line = if source {
+                "source-replay --source-record | P name"
+            } else {
+                "source-replay | P name"
+            };
+            let executed = crate::repl::dispatch::execute_repl_plugin_line(
+                &mut state,
+                &history,
+                line,
+                Some(&mut sink),
+            )
+            .expect("command should render");
+            let ReplResult::Print(text) = executed.result else {
+                panic!("expected command output")
+            };
+            let selected = if source { "server" } else { "display" };
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+                serde_json::json!([{"name": selected}])
+            );
+
+            for (line, expected) in [
+                (
+                    "last --source-record --json",
+                    serde_json::json!([{"name": "server"}]),
+                ),
+                (
+                    "last --source-record --raw --json",
+                    serde_json::json!({"name": "server", "server_field": "kept"}),
+                ),
+                (
+                    "last --raw --source-record --json | P server_field",
+                    serde_json::json!([{"server_field": "kept"}]),
+                ),
+                ("last --json", serde_json::json!([{"name": selected}])),
+            ] {
+                let executed = crate::repl::dispatch::execute_repl_plugin_line(
+                    &mut state,
+                    &history,
+                    line,
+                    Some(&mut sink),
+                )
+                .expect("last should replay");
+                let ReplResult::Print(text) = executed.result else {
+                    panic!("expected replay output")
+                };
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+                    expected,
+                    "{line}"
+                );
+            }
+        }
+    }
 
     impl NativeCommand for PageCommand {
         fn command(&self) -> Command {

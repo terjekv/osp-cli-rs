@@ -63,6 +63,7 @@ pub(crate) struct ReplCommandSpec {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedInvocation {
+    pub(crate) source: bool,
     pub(crate) ui: UiState,
     pub(crate) help_level: HelpLevel,
 }
@@ -789,6 +790,7 @@ pub(crate) fn resolve_invocation_ui(
     }
 
     ResolvedInvocation {
+        source: invocation.source,
         ui: UiState::new(
             render_settings,
             crate::ui::messages::adjust_verbosity(

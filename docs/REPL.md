@@ -63,6 +63,7 @@ That includes:
 
 - DSL pipes
 - `--format` and format shorthands like `--json`
+- `--source-record` to select the source record before rendering or pipes
 - `-v/-q/-d`
 
 Failures use the same renderer as one-shot commands: `error:`, an optional
@@ -88,10 +89,15 @@ For successful results, the REPL also keeps the last replayable output:
   - replay the last successful result with its original pipe stages
 - `last --raw`
   - show the pre-pipeline payload from that same successful command
+- `last --source-record`
+  - select the saved source record before replaying the original pipeline
+  - combine with `--raw` to skip that pipeline and inspect the full source
+  - without a separate source, use the command's normal data and presentation
 - `last | state`, `last --json`, `last --raw | P name`
   - use normal output formats and DSL stages without another service request
   - new stages follow the saved pipeline; `--raw` skips that saved pipeline
   - replay keeps the saved result intact, so later `last` calls start from it
+  - plain `last` retains the original command's source/display selection
 - `doctor last`
   - stays failure-only
 
@@ -274,8 +280,12 @@ Useful REPL config keys:
   - `off | interactive | always`; see [COMPLETION.md](COMPLETION.md)
 - `repl.hint.command_limit`
   - Maximum names in typing hints, default `3`; `0` hides multiple-match lists.
-- `repl.tab_mode`
-  - `tab | always | after_<n>_letters`; see [COMPLETION.md](COMPLETION.md)
+- `repl.autosuggest`
+  - Inline suggestions, default `true`; Ctrl-Right cycles history choices at
+    the end of input with the menu closed. Status/help guidance stays enabled.
+- `repl.complete_on`
+  - List of `flag`, `space`, `after_<n>_letters`; default `["flag"]`.
+    See [COMPLETION.md](COMPLETION.md).
 
 Presentation presets also affect the REPL:
 

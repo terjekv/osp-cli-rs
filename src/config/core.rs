@@ -534,6 +534,7 @@ const REMOVED_KEYS: &[&str] = &[
     "plugins.*.state",
     "extensions.plugins.discovery.path",
     "repl.history.profile_scoped",
+    "repl.tab_mode",
     "session.cache.max_results",
     "ui.prompt",
     "ui.prompt.secrets",

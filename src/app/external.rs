@@ -216,7 +216,7 @@ fn dispatch_external_invocation(
         .split_first()
         .ok_or_else(|| miette!("missing external command"))?;
     let command = canonical_external_command_name(&state.runtime.auth, &state.clients, command)?;
-    let result = match resolve_external_command_source(
+    let mut result = match resolve_external_command_source(
         &state.runtime.auth,
         &state.clients,
         &command,
@@ -262,6 +262,7 @@ fn dispatch_external_invocation(
             )
         }
     }?;
+    result.use_source = invocation.source;
     parsed.finish(result)
 }
 
@@ -1165,7 +1166,8 @@ fn run_external_plugin_command(
             .as_ref()
             .is_some_and(|d| d.output.as_deref() == Some("json"))
             || !parsed.stages.is_empty()
-            || invocation.ui.render_settings.format_explicit);
+            || invocation.ui.render_settings.format_explicit
+            || invocation.source);
     let mut context = plugin_dispatch_context_for(&state.runtime, Some(invocation));
     let selected_context = state
         .session
@@ -1261,6 +1263,7 @@ fn run_external_plugin_command(
                     response
                 } else {
                     crate::core::plugin::ResponseV1 {
+                        source: None,
                         protocol_version: 1,
                         ok: true,
                         data: value,
@@ -1462,6 +1465,7 @@ mod tests {
                 NativeOutcomeKind::Exit => NativeCommandOutcome::Exit(7),
                 NativeOutcomeKind::Response => {
                     NativeCommandOutcome::Response(Box::new(ResponseV1 {
+                        source: None,
                         protocol_version: PLUGIN_PROTOCOL_V1,
                         ok: true,
                         data: serde_json::json!([{ "command": "ldap", "args": args }]),
@@ -1492,6 +1496,7 @@ mod tests {
                 }
                 NativeOutcomeKind::ResponseWithExit => NativeCommandOutcome::ResponseWithExit {
                     response: Box::new(ResponseV1 {
+                        source: None,
                         protocol_version: PLUGIN_PROTOCOL_V1,
                         ok: true,
                         data: serde_json::json!({"status": "waiting_approval"}),
@@ -1549,6 +1554,7 @@ mod tests {
                 }),
             )?;
             Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+                source: None,
                 protocol_version: PLUGIN_PROTOCOL_V1,
                 ok: true,
                 data: serde_json::json!({"status": "completed"}),
@@ -1588,6 +1594,7 @@ mod tests {
             context: &NativeCommandContext<'_>,
         ) -> anyhow::Result<NativeCommandOutcome> {
             Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+                source: None,
                 protocol_version: PLUGIN_PROTOCOL_V1,
                 ok: true,
                 data: serde_json::json!({
@@ -1770,6 +1777,7 @@ mod tests {
     #[test]
     fn external_plugin_response_preserves_messages_unit() {
         let response = ResponseV1 {
+            source: None,
             protocol_version: 1,
             ok: true,
             data: serde_json::json!({ "message": "hello" }),

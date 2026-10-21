@@ -37,6 +37,181 @@ fn with_config_path<T>(config_toml: &str, callback: impl FnOnce() -> T) -> T {
 
 struct NativeProbeCommand;
 
+struct SourceRecordCommand {
+    include_source: bool,
+}
+
+impl NativeCommand for SourceRecordCommand {
+    fn command(&self) -> Command {
+        Command::new("source-record")
+    }
+
+    fn execute(
+        &self,
+        _args: &[String],
+        _context: &NativeCommandContext<'_>,
+    ) -> Result<NativeCommandOutcome> {
+        let mut response = ResponseV1::ok(json!({"Group renamed to": {"new_name": "display"}}));
+        response.source = self.include_source.then(|| {
+            json!({
+                "new_name": "server",
+                "enabled": true,
+                "server_field": "kept"
+            })
+        });
+        response.meta = ResponseMetaV1 {
+            preserve_json_document: true,
+            format_hint: Some("json".into()),
+            columns: Some(vec!["Group renamed to".into()]),
+            detail_columns: vec!["Group renamed to".into()],
+            display_rules: vec![DisplayRule::SuffixWhenTrue {
+                field: "new_name".into(),
+                when: "enabled".into(),
+                suffix: " DISPLAY".into(),
+            }],
+            ..ResponseMetaV1::default()
+        };
+        Ok(NativeCommandOutcome::Response(Box::new(response)))
+    }
+}
+
+#[test]
+fn source_selection_drives_rendering_json_pipelines_and_quick_search() {
+    let app = App::new().with_native_commands(NativeCommandRegistry::new().with_command(
+        SourceRecordCommand {
+            include_source: true,
+        },
+    ));
+    for (args, expected) in [
+        (
+            vec!["source-record", "--json"],
+            json!({"Group renamed to": {"new_name": "display"}}),
+        ),
+        (
+            vec!["source-record", "--source-record", "--json"],
+            json!({"new_name": "server", "enabled": true, "server_field": "kept"}),
+        ),
+        (
+            vec![
+                "--source-record",
+                "source-record",
+                "--json",
+                "|",
+                "P new_name",
+            ],
+            json!([{"new_name": "server"}]),
+        ),
+        (
+            vec![
+                "source-record",
+                "--source-record",
+                "--json",
+                "|",
+                "server",
+                "|",
+                "P new_name",
+            ],
+            json!([{"new_name": "server"}]),
+        ),
+    ] {
+        let mut sink = BufferedUiSink::default();
+        assert_eq!(
+            app.run_with_sink(
+                ["osp", "--defaults-only"].into_iter().chain(args),
+                &mut sink
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&sink.stdout).unwrap(),
+            expected
+        );
+    }
+
+    let mut sink = BufferedUiSink::default();
+    assert_eq!(
+        app.run_with_sink(
+            ["osp", "--defaults-only", "source-record", "--source-record"],
+            &mut sink
+        )
+        .unwrap(),
+        0
+    );
+    assert!(sink.stdout.contains("server"), "{}", sink.stdout);
+    assert!(sink.stdout.contains("kept"), "{}", sink.stdout);
+    assert!(!sink.stdout.contains("DISPLAY"), "{}", sink.stdout);
+    assert!(sink.stderr.is_empty(), "{}", sink.stderr);
+    // A JSON producer hint would bypass the generic human renderer.
+    assert!(serde_json::from_str::<serde_json::Value>(&sink.stdout).is_err());
+}
+
+#[test]
+fn source_selection_without_a_source_preserves_data_and_presentation() {
+    let app = App::new().with_native_commands(NativeCommandRegistry::new().with_command(
+        SourceRecordCommand {
+            include_source: false,
+        },
+    ));
+    for tail in [vec![], vec!["--json"], vec!["--json", "|", "C"]] {
+        let mut normal = BufferedUiSink::default();
+        let mut source = BufferedUiSink::default();
+        assert_eq!(
+            app.run_with_sink(
+                ["osp", "--defaults-only", "source-record"]
+                    .into_iter()
+                    .chain(tail.iter().copied()),
+                &mut normal
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            app.run_with_sink(
+                ["osp", "--defaults-only", "source-record", "--source-record"]
+                    .into_iter()
+                    .chain(tail),
+                &mut source
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(source.stdout, normal.stdout);
+        assert_eq!(source.stderr, normal.stderr);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_selection_captures_plugin_responses_without_a_format_flag() {
+    let dir = make_temp_dir("osp-cli-app-source-plugin");
+    write_executable_script(
+        &dir.path().join("osp-source-plugin"),
+        r#"#!/bin/sh
+echo '{"protocol_version":1,"ok":true,"data":{"label":"display"},"source":{"name":"server"},"error":null}'
+"#,
+    );
+    let mut sink = BufferedUiSink::default();
+    assert_eq!(
+        App::new()
+            .run_with_sink(
+                [
+                    "osp",
+                    "--defaults-only",
+                    "--plugin-dir",
+                    dir.to_str().unwrap(),
+                    "source-plugin",
+                    "--source-record"
+                ],
+                &mut sink,
+            )
+            .unwrap(),
+        0
+    );
+    assert!(sink.stdout.contains("server"), "{}", sink.stdout);
+    assert!(!sink.stdout.contains("display"), "{}", sink.stdout);
+}
+
 struct GroupShapedServiceCommand;
 
 impl NativeCommand for GroupShapedServiceCommand {
@@ -50,6 +225,7 @@ impl NativeCommand for GroupShapedServiceCommand {
         _context: &NativeCommandContext<'_>,
     ) -> Result<NativeCommandOutcome> {
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{"groups": {}, "aggregates": {}, "rows": []}]),
@@ -101,6 +277,7 @@ impl NativeCommand for NativeProbeCommand {
         context: &NativeCommandContext<'_>,
     ) -> Result<NativeCommandOutcome> {
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{
@@ -171,6 +348,7 @@ impl NativeCommand for CuratedOrchRowsCommand {
         }
         context.flush_progress()?;
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!({
@@ -259,6 +437,7 @@ impl NativeCommand for SiteStatusCommand {
         context: &NativeCommandContext<'_>,
     ) -> Result<NativeCommandOutcome> {
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!([{

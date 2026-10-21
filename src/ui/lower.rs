@@ -27,7 +27,7 @@ use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
-    ColumnAlignment, Group, OutputDocument, OutputItems, OutputResult, group_rows,
+    ColumnAlignment, DisplayRule, Group, OutputDocument, OutputItems, OutputResult, group_rows,
     output_items_to_rows,
 };
 use crate::core::row::Row;
@@ -1067,15 +1067,32 @@ fn json_group_value(group: &Group) -> Value {
 fn lower_mreg_doc(output: &OutputResult) -> Doc {
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
-        OutputItems::Rows(rows) if rows.len() == 1 && row_has_table_arrays(&rows[0]) => Doc {
-            blocks: mreg_record_blocks(&rows[0], &output.meta.key_index),
-        },
-        OutputItems::Rows(rows) if rows.len() == 1 => Doc {
-            blocks: vec![Block::KeyValue(key_value_from_map(
-                &rows[0],
-                &output.meta.key_index,
-            ))],
-        },
+        OutputItems::Rows(rows)
+            // Several nested documents (e.g. hosts sharing an address) are cards like
+            // mreg-cli; flat list rows stay a table.
+            if rows.len() == 1 || rows.iter().all(|row| row.values().any(value_has_table_arrays)) =>
+        {
+            let mut blocks = Vec::new();
+            for (index, row) in rows.iter().enumerate() {
+                if index > 0 {
+                    push_blank_lines(&mut blocks, 1);
+                }
+                let mut record = row.clone();
+                for rule in &output.meta.display_rules {
+                    if let DisplayRule::Notice { field } = rule
+                        && let Some(value) = record.shift_remove(field)
+                    {
+                        blocks.push(Block::Paragraph(ParagraphBlock {
+                            text: display_value(&value),
+                            indent: 0,
+                            inline_markup: false,
+                        }));
+                    }
+                }
+                blocks.extend(mreg_record_blocks(&record, &output.meta.key_index));
+            }
+            Doc { blocks }
+        }
         _ => lower_table_doc(output),
     }
 }
@@ -1304,10 +1321,6 @@ fn visit_mreg_record_field(
         }
         other => builder.push_row(key, lower_key_value_value(other, false), depth),
     }
-}
-
-fn row_has_table_arrays(row: &Row) -> bool {
-    row.values().any(value_has_table_arrays)
 }
 
 fn object_has_table_arrays(map: &Map<String, Value>) -> bool {

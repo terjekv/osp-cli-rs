@@ -23,11 +23,20 @@ const MATCH_SCORE_EXACT: u32 = 0;
 const MATCH_SCORE_EMPTY_STUB: u32 = 1_000;
 const MATCH_SCORE_PREFIX_BASE: u32 = 100;
 const MATCH_SCORE_BOUNDARY_PREFIX_BASE: u32 = 200;
+const MATCH_SCORE_INTERIOR_BASE: u32 = 500;
 const MATCH_SCORE_FUZZY_BASE: u32 = 10_000;
 const MATCH_SCORE_FUZZY_NORMALIZED_MAX: u32 = 100_000;
-const MATCH_SCORE_TYPO_BASE: u32 = 200_000;
-// Lower scores win:
-// exact < prefix < boundary-prefix < fuzzy fallback < catalogue typo rescue.
+const MATCH_SCORE_HINT_LITERAL_PENALTY: u32 = 1_000;
+const MATCH_SCORE_HINT_FUZZY_PENALTY: u32 = 200_000;
+// Encode lexicographic classes in Suggestion's existing lower-is-better score.
+const MATCH_CLASS_STRIDE: u32 = 1 << 28;
+
+#[derive(Clone, Copy)]
+enum ValueMatch {
+    Ordinary,
+    Separator,
+    Typo,
+}
 
 /// Catalogue matches shown at once; the menu lays them out as a compact grid.
 const CATALOG_MATCH_LIMIT: usize = 25;
@@ -381,14 +390,11 @@ impl SuggestionEngine {
         self.entry_suggestions(&arg.suggestions, stub)
     }
 
-    /// Ranks large catalogues like other values, searching them in order.
+    /// Searches catalogue tiers in order, bounding results before cloning.
     ///
-    /// A later catalogue is searched only when earlier ones have no ordinary
-    /// match, so "your VMs" hide everyone else's until the typed text leaves
-    /// them. Typo rescue runs only when no catalogue has an ordinary match;
-    /// an exact match in a later catalogue wins over typo rescue. Results are bounded before
-    /// cloning; an empty stub lists the first names of the first non-empty
-    /// catalogue rather than scoring every value.
+    /// Value scans choose ordinary, separator fallback, or typo rescue before
+    /// hints compete, so metadata cannot suppress an existing value rescue.
+    /// Empty input retains the first nonempty catalogue's alphabetical menu.
     fn catalog_suggestions(&self, catalogs: &[ValueCatalog], stub: &str) -> Vec<SuggestionOutput> {
         let ranked = |hits: Vec<(u32, SuggestionEntry)>| {
             hits.into_iter()
@@ -417,22 +423,60 @@ impl SuggestionEngine {
             );
         }
         let stub_lc = fold_case(stub);
-        for catalog in catalogs {
+        let compact_stub = compact(&stub_lc);
+        let mut value_hits = Vec::new();
+        for mode in [
+            ValueMatch::Ordinary,
+            ValueMatch::Separator,
+            ValueMatch::Typo,
+        ] {
+            value_hits = catalogs
+                .iter()
+                .map(|catalog| {
+                    catalog.scan(|entries| {
+                        best(entries.iter().filter_map(|entry| {
+                            let score = if let Some(matches) = catalog.matcher {
+                                if !matches!(mode, ValueMatch::Ordinary) {
+                                    return None;
+                                }
+                                matches(entry, &stub_lc).then_some(
+                                    if fold_case(&entry.value) == stub_lc {
+                                        MATCH_SCORE_EXACT
+                                    } else {
+                                        MATCH_SCORE_PREFIX_BASE
+                                    },
+                                )
+                            } else {
+                                self.value_match_score(&stub_lc, &compact_stub, entry, mode)
+                            }?;
+                            Some((score, entry))
+                        }))
+                    })
+                })
+                .collect::<Vec<_>>();
+            if value_hits.iter().any(|hits| !hits.is_empty()) {
+                break;
+            }
+        }
+        for (catalog, hits) in catalogs.iter().zip(value_hits) {
+            if catalog.matcher.is_some() {
+                if !hits.is_empty() {
+                    return ranked(hits);
+                }
+                continue;
+            }
+            let scores = hits
+                .iter()
+                .map(|(score, entry)| (entry.value.as_str(), *score))
+                .collect::<BTreeMap<_, _>>();
             let hits = catalog.scan(|entries| {
                 best(entries.iter().filter_map(|entry| {
-                    let score = match catalog.matcher {
-                        Some(matches) => matches(entry, &stub_lc).then_some(
-                            if fold_case(&entry.value) == stub_lc {
-                                MATCH_SCORE_EXACT
-                            } else {
-                                MATCH_SCORE_PREFIX_BASE
-                            },
-                        ),
-                        None => std::iter::once(&entry.value)
-                            .chain(&entry.aliases)
-                            .filter_map(|value| self.match_score(&stub_lc, value))
-                            .min(),
-                    }?;
+                    let score = scores
+                        .get(entry.value.as_str())
+                        .copied()
+                        .into_iter()
+                        .chain(self.hint_match_score(&stub_lc, &compact_stub, entry))
+                        .min()?;
                     Some((score, entry))
                 }))
             });
@@ -440,26 +484,71 @@ impl SuggestionEngine {
                 return ranked(hits);
             }
         }
-        if stub.chars().count() < TYPO_RESCUE_MIN_CHARS {
-            return Vec::new();
-        }
-        for catalog in catalogs.iter().filter(|catalog| catalog.matcher.is_none()) {
-            let hits = catalog.scan(|entries| {
-                best(entries.iter().filter_map(|entry| {
-                    // Compare the leading label, not the shared domain suffix.
-                    let label = entry.value.split('.').next().unwrap_or(&entry.value);
-                    let similarity = strsim::jaro_winkler(&stub_lc, &folded_candidate(label));
-                    (similarity >= TYPO_RESCUE_MIN_SIMILARITY).then(|| {
-                        let distance = ((1.0 - similarity) * 10_000.0) as u32;
-                        (MATCH_SCORE_TYPO_BASE + distance, entry)
-                    })
-                }))
-            });
-            if !hits.is_empty() {
-                return ranked(hits);
+        Vec::new()
+    }
+
+    fn value_match_score(
+        &self,
+        stub: &str,
+        compact_stub: &str,
+        entry: &SuggestionEntry,
+        mode: ValueMatch,
+    ) -> Option<u32> {
+        match mode {
+            ValueMatch::Ordinary => {
+                let score = std::iter::once(&entry.value)
+                    .chain(&entry.aliases)
+                    .filter_map(|value| self.field_match_score(stub, value))
+                    .min()?;
+                Some(value_score(stub, &entry.value, score))
+            }
+            ValueMatch::Separator => {
+                if compact_stub.chars().count() < TYPO_RESCUE_MIN_CHARS {
+                    return None;
+                }
+                let value = compact(&folded_candidate(&entry.value));
+                let offset = value.find(compact_stub)?;
+                let cost = if value == compact_stub {
+                    0
+                } else if offset == 0 {
+                    100
+                } else {
+                    500 + offset as u32
+                };
+                Some(class_score(2, cost))
+            }
+            ValueMatch::Typo => {
+                if stub.chars().count() < TYPO_RESCUE_MIN_CHARS {
+                    return None;
+                }
+                // Compare the leading label, not the shared domain suffix.
+                let label = entry.value.split('.').next().unwrap_or(&entry.value);
+                let similarity = strsim::jaro_winkler(stub, &folded_candidate(label));
+                (similarity >= TYPO_RESCUE_MIN_SIMILARITY)
+                    .then(|| class_score(3, ((1.0 - similarity) * 10_000.0) as u32))
             }
         }
-        Vec::new()
+    }
+
+    fn hint_match_score(
+        &self,
+        stub: &str,
+        compact_stub: &str,
+        entry: &SuggestionEntry,
+    ) -> Option<u32> {
+        let hint = folded_candidate(entry.meta.as_deref()?);
+        let ordinary = self.field_match_score(stub, &hint);
+        // Hint normalization is a literal alternative; values retain their gaps.
+        let normalized = (compact_stub.chars().count() >= TYPO_RESCUE_MIN_CHARS)
+            .then(|| compact(&hint).find(compact_stub))
+            .flatten()
+            .map(|offset| (if offset == 0 { 150 } else { 550 }) + offset as u32);
+        let score = ordinary.into_iter().chain(normalized).min()?;
+        Some(if score < MATCH_SCORE_FUZZY_BASE {
+            class_score(3, score + MATCH_SCORE_HINT_LITERAL_PENALTY)
+        } else {
+            class_score(4, score + MATCH_SCORE_HINT_FUZZY_PENALTY)
+        })
     }
 
     fn subcommand_suggestions(&self, node: &CompletionNode, stub: &str) -> Vec<Suggestion> {
@@ -491,30 +580,28 @@ impl SuggestionEngine {
             .collect()
     }
 
-    /// Scores a value by its own spelling, falling back to its aliases.
-    ///
-    /// An empty stub lists only the canonical values; aliases surface their
-    /// value once typed input matches one of them.
+    /// Scores values and hints independently, protecting canonical exact/prefix matches.
     fn entry_match_score(&self, stub_lc: &str, entry: &SuggestionEntry) -> Option<u32> {
-        let own = self.match_score(stub_lc, &entry.value);
         if stub_lc.is_empty() {
-            return own;
+            return Some(MATCH_SCORE_EMPTY_STUB);
         }
-        entry
-            .aliases
-            .iter()
-            .filter_map(|alias| self.match_score(stub_lc, alias))
-            .chain(own)
+        let compact_stub = compact(stub_lc);
+        self.value_match_score(stub_lc, &compact_stub, entry, ValueMatch::Ordinary)
+            .into_iter()
+            .chain(self.hint_match_score(stub_lc, &compact_stub, entry))
             .min()
     }
 
     fn match_score(&self, stub_lc: &str, candidate: &str) -> Option<u32> {
-        // Lower scores are better:
-        // - exact match wins with 0
-        // - 100-range keeps ordinary prefix matches together
-        // - 200-range keeps word-boundary prefixes behind direct prefixes
-        // - 10_000+ is fuzzy fallback, where higher fuzzy scores reduce the
-        //   penalty and therefore sort earlier
+        let score = self.field_match_score(stub_lc, candidate)?;
+        Some(if stub_lc.is_empty() {
+            score
+        } else {
+            value_score(stub_lc, candidate, score)
+        })
+    }
+
+    fn field_match_score(&self, stub_lc: &str, candidate: &str) -> Option<u32> {
         if stub_lc.is_empty() {
             return Some(MATCH_SCORE_EMPTY_STUB);
         }
@@ -524,14 +611,26 @@ impl SuggestionEngine {
         if stub_lc == candidate_lc {
             return Some(MATCH_SCORE_EXACT);
         }
-        // Prefer deterministic prefix classes before fuzzy fallback so short
-        // tab-completion stubs stay predictable.
-        if candidate_lc.starts_with(stub_lc) {
-            return Some(MATCH_SCORE_PREFIX_BASE + (candidate_lc.len() - stub_lc.len()) as u32);
-        }
-
-        if let Some(boundary) = boundary_prefix_index(&candidate_lc, stub_lc) {
-            return Some(MATCH_SCORE_BOUNDARY_PREFIX_BASE + boundary as u32);
+        let prefix = candidate_lc
+            .starts_with(stub_lc)
+            .then(|| MATCH_SCORE_PREFIX_BASE + (candidate_lc.len() - stub_lc.len()) as u32);
+        let literal = candidate_lc
+            .char_indices()
+            .filter(|(offset, _)| candidate_lc[*offset..].starts_with(stub_lc))
+            .map(|(offset, _)| {
+                let boundary = candidate_lc[..offset]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|ch| !ch.is_alphanumeric());
+                (if boundary {
+                    MATCH_SCORE_BOUNDARY_PREFIX_BASE
+                } else {
+                    MATCH_SCORE_INTERIOR_BASE
+                }) + offset as u32
+            })
+            .min();
+        if let Some(score) = prefix.into_iter().chain(literal).min() {
+            return Some(score);
         }
 
         // Fuzzy matching is the rescue path, not the primary ranking model.
@@ -756,17 +855,27 @@ fn folded_candidate(candidate: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-fn boundary_prefix_index(candidate: &str, stub: &str) -> Option<usize> {
-    candidate
-        .match_indices(stub)
-        .find(|(idx, _)| {
-            *idx == 0
-                || candidate
-                    .as_bytes()
-                    .get(idx.saturating_sub(1))
-                    .is_some_and(|byte| matches!(byte, b'-' | b'_' | b'.' | b':' | b'/'))
-        })
-        .map(|(idx, _)| idx)
+// The frozen lab extension protects literal values, then lets literal hints
+// compete with value typos, and penalizes fuzzy hints against fuzzy values.
+fn value_score(stub: &str, candidate: &str, field_score: u32) -> u32 {
+    let candidate = folded_candidate(candidate);
+    if candidate == stub {
+        MATCH_SCORE_EXACT
+    } else if candidate.starts_with(stub) {
+        class_score(1, (candidate.len() - stub.len()) as u32)
+    } else if field_score < MATCH_SCORE_FUZZY_BASE {
+        class_score(2, field_score)
+    } else {
+        class_score(4, field_score)
+    }
+}
+
+fn class_score(class: u32, cost: u32) -> u32 {
+    class * MATCH_CLASS_STRIDE + cost.min(MATCH_CLASS_STRIDE - 1)
+}
+
+fn compact(text: &str) -> String {
+    text.chars().filter(|ch| ch.is_alphanumeric()).collect()
 }
 
 #[cfg(test)]

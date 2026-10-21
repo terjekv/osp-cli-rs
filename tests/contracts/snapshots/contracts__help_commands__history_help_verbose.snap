@@ -36,6 +36,7 @@ Usage: osp history [OPTIONS] <COMMAND>
           Print help (see a summary with '-h')
 
 - Common Invocation Options
+  --source-record                                                       Show the source record before display shaping
   --format <auto|guide|json|csv|tsv|table|md|mreg|value>                Format this invocation only
   --guide | --csv | --tsv | --json | --table | --mreg | --value | --md  Convenience aliases for --format
   --render-mode <auto|plain|rich>                                       Render mode for this invocation

@@ -23,6 +23,9 @@ use super::editor::PaintedLine;
 use crate::completion::{CompletionAnalysis, CompletionRequest};
 use crate::repl::highlight::{LineProblemKind, ReplHighlighter};
 
+const HISTORY_SUGGESTION_LIMIT: i64 = 200;
+const HISTORY_FREQUENCY_RATIO: usize = 3;
+
 /// The hint lines below the input.
 struct Status {
     /// The command's description, on its own line above `text`.
@@ -49,7 +52,7 @@ pub(crate) struct ReplHinter {
     // `None` turns the inline suggestion off; unstyled it would look typed.
     style: Option<Style>,
     command_limit: usize,
-    inline: String,
+    autosuggest: bool,
 }
 
 impl ReplHinter {
@@ -58,6 +61,7 @@ impl ReplHinter {
         highlighter: ReplHighlighter,
         painted: PaintedLine,
         style: Option<Style>,
+        autosuggest: bool,
     ) -> Self {
         Self {
             completer,
@@ -65,15 +69,12 @@ impl ReplHinter {
             painted,
             style,
             command_limit: 3,
-            inline: String::new(),
+            autosuggest,
         }
     }
 
-    /// The rest of the line the user most likely wants.
-    ///
-    /// The newest history line extending the input wins when it agrees with
-    /// the command tree; otherwise the tree's only candidate for the current
-    /// word does.
+    /// Prefer recent history unless a command is at least three times as common.
+    /// History must agree with the command tree's unique extension, when present.
     fn inline_suggestion(
         &self,
         line: &str,
@@ -81,18 +82,50 @@ impl ReplHinter {
         candidates: &[Suggestion],
     ) -> String {
         let from_tree = only_extension(line, candidates);
-        let from_history = history
-            .search(SearchQuery::last_with_prefix(line.to_string(), None))
-            .ok()
-            .and_then(|items| items.into_iter().next())
-            .and_then(|item| item.command_line.get(line.len()..).map(str::to_string))
-            .filter(|rest| !rest.is_empty());
-        match (from_history, from_tree) {
-            (Some(past), Some(tree)) if past.starts_with(&tree) => past,
-            (_, Some(tree)) => tree,
-            (Some(past), None) => past,
-            (None, None) => String::new(),
+        self.painted
+            .history_suggestion(self.history_suggestions(line, history, from_tree.as_deref()))
+            .or(from_tree)
+            .unwrap_or_default()
+    }
+
+    fn history_suggestions(
+        &self,
+        line: &str,
+        history: &dyn History,
+        from_tree: Option<&str>,
+    ) -> Vec<String> {
+        let mut query = SearchQuery::last_with_prefix(line.to_string(), None);
+        query.limit = Some(HISTORY_SUGGESTION_LIMIT);
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for item in history.search(query).unwrap_or_default() {
+            let Some(rest) = item.command_line.strip_prefix(line) else {
+                continue;
+            };
+            if rest.is_empty() || from_tree.is_some_and(|tree| !rest.starts_with(tree)) {
+                continue;
+            }
+            if let Some((_, count)) = counts
+                .iter_mut()
+                .find(|(command, _)| command == &item.command_line)
+            {
+                *count += 1;
+            } else {
+                counts.push((item.command_line, 1));
+            }
         }
+        let mut ranked = Vec::with_capacity(counts.len());
+        while !counts.is_empty() {
+            let mut best = 0;
+            for index in 1..counts.len() {
+                if counts[index].1 >= HISTORY_FREQUENCY_RATIO * counts[0].1
+                    && counts[index].1 > counts[best].1
+                {
+                    best = index;
+                }
+            }
+            ranked.push(counts.remove(best).0[line.len()..].to_string());
+        }
+        ranked
     }
 
     /// One line about the cursor position, below the command's description
@@ -281,13 +314,15 @@ impl Hinter for ReplHinter {
         use_ansi_coloring: bool,
         _cwd: &str,
     ) -> String {
+        let analysis = self.completer.analyze(line, pos);
         self.painted.set(line, pos);
+        self.painted
+            .set_inside_quote(analysis.cursor.quote_style.is_some());
         let candidates = if line.trim().is_empty() {
             Vec::new()
         } else {
             self.completer.complete(line, pos).suggestions().to_vec()
         };
-        let analysis = self.completer.analyze(line, pos);
         let command_matches = self.command_matches(&analysis);
         let command_valid = command_matches
             .as_ref()
@@ -301,7 +336,8 @@ impl Hinter for ReplHinter {
         } else {
             candidates
         };
-        self.inline = if command_valid
+        let inline = if self.autosuggest
+            && command_valid
             && use_ansi_coloring
             && self.style.is_some()
             && pos == line.len()
@@ -309,6 +345,7 @@ impl Hinter for ReplHinter {
         {
             self.inline_suggestion(line, history, &candidates)
         } else {
+            self.painted.history_suggestion(Vec::new());
             String::new()
         };
 
@@ -316,7 +353,8 @@ impl Hinter for ReplHinter {
             Some(style) if use_ansi_coloring => style.paint(text).to_string(),
             _ => text.to_string(),
         };
-        let mut out = paint(&self.inline, self.style);
+        let mut out = paint(&inline, self.style);
+        self.painted.set_inline(inline);
         if let Some(Status {
             description,
             text: status,
@@ -353,14 +391,15 @@ impl Hinter for ReplHinter {
     }
 
     fn complete_hint(&self) -> String {
-        self.inline.clone()
+        self.painted.inline()
     }
 
     fn next_hint_token(&self) -> String {
-        let word = self.inline.trim_start();
-        let lead = self.inline.len() - word.len();
+        let inline = self.painted.inline();
+        let word = inline.trim_start();
+        let lead = inline.len() - word.len();
         let end = word.find(char::is_whitespace).unwrap_or(word.len());
-        self.inline[..lead + end].to_string()
+        inline[..lead + end].to_string()
     }
 }
 
@@ -462,6 +501,7 @@ mod tests {
             ReplHighlighter::new(tree(), Color::Green, Color::Red, None),
             PaintedLine::default(),
             Some(Style::new()),
+            true,
         )
     }
 

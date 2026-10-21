@@ -418,6 +418,10 @@ pub struct ResponseV1 {
     pub ok: bool,
     /// Response payload produced by the plugin.
     pub data: serde_json::Value,
+    /// Decoded record before display shaping, when it differs from `data`.
+    /// The host selects it with `--source-record` and ignores `data`'s display metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<serde_json::Value>,
     /// Structured error payload present when `ok` is `false`.
     pub error: Option<ResponseErrorV1>,
     /// User-facing messages emitted alongside the payload.
@@ -439,6 +443,7 @@ impl ResponseV1 {
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: data.into(),
+            source: None,
             error: None,
             messages: Vec::new(),
             meta: ResponseMetaV1::default(),
@@ -760,6 +765,7 @@ impl ResponseV1 {
     /// use serde_json::json;
     ///
     /// let response = ResponseV1 {
+    ///     source: None,
     ///     protocol_version: 1,
     ///     ok: true,
     ///     data: json!({"uid": "alice"}),
@@ -1117,6 +1123,7 @@ mod tests {
     #[test]
     fn response_row_path_requires_a_top_level_array_unit() {
         let response = ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!({
@@ -1181,6 +1188,7 @@ mod tests {
     #[test]
     fn response_column_labels_align_with_columns_unit() {
         let response = ResponseV1 {
+            source: None,
             protocol_version: PLUGIN_PROTOCOL_V1,
             ok: true,
             data: json!({"items": [{"provider": {"name": "vmware"}}]}),

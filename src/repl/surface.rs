@@ -500,10 +500,10 @@ pub(crate) fn config_set_key_specs(
                     .into_iter()
                     .map(SuggestionEntry::value)
                     .collect::<Vec<_>>()
-            } else if key == "repl.tab_mode" {
+            } else if key == "repl.complete_on" {
                 [
-                    "tab",
-                    "always",
+                    "flag",
+                    "space",
                     "after_1_letter",
                     "after_2_letters",
                     "after_3_letters",
