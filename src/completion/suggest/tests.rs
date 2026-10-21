@@ -494,3 +494,99 @@ fn internal_example_1() {
         Some(SuggestionOutput::Item(item)) if item.text == "ldap"
     ));
 }
+
+fn matched_catalog(entries: Vec<SuggestionEntry>, query: &str) -> Vec<String> {
+    let catalog = crate::completion::ValueCatalog::default();
+    catalog.replace_entries(entries);
+    values(
+        super::SuggestionEngine::new(CompletionTree::default())
+            .catalog_suggestions(&[catalog], query),
+    )
+}
+
+#[test]
+fn value_classes_protect_exact_prefix_and_literal_matches_from_hints() {
+    let entries = vec![
+        SuggestionEntry::value("other").meta("alpha"),
+        SuggestionEntry::value("team-alpha"),
+        SuggestionEntry::value("alphabet"),
+        SuggestionEntry::value("alpha").meta("unrelated"),
+    ];
+    assert_eq!(
+        matched_catalog(entries, "alpha"),
+        ["alpha", "alphabet", "team-alpha", "other"]
+    );
+}
+
+#[test]
+fn hints_match_utilization_and_separator_variants() {
+    let entries = vec![
+        SuggestionEntry::value("192.0.2.0/24").meta("vlan 14 · 100% used · Campus"),
+        SuggestionEntry::value("2001:700:2:8c00::/64").meta("vlan 100 · RT#6855214"),
+        SuggestionEntry::value("198.51.100.0/24").meta("vlan 99 · 82% used"),
+    ];
+    for (query, expected) in [
+        ("100%", "192.0.2.0/24"),
+        ("82%", "198.51.100.0/24"),
+        ("RT 6855214", "2001:700:2:8c00::/64"),
+    ] {
+        let matches = matched_catalog(entries.clone(), query);
+        assert_eq!(
+            matches.first().map(String::as_str),
+            Some(expected),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn digit_subsequences_keep_dotted_value_ranking() {
+    let entries = ["129.240.13.0/24", "129.240.130.0/24", "129.240.1.30/32"]
+        .into_iter()
+        .map(SuggestionEntry::value)
+        .collect();
+    let matches = matched_catalog(entries, "129240130");
+    assert_eq!(
+        matches.first().map(String::as_str),
+        Some("129.240.130.0/24")
+    );
+}
+
+#[test]
+fn separator_fallback_recovers_values_only_without_ordinary_value_hits() {
+    assert_eq!(
+        matched_catalog(
+            vec![SuggestionEntry::value("129.240.132.0/25")],
+            "129.240.1320./25"
+        ),
+        ["129.240.132.0/25"]
+    );
+}
+
+#[test]
+fn value_typo_rescue_competes_independently_with_literal_hints() {
+    assert_eq!(
+        matched_catalog(
+            vec![
+                SuggestionEntry::value("bss-printere"),
+                SuggestionEntry::value("other").meta("bss-prnitere"),
+            ],
+            "bss-prnitere"
+        ),
+        ["bss-printere", "other"]
+    );
+}
+
+#[test]
+fn unrelated_short_queries_abstain_in_values_and_hints() {
+    let entries = vec![
+        SuggestionEntry::value("129.240.130.0/24").meta("vlan 14 · 100% used · Campus"),
+        SuggestionEntry::value("bss-printere").meta("Roller som BSS kan legge paa printere"),
+    ];
+    for query in ["qqq", "zz9"] {
+        assert!(
+            matched_catalog(entries.clone(), query).is_empty(),
+            "{query}"
+        );
+    }
+}

@@ -101,7 +101,7 @@ pub enum ContextScope {
 pub struct SuggestionEntry {
     /// Text inserted into the buffer if this suggestion is accepted.
     pub value: String,
-    /// Short right-column description in menu-style UIs.
+    /// Short right-column description, searched separately from the value.
     pub meta: Option<String>,
     /// Optional human-friendly label when the inserted value should stay terse.
     pub display: Option<String>,
