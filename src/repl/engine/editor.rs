@@ -83,7 +83,7 @@ impl PaintedLine {
 
     fn cycle_history_suggestion(&self) -> bool {
         let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if painted.cursor != painted.line.len() || painted.history_suggestions.is_empty() {
+        if painted.cursor != painted.line.len() || painted.history_suggestions.len() < 2 {
             return false;
         }
         painted.history_index = (painted.history_index + 1) % painted.history_suggestions.len();
