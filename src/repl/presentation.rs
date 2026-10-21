@@ -115,11 +115,11 @@ pub(crate) fn repl_input_mode(config: &ResolvedConfig) -> ReplInputMode {
         .unwrap_or(ReplInputMode::Auto)
 }
 
-pub(crate) fn repl_tab_mode(config: &ResolvedConfig) -> crate::repl::ReplTabMode {
+pub(crate) fn repl_complete_on(config: &ResolvedConfig) -> crate::repl::ReplCompleteOn {
     config
-        .get_string("repl.tab_mode")
-        .and_then(crate::repl::ReplTabMode::parse)
-        .unwrap_or(crate::repl::ReplTabMode::Tab)
+        .get_string_list("repl.complete_on")
+        .map(|values| crate::repl::ReplCompleteOn::parse(&values))
+        .unwrap_or_default()
 }
 
 const DEFAULT_MINIMAL_INTRO_TEMPLATE: &str =

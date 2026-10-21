@@ -55,8 +55,8 @@ pub(crate) use adapter::{
 };
 pub use adapter::{color_from_style_spec, default_pipe_verbs};
 pub use config::{
-    LineProjection, LineProjector, PromptRightRenderer, ReplAppearance, ReplInputMode, ReplPrompt,
-    ReplReloadKind, ReplResult, ReplRunConfig, ReplTabMode,
+    LineProjection, LineProjector, PromptRightRenderer, ReplAppearance, ReplCompleteOn,
+    ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult, ReplRunConfig,
 };
 pub use debug::{CompletionDebugOptions, DebugStep, debug_completion, debug_completion_steps};
 #[cfg(test)]
@@ -82,7 +82,7 @@ struct ReplRunContext {
     prompt: OspPrompt,
     completion_tree: CompletionTree,
     appearance: ReplAppearance,
-    tab_mode: ReplTabMode,
+    complete_on: ReplCompleteOn,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
     actions: Vec<crate::repl::ReplAction>,
@@ -116,7 +116,7 @@ where
         appearance,
         history_config,
         input_mode,
-        tab_mode,
+        complete_on,
         prompt_right,
         line_projector,
         actions,
@@ -138,7 +138,7 @@ where
             prompt,
             completion_tree,
             appearance,
-            tab_mode,
+            complete_on,
             line_projector,
             history_store: history_store.clone(),
             actions,
@@ -175,7 +175,7 @@ where
         prompt,
         completion_tree,
         appearance,
-        tab_mode,
+        complete_on,
         line_projector,
         history_store,
         actions,
@@ -203,7 +203,7 @@ where
             prompt: &prompt,
             completion_tree,
             appearance,
-            tab_mode,
+            complete_on,
             line_projector,
             actions,
             after_paint,

@@ -12,7 +12,7 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 | `adapter.rs` | `ReplCompleter` and the highlighter/history adapters |
 | `hint.rs` | Muted inline suggestion plus the status line under the prompt |
 | `overlay.rs` | Menu construction and the Ctrl-R history picker (skim) |
-| `config.rs` | Public run config: `ReplRunConfig`, `ReplAppearance`, `ReplTabMode` |
+| `config.rs` | Public run config: `ReplRunConfig`, `ReplAppearance`, `ReplCompleteOn` |
 | `debug.rs` | The `debug-complete` and menu debug surfaces |
 
 ## How a key travels

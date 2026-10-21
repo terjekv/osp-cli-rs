@@ -101,46 +101,60 @@ impl ReplInputMode {
     }
 }
 
-/// Selects when typing, rather than Tab, opens the completion menu.
-///
-/// Tab and a leading `-` open the menu in every mode.
+/// Selects which typing events open the completion menu. Tab and Ctrl-Space
+/// remain available regardless of these settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplTabMode {
-    /// Only Tab, Ctrl-Space, or starting a flag opens the menu.
-    Tab,
-    /// Every typed character, including a space, opens the menu.
-    Always,
-    /// The menu opens once the word being typed has this many characters.
-    AfterLetters(usize),
+pub struct ReplCompleteOn {
+    /// Open when `-` starts a word.
+    pub flag: bool,
+    /// Open after a word is finished with a space.
+    pub space: bool,
+    /// Open once the current word reaches this many characters.
+    pub after_letters: Option<usize>,
 }
 
-impl ReplTabMode {
-    /// Parses `tab`, `always`, or `after_<n>_letter[s]`.
-    ///
-    /// # Examples
-    ///
-    /// ```text
-    /// use osp_cli::repl::ReplTabMode;
-    ///
-    /// assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
-    /// assert_eq!(ReplTabMode::parse("after_1_letter"), Some(ReplTabMode::AfterLetters(1)));
-    /// assert_eq!(ReplTabMode::parse("after_3_letters"), Some(ReplTabMode::AfterLetters(3)));
-    /// assert_eq!(ReplTabMode::parse("after_0_letters"), None);
-    /// ```
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "tab" => Some(Self::Tab),
-            "always" => Some(Self::Always),
-            other => other
-                .strip_prefix("after_")
-                .and_then(|rest| {
-                    rest.strip_suffix("_letters")
-                        .or_else(|| rest.strip_suffix("_letter"))
-                })
-                .and_then(|count| count.parse::<usize>().ok())
-                .filter(|count| *count > 0)
-                .map(Self::AfterLetters),
+impl Default for ReplCompleteOn {
+    fn default() -> Self {
+        Self {
+            flag: true,
+            space: false,
+            after_letters: None,
         }
+    }
+}
+
+impl ReplCompleteOn {
+    /// Parses `flag`, `space`, and `after_<n>_letter[s]` list entries.
+    ///
+    /// Unknown entries are ignored. Multiple letter thresholds use the smallest
+    /// positive count; an empty list disables opening the menu while typing.
+    pub fn parse(values: &[String]) -> Self {
+        let mut triggers = Self {
+            flag: false,
+            space: false,
+            after_letters: None,
+        };
+        for value in values {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "flag" => triggers.flag = true,
+                "space" => triggers.space = true,
+                other => {
+                    let count = other
+                        .strip_prefix("after_")
+                        .and_then(|rest| {
+                            rest.strip_suffix("_letters")
+                                .or_else(|| rest.strip_suffix("_letter"))
+                        })
+                        .and_then(|count| count.parse::<usize>().ok())
+                        .filter(|count| *count > 0);
+                    if let Some(count) = count {
+                        triggers.after_letters =
+                            Some(triggers.after_letters.map_or(count, |old| old.min(count)));
+                    }
+                }
+            }
+        }
+        triggers
     }
 }
 
@@ -197,7 +211,7 @@ pub struct ReplRunConfig {
     /// Chooses between interactive and basic input handling.
     pub input_mode: ReplInputMode,
     /// Chooses when typing opens the completion menu.
-    pub tab_mode: ReplTabMode,
+    pub complete_on: ReplCompleteOn,
     /// Optional renderer for the right-hand prompt.
     pub prompt_right: Option<PromptRightRenderer>,
     /// Optional projector used before completion/highlighting analysis.
@@ -223,7 +237,7 @@ impl ReplRunConfig {
             appearance: ReplAppearance::default(),
             history_config,
             input_mode: ReplInputMode::Auto,
-            tab_mode: ReplTabMode::Tab,
+            complete_on: ReplCompleteOn::default(),
             prompt_right: None,
             line_projector: None,
             actions: Vec::new(),
@@ -294,9 +308,9 @@ impl ReplRunConfigBuilder {
 
     /// Replaces when typing opens the completion menu.
     ///
-    /// If omitted, the config keeps [`ReplTabMode::Tab`].
-    pub fn with_tab_mode(mut self, tab_mode: ReplTabMode) -> Self {
-        self.config.tab_mode = tab_mode;
+    /// If omitted, the config keeps [`ReplCompleteOn::default()`].
+    pub fn with_complete_on(mut self, complete_on: ReplCompleteOn) -> Self {
+        self.config.complete_on = complete_on;
         self
     }
 
@@ -514,18 +528,21 @@ mod tests {
 
     #[test]
     fn repl_internal_example_1() {
-        use crate::repl::ReplTabMode;
+        use crate::repl::ReplCompleteOn;
 
-        assert_eq!(ReplTabMode::parse("always"), Some(ReplTabMode::Always));
+        let triggers =
+            ReplCompleteOn::parse(&["flag".into(), "space".into(), "after_1_letter".into()]);
+        assert!(triggers.flag);
+        assert!(triggers.space);
+        assert_eq!(triggers.after_letters, Some(1));
         assert_eq!(
-            ReplTabMode::parse("after_1_letter"),
-            Some(ReplTabMode::AfterLetters(1))
+            ReplCompleteOn::parse(&["after_3_letters".into()]).after_letters,
+            Some(3)
         );
         assert_eq!(
-            ReplTabMode::parse("after_3_letters"),
-            Some(ReplTabMode::AfterLetters(3))
+            ReplCompleteOn::parse(&["after_0_letters".into()]).after_letters,
+            None
         );
-        assert_eq!(ReplTabMode::parse("after_0_letters"), None);
     }
 
     #[test]

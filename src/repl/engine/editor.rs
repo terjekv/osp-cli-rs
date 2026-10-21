@@ -14,8 +14,8 @@ use reedline::{
 };
 
 use super::{
-    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer, ReplInputMode,
-    ReplTabMode,
+    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer,
+    ReplCompleteOn, ReplInputMode,
 };
 use crate::repl::menu::SharedCompletionMenu;
 
@@ -54,7 +54,7 @@ impl PaintedLine {
 pub(crate) struct AutoCompleteEmacs {
     inner: Emacs,
     menu: SharedCompletionMenu,
-    tab_mode: ReplTabMode,
+    complete_on: ReplCompleteOn,
     painted: PaintedLine,
     painted_revision: u64,
     pending_word_len: Option<usize>,
@@ -65,14 +65,14 @@ impl AutoCompleteEmacs {
     pub(crate) fn new(
         inner: Emacs,
         menu: SharedCompletionMenu,
-        tab_mode: ReplTabMode,
+        complete_on: ReplCompleteOn,
         painted: PaintedLine,
     ) -> Self {
         let (pending_word_len, painted_revision) = painted.word_len_before_cursor();
         Self {
             inner,
             menu,
-            tab_mode,
+            complete_on,
             painted,
             painted_revision,
             pending_word_len: Some(pending_word_len),
@@ -87,23 +87,18 @@ impl AutoCompleteEmacs {
 
     /// Whether typing these commands should open a closed menu.
     ///
-    /// Starting a flag always does; a `-` inside a word such as a hostname
-    /// does not. Otherwise `tab_mode` decides. A space only opens in `Always`
-    /// mode and is handled with the token commit below.
+    /// A `-` inside a word such as a hostname is not a flag trigger.
+    /// Spaces are handled by the token commit below.
     fn opens_menu_at(&self, commands: &[EditCommand], word_len: Option<usize>) -> bool {
         let [EditCommand::InsertChar(ch)] = commands else {
             return false;
         };
-        if *ch == '-' && word_len == Some(0) {
-            return true;
-        }
-        match self.tab_mode {
-            ReplTabMode::Tab => false,
-            ReplTabMode::Always => true,
-            ReplTabMode::AfterLetters(count) => {
-                !ch.is_whitespace() && word_len.is_some_and(|len| len + 1 >= count)
-            }
-        }
+        (self.complete_on.flag && *ch == '-' && word_len == Some(0))
+            || (!ch.is_whitespace()
+                && self
+                    .complete_on
+                    .after_letters
+                    .is_some_and(|count| word_len.is_some_and(|len| len + 1 >= count)))
     }
 
     fn sync_painted_word_len(&mut self) -> Option<usize> {
@@ -206,10 +201,9 @@ impl EditMode for AutoCompleteEmacs {
                 self.track_edit(&commands, word_len);
                 // Space commits the token: close the menu, keeping any cycled
                 // selection already in the buffer, instead of letting reedline
-                // refresh it with the next token's candidates. `Always` then
-                // opens a fresh menu for the next token.
+                // refresh it with the next token's candidates.
                 let mut events = vec![ReedlineEvent::Esc, ReedlineEvent::Edit(commands)];
-                if self.tab_mode == ReplTabMode::Always {
+                if self.complete_on.space && word_len.is_some_and(|len| len > 0) {
                     events.push(self.auto_open());
                 }
                 ReedlineEvent::Multiple(events)

@@ -28,6 +28,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Replace `repl.tab_mode` and the public `ReplTabMode` API with the trigger list
+  `repl.complete_on` and `ReplCompleteOn`. The run-config builder now exposes
+  `with_complete_on`; defaults open on flag starts, and an empty list leaves
+  only explicit completion.
+
 - Reject known injected secrets in context selections and announcements; redact
   them from context provenance while preserving canonical command result data.
 

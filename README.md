@@ -83,8 +83,8 @@ While you type in the REPL:
   the command tree; Right or End accepts it
 - the line under the prompt explains the current command or flag, lists
   missing required flags, and names unknown words, which are shown in red
-- `repl.tab_mode` (`tab`, `always`, `after_<n>_letters`) chooses whether
-  typing opens the menu without Tab
+- `repl.complete_on` lists typing triggers: `flag` (default), `space`, and
+  `after_<n>_letters`; an empty list leaves Tab and Ctrl-Space
 
 See [docs/COMPLETION.md](docs/COMPLETION.md).
 

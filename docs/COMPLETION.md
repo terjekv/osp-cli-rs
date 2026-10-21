@@ -54,14 +54,16 @@ hides multiple-match lists while retaining a unique command's description;
 negative values also behave as zero. Lists above the limit show nothing.
 This setting does not limit the Tab menu.
 
-`repl.tab_mode` chooses when typing opens the menu without Tab:
+`repl.complete_on` lists when typing opens the menu without Tab:
 
-- `tab` (default): only Tab, Ctrl-Space, or starting a flag with `-`
-- `always`: every typed character, including a space
+- `flag` (default): starting a word with `-`
+- `space`: finishing a word with a space
 - `after_<n>_letters`, e.g. `after_1_letter` or `after_3_letters`: once the
   current word has that many characters
 
-Any positive count is accepted. Unrecognized values fall back to `tab`.
+Combine triggers in a list, for example `["flag", "space", "after_3_letters"]`.
+Any positive count is accepted; unknown entries are ignored. `[]` disables
+opening while typing. Tab and Ctrl-Space remain available with any list.
 
 ## Command prefixes
 

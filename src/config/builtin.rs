@@ -309,11 +309,11 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from(3)),
             },
             BuiltinKey {
-                key: "repl.tab_mode",
-                schema: SchemaEntry::string().with_doc(
-                    "When typing opens the REPL completion menu: tab, always, or after_<n>_letters",
+                key: "repl.complete_on",
+                schema: SchemaEntry::string_list().with_doc(
+                    "Typing triggers for the completion menu: flag, space, after_<n>_letters",
                 ),
-                default: Some(ConfigValue::from("tab")),
+                default: Some(ConfigValue::from(vec!["flag".to_string()])),
             },
             BuiltinKey {
                 key: "repl.simple_prompt",
