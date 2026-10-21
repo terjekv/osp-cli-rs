@@ -14,6 +14,8 @@ If those workspace files are absent, use this repo's own docs and instructions.
 
 Prefer simple code, narrow interfaces, existing dependencies, and small
 reversible refactors. Centralize shared decisions rather than similar syntax.
+Completion, highlighting and menus read local data only; refreshing it happens
+in the background and may be up to an hour stale.
 Do not add per-bug regression or negative tests (see the workspace AGENTS.md);
 prefer stable-boundary tests and useful public examples over overlapping tests
 and noisy comments.

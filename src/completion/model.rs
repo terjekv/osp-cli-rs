@@ -199,6 +199,8 @@ impl DynamicCompletion {
     /// static suggestions. Positional overrides use zero-based argument slots,
     /// including repeated values of a variadic slot. Omitted flags and slots keep
     /// their static suggestions. Flags outside a returned hint list are hidden.
+    /// Called during editing, highlighting and menu painting: read local data
+    /// only and never wait on locks held across remote I/O.
     ///
     /// # Examples
     ///
