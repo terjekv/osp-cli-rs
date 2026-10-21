@@ -38,8 +38,15 @@ least four characters and compares the leading label at a Jaro-Winkler floor of
   (`--interactive, -i`), required flags come first and are marked `*`, and
   value aliases match what you type without being listed.
 - **Muted text after the cursor** suggests the rest of the line: the newest
-  history entry that extends it, or the only completion for the current word.
-  Right or End accepts it; Alt-Right accepts one word.
+  history entry that extends it, unless another occurs at least three times as
+  often among the last 200 prefix matches. Equal counts prefer recency. History
+  must agree with a unique command-tree completion; otherwise that completion
+  supplies the suggestion.
+  Right or End accepts it; Alt-Right accepts one word. Ctrl-Right cycles through
+  distinct eligible history suggestions in the same ranking order, wrapping at
+  the end, when the cursor is at the end of input and the menu is closed.
+  Editing or moving the cursor resets the cycle.
+  `repl.autosuggest=false` hides this inline text without hiding the status line.
 - **While typing a command**, one matching command shows its canonical name,
   next arguments and description on one line. Two or three matches show only
   their names, with executable prefixes in bold. More matches or an unknown
@@ -63,14 +70,17 @@ hides multiple-match lists while retaining a unique command's description;
 negative values also behave as zero. Lists above the limit show nothing.
 This setting does not limit the Tab menu.
 
-`repl.tab_mode` chooses when typing opens the menu without Tab:
+`repl.complete_on` lists when typing opens the menu without Tab:
 
-- `tab` (default): only Tab, Ctrl-Space, or starting a flag with `-`
-- `always`: every typed character, including a space
+- `flag` (default): starting a word with `-`
+- `space`: finishing a word with a space
 - `after_<n>_letters`, e.g. `after_1_letter` or `after_3_letters`: once the
   current word has that many characters
 
-Any positive count is accepted. Unrecognized values fall back to `tab`.
+Combine triggers in a list, for example `["flag", "space", "after_3_letters"]`.
+Any positive count is accepted; unknown entries are ignored. `[]` disables
+opening while typing. Tab and Ctrl-Space remain available with any list.
+Typing triggers stay inactive inside open quotes.
 
 ## Command prefixes
 

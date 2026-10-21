@@ -28,6 +28,23 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Cycle distinct inline history suggestions with Ctrl-Right at the end of
+  input while the menu is closed. Editing or moving the cursor resets cycling;
+  Right/End still accept the full suggestion and Alt-Right accepts one word.
+
+- Rank inline history suggestions within the last 200 prefix matches. Recency
+  wins unless another command is at least three times as frequent; ties retain
+  recency, and suggestions still agree with unique command-tree completions.
+
+- Add `repl.autosuggest` (default `true`) and `with_autosuggest` on the public
+  run-config builder. Disabling it hides inline text while retaining status
+  and help guidance below the input.
+
+- Replace `repl.tab_mode` and the public `ReplTabMode` API with the trigger list
+  `repl.complete_on` and `ReplCompleteOn`. The run-config builder now exposes
+  `with_complete_on`; defaults open on flag starts, and an empty list leaves
+  only explicit completion.
+
 - Reject known injected secrets in context selections and announcements; redact
   them from context provenance while preserving canonical command result data.
 

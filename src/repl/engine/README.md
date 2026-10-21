@@ -12,7 +12,7 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 | `adapter.rs` | `ReplCompleter` and the highlighter/history adapters |
 | `hint.rs` | Muted inline suggestion plus the status line under the prompt |
 | `overlay.rs` | Menu construction and the Ctrl-R history picker (skim) |
-| `config.rs` | Public run config: `ReplRunConfig`, `ReplAppearance`, `ReplTabMode` |
+| `config.rs` | Public run config: `ReplRunConfig`, `ReplAppearance`, `ReplCompleteOn` |
 | `debug.rs` | The `debug-complete` and menu debug surfaces |
 
 ## How a key travels
@@ -22,7 +22,11 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 2. reedline applies the event. Tab on a closed menu reaches
    `OspCompletionMenu::complete_like_shell` through partial completion.
 3. reedline paints: highlighter, then the hinter, then an open menu. The hinter
-   records the painted line in `PaintedLine` for the next key.
+   records the painted line and ranked history suggestions in `PaintedLine`.
+   Ctrl-Right advances its shared index and requests a repaint. Input or cursor
+   changes reset the index; intervening key edits discard stale suggestions.
+   Accepted inline text is shared too: reedline parses a whole key batch before
+   repainting, so a cycle followed immediately by Right must use the new choice.
 
 ## Constraints that shape the code
 
@@ -43,4 +47,6 @@ in `../menu.rs`; the rest of `repl` talks in lines and results.
 
 - **Key binding:** `build_repl_keybindings` in `session.rs`.
 - **When typing opens the menu:** `AutoCompleteEmacs::opens_menu_at`.
+- **Inline suggestions:** `ReplHinter` gates them on `repl.autosuggest`,
+  independently of the status line.
 - **What the status line says:** `ReplHinter::status`.

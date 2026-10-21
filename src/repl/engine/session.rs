@@ -1,5 +1,5 @@
 use super::adapter::{ReplCompleter, build_repl_highlighter, color_from_style_spec};
-use super::config::{LineProjector, ReplAppearance, ReplResult, ReplTabMode};
+use super::config::{LineProjector, ReplAppearance, ReplCompleteOn, ReplResult};
 use super::editor::{AutoCompleteEmacs, OspPrompt, PaintedLine};
 use super::hint::ReplHinter;
 use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
@@ -23,7 +23,8 @@ pub(crate) struct InteractiveLoopConfig<'a> {
     pub(crate) prompt: &'a OspPrompt,
     pub(crate) completion_tree: CompletionTree,
     pub(crate) appearance: ReplAppearance,
-    pub(crate) tab_mode: ReplTabMode,
+    pub(crate) complete_on: ReplCompleteOn,
+    pub(crate) autosuggest: bool,
     pub(crate) line_projector: Option<LineProjector>,
     pub(crate) actions: Vec<crate::repl::ReplAction>,
     pub(crate) after_paint: Box<dyn FnMut() + Send>,
@@ -73,7 +74,8 @@ where
         prompt,
         completion_tree,
         appearance,
-        tab_mode,
+        complete_on,
+        autosuggest,
         line_projector,
         actions,
         after_paint,
@@ -109,7 +111,8 @@ where
         build_interactive_editor(
             completion_tree,
             &appearance,
-            tab_mode,
+            complete_on,
+            autosuggest,
             line_projector,
             history_store.clone(),
             Some(bindings),
@@ -129,7 +132,8 @@ where
 pub(super) fn build_interactive_editor(
     completion_tree: CompletionTree,
     appearance: &ReplAppearance,
-    tab_mode: ReplTabMode,
+    complete_on: ReplCompleteOn,
+    autosuggest: bool,
     line_projector: Option<LineProjector>,
     history_store: SharedHistory,
     bindings: Option<reedline::Keybindings>,
@@ -148,12 +152,13 @@ pub(super) fn build_interactive_editor(
         line_projector.clone(),
         painted.clone(),
         &history_store,
+        autosuggest,
     );
     let highlighter = build_repl_highlighter(tree.clone(), appearance, line_projector);
     let edit_mode = Box::new(AutoCompleteEmacs::new(
         Emacs::new(bindings.unwrap_or_else(build_repl_keybindings)),
         completion_menu.clone(),
-        tab_mode,
+        complete_on,
         painted,
     ));
 
@@ -256,6 +261,7 @@ fn build_repl_hinter(
     line_projector: Option<LineProjector>,
     painted: PaintedLine,
     history: &SharedHistory,
+    autosuggest: bool,
 ) -> ReplHinter {
     let color = |spec: &Option<String>| spec.as_deref().and_then(color_from_style_spec);
     let error_color = color(&appearance.error_highlight_style).unwrap_or(Color::Red);
@@ -267,6 +273,7 @@ fn build_repl_hinter(
             .with_command_prefixes(appearance.command_prefixes),
         painted,
         color(&appearance.hint_style).map(|hint| Style::new().fg(hint)),
+        autosuggest,
     )
     .with_command_limit(appearance.command_hint_limit)
 }
@@ -560,7 +567,11 @@ pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
     let mode = AutoCompleteEmacs::new(
         Emacs::new(bindings),
         menu.clone(),
-        ReplTabMode::Always,
+        ReplCompleteOn {
+            after_letters: Some(1),
+            space: true,
+            ..ReplCompleteOn::default()
+        },
         PaintedLine::default(),
     );
     let mut editor = Reedline::create()

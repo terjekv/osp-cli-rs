@@ -8,14 +8,15 @@ use std::borrow::Cow;
 use std::io::{self, IsTerminal};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use reedline::{
     EditCommand, EditMode, Emacs, Menu, MenuEvent, Prompt, PromptEditMode, PromptHistorySearch,
     PromptHistorySearchStatus, ReedlineEvent, ReedlineRawEvent,
 };
 
 use super::{
-    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer, ReplInputMode,
-    ReplTabMode,
+    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PREVIOUS_ARGUMENT, PromptRightRenderer,
+    ReplCompleteOn, ReplInputMode,
 };
 use crate::repl::menu::SharedCompletionMenu;
 
@@ -25,28 +26,94 @@ use crate::repl::menu::SharedCompletionMenu;
 /// every paint and records the line here, so key handling can measure the
 /// word being typed.
 #[derive(Clone, Default)]
-pub(crate) struct PaintedLine(Arc<Mutex<(String, usize, u64)>>);
+pub(crate) struct PaintedLine(Arc<Mutex<PaintedLineState>>);
+
+#[derive(Default)]
+struct PaintedLineState {
+    line: String,
+    cursor: usize,
+    inside_quote: bool,
+    revision: u64,
+    history_suggestions: Vec<String>,
+    history_index: usize,
+    inline: String,
+}
 
 impl PaintedLine {
     pub(crate) fn set(&self, line: &str, cursor: usize) {
         let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        painted.0.clear();
-        painted.0.push_str(line);
-        painted.1 = cursor;
-        painted.2 = painted.2.wrapping_add(1);
+        if painted.line != line || painted.cursor != cursor {
+            painted.history_index = 0;
+            painted.history_suggestions.clear();
+        }
+        painted.line.clear();
+        painted.line.push_str(line);
+        painted.cursor = cursor;
+        painted.revision = painted.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn set_inside_quote(&self, inside_quote: bool) {
+        let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        painted.inside_quote = inside_quote;
+    }
+
+    fn inside_quote(&self) -> bool {
+        let painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        painted.inside_quote
+    }
+
+    pub(crate) fn history_suggestion(&self, suggestions: Vec<String>) -> Option<String> {
+        let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if painted.history_suggestions != suggestions {
+            painted.history_index = 0;
+            painted.history_suggestions = suggestions;
+        }
+        painted
+            .history_suggestions
+            .get(painted.history_index)
+            .cloned()
+    }
+
+    pub(crate) fn set_inline(&self, inline: String) {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).inline = inline;
+    }
+
+    pub(crate) fn inline(&self) -> String {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .inline
+            .clone()
+    }
+
+    fn clear_history_suggestions(&self) {
+        let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        painted.history_suggestions.clear();
+        painted.history_index = 0;
+    }
+
+    fn cycle_history_suggestion(&self) -> bool {
+        let mut painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if painted.cursor != painted.line.len() || painted.history_suggestions.len() < 2 {
+            return false;
+        }
+        painted.history_index = (painted.history_index + 1) % painted.history_suggestions.len();
+        // Reedline parses a key batch before repainting, including hint acceptance.
+        painted.inline = painted.history_suggestions[painted.history_index].clone();
+        true
     }
 
     /// Characters between the start of the current word and the cursor.
     fn word_len_before_cursor(&self) -> (usize, u64) {
         let painted = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let before = painted.0.get(..painted.1).unwrap_or(&painted.0);
+        let before = painted.line.get(..painted.cursor).unwrap_or(&painted.line);
         (
             before
                 .chars()
                 .rev()
                 .take_while(|ch| !ch.is_whitespace())
                 .count(),
-            painted.2,
+            painted.revision,
         )
     }
 }
@@ -54,7 +121,7 @@ impl PaintedLine {
 pub(crate) struct AutoCompleteEmacs {
     inner: Emacs,
     menu: SharedCompletionMenu,
-    tab_mode: ReplTabMode,
+    complete_on: ReplCompleteOn,
     painted: PaintedLine,
     painted_revision: u64,
     pending_word_len: Option<usize>,
@@ -65,14 +132,14 @@ impl AutoCompleteEmacs {
     pub(crate) fn new(
         inner: Emacs,
         menu: SharedCompletionMenu,
-        tab_mode: ReplTabMode,
+        complete_on: ReplCompleteOn,
         painted: PaintedLine,
     ) -> Self {
         let (pending_word_len, painted_revision) = painted.word_len_before_cursor();
         Self {
             inner,
             menu,
-            tab_mode,
+            complete_on,
             painted,
             painted_revision,
             pending_word_len: Some(pending_word_len),
@@ -87,23 +154,22 @@ impl AutoCompleteEmacs {
 
     /// Whether typing these commands should open a closed menu.
     ///
-    /// Starting a flag always does; a `-` inside a word such as a hostname
-    /// does not. Otherwise `tab_mode` decides. A space only opens in `Always`
-    /// mode and is handled with the token commit below.
+    /// Open quotes suppress typing triggers. A `-` inside a word such as a
+    /// hostname is not a flag trigger.
+    /// Spaces are handled by the token commit below.
     fn opens_menu_at(&self, commands: &[EditCommand], word_len: Option<usize>) -> bool {
         let [EditCommand::InsertChar(ch)] = commands else {
             return false;
         };
-        if *ch == '-' && word_len == Some(0) {
-            return true;
+        if self.painted.inside_quote() {
+            return false;
         }
-        match self.tab_mode {
-            ReplTabMode::Tab => false,
-            ReplTabMode::Always => true,
-            ReplTabMode::AfterLetters(count) => {
-                !ch.is_whitespace() && word_len.is_some_and(|len| len + 1 >= count)
-            }
-        }
+        (self.complete_on.flag && *ch == '-' && word_len == Some(0))
+            || (!ch.is_whitespace()
+                && self
+                    .complete_on
+                    .after_letters
+                    .is_some_and(|count| word_len.is_some_and(|len| len + 1 >= count)))
     }
 
     fn sync_painted_word_len(&mut self) -> Option<usize> {
@@ -171,7 +237,24 @@ pub(crate) fn menu_navigation(event: &ReedlineEvent) -> Option<MenuEvent> {
 impl EditMode for AutoCompleteEmacs {
     fn parse_event(&mut self, event: ReedlineRawEvent) -> ReedlineEvent {
         let word_len = self.sync_painted_word_len();
-        let parsed = self.inner.parse_event(event);
+        let event: Event = event.into();
+        if matches!(&event, Event::Key(KeyEvent { code: KeyCode::Right, modifiers, .. })
+            if *modifiers == KeyModifiers::CONTROL)
+            && !self.menu.is_active()
+            && self.painted.cycle_history_suggestion()
+        {
+            self.last_argument = false;
+            return ReedlineEvent::Repaint;
+        }
+        let parsed = self.inner.parse_event(
+            event
+                .try_into()
+                .expect("previously validated reedline event"),
+        );
+        // Keys can arrive before the next paint; never cycle a stale prefix.
+        if !matches!(parsed, ReedlineEvent::Resize(..) | ReedlineEvent::Repaint) {
+            self.painted.clear_history_suggestions();
+        }
         if matches!(&parsed, ReedlineEvent::ExecuteHostCommand(name) if name == HOST_COMMAND_LAST_ARGUMENT)
         {
             let command = if self.last_argument {
@@ -206,10 +289,12 @@ impl EditMode for AutoCompleteEmacs {
                 self.track_edit(&commands, word_len);
                 // Space commits the token: close the menu, keeping any cycled
                 // selection already in the buffer, instead of letting reedline
-                // refresh it with the next token's candidates. `Always` then
-                // opens a fresh menu for the next token.
+                // refresh it with the next token's candidates.
                 let mut events = vec![ReedlineEvent::Esc, ReedlineEvent::Edit(commands)];
-                if self.tab_mode == ReplTabMode::Always {
+                if self.complete_on.space
+                    && !self.painted.inside_quote()
+                    && word_len.is_some_and(|len| len > 0)
+                {
                     events.push(self.auto_open());
                 }
                 ReedlineEvent::Multiple(events)

@@ -34,8 +34,8 @@ pub(crate) use engine::ReplCompleter;
 // Primary host-facing entry points.
 pub(crate) use engine::{
     HistoryConfig, HistoryEntry, HistoryShellContext, LineProjection, LineProjector,
-    PromptRightRenderer, ReplAppearance, ReplInputMode, ReplPrompt, ReplReloadKind, ReplResult,
-    ReplRunConfig, ReplTabMode, SharedHistory, color_from_style_spec, default_pipe_verbs, run_repl,
+    PromptRightRenderer, ReplAppearance, ReplCompleteOn, ReplInputMode, ReplPrompt, ReplReloadKind,
+    ReplResult, ReplRunConfig, SharedHistory, color_from_style_spec, default_pipe_verbs, run_repl,
 };
 pub use notices::{ReplSession, post_notice};
 pub(crate) use product::ReplEvent;

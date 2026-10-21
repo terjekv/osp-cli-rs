@@ -80,11 +80,12 @@ While you type in the REPL:
 - Tab completes like a shell: a single match or the shared prefix first, then
   a menu of choices with their descriptions
 - muted text after the cursor suggests the rest of the line from history or
-  the command tree; Right or End accepts it
+  the command tree; Right or End accepts it, Ctrl-Right cycles history choices,
+  and `repl.autosuggest=false` hides it
 - the line under the prompt explains the current command or flag, lists
   missing required flags, and names unknown words, which are shown in red
-- `repl.tab_mode` (`tab`, `always`, `after_<n>_letters`) chooses whether
-  typing opens the menu without Tab
+- `repl.complete_on` lists typing triggers: `flag` (default), `space`, and
+  `after_<n>_letters`; an empty list leaves Tab and Ctrl-Space
 
 See [docs/COMPLETION.md](docs/COMPLETION.md).
 

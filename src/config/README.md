@@ -46,9 +46,10 @@ module as is. They do not keep a parallel config model.
 ## Debugging
 
 ```sh
-osp config explain repl.tab_mode
+osp config explain repl.complete_on
 osp config show --sources
-OSP__REPL__TAB_MODE=always osp      # one-off env override
+OSP__REPL__COMPLETE_ON=flag,space osp      # one-off env override
+osp config set repl.autosuggest false
 ```
 
 Retired config keys are ignored before interpolation and validation. The host
