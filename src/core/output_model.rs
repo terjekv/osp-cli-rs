@@ -23,8 +23,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 /// Producer-declared human display changes. Conditions use original row values;
-/// rules never change canonical data or DSL field values. Field selectors accept
-/// literal top-level keys, dotted paths, or JSON Pointers.
+/// rules never change canonical data or DSL field values. Unless a literal key
+/// is required, selectors accept top-level keys, dotted paths, or JSON Pointers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
@@ -83,6 +83,11 @@ pub enum DisplayRule {
         field: String,
         /// Ordered literal and field spans in the displayed value.
         parts: Vec<DisplayPart>,
+    },
+    /// Render a top-level field as an unlabelled notice above an MREG card.
+    Notice {
+        /// Literal top-level field name, after human display composition.
+        field: String,
     },
     /// Render a field with the theme's warning style in human output only.
     Warning {

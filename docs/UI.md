@@ -44,6 +44,13 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg`
 - larger row sets render as `table`
 
+In `mreg` format, preserved JSON arrays of documents and results recommended
+as `mreg` render each record as a card, separated by one blank line. Ordinary
+multi-row results retain tables. Producers can compose a field's human value
+with `DisplayRule::Compose` and mark its literal top-level name with
+`DisplayRule::Notice` to show an unlabelled line above its card. JSON retains
+the original structured field.
+
 Help and intro producers build `core::Document`: ordered sections,
 paragraphs, named entries, lists, and data blocks. `auto` renders these as human
 documents laid out for the active `ui.presentation`. Ordinary records never
