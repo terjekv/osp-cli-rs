@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Rank inline history suggestions within the last 200 prefix matches. Recency
+  wins unless another command is at least three times as frequent; ties retain
+  recency, and suggestions still agree with unique command-tree completions.
+
 - Add `repl.autosuggest` (default `true`) and `with_autosuggest` on the public
   run-config builder. Disabling it hides inline text while retaining status
   and help guidance below the input.

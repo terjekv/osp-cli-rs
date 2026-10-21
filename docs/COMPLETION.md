@@ -29,7 +29,10 @@ It does not call remote systems while you are pressing tab.
   (`--interactive, -i`), required flags come first and are marked `*`, and
   value aliases match what you type without being listed.
 - **Muted text after the cursor** suggests the rest of the line: the newest
-  history entry that extends it, or the only completion for the current word.
+  history entry that extends it, unless another occurs at least three times as
+  often among the last 200 prefix matches. Equal counts prefer recency. History
+  must agree with a unique command-tree completion; otherwise that completion
+  supplies the suggestion.
   Right or End accepts it; Alt-Right accepts one word.
   `repl.autosuggest=false` hides this inline text without hiding the status line.
 - **While typing a command**, one matching command shows its canonical name,

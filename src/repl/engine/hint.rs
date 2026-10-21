@@ -23,6 +23,9 @@ use super::editor::PaintedLine;
 use crate::completion::{CompletionAnalysis, CompletionRequest};
 use crate::repl::highlight::{LineProblemKind, ReplHighlighter};
 
+const HISTORY_SUGGESTION_LIMIT: i64 = 200;
+const HISTORY_FREQUENCY_RATIO: usize = 3;
+
 /// The hint lines below the input.
 struct Status {
     /// The command's description, on its own line above `text`.
@@ -72,11 +75,8 @@ impl ReplHinter {
         }
     }
 
-    /// The rest of the line the user most likely wants.
-    ///
-    /// The newest history line extending the input wins when it agrees with
-    /// the command tree; otherwise the tree's only candidate for the current
-    /// word does.
+    /// Prefer recent history unless a command is at least three times as common.
+    /// History must agree with the command tree's unique extension, when present.
     fn inline_suggestion(
         &self,
         line: &str,
@@ -84,18 +84,51 @@ impl ReplHinter {
         candidates: &[Suggestion],
     ) -> String {
         let from_tree = only_extension(line, candidates);
-        let from_history = history
-            .search(SearchQuery::last_with_prefix(line.to_string(), None))
-            .ok()
-            .and_then(|items| items.into_iter().next())
-            .and_then(|item| item.command_line.get(line.len()..).map(str::to_string))
-            .filter(|rest| !rest.is_empty());
-        match (from_history, from_tree) {
-            (Some(past), Some(tree)) if past.starts_with(&tree) => past,
-            (_, Some(tree)) => tree,
-            (Some(past), None) => past,
-            (None, None) => String::new(),
+        self.history_suggestions(line, history, from_tree.as_deref())
+            .into_iter()
+            .next()
+            .or(from_tree)
+            .unwrap_or_default()
+    }
+
+    fn history_suggestions(
+        &self,
+        line: &str,
+        history: &dyn History,
+        from_tree: Option<&str>,
+    ) -> Vec<String> {
+        let mut query = SearchQuery::last_with_prefix(line.to_string(), None);
+        query.limit = Some(HISTORY_SUGGESTION_LIMIT);
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for item in history.search(query).unwrap_or_default() {
+            let Some(rest) = item.command_line.strip_prefix(line) else {
+                continue;
+            };
+            if rest.is_empty() || from_tree.is_some_and(|tree| !rest.starts_with(tree)) {
+                continue;
+            }
+            if let Some((_, count)) = counts
+                .iter_mut()
+                .find(|(command, _)| command == &item.command_line)
+            {
+                *count += 1;
+            } else {
+                counts.push((item.command_line, 1));
+            }
         }
+        let mut ranked = Vec::with_capacity(counts.len());
+        while !counts.is_empty() {
+            let mut best = 0;
+            for index in 1..counts.len() {
+                if counts[index].1 >= HISTORY_FREQUENCY_RATIO * counts[0].1
+                    && counts[index].1 > counts[best].1
+                {
+                    best = index;
+                }
+            }
+            ranked.push(counts.remove(best).0[line.len()..].to_string());
+        }
+        ranked
     }
 
     /// One line about the cursor position, below the command's description
