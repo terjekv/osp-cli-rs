@@ -88,17 +88,23 @@ fn source_selection_drives_rendering_json_pipelines_and_quick_search() {
             json!({"Group renamed to": {"new_name": "display"}}),
         ),
         (
-            vec!["source-record", "--source", "--json"],
+            vec!["source-record", "--source-record", "--json"],
             json!({"new_name": "server", "enabled": true, "server_field": "kept"}),
         ),
         (
-            vec!["--source", "source-record", "--json", "|", "P new_name"],
+            vec![
+                "--source-record",
+                "source-record",
+                "--json",
+                "|",
+                "P new_name",
+            ],
             json!([{"new_name": "server"}]),
         ),
         (
             vec![
                 "source-record",
-                "--source",
+                "--source-record",
                 "--json",
                 "|",
                 "server",
@@ -126,7 +132,7 @@ fn source_selection_drives_rendering_json_pipelines_and_quick_search() {
     let mut sink = BufferedUiSink::default();
     assert_eq!(
         app.run_with_sink(
-            ["osp", "--defaults-only", "source-record", "--source"],
+            ["osp", "--defaults-only", "source-record", "--source-record"],
             &mut sink
         )
         .unwrap(),
@@ -162,7 +168,7 @@ fn source_selection_without_a_source_preserves_data_and_presentation() {
         );
         assert_eq!(
             app.run_with_sink(
-                ["osp", "--defaults-only", "source-record", "--source"]
+                ["osp", "--defaults-only", "source-record", "--source-record"]
                     .into_iter()
                     .chain(tail),
                 &mut source
@@ -195,7 +201,7 @@ echo '{"protocol_version":1,"ok":true,"data":{"label":"display"},"source":{"name
                     "--plugin-dir",
                     dir.to_str().unwrap(),
                     "source-plugin",
-                    "--source"
+                    "--source-record"
                 ],
                 &mut sink,
             )

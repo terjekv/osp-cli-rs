@@ -167,7 +167,7 @@ CLI, such as:
 
 - `--format`
 - `--json`
-- `--source`
+- `--source-record`
 - `--verbose`
 - `--quiet`
 - `--debug`

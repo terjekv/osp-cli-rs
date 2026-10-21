@@ -37,7 +37,7 @@ impl InvocationAlias {
 
 pub(crate) const INVOCATION_FLAGS: &[InvocationFlag] = &[
     InvocationFlag {
-        long: "--source",
+        long: "--source-record",
         short: None,
         value_name: None,
         choices: Vec::new,
@@ -600,14 +600,15 @@ mod tests {
 
     #[test]
     fn source_selection_scans_cli_and_repl_and_merges_alias_flags() {
-        let scanned =
-            scan_cli_argv(&["osp", "--source", "config", "show", "--json"].map(OsString::from));
+        let scanned = scan_cli_argv(
+            &["osp", "--source-record", "config", "show", "--json"].map(OsString::from),
+        );
         assert!(scanned.error.is_none());
         assert!(scanned.invocation.source);
         assert_eq!(scanned.invocation.format, Some(OutputFormat::Json));
         assert_eq!(scanned.argv, ["osp", "config", "show"].map(OsString::from));
 
-        let scanned = scan(&["last", "--source", "--raw"]);
+        let scanned = scan(&["last", "--source-record", "--raw"]);
         assert!(scanned.invocation.source);
         assert_eq!(scanned.tokens, ["last", "--raw"]);
         let mut merged = InvocationOptions::default();
@@ -616,8 +617,8 @@ mod tests {
             .expect("alias flags should merge");
         assert!(merged.source);
         assert_eq!(
-            scan(&["config", "show", "--", "--source"]).tokens,
-            ["config", "show", "--", "--source"]
+            scan(&["config", "show", "--", "--source-record"]).tokens,
+            ["config", "show", "--", "--source-record"]
         );
     }
 
@@ -728,7 +729,8 @@ mod tests {
         assert!(
             rendered
                 .iter()
-                .any(|row| row.get("name").and_then(serde_json::Value::as_str) == Some("--source"))
+                .any(|row| row.get("name").and_then(serde_json::Value::as_str)
+                    == Some("--source-record"))
         );
         assert!(rendered.iter().any(|row| {
             row.get("name")

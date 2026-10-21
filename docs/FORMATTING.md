@@ -6,7 +6,7 @@ in the REPL.
 The useful split is:
 
 - format flags change the output shape
-- `--source` selects the source record before display shaping
+- `--source-record` selects the source record before display shaping
 - render flags change how that shape is drawn
 - verbosity/debug flags change side-channel detail, not the command data itself
 
@@ -15,19 +15,19 @@ new default.
 
 ## Source Record
 
-`--source` uses the decoded source record when an integration supplies one
+`--source-record` uses the decoded source record when an integration supplies one
 alongside its display document. Rendering, `--json`, pipes and quick search all
 use that record, with generic rendering instead of the display document's
 columns, format hint or display rules. Without a separate source, the command's
 normal data and presentation stay unchanged.
 
 ```text
-osp COMMAND --source --json
-COMMAND --source | P field
-last --source --raw --json
+osp COMMAND --source-record --json
+COMMAND --source-record | P field
+last --source-record --raw --json
 ```
 
-The REPL saves both documents and the command's selection. `last --source`
+The REPL saves both documents and the command's selection. `last --source-record`
 selects the saved source before replaying the original pipeline. Add `--raw` to
 skip that pipeline; new stages still run on the source. Plain `last` retains the
 original command's selection, and replay never changes the saved result.

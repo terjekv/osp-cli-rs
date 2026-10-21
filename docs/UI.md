@@ -78,7 +78,7 @@ even if the terminal could support them.
 
 Useful one-shot flags:
 
-- `--source`
+- `--source-record`
 - `--format`
 - `--render-mode`
 - `--color {auto,always,never}`

@@ -271,7 +271,7 @@ fn invocation_prefilled_flags(
     // completion inside aliases and shell scopes, so the tree carries them as
     // prefilled values rather than treating them as out-of-band state.
     if invocation.source {
-        out.insert("--source".to_string(), Vec::new());
+        out.insert("--source-record".to_string(), Vec::new());
     }
     if let Some(format) = invocation.format {
         out.insert("--format".to_string(), vec![format.as_str().to_string()]);
@@ -596,11 +596,11 @@ mod tests {
         assert!(root.flags.contains_key("--guide"));
         assert!(root.flags.contains_key("--json"));
         assert!(root.flags.contains_key("--format"));
-        assert!(root.flags.contains_key("--source"));
+        assert!(root.flags.contains_key("--source-record"));
         assert!(root.children["ldap"].flags.contains_key("--guide"));
         assert!(root.children["ldap"].flags.contains_key("--json"));
         assert!(root.children["ldap"].flags.contains_key("--format"));
-        assert!(root.children["ldap"].flags.contains_key("--source"));
+        assert!(root.children["ldap"].flags.contains_key("--source-record"));
         assert!(!root.children["exit"].flags.contains_key("--json"));
         assert_eq!(
             root.flags["--format"]

@@ -623,7 +623,7 @@ mod tests {
             );
             let mut sink = crate::app::sink::BufferedUiSink::default();
             let line = if source {
-                "source-replay --source | P name"
+                "source-replay --source-record | P name"
             } else {
                 "source-replay | P name"
             };
@@ -645,15 +645,15 @@ mod tests {
 
             for (line, expected) in [
                 (
-                    "last --source --json",
+                    "last --source-record --json",
                     serde_json::json!([{"name": "server"}]),
                 ),
                 (
-                    "last --source --raw --json",
+                    "last --source-record --raw --json",
                     serde_json::json!({"name": "server", "server_field": "kept"}),
                 ),
                 (
-                    "last --raw --source --json | P server_field",
+                    "last --raw --source-record --json | P server_field",
                     serde_json::json!([{"server_field": "kept"}]),
                 ),
                 ("last --json", serde_json::json!([{"name": selected}])),

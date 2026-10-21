@@ -419,7 +419,7 @@ pub struct ResponseV1 {
     /// Response payload produced by the plugin.
     pub data: serde_json::Value,
     /// Decoded record before display shaping, when it differs from `data`.
-    /// The host selects it with `--source` and ignores `data`'s display metadata.
+    /// The host selects it with `--source-record` and ignores `data`'s display metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<serde_json::Value>,
     /// Structured error payload present when `ok` is `false`.

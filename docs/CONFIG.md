@@ -129,8 +129,8 @@ Notes:
 - REPL `config set --session ...` writes into the in-memory session layer.
 - Launch-time bootstrap flags like `--theme` and `-u` may still affect startup
   state or session defaults.
-- Invocation flags like `--source`, `--json`, `--format`, `--render-mode`, `--color`, `--ascii`,
-  `-v/-q` and `-d` do not write into config state.
+- Invocation flags like `--source-record`, `--json`, `--format`, `--render-mode`,
+  `--color`, `--ascii`, `-v/-q` and `-d` do not write into config state.
 - `config get --sources` therefore reflects stored defaults, not one-shot
   invocation overrides.
 

@@ -91,8 +91,9 @@ JSON-producing plugins. An argparse attribute can be a parser factory.
 
 ## JSON output and pipes
 
-Stdout is captured when metadata sets `"output": "json"`, `--source` or an osp
-format flag such as `--json` or `--format table` is supplied, or the command has DSL stages.
+Stdout is captured when metadata sets `"output": "json"`, `--source-record` or an
+osp format flag such as `--json` or `--format table` is supplied, or the command
+has DSL stages.
 Stdin and stderr remain inherited. Captured stdout is limited to 64 MiB;
 capture ends when the direct child exits, even if descendants retain stdout.
 
@@ -121,10 +122,10 @@ may be omitted. An `ok: false` response is rendered as an error.
 from `data` through the shared renderer; `columns`, `column_labels`,
 `display_rules`, `row_path` and `preserve_json_document` describe its projection.
 When `data` is a display document shaped from a decoded server record, set the
-optional `ResponseV1.source` to that original record. `--source` selects it before
-rendering or DSL stages and ignores the display document's rendering metadata.
-Omit `source` when `data` already is the source record; `--source` then leaves
-the output unchanged. The REPL retains both documents for `last --source`.
+optional `ResponseV1.source` to that original record. `--source-record` selects it
+before rendering or DSL stages and ignores the display document's rendering metadata.
+Omit `source` when `data` already is the source record; `--source-record` then leaves
+the output unchanged. The REPL retains both documents for `last --source-record`.
 One-line notices belong in levelled `messages`. The early-development protocol
 has removed final-text overrides and string-only progress append metadata;
 plugins must return structured data instead. There is no replacement final-text
