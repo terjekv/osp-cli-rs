@@ -27,8 +27,8 @@ use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
-    ColumnAlignment, DisplayRule, Group, OutputDocument, OutputItems, OutputResult,
-    RenderRecommendation, group_rows, output_items_to_rows,
+    ColumnAlignment, DisplayRule, Group, OutputDocument, OutputItems, OutputResult, group_rows,
+    output_items_to_rows,
 };
 use crate::core::row::Row;
 
@@ -1068,15 +1068,15 @@ fn lower_mreg_doc(output: &OutputResult) -> Doc {
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
         OutputItems::Rows(rows)
-            if rows.len() == 1
-                || output.meta.render_recommendation
-                    == Some(RenderRecommendation::Format(OutputFormat::Mreg))
-                || matches!(&output.document, Some(OutputDocument::Json(Value::Array(documents)))
-                    if documents.iter().all(Value::is_object)) =>
+            // Several nested documents (e.g. hosts sharing an address) are cards like
+            // mreg-cli; flat list rows stay a table.
+            if rows.len() == 1 || rows.iter().all(|row| row.values().any(value_has_table_arrays)) =>
         {
             let mut blocks = Vec::new();
-            for row in rows {
-                push_blank_lines(&mut blocks, 1);
+            for (index, row) in rows.iter().enumerate() {
+                if index > 0 {
+                    push_blank_lines(&mut blocks, 1);
+                }
                 let mut record = row.clone();
                 for rule in &output.meta.display_rules {
                     if let DisplayRule::Notice { field } = rule
