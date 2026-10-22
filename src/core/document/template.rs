@@ -10,7 +10,7 @@ pub(super) fn parse(template: &str, help: &Document) -> Document {
     let mut code: Option<String> = None;
     let mut items: Vec<String> = Vec::new();
     let mut list = Vec::new();
-    for event in Parser::new_ext(template, Options::all()) {
+    for event in Parser::new_ext(template, Options::all() - Options::ENABLE_SMART_PUNCTUATION) {
         match event {
             Event::Start(Tag::Heading { .. }) => {
                 text.clear();

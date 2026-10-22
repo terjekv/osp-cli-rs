@@ -309,7 +309,7 @@ fn resolve_intro_placeholder(
                         .map(|key| format!("`{key}` {}", action.label.to_ascii_lowercase()))
                 })
                 .collect::<Vec<_>>()
-                .join(" · ");
+                .join(" / ");
         }
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),
