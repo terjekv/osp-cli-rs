@@ -330,6 +330,7 @@ impl CommandLineParser {
     /// boundary before the parser slices the line.
     ///
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
         self.analyze_with_flag_arity(line, cursor, |_, _| None)
     }
@@ -577,6 +578,7 @@ impl CommandLineParser {
     /// Returns the active quote style for the token being edited, if any.
     ///
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }
@@ -716,11 +718,13 @@ fn is_number(text: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
     quote_style_for_state(scan_shell(text, |_| {}).state)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

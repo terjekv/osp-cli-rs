@@ -721,6 +721,7 @@ fn is_normal_level(level: &HelpLevel) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{DocBlock, Document, DocumentEntry, HelpLevel};
     use serde_json::json;

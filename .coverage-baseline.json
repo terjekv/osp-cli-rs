@@ -1,14 +1,124 @@
 {
-  "generated_at": "2026-09-30",
+  "generated_at": "2026-10-22",
   "overall_line_percent": 85.0,
   "changed_file_review_line_percent": 85.0,
   "min_executable_lines": 20,
   "non_executable_files": {
-    "src/config/mod.rs": "1b4d814782b054c69048161e25adcbb952dfb2bb45ad7104b645a78b6794efd3",
+    "src/completion/mod.rs": "94c3cf5c893ddfd27b7e405a580ce2749cbc2b05dc18de60aa85b421a6fe4357",
+    "src/config/mod.rs": "54eb696c4781d903923cf0155de57fed288a161503323dcc81750e01104fe149",
     "src/core/mod.rs": "7ab5673c5513eb21ced5dd1ca6c6478f679963fb3f00b43980ed1174a5bebbab",
-    "src/lib.rs": "6317427a4faa5c2c74ea0b52dd21594a062474e9ea01b7421b774f90366ef65d",
+    "src/dsl/eval/mod.rs": "806927e152ac7b48bfed95c52a0ea64e9defd51f2e7d11bb98cd9cede4a6d45b",
+    "src/dsl/mod.rs": "503ef22717d0e6d6c47464261dd50aa9644e1ad7a1385f7d6f535afd90469852",
+    "src/dsl/verbs/mod.rs": "74b1dca5ca0243401de9a96e932822229e70acacacef20d31952a51ef8d0d39d",
+    "src/lib.rs": "df38f4729036a002106a75a444f8e613e84a85612946f6a39ee522f7546dff2a",
+    "src/plugin/mod.rs": "7f7cba5cc23bfe41b0b281866389b2d02ac780a46cda364e45cdb7f834a8cee6",
     "src/repl/mod.rs": "6b350b01f4ea5e8f4936ca59b23ca20beedb384ba1688ceb6e568c21cbfca6d8",
     "src/ui/doc.rs": "ddb311dc720df6d5960b0b882b791952f03eb9d5ed154f31d148319a970676b3"
   },
-  "notes": "The user selected an 85% overall floor; the aim remains higher coverage through useful contract and integration workflows. Whole-file 85% is a review warning, not a requirement to add overlapping tests. Reviewed non_executable_files contain only docs, module declarations, imports, reexports, data types and derives, with no executable entry in the full LLVM report. Content changes require renewed review. These pins do not remove LLVM lines or alter the percentage."
+  "notes": "The user selected an 85% overall floor; the aim remains higher coverage through useful contract and integration workflows. Whole-file 85% is a review warning, not a requirement to add overlapping tests. Reviewed non_executable_files contain only docs, module declarations, imports, reexports, data types and derives, with no executable entry in the full LLVM report. Content changes require renewed review. These pins do not remove LLVM lines or alter the percentage.",
+  "measurement": {
+    "date": "2026-10-22",
+    "toolchain": "nightly-2026-10-16",
+    "cargo_llvm_cov": "0.9.1",
+    "scope": "Product code only; test-gated exclusions. This measurement does not set the gate floor.",
+    "same_source_with_test_code": {
+      "lines": {
+        "covered": 41556,
+        "count": 48458
+      },
+      "regions": {
+        "covered": 41325,
+        "count": 49237
+      }
+    },
+    "product_code": {
+      "lines": {
+        "covered": 32063,
+        "count": 38863
+      },
+      "regions": {
+        "covered": 30615,
+        "count": 38414
+      }
+    },
+    "excluded_test_code": {
+      "lines": 9595,
+      "regions": 10823
+    },
+    "excluded_test_code_by_module": {
+      "app": {
+        "lines": 1599,
+        "regions": 1771
+      },
+      "cli": {
+        "lines": 1192,
+        "regions": 1456
+      },
+      "completion": {
+        "lines": 586,
+        "regions": 664
+      },
+      "config": {
+        "lines": 719,
+        "regions": 627
+      },
+      "core": {
+        "lines": 644,
+        "regions": 801
+      },
+      "dsl": {
+        "lines": 1172,
+        "regions": 1613
+      },
+      "plugin": {
+        "lines": 27,
+        "regions": 23
+      },
+      "repl": {
+        "lines": 2124,
+        "regions": 2240
+      },
+      "ui": {
+        "lines": 1532,
+        "regions": 1628
+      }
+    },
+    "crates": {
+      "osp-cli": {
+        "with_test_code": {
+          "lines": {
+            "covered": 41556,
+            "count": 48458
+          },
+          "regions": {
+            "covered": 41325,
+            "count": 49237
+          }
+        },
+        "product_code": {
+          "lines": {
+            "covered": 32063,
+            "count": 38863
+          },
+          "regions": {
+            "covered": 30615,
+            "count": 38414
+          }
+        }
+      }
+    },
+    "previous_stable_report": {
+      "toolchain": "1.99.1",
+      "cargo_llvm_cov": "0.8.4",
+      "lines": {
+        "covered": 43444,
+        "count": 50548
+      },
+      "regions": {
+        "covered": 63311,
+        "count": 74816
+      }
+    },
+    "comparison_note": "Total deltas measure excluded test scope; covered counts describe separate complete runs and may vary slightly."
+  }
 }

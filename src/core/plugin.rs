@@ -1079,6 +1079,7 @@ fn validate_session_requirements(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -1259,6 +1260,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod clap_tests {
     use super::{DescribeCommandV1, DescribeValueTypeV1};
     use clap::{Arg, ArgAction, Command, ValueHint};

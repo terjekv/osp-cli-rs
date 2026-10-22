@@ -108,6 +108,7 @@ impl CompletionEngine {
     /// This is mainly useful for tests or callers that already have split
     /// command state for the full line and the cursor-local prefix.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn analyze_command(
         &self,
         full_cmd: CommandLine,
@@ -150,6 +151,7 @@ impl CompletionEngine {
 
     /// Returns how many leading tokens resolve to a command path in the tree.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
         TreeResolver::new(self.suggester.tree()).matched_command_len_tokens(tokens)
     }
@@ -606,6 +608,7 @@ fn collect_global_context_flags(root: &CompletionNode) -> BTreeSet<String> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::BTreeMap;
 

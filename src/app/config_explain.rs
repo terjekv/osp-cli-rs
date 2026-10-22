@@ -573,6 +573,7 @@ pub(crate) fn suggest_config_keys(config: &ResolvedConfig, key: &str) -> Vec<Str
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::app::resolve_runtime_config;

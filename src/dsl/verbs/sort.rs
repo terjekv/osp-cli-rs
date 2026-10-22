@@ -61,11 +61,13 @@ pub(crate) fn apply_rows<T>(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_with_plan(items: OutputItems, plan: &SortPlan) -> Result<OutputItems> {
     apply_set(items.into(), plan).map(Into::into)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value_with_plan(value: Value, plan: &SortPlan) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -284,4 +286,5 @@ fn to_string_normalized(value: &Value) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

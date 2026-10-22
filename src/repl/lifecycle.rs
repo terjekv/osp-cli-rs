@@ -357,6 +357,7 @@ pub(super) fn seed_native_context(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ReplLoopState, build_cycle_chrome_output};
     use crate::app::sink::BufferedUiSink;

@@ -93,6 +93,7 @@ impl DeveloperLoggingConfig {
 
 /// Derives the initial developer logging configuration from raw CLI arguments.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn bootstrap_logging_config(args: &[OsString]) -> DeveloperLoggingConfig {
     DeveloperLoggingConfig::new(crate::cli::invocation::scan_cli_argv(args).invocation.debug)
 }
@@ -336,6 +337,7 @@ fn map_debug_level(debug_level: u8) -> LevelFilter {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         DynamicFileWriter, bootstrap_logging_config, map_debug_level, open_log_file,

@@ -343,6 +343,7 @@ pub(super) fn list_cell_lines(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{crop_display_width, display_width, visible_inline_text, wrap_display_width};
     use unicode_width::UnicodeWidthStr;

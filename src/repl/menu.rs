@@ -840,6 +840,7 @@ fn compute_menu_indent(menu: &OspCompletionMenu, editor: &Editor, screen_width: 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl OspCompletionMenu {
     fn update_for_test(
         &mut self,
@@ -870,4 +871,5 @@ impl OspCompletionMenu {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

@@ -278,6 +278,7 @@ fn emit_markdown_nested_items(items: &[KeyValueValue], indent: usize) -> Vec<Str
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{emit_doc, emit_table};
     use crate::core::output_model::ColumnAlignment;

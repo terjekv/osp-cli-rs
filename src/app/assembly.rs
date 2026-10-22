@@ -312,6 +312,7 @@ pub(crate) fn derive_render_settings(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn derive_render_settings_or_fallback(
     context: &RuntimeContext,
     config: &ResolvedConfig,
@@ -434,6 +435,7 @@ pub(crate) fn rebuild_repl_state(current: &super::AppState) -> Result<super::App
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{RenderSettingsSeed, derive_render_settings_or_fallback, derive_ui_state};
     use crate::app::{LaunchContext, RuntimeContext, TerminalKind};

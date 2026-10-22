@@ -294,6 +294,7 @@ pub fn apply_style_spec(text: &str, spec: &str, enabled: bool) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::core::style::is_valid_style_spec;
     use crate::ui::theme::resolve_theme;

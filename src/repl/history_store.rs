@@ -172,6 +172,7 @@ pub struct HistoryShellContext {
 impl HistoryShellContext {
     /// Creates a shell context with an initial normalized prefix.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn new(prefix: impl Into<String>) -> Self {
         let context = Self::default();
         context.set_prefix(prefix);
@@ -187,6 +188,7 @@ impl HistoryShellContext {
 
     /// Clears the current shell prefix.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn clear(&self) {
         if let Ok(mut guard) = self.inner.write() {
             *guard = None;
@@ -562,6 +564,7 @@ impl OspHistoryStore {
     ///
     /// Returns an error when saving or persisting the item fails.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn save_command_line(&mut self, command_line: &str) -> Result<()> {
         let item = HistoryItem::from_command_line(command_line);
         self.save(item).map(|_| ())?;
@@ -1369,4 +1372,5 @@ fn matches_pattern(pattern: &str, command: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

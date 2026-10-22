@@ -824,6 +824,7 @@ pub fn resolve_settings(settings: &RenderSettings, target: RenderTarget) -> Reso
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         HelpLayout, RenderBackend, RenderRuntime, RenderTarget, TableBorderOverride,

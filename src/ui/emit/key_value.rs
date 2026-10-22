@@ -36,6 +36,7 @@ pub(super) fn scalar_text(value: &KeyValueValue) -> Option<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{aligned_display_key_width, display_key};
     use crate::ui::doc::{KeyValueRow, KeyValueValue};

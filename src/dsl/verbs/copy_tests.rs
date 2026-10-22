@@ -9,6 +9,7 @@ pub fn apply(rows: Vec<Row>) -> Vec<Row> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::apply;
     use serde_json::json;

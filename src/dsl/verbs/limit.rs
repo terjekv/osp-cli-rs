@@ -27,6 +27,7 @@ pub(crate) fn parse_limit_spec(spec: &str) -> Result<LimitSpec> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Applies `L` limit semantics to `items`.
 ///
 /// Positive counts return a head slice, optionally from an offset. Negative
@@ -83,6 +84,7 @@ pub(crate) fn apply_set(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::apply;
 

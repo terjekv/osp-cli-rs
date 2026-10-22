@@ -216,6 +216,7 @@ pub(crate) fn search_fuzzy_matcher() -> &'static dyn FuzzyMatcher {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     #[test]

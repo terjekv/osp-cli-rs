@@ -315,6 +315,7 @@ pub(crate) struct LastFailure {
 impl LastFailure {
     /// Records supplied summary and detail text without duplicating the detail ladder.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn new(command_line: String, summary: String, detail: String) -> Self {
         Self {
             command_line,
@@ -400,6 +401,7 @@ pub(crate) enum ReplExitTransition {
 impl AppSession {
     /// Enables or disables history capture for this session.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_history_enabled(mut self, history_enabled: bool) -> Self {
         self.history_enabled = history_enabled;
         self
@@ -407,6 +409,7 @@ impl AppSession {
 
     /// Replaces the shell-scoped history context shared with the history store.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_history_shell(mut self, history_shell: HistoryShellContext) -> Self {
         self.history_shell = history_shell;
         self
@@ -477,6 +480,7 @@ impl AppSession {
 
     /// Records details about the latest failed command.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn record_failure(
         &mut self,
         command_line: &str,
@@ -604,6 +608,7 @@ impl AppState {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl AppState {
     /// Builds a full application-state snapshot by deriving UI state from the
     /// resolved config and runtime context.
@@ -710,6 +715,7 @@ pub(crate) struct AppStateBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl AppStateBuilder {
     /// Starts building an application-state snapshot from the resolved config
     /// and UI state the caller wants to expose.
@@ -816,6 +822,7 @@ impl AppStateBuilder {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

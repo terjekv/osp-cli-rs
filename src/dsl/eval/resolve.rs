@@ -248,6 +248,7 @@ pub(crate) fn enumerate_named_descendant_arrays(root: &Value, field: &str) -> Ve
 /// values. Call [`compact_sparse_arrays`] after any intermediate envelope
 /// restoration/merge work to strip those holes from the final payload.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn materialize_path_matches(matches: &[AddressedValue]) -> Value {
     let mut out = Value::Null;
     for entry in matches {
@@ -262,6 +263,7 @@ pub fn materialize_path_matches(matches: &[AddressedValue]) -> Value {
 /// precise subtree from matched addresses without reinterpreting fanout or
 /// slice semantics.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn is_exact_address_path(path: &PathExpression) -> bool {
     let has_selectors = path
         .segments
@@ -598,6 +600,7 @@ fn flatten_addressed_value(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn insert_addressed_value(target: &mut Value, address: &[AddressStep], value: Value) {
     if address.is_empty() {
         *target = value;
@@ -661,4 +664,5 @@ pub fn is_truthy(value: &Value) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

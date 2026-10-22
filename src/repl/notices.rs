@@ -235,6 +235,7 @@ pub(crate) fn finish_foreground() {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ExternalPrinter, Notices};
 

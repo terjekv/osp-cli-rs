@@ -376,6 +376,7 @@ fn normalized_failure_detail(detail: &str) -> &str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         doctor_command, render_last_failure_document, run_doctor_command, theme_doctor_rows,

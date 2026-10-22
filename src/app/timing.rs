@@ -84,6 +84,7 @@ fn format_duration(duration: Duration, debug_level: u8) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::hint::black_box;
 

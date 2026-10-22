@@ -347,6 +347,7 @@ fn default_repl_history_path() -> PathBuf {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         HistoryScopeView, build_history_config, repl_history_enabled,

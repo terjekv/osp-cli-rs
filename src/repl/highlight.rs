@@ -422,6 +422,7 @@ fn debug_kind_rgb(kind: HighlightTokenKind) -> Option<[u8; 3]> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ReplHighlighter, debug_highlight};
     use crate::completion::{CompletionNode, CompletionTree};

@@ -323,6 +323,7 @@ pub(crate) fn normalize_profile_override(value: Option<String>) -> Option<String
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         DispatchPlan, RunAction, build_dispatch_plan, normalize_cli_profile,

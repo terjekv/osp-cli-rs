@@ -140,5 +140,6 @@ pub(crate) use store::{AtomicWriteDurability, lock_file_transaction, write_text_
 use defaults::DEFAULT_PROFILE_NAME;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "tests/loading_and_mutation.rs"]
 mod loading_and_mutation;

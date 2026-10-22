@@ -451,5 +451,6 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "tests/engine.rs"]
 mod tests;

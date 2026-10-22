@@ -88,6 +88,7 @@ pub(crate) mod session;
 /// UI sink abstractions used by the host entrypoints.
 pub(crate) mod sink;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 pub(crate) mod timing;
 
@@ -650,6 +651,7 @@ where
 /// assert!(sink.stderr.is_empty());
 /// ```
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
 where
     I: IntoIterator<Item = T>,

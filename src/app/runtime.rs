@@ -197,6 +197,7 @@ impl ConfigState {
 
     /// Replaces the resolved configuration when it changes.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn replace_resolved(&mut self, next: ResolvedConfig) -> bool {
         if self.resolved == next {
             return false;
@@ -208,6 +209,7 @@ impl ConfigState {
 
     /// Applies a configuration transform atomically against the current snapshot.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn transaction<F, E>(&mut self, mutator: F) -> Result<bool, E>
     where
         F: FnOnce(&ResolvedConfig) -> Result<ResolvedConfig, E>,
@@ -345,6 +347,7 @@ impl LaunchContext {
 
     /// Appends one explicit plugin directory.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_plugin_dir(mut self, plugin_dir: impl Into<PathBuf>) -> Self {
         self.plugin_dirs.push(plugin_dir.into());
         self
@@ -358,6 +361,7 @@ impl LaunchContext {
 
     /// Sets the config root override.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_config_root(mut self, config_root: Option<PathBuf>) -> Self {
         self.config_root = config_root;
         self
@@ -365,6 +369,7 @@ impl LaunchContext {
 
     /// Sets the cache root override.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_cache_root(mut self, cache_root: Option<PathBuf>) -> Self {
         self.cache_root = cache_root;
         self
@@ -509,12 +514,14 @@ impl AppRuntime {
 
     /// Returns the runtime context used for config selection and rebuilds.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn context(&self) -> &RuntimeContext {
         &self.context
     }
 
     /// Returns the authoritative resolved-config state.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn config_state(&self) -> &ConfigState {
         &self.config
     }
@@ -531,6 +538,7 @@ impl AppRuntime {
 
     /// Returns the UI state derived from the current config snapshot.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn ui(&self) -> &UiState {
         &self.ui
     }
@@ -559,6 +567,7 @@ impl AppRuntime {
 
     /// Returns the launch-time provenance used to assemble the runtime.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn launch(&self) -> &LaunchContext {
         &self.launch
     }
@@ -762,6 +771,7 @@ impl AuthState {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

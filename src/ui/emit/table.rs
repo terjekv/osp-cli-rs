@@ -93,6 +93,7 @@ impl PreparedCell {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::PreparedTable;
     use crate::core::output_model::ColumnAlignment;

@@ -394,6 +394,7 @@ fn trim_span(input: &str, start: usize, end: usize) -> (usize, usize) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{LexerError, Op, Span, StageSegment, TokenKind, split_pipeline, tokenize_stage};
 

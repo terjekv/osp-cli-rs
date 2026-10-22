@@ -38,6 +38,7 @@ pub(crate) fn compile(spec: &str) -> Result<FilterPlan> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Filters flat rows according to the predicate in `spec`.
 pub fn apply(rows: Vec<Row>, spec: &str) -> Result<Vec<Row>> {
     let plan = compile(spec)?;
@@ -45,6 +46,7 @@ pub fn apply(rows: Vec<Row>, spec: &str) -> Result<Vec<Row>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Filters grouped output according to `spec`.
 ///
 /// Group headers and aggregates are tested first. Otherwise the predicate is
@@ -55,6 +57,7 @@ pub fn apply_groups(groups: Vec<Group>, spec: &str) -> Result<Vec<Group>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &FilterPlan) -> Result<Vec<Row>> {
     let mut out = Vec::new();
 
@@ -90,6 +93,7 @@ pub(crate) fn apply_set(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn apply_groups_with_plan(groups: Vec<Group>, plan: &FilterPlan) -> Result<Vec<Group>> {
     Ok(apply_set(
         crate::dsl::model::RowSet {
@@ -434,6 +438,7 @@ fn parse_date(input: &str) -> Option<chrono::NaiveDate> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::core::output_model::Group;
     use serde_json::json;

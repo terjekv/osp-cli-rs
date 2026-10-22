@@ -458,6 +458,7 @@ fn resolve_alias_placeholder(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

@@ -113,6 +113,7 @@ pub fn registered_verbs() -> &'static [VerbInfo] {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Returns the registered non-meta DSL verb names used by tests.
 pub fn registered_explicit_verbs() -> Vec<&'static str> {
     VERBS
@@ -163,6 +164,7 @@ pub fn is_registered_explicit_verb(verb: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::dsl::verb_info::{is_registered_explicit_verb, registered_explicit_verbs};
 

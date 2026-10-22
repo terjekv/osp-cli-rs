@@ -490,6 +490,7 @@ impl RuntimeEnvironment {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn from_pairs<I, K, V>(vars: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -633,6 +634,7 @@ fn project_dirs() -> Option<ProjectDirs> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::ResolvedConfig;
     /// Minimal runtime-derived config that callers often need directly.

@@ -39,6 +39,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -48,6 +49,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal
+
+from confidence import MIRI_TOOLCHAIN, check_coverage_exclusions
 
 
 hermetic_env = runpy.run_path(
@@ -261,7 +264,7 @@ def ensure_coverage_tooling(*, purpose: str) -> None:
     if shutil.which("cargo") is None:
         fail("`cargo` was not found in PATH.")
     result = subprocess.run(
-        ["cargo", "llvm-cov", "--version"],
+        ["cargo", f"+{MIRI_TOOLCHAIN}", "llvm-cov", "--version"],
         check=False,
         text=True,
         capture_output=True,
@@ -371,11 +374,14 @@ def resolve_branch_diff_args(
 
 
 def is_internal_test_module(path: str) -> bool:
-    """Treat inline test modules as test support, not changed production source."""
+    """Follow cargo-llvm-cov's default whole-test-file exclusions."""
 
     if not path.endswith(".rs"):
         return False
-    return path.endswith("/tests.rs") or "/tests/" in path
+    return (
+        Path(path).name == "tests.rs" or "/tests/" in path
+        or re.fullmatch(r"[0-9a-zA-Z_-]+[_-]tests\.rs", Path(path).name) is not None
+    )
 
 
 def parse_path_output(output: str | None) -> list[str]:
@@ -597,11 +603,12 @@ def normalize_llvm_cov_args(args: list[str]) -> list[str]:
 def run_llvm_cov(args: list[str], *, repo_root: Path, prefix: str) -> None:
     """Run an arbitrary cargo-llvm-cov command inside the isolated workspace."""
 
+    check_coverage_exclusions(repo_root)
     ensure_coverage_tooling(purpose="run cargo llvm-cov")
     llvm_cov_args = normalize_llvm_cov_args(args)
     with prepared_workspace(prefix) as (_, env):
         subprocess.run(
-            ["cargo", "llvm-cov", *llvm_cov_args],
+            ["cargo", f"+{MIRI_TOOLCHAIN}", "llvm-cov", *llvm_cov_args],
             cwd=repo_root,
             check=True,
             env=env,
@@ -615,6 +622,7 @@ def build_json_report_command(
 
     command = [
         "cargo",
+        f"+{MIRI_TOOLCHAIN}",
         "llvm-cov",
         *JSON_REPORT_BASE_ARGS,
         f"--output-path={report_path}",
@@ -631,6 +639,7 @@ def run_json_report(
 ) -> CoverageReport:
     """Execute llvm-cov and return the parsed JSON report."""
 
+    check_coverage_exclusions(repo_root)
     with prepared_workspace(prefix) as (run_dir, env):
         report_path = run_dir / "coverage.json"
         if report_path.exists():

@@ -287,6 +287,7 @@ fn paint(styler: &ThemeStyler<'_>, text: &str, token: StyleToken) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{MessageChrome, render_messages};
     use crate::config::{ConfigLayer, ConfigResolver, LoadedLayers, ResolveOptions};

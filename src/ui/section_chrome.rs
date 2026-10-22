@@ -526,6 +526,7 @@ fn section_body_lines(body: &str) -> Vec<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

@@ -9,6 +9,7 @@ use std::io::{IsTerminal, Write};
 mod backend;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 /// Clipboard service that tries OSC 52 and platform-specific clipboard helpers.
@@ -105,6 +106,7 @@ impl ClipboardService {
 
     /// Enables or disables OSC 52 before falling back to external commands.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_osc52(mut self, enabled: bool) -> Self {
         self.prefer_osc52 = enabled;
         self
