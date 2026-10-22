@@ -372,7 +372,15 @@ fn apply_document_stage(
         CompiledStage::Sort(plan) => sort::apply_rows(rows, plan, |(row, _)| row),
         CompiledStage::Limit(spec) => Ok(limit::apply_with_spec(rows, *spec)),
         CompiledStage::Copy | CompiledStage::Page | CompiledStage::Editor => Ok(rows),
-        _ => unreachable!("only row-preserving stages retain document roles"),
+        _ => Ok(apply_stage(
+            RowSet::rows(rows.into_iter().map(|(row, _)| row).collect()),
+            stage,
+        )?
+        .partitions
+        .into_iter()
+        .flat_map(|partition| partition.rows)
+        .map(|row| (row, Default::default()))
+        .collect()),
     }
 }
 
