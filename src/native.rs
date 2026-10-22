@@ -842,6 +842,14 @@ pub trait NativeCommand: Send + Sync {
         false
     }
 
+    /// Protects integration syntax before shell word decoding in the REPL.
+    /// Receives the command segment, including aliases and scoped input, without
+    /// pipeline stages. Return shell text; preserve ordinary words and quoting.
+    /// This local hook runs only for a command resolved to this integration.
+    fn prepare_repl_command(&self, command: &str) -> Result<String> {
+        Ok(command.to_owned())
+    }
+
     /// Converts supplied arguments to the canonical command grammar.
     ///
     /// The host calls this before native clap parsing and command-path

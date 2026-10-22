@@ -514,7 +514,29 @@ fn classify_repl_line(
     }
 
     // 2. Parse the line into REPL-local command/stage shape.
-    let parsed = parse_repl_dispatch_line(runtime, line)?;
+    let mut parsed = parse_repl_dispatch_line(runtime, line)?;
+    let scoped = scan_command_tokens(&parsed.prefixed_tokens(&session.scope))?;
+    let tokens = scoped
+        .tokens
+        .strip_prefix(&["sudo".to_owned()])
+        .unwrap_or(&scoped.tokens);
+    if let Some(native) = tokens
+        .first()
+        .and_then(|root| native_commands.command(root))
+    {
+        let segments = crate::dsl::parse::lexer::split_pipeline(line)
+            .map_err(|error| miette::miette!("{error}"))?;
+        if let Some(command) = segments.first() {
+            let prepared = native
+                .prepare_repl_command(&command.raw)
+                .map_err(|error| miette::miette!("{error}"))?;
+            if prepared != command.raw {
+                let mut rewritten = line.to_owned();
+                rewritten.replace_range(command.span.start..command.span.end, &prepared);
+                parsed = parse_repl_dispatch_line(runtime, &rewritten)?;
+            }
+        }
+    }
 
     let scanned = scan_command_tokens(&parsed.dispatch_tokens)?;
     if crate::cli::is_help_all(&scanned.tokens) {
