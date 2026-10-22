@@ -123,8 +123,8 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     );
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "--help"]);
-    assert!(mreg.contains("section: Usage"));
-    assert!(mreg.contains("description: Inspect and edit runtime config"));
+    assert!(mreg.contains("- Usage"));
+    assert!(mreg.contains("description  Inspect and edit runtime config"));
     assert!(!mreg.lines().any(|line| line.starts_with('|')));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "--help"]);
@@ -168,8 +168,8 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
     assert!(table.contains("section"));
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "intro"]);
-    assert!(mreg.contains("section"));
-    assert!(mreg.contains("Commands"));
+    assert!(mreg.contains("- Commands"));
+    assert!(mreg.contains("Show this command overview."));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "intro"]);
     assert!(value.contains("Welcome"));

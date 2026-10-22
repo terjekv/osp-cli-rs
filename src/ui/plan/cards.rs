@@ -102,7 +102,11 @@ pub(super) fn plan_compact_cards(
                     body: Vec::new(),
                 };
             };
-            if fields.len() == 1 {
+            if fields
+                .iter()
+                .skip(1)
+                .all(|field| field.value.trim().is_empty())
+            {
                 return CompactCard::Entry(title.clone());
             }
             let mut body = Vec::new();
