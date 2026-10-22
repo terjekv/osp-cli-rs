@@ -11,7 +11,7 @@ pub(crate) mod delimited;
 mod entries;
 pub(crate) mod grid;
 pub(crate) mod json;
-mod key_value;
+pub(super) mod key_value;
 mod markdown;
 pub(crate) mod shared;
 mod table;

@@ -1,5 +1,6 @@
 //! Pure human data projection, shared by layout planning and lowering.
 
+use super::doc::{KeyValueRow, KeyValueValue};
 use super::settings::ResolvedRenderSettings;
 use super::style::{CellStyle, StyleToken};
 use super::text::sanitize_human_text;
@@ -1121,5 +1122,33 @@ pub(super) fn display_value(value: &Value) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         Value::Object(_) => serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
+    }
+}
+
+pub(super) fn key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
+    match value {
+        Value::Null if null_as_empty => KeyValueValue::Empty,
+        Value::Null => KeyValueValue::Scalar("null".to_string()),
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            KeyValueValue::Scalar(display_value(value))
+        }
+        Value::Array(items) => KeyValueValue::Array(
+            items
+                .iter()
+                .map(|item| key_value_value(item, false))
+                .collect(),
+        ),
+        Value::Object(map) => KeyValueValue::Object(
+            map.iter()
+                .map(|(key, value)| KeyValueRow {
+                    block_indent: None,
+                    value_style: None,
+                    key: key.clone(),
+                    value: key_value_value(value, false),
+                    indent: None,
+                    gap: None,
+                })
+                .collect(),
+        ),
     }
 }

@@ -515,7 +515,10 @@ fn emit_plain_row_lines(
         effective_indent,
         " ".repeat(display_key_width.saturating_add(1 + value_spacing.len()))
     );
-    let child_indent = format!("{effective_indent}{}", " ".repeat(2));
+    let child_indent = format!(
+        "{effective_indent}{}",
+        " ".repeat(row.block_indent.unwrap_or(2))
+    );
 
     match &row.value {
         KeyValueValue::Empty => vec![label],

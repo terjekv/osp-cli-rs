@@ -123,7 +123,12 @@ include.uiocloud.no:
 Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
 separators. Classic card scalar values and scalar lists wrap within the same
-resolved screen budget, including their labels and indentation.
+resolved screen budget, including their labels and indentation. Nested tables
+and grid lists start at the card's scalar value column when the block fits
+there without hiding columns or shortening additional values compared with
+its usual indent. Each block chooses independently; otherwise it keeps its
+usual indent. Planning includes the chosen indent, card depth and margin in
+the block's width budget. Compact cards retain their existing layout.
 
 `ui.mreg.gap` controls blank lines between consecutive cards, including automatic
 fallback and one-line compact entries. The default `auto` keeps compact cards

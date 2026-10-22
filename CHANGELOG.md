@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Align classic card nested tables and grid lists with scalar values when they
+  fit without hiding columns or shortening additional values. Each block keeps
+  its usual indent when it needs the extra width; compact cards are unchanged.
+
 - Configure blank lines between MREG cards with `ui.mreg.gap=auto|0..10`.
   The default preserves dense compact cards and spaced classic/nested cards.
 
