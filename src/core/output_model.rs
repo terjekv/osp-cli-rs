@@ -101,6 +101,12 @@ pub enum DisplayRule {
         /// Emphasize the value in addition to its declared style.
         bold: bool,
     },
+    /// Show a valid colour as a two-cell block in coloured human output.
+    /// Plain output retains the original value; machine data is unchanged.
+    Swatch {
+        /// Canonical string field containing a colour/style specification.
+        field: String,
+    },
     /// Mark a field as a command line for human styling.
     Command {
         /// Canonical command field selector.

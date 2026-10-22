@@ -43,7 +43,8 @@ OutputResult / Document
 - **Wrong format, cards or hidden columns:** start in `plan/`. The fit function
   measures projected cell text, preserves atomic values and drops trailing columns; `lower.rs` and emitters consume its decision.
 - **Wrong spacing, border or colour:** start in the emitter and `ThemeStyler`.
-  The IR carries tokens; palette specimens alone retain validated raw specs.
+  The IR carries tokens; palette specimens and declared swatches retain validated raw specs. Swatches
+  project to two cells before width planning when terminal colour is enabled.
 - **New style role:** add the token in `style/`, map it in each builtin theme
   in `theme/`, document it in `docs/THEMES.md`.
 - **New output format:** add format planning and `core/output.rs` vocabulary;

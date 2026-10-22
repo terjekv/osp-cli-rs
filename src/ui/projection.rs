@@ -52,6 +52,30 @@ fn field_path(value: &Value, selector: &str) -> Vec<String> {
     }
 }
 
+fn swatch_spec(value: &Value) -> Option<&str> {
+    let spec = value.as_str()?;
+    (crate::core::style::is_valid_style_spec(spec)
+        && crate::core::style::parse_style_spec(spec)
+            .is_some_and(|style| style.foreground.is_some()))
+    .then_some(spec)
+}
+
+fn apply_swatches(value: &mut Value, raw: &Value, rules: &[crate::core::DisplayRule]) {
+    for rule in rules {
+        if let crate::core::DisplayRule::Swatch { field } = rule
+            && let Some(value) = display_path_mut(value, field)
+        {
+            *value = Value::String(
+                if display_path(raw, field).and_then(swatch_spec).is_some() {
+                    "██".into()
+                } else {
+                    String::new()
+                },
+            );
+        }
+    }
+}
+
 fn field_styles(value: &Value, rules: &[crate::core::DisplayRule]) -> FieldStyles {
     use crate::core::DisplayRule;
     let mut styles = FieldStyles::new();
@@ -76,6 +100,13 @@ fn field_styles(value: &Value, rules: &[crate::core::DisplayRule]) -> FieldStyle
                     spec.to_owned()
                 }),
             );
+        }
+    }
+    for rule in rules {
+        if let DisplayRule::Swatch { field } = rule
+            && let Some(spec) = display_path(value, field).and_then(swatch_spec)
+        {
+            styles.insert(field_path(value, field), CellStyle::Spec(spec.to_owned()));
         }
     }
     for rule in rules {
@@ -212,7 +243,7 @@ pub(super) fn project(
     let (mut display, mut styles) = if output.meta.document_rows {
         (output.clone(), Vec::new())
     } else {
-        display_output(output, format)
+        display_output(output, format, settings.color)
     };
     if format != OutputFormat::Value {
         localize_timestamps(&mut display);
@@ -232,6 +263,21 @@ pub(super) fn project(
             .collect::<Vec<_>>(),
         _ => Vec::new(),
     };
+    if settings.color
+        && !matches!(format, OutputFormat::Value | OutputFormat::Markdown)
+        && let OutputItems::Groups(groups) = &mut display.items
+    {
+        for row in groups.iter_mut().flat_map(|group| {
+            std::iter::once(&mut group.groups)
+                .chain(std::iter::once(&mut group.aggregates))
+                .chain(group.rows.iter_mut())
+        }) {
+            let raw = Value::Object(std::mem::take(row));
+            let mut value = raw.clone();
+            apply_swatches(&mut value, &raw, &output.meta.display_rules);
+            *row = value.as_object().cloned().unwrap_or_default();
+        }
+    }
     // Derived display values must see every row and nested item.
     let shortened = if settings.display_limits {
         display.meta.display_limit.and_then(|limit| {
@@ -457,7 +503,11 @@ fn address_range_total(ranges: &Value, start: &str, end: &str) -> Option<String>
     })
 }
 
-fn display_output(output: &OutputResult, format: OutputFormat) -> (OutputResult, Vec<FieldStyles>) {
+fn display_output(
+    output: &OutputResult,
+    format: OutputFormat,
+    color: bool,
+) -> (OutputResult, Vec<FieldStyles>) {
     let mut display = output.clone();
     let mut row_styles = Vec::new();
     if let OutputItems::Rows(rows) = &mut display.items {
@@ -626,6 +676,9 @@ fn display_output(output: &OutputResult, format: OutputFormat) -> (OutputResult,
                 {
                     *value = Value::String(time);
                 }
+            }
+            if color && !matches!(format, OutputFormat::Value | OutputFormat::Markdown) {
+                apply_swatches(&mut original, &raw, &output.meta.display_rules);
             }
             *row = if let Some(columns) = &output.meta.display_columns {
                 let labels = display_labels(output, columns);

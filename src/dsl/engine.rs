@@ -435,6 +435,7 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
         DisplayRule::Warning { field }
         | DisplayRule::ValueStyle { field, .. }
+        | DisplayRule::Swatch { field }
         | DisplayRule::NullText { field, .. }
         | DisplayRule::Date { field, .. }
         | DisplayRule::Decimal { field, .. }

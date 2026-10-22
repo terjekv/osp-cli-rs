@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Add producer-declared colour swatches. Coloured `theme list` shows two-cell
+  blocks measured before fitting; plain output and exports keep raw colours.
+
 - Choose eligible automatic table/card layouts by visible values per rendered
   line, keeping tables on ties. Hidden columns alone no longer force cards.
 

@@ -5,6 +5,7 @@ const GRID_COLUMN_WEIGHT: usize = 3;
 
 pub(crate) struct PreparedGridList {
     pub rows: Vec<Vec<String>>,
+    pub source_indices: Vec<Vec<Option<usize>>>,
     pub column_widths: Vec<usize>,
     pub gap: usize,
 }
@@ -18,8 +19,23 @@ impl PreparedGridList {
             None,
             GRID_COLUMN_WEIGHT,
         );
+        let height = values.len().div_ceil(column_widths.len().max(1));
+        let source_indices = (0..height)
+            .map(|row| {
+                (0..column_widths.len())
+                    .map(|column| {
+                        let index = column * height + row;
+                        (index < values.len()).then_some(index)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|row| {
+                values.len() <= 1 || row.iter().flatten().any(|index| !values[*index].is_empty())
+            })
+            .collect();
         Self {
             rows,
+            source_indices,
             column_widths,
             gap: GRID_PADDING,
         }

@@ -55,7 +55,7 @@ pub(crate) fn run_theme_command(
                     crate::core::output::OutputFormat::Table,
                 ));
             }
-            add_palette_styles(&mut output);
+            add_palette_swatches(&mut output);
             let overridden = crate::core::style::ColorRole::ALL
                 .into_iter()
                 .filter(|role| runtime.config.resolved().get(role.key()).is_some())
@@ -168,29 +168,17 @@ pub(crate) fn augment_theme_completion(spec: &mut CompletionNode, themes: &Theme
     }
 }
 
-fn add_palette_styles(output: &mut OutputResult) {
-    output.meta.display_rules.extend(
-        [
-            "text",
-            "accent",
-            "info",
-            "warning",
-            "success",
-            "error",
-            "border",
-            "muted",
-            "title",
-            "selection",
-            "link",
-            "bg",
-            "bg_alt",
-        ]
-        .into_iter()
-        .map(|field| DisplayRule::ValueStyle {
-            field: field.to_owned(),
-            bold: field == "error",
-        }),
-    );
+fn add_palette_swatches(output: &mut OutputResult) {
+    output
+        .meta
+        .display_rules
+        .extend(
+            crate::core::style::ColorRole::ALL
+                .into_iter()
+                .map(|role| DisplayRule::Swatch {
+                    field: role.name().into(),
+                }),
+        );
 }
 
 fn theme_list_rows(themes: &ThemeCatalog, active_theme: &str) -> Vec<Row> {

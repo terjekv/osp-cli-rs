@@ -97,6 +97,12 @@ nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
 This cutoff chooses nested comparison tables; any object makes a record nested
 for compact-card eligibility.
 
+`theme list` declares `DisplayRule::Swatch` for its nine palette colour fields.
+With colour enabled, valid colour values become two-cell painted blocks before
+width planning; invalid/empty values become empty. Plain, NO_COLOR, editor,
+clipboard, Markdown and Value output retain raw values. Machine exports always
+retain canonical data. The generic renderer has no theme-column name rules.
+
 Producers can compose a field's human value with `DisplayRule::Compose` and
 mark its literal top-level name with `DisplayRule::Notice` to show an unlabelled
 line above its card. JSON retains the original structured field.

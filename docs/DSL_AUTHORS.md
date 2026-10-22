@@ -39,8 +39,18 @@ parallel implementations of verbs.
 `DisplayRule::Command { field }` explicitly marks a command field for styling;
 a column named `command` has no implicit role. Warning and command roles remain
 style tokens until emission. `ValueStyle` retains a validated raw palette spec
-for theme inspection; projected cells keep their own source styles across
+for producer specimens; projected cells keep their own source styles across
 labels, grouping, array filtering and display limits.
+
+`DisplayRule::Swatch { field }` declares a colour specimen. With colour enabled,
+human terminal output projects a valid colour/style value to `██` painted with
+its foreground colour; invalid, empty or modifier-only specifications project
+to empty text. Width planning measures the two-cell block. Plain, editor,
+clipboard, NO_COLOR, Markdown and Value output keep the raw value. JSON/CSV/TSV
+remain canonical. The serialized rule is `{"kind":"swatch","field":"accent"}`.
+Like other field rules, it survives row-preserving stages and is cleared for
+synthesized fields or shape-changing stages. Producers declare swatches; the
+renderer never recognizes colour columns by name.
 
 `DisplayRule::Hyperlink { field }` marks a string field whose value is an
 HTTP(S) URL. The renderer emits OSC 8 only for rich TTY output. Plain output,

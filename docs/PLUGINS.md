@@ -121,6 +121,10 @@ may be omitted. An `ok: false` response is rendered as an error.
 `ResponseMetaV1` in `src/core/plugin.rs` is the wire schema. Final output comes
 from `data` through the shared renderer; `columns`, `column_labels`,
 `display_rules`, `row_path` and `preserve_json_document` describe its projection.
+A colour specimen can declare `{"kind":"swatch","field":"accent"}` in
+`display_rules`: coloured human output shows a two-cell painted block, while
+plain output and machine exports retain the raw colour value. Invalid colours
+render empty in swatch mode. See [DSL authors](DSL_AUTHORS.md) for field rules.
 When `data` is a display document shaped from a decoded server record, set the
 optional `ResponseV1.source` to that original record. `--source-record` selects it
 before rendering or DSL stages and ignores the display document's rendering metadata.

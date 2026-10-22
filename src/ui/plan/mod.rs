@@ -227,14 +227,19 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                     rows: grid
                         .rows
                         .iter()
-                        .map(|row| {
+                        .enumerate()
+                        .map(|(row_index, row)| {
                             row.iter()
-                                .map(|value| GridCell {
+                                .enumerate()
+                                .map(|(column, value)| GridCell {
                                     label: String::new(),
                                     value: value.clone(),
-                                    value_style: values
-                                        .iter()
-                                        .position(|item| item == value)
+                                    value_style: grid
+                                        .source_indices
+                                        .get(row_index)
+                                        .and_then(|row| row.get(column))
+                                        .copied()
+                                        .flatten()
                                         .and_then(|index| projection.records.get(index))
                                         .and_then(|record| record.first())
                                         .and_then(|(_, field)| field.style.clone()),
