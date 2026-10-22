@@ -717,7 +717,9 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
                 "{format}: {}",
                 grouped.stdout
             );
-            let expected_state = if format == "--md" {
+            let expected_state = if format == "--table" {
+                "1 field"
+            } else if format == "--md" {
                 r"powered\_on"
             } else {
                 "powered_on"

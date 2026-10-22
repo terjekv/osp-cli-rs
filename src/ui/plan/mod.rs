@@ -214,8 +214,7 @@ fn plan_record(
 pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
     let card_alternative = !projection.output.meta.grouped
         && !projection.output.meta.document_rows
-        && projection.source_row_count.is_some_and(|count| count > 1)
-        && matches!(&projection.output.items, OutputItems::Rows(rows) if rows.iter().all(cards::is_flat));
+        && !projection.records.is_empty();
     let actions = (!projection.output.meta.document_rows).then_some(card_alternative);
     plan.tables = projection
         .tables

@@ -22,6 +22,7 @@ pub(super) struct HumanProjection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ProjectedTable {
     pub list_items: BTreeMap<(usize, usize), Vec<String>>,
+    pub summarized_cells: BTreeSet<(usize, usize)>,
     pub cell_styles: Vec<Vec<Option<CellStyle>>>,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
@@ -424,6 +425,9 @@ pub(super) fn project(
         OutputItems::Rows(rows) => {
             let mut table =
                 project_table(rows, &display.meta.key_index, &display.meta.column_align);
+            if !matches!(format, OutputFormat::Markdown | OutputFormat::Value) {
+                summarize_table(&mut table, rows);
+            }
             style_table(&mut table, &styles);
             vec![table]
         }
@@ -435,6 +439,9 @@ pub(super) fn project(
                 let styles = &grouped_styles[index];
                 let mut table =
                     project_table(&rows, &display.meta.key_index, &display.meta.column_align);
+                if !matches!(format, OutputFormat::Markdown | OutputFormat::Value) {
+                    summarize_table(&mut table, &rows);
+                }
                 style_table(&mut table, styles);
                 table
             })
@@ -976,6 +983,41 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
     (total > 0).then_some((limited, total))
 }
 
+fn summarize_table(table: &mut ProjectedTable, rows: &[Row]) {
+    for (row_index, row) in rows.iter().enumerate() {
+        for (column, header) in table.headers.iter().enumerate() {
+            let summary = match row.get(header) {
+                Some(Value::Array(items)) if items.iter().all(Value::is_object) => {
+                    let fields = items
+                        .iter()
+                        .filter_map(Value::as_object)
+                        .flat_map(|row| row.keys())
+                        .collect::<BTreeSet<_>>();
+                    (fields.len() > 1).then(|| {
+                        format!(
+                            "{} item{}",
+                            items.len(),
+                            if items.len() == 1 { "" } else { "s" }
+                        )
+                    })
+                }
+                Some(Value::Object(fields)) => {
+                    let count = fields.values().filter(|value| !empty_value(value)).count();
+                    Some(format!(
+                        "{count} field{}",
+                        if count == 1 { "" } else { "s" }
+                    ))
+                }
+                _ => None,
+            };
+            if let Some(summary) = summary {
+                table.rows[row_index][column] = summary;
+                table.summarized_cells.insert((row_index, column));
+            }
+        }
+    }
+}
+
 pub(super) fn project_table(
     rows: &[Row],
     key_index: &[String],
@@ -1006,6 +1048,7 @@ pub(super) fn project_table(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     ProjectedTable {
+        summarized_cells: BTreeSet::new(),
         list_items: rows
             .iter()
             .enumerate()

@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Summarize multi-field object arrays and objects in terminal table cells as
+  item or field counts. Protect counts during fitting and include them in the
+  shortened-values footer with a card action; cards and exports keep details.
+
 - Render compact cards on one aligned line per record when every title and
   nonempty field fits at the target width; otherwise retain titled cards.
 

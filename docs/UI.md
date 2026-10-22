@@ -117,7 +117,11 @@ list of its values. For example, `[{"hostname":"ns1.nrec.no","TTL":null},
 {"hostname":"ns2.nrec.no","TTL":null}]` displays as `ns1.nrec.no, ns2.nrec.no`
 in table cells and as a list in cards, without a nested hostname header.
 Records containing only scalars and scalar lists after reduction count as flat.
-Remaining object arrays use nested tables with the same empty-column removal.
+Remaining object arrays keep nested tables in cards. Top-level terminal table
+cells summarize these arrays as `1 item` / `N items`; object cells show their
+nonempty field count as `1 field` / `N fields`. These counts are atomic when
+fitting and count as shortened values in the screen footer. Markdown keeps
+complete cell values.
 JSON, CSV, TSV and DSL data retain the original objects and empty fields.
 
 `theme list` declares `DisplayRule::Swatch` for its nine palette colour fields.
@@ -301,13 +305,14 @@ Screen tables combine hidden columns and shortened visible cells in one footer:
 ```
 
 Each summary appears only when applicable. Counts refer to cells shortened by
-ellipsis or list remaining counts; column names retain producer order. Lines
-wrap to terminal width with two-space continuations and are never cropped.
+ellipsis, list remaining counts or structured item/field summaries; column
+names retain producer order. Lines wrap to terminal width with two-space
+continuations and are never cropped.
 These are at most three logical entries; wrapping may add physical lines.
 `| LESS` always re-renders at unlimited width. `all fields: --mreg` appears only
-for top-level flat lists where cards are an alternative. The pick suggestion
-uses the first column and the first hidden column, or the most-shortened column
-when none is hidden; whitespace and commas in literal names are quoted for DSL.
+for top-level records where cards are an alternative, including nested records
+and singleton tables. The pick suggestion uses the first column and the first
+hidden column, or the most-shortened column when none is hidden; whitespace and commas in literal names are quoted for DSL.
 Nested card tables show only the applicable summaries, without actions.
 `-q` or `ui.help.level=none` suppresses the footer. Pager, editor, clipboard and
 pipe targets preserve full widths and never show this footer.

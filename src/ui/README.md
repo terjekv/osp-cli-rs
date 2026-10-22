@@ -86,15 +86,18 @@ The host retains staged structured output for action re-renders, rather than
 reusing a fitted screen string. Emitters apply the resolved margin uniformly,
 including machine output on the REPL screen.
 
-`plan/cards.rs` owns compact flat-list cards: ruled first values, globally sized
-short-field grids and wrapped long fields with one shared label width. Single and nested records retain
-classic cards. Lowering copies planned grids into the data-only IR.
+`plan/cards.rs` owns compact flat-list cards. When all records fit, it plans
+one aligned line per record; otherwise it uses double-rule titles and bodies
+indented by two columns. Grid value widths use rendered values in each column
+across records. Single and nested records retain classic cards. Lowering copies
+planned grids into the data-only IR.
 
 Targets set automatic colour/Unicode defaults. Explicit choices survive screen,
 pager and pipe rendering; editor and clipboard always suppress colour.
 
-Format precedence is explicit, configured, single-record classic card, producer
-recommendation, then shape inference. Machine recommendations bypass card rules.
+Format precedence is explicit, configured, producer recommendation, then shape
+inference. A singleton overrides only a Table recommendation with a classic card;
+other recommendations retain their formats.
 
 Projection drops fields empty in every object-array item and reduces remaining
 single-field object lists to value lists before table/card classification.
@@ -106,3 +109,8 @@ lines directly. Wrap mode prints one complete item per line.
 The table planner owns screen fit summaries, shortened-cell counts and quoted
 DSL recovery actions. Lowering carries the wrapped footer in the IR; emitters
 only style it. Nested tables omit actions, and help/quiet policy gates hints.
+
+Top-level terminal table cells summarize remaining multi-field object arrays as
+item counts and objects as nonempty field counts. Counts stay whole when fitted
+and contribute to shortened-cell footers; cards retain nested tables and exports
+retain their complete data.

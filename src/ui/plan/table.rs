@@ -29,14 +29,16 @@ pub(super) fn fitted_table_widths(
                 && data
                     .rows
                     .iter()
-                    .filter_map(|row| row.get(column))
-                    .all(|cell| {
+                    .enumerate()
+                    .filter_map(|(row_index, row)| row.get(column).map(|cell| (row_index, cell)))
+                    .all(|(row_index, cell)| {
                         let rendered = if overflow == TableOverflow::Wrap {
                             cell.clone()
                         } else {
                             escape_table_line_breaks(cell)
                         };
-                        rendered.is_empty()
+                        data.summarized_cells.contains(&(row_index, column))
+                            || rendered.is_empty()
                             || (!rendered.chars().any(char::is_whitespace)
                                 && table_cell_width(cell, overflow) <= ATOMIC_MAX_WIDTH)
                     });
@@ -54,10 +56,18 @@ pub(super) fn fitted_table_widths(
                 } else {
                     0
                 };
+                let summary_width = data
+                    .summarized_cells
+                    .iter()
+                    .filter(|(_, index)| *index == column)
+                    .map(|(row, column)| table_cell_width(&data.rows[*row][*column], overflow))
+                    .max()
+                    .unwrap_or(0);
                 natural[column].min(
                     PROSE_MIN_WIDTH
                         .max(table_cell_width(header, overflow))
-                        .max(item_width),
+                        .max(item_width)
+                        .max(summary_width),
                 )
             }
         })
@@ -146,11 +156,12 @@ pub(super) fn fit_footer(
                 .enumerate()
                 .filter(|(row_index, row)| {
                     let list = data.list_items.contains_key(&(*row_index, column));
-                    (settings.table_overflow == TableOverflow::Ellipsis
-                        || (list && settings.table_overflow == TableOverflow::Clip))
-                        && row.get(column).is_some_and(|cell| {
-                            table_cell_width(cell, settings.table_overflow) > *width
-                        })
+                    data.summarized_cells.contains(&(*row_index, column))
+                        || (settings.table_overflow == TableOverflow::Ellipsis
+                            || (list && settings.table_overflow == TableOverflow::Clip))
+                            && row.get(column).is_some_and(|cell| {
+                                table_cell_width(cell, settings.table_overflow) > *width
+                            })
                 })
                 .count()
         })
