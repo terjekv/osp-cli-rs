@@ -438,28 +438,6 @@ pub(crate) fn lower_document_help_layout(
     Doc { blocks }
 }
 
-pub(crate) fn json_value(output: &OutputResult) -> Value {
-    let data = if let Some(document) = &output.document
-        && (output.meta.document_rows || matches!(document, OutputDocument::Json(_)))
-    {
-        document.json_value()
-    } else {
-        match &output.items {
-            OutputItems::Rows(rows) => {
-                Value::Array(rows.iter().cloned().map(Value::Object).collect())
-            }
-            OutputItems::Groups(groups) => {
-                Value::Array(groups.iter().map(json_group_value).collect())
-            }
-        }
-    };
-    if output.meta.context.is_empty() {
-        data
-    } else {
-        serde_json::json!({"data": data, "meta": {"context": output.meta.context}})
-    }
-}
-
 fn lower_table_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     match &output.items {
         OutputItems::Rows(_) => Doc {
@@ -494,27 +472,6 @@ fn lower_markdown_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
         },
         _ => lower_table_doc(output, plan),
     }
-}
-
-fn json_group_value(group: &Group) -> Value {
-    let mut item = Row::new();
-    item.insert("groups".to_string(), Value::Object(group.groups.clone()));
-    item.insert(
-        "aggregates".to_string(),
-        Value::Object(group.aggregates.clone()),
-    );
-    item.insert(
-        "rows".to_string(),
-        Value::Array(
-            group
-                .rows
-                .iter()
-                .cloned()
-                .map(Value::Object)
-                .collect::<Vec<_>>(),
-        ),
-    );
-    Value::Object(item)
 }
 
 fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {

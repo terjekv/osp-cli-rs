@@ -54,7 +54,9 @@ pub(crate) mod runtime;
 pub(crate) mod shell_words;
 pub(crate) mod style;
 
-pub use document::{DocBlock, Document, DocumentEntry, HelpLevel};
+pub use document::{
+    DocBlock, Document, DocumentEntry, DocumentRowRole, EntryRole, HelpLevel, SectionRole,
+};
 pub use fuzzy::fold_case;
 pub use output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
 pub use output_model::{

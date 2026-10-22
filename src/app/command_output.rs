@@ -236,7 +236,7 @@ impl CommandOutput {
         }
     }
 
-    fn render(&self, config: &ResolvedConfig, settings: &RenderSettings) -> String {
+    pub(super) fn render(&self, config: &ResolvedConfig, settings: &RenderSettings) -> String {
         let mut effective = resolve_render_settings_with_hint(settings, self.format_hint);
         let output = match &self.body {
             CommandBody::None => return String::new(),
@@ -802,18 +802,10 @@ fn pager_for_output(
     rendered: &str,
 ) -> Option<String> {
     if matches!(
-        resolve_render_settings_with_hint(&ui.render_settings, output.format_hint).format,
-        OutputFormat::Csv | OutputFormat::Tsv
+        output.output_format(&ui.render_settings),
+        OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv
     ) || config.get_string("ui.pager") != Some("auto")
         || !ui.render_settings.runtime.stdout_is_tty
-        || match &output.body {
-            CommandBody::Json(_) => true,
-            CommandBody::Text(_) => ui.render_settings.format == OutputFormat::Json,
-            CommandBody::None | CommandBody::Output(_) => {
-                resolve_render_settings_with_hint(&ui.render_settings, output.format_hint).format
-                    == OutputFormat::Json
-            }
-        }
         || rendered.lines().count() <= terminal_height()?
     {
         return None;

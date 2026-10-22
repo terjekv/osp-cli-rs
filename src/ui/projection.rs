@@ -42,8 +42,8 @@ fn field_path(value: &Value, selector: &str) -> Vec<String> {
     if value.get(selector).is_some() {
         return vec![selector.into()];
     }
-    if selector.starts_with('/') {
-        selector[1..]
+    if let Some(pointer) = selector.strip_prefix('/') {
+        pointer
             .split('/')
             .map(|part| part.replace("~1", "/").replace("~0", "~"))
             .collect()

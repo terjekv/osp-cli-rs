@@ -57,7 +57,7 @@ pub struct RenderPlan {
     pub document_entry_gap: Option<usize>,
 }
 
-pub fn plan_output(
+pub fn plan_format(
     output: &OutputResult,
     settings: &RenderSettings,
     profile: RenderProfile,

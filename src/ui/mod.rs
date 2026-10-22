@@ -52,17 +52,16 @@ use crate::core::document::DocBlock;
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{DisplayRule, OutputResult};
 
-pub(crate) use lower::json_value;
+pub(crate) use emit::json::json_value;
 pub(crate) use messages::{MessageRequest, render as render_messages};
-pub(crate) use plan::plan_output;
+pub(crate) use plan::plan_format;
 pub use section_chrome::{RuledSectionPolicy, SectionFrameStyle};
 pub(crate) use settings::RenderBackend;
 #[cfg(test)]
 use settings::resolve_settings;
-#[allow(unused_imports)]
 pub use settings::{
     HelpLayout, RenderProfile, RenderRuntime, RenderSettings, TableBorderOverride,
-    TableBorderStyle, TableOverflow, UiPresentation,
+    TableBorderStyle, TableOverflow, TableTooWide, UiPresentation,
 };
 pub(crate) use settings::{
     ResolvedRenderSettings, build_presentation_defaults_layer, explain_presentation_effect,
@@ -79,22 +78,15 @@ pub(crate) use theme::DEFAULT_THEME_NAME;
 
 const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
 
-/// Formats an RFC3339 timestamp in local time at seconds precision.
-pub fn format_local_timestamp(value: &str) -> Option<String> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|time| format_local_utc_timestamp(time.with_timezone(&chrono::Utc)))
-}
-
 /// Formats an RFC3339 timestamp as a compact duration from the current time.
-pub fn format_relative_timestamp(value: &str) -> Option<String> {
+pub(crate) fn format_relative_timestamp(value: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|time| format_relative_unix_timestamp(time.timestamp()))
 }
 
 /// Formats a byte count with the largest useful binary unit.
-pub fn format_binary_bytes(bytes: u64) -> String {
+pub(crate) fn format_binary_bytes(bytes: u64) -> String {
     for (unit, divisor) in [
         ("TiB", 1_u64 << 40),
         ("GiB", 1_u64 << 30),
@@ -186,7 +178,7 @@ impl<'a> RenderRequest<'a> {
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
     let canonical = output;
-    let mut plan = plan_output(output, request.settings, request.profile);
+    let mut plan = plan_format(output, request.settings, request.profile);
     match plan.format {
         OutputFormat::Csv | OutputFormat::Tsv => {
             return emit::delimited::render(output, plan.format);

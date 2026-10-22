@@ -721,17 +721,10 @@ impl RenderSettings {
                 (self.format, Configured)
             };
         }
-        if let Some(recommended) = output.meta.render_recommendation {
-            return (
-                match recommended {
-                    RenderRecommendation::Format(format) => format,
-                    RenderRecommendation::Document if self.format == OutputFormat::Auto => {
-                        OutputFormat::Auto
-                    }
-                    RenderRecommendation::Document => self.format,
-                },
-                Recommended,
-            );
+        if let Some(RenderRecommendation::Format(format)) = output.meta.render_recommendation
+            && format != OutputFormat::Auto
+        {
+            return (format, Recommended);
         }
         if self.format != OutputFormat::Auto {
             return (self.format, Configured);

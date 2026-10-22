@@ -9,7 +9,7 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use super::doc::{Block, SectionTitleChrome};
-use super::{HelpLayout, RenderProfile, RenderSettings, plan_output, render, resolve_settings};
+use super::{HelpLayout, RenderProfile, RenderSettings, plan_format, render, resolve_settings};
 
 #[test]
 fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
@@ -19,12 +19,12 @@ fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
 
     let mut inherited_json = RenderSettings::test_plain(OutputFormat::Json);
     inherited_json.format_explicit = false;
-    let inherited_plan = plan_output(&output, &inherited_json, super::RenderProfile::Normal);
+    let inherited_plan = plan_format(&output, &inherited_json, super::RenderProfile::Normal);
     assert_eq!(inherited_plan.format, OutputFormat::Auto);
 
     let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
     explicit_json.format_explicit = true;
-    let explicit_plan = plan_output(&output, &explicit_json, super::RenderProfile::Normal);
+    let explicit_plan = plan_format(&output, &explicit_json, super::RenderProfile::Normal);
     assert_eq!(explicit_plan.format, OutputFormat::Json);
 }
 
@@ -704,7 +704,7 @@ fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
     let projection =
         super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
     super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
@@ -740,7 +740,7 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
     let projection =
         super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
     super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
@@ -757,7 +757,7 @@ fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
     let guide = Document::from_help_text("Commands:\n  list   List history entries\n");
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
     let projection =
         super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
     super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
@@ -786,7 +786,7 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
     };
     let output = guide.to_output_result();
 
-    let mut guide_plan = plan_output(
+    let mut guide_plan = plan_format(
         &output,
         &RenderSettings::test_plain(OutputFormat::Auto),
         RenderProfile::Normal,
@@ -818,7 +818,7 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
-    let mut markdown_plan = plan_output(&output, &markdown_settings, RenderProfile::Normal);
+    let mut markdown_plan = plan_format(&output, &markdown_settings, RenderProfile::Normal);
     let projection = super::projection::project(
         &output,
         markdown_plan.format,
@@ -880,7 +880,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         },
     };
 
-    let mut table_plan = plan_output(
+    let mut table_plan = plan_format(
         &output,
         &RenderSettings::test_plain(OutputFormat::Table),
         RenderProfile::Normal,
@@ -961,7 +961,7 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(40);
     let output = guide.to_output_result();
-    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
     let projection =
         super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
     super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);

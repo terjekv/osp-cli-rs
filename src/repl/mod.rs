@@ -12,7 +12,6 @@ pub(crate) mod completion;
 pub(crate) mod dispatch;
 pub(crate) use engine::read_path;
 mod engine;
-pub(crate) mod help;
 mod highlight;
 pub(crate) mod history;
 mod history_store;

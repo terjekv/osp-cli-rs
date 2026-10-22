@@ -38,9 +38,10 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
     let state = make_completion_state();
     let known_sections =
         "Usage: config <COMMAND>\n\nCommands:\n  show\n\nOptions:\n  -h, --help  Print help\n";
-    let headings = repl_help::render_repl_help_with_chrome(
-        repl_view(&state.runtime, &state.session),
+    let headings = super::help_rendering::render_help(
         known_sections,
+        &state.runtime.ui.render_settings,
+        crate::ui::help_layout_from_config(state.runtime.config()),
     );
     assert!(headings.contains("Usage"));
     assert!(headings.contains("config <COMMAND>"));
@@ -49,16 +50,18 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
 
     let passthrough = "custom help text";
     assert_eq!(
-        repl_help::render_repl_help_with_chrome(
-            repl_view(&state.runtime, &state.session),
+        super::help_rendering::render_help(
             passthrough,
+            &state.runtime.ui.render_settings,
+            crate::ui::help_layout_from_config(state.runtime.config())
         ),
-        passthrough
+        "custom help text\n"
     );
 
-    let mut resolved = state.runtime.ui.render_settings.resolve_render_settings();
-    resolved.unicode = true;
-    let unicode = repl_help::render_help_with_chrome(
+    let mut resolved = state.runtime.ui.render_settings.clone();
+    resolved.mode = RenderMode::Rich;
+    resolved.unicode = UnicodeMode::Always;
+    let unicode = super::help_rendering::render_help(
         "Usage: osp [OPTIONS]\n\nCommands:\n  help\n\nOptions:\n  -h, --help\n",
         &resolved,
         crate::ui::HelpLayout::Full,
@@ -70,14 +73,15 @@ fn repl_help_chrome_variants_render_expected_structure_unit() {
 
     let austere = make_completion_state_with_entries(&[("ui.presentation", "austere")]);
     let footer = "Usage: osp [OPTIONS]\n\nOptions:\n  -h, --help\n\nUse `osp plugins list` to list plugin-provided commands.\n";
-    let rendered = repl_help::render_repl_help_with_chrome(
-        repl_view(&austere.runtime, &austere.session),
+    let rendered = super::help_rendering::render_help(
         footer,
+        &austere.runtime.ui.render_settings,
+        crate::ui::help_layout_from_config(austere.runtime.config()),
     );
     assert!(rendered.contains("Options"));
-    assert!(rendered.contains("Use `osp plugins list`"));
-    assert!(rendered.contains("\n\nUse `osp plugins list`"));
-    assert!(!rendered.contains("\n\n\nUse `osp plugins list`"));
+    assert!(rendered.contains("Use osp plugins list"));
+    assert!(rendered.contains("\n\nUse osp plugins list"));
+    assert!(!rendered.contains("\n\n\nUse osp plugins list"));
 }
 
 #[cfg_attr(miri, ignore = "insta snapshot test spawns cargo metadata")]
