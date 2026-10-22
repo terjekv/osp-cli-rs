@@ -77,9 +77,25 @@ multi-row and grouped output. Grouped cards carry each member's group keys and
 aggregates; an empty group still has its context card. Other MREG sources use
 cards for one row, or for several rows only when every row contains a nested
 comparison table. Flat lists and non-explicit grouped MREG remain tables.
+When several flat records render as cards (explicit MREG or automatic table
+fallback), the planner selects compact cards. Flat means every value is a
+scalar or an array of scalars. Each card uses its first field's value in a
+styled ruled title, followed by nonempty fields in producer order, without
+blank separators. Title-only records print `Label: value` entries instead.
+A field is short when its label width plus two spaces plus its longest value
+across all records fits half the available width. Consecutive short runs pack
+row-major with one shared column count and label/value widths for the whole
+result. A long field breaks the run, aligns with the other long labels and
+wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
+list geometry; short arrays are comma-joined. Unknown widths use 100 columns
+for compact body geometry. Single records and lists containing objects or arrays
+of objects retain the classic aligned cards, nested tables, lists and blank
+separators exactly.
+
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
-This cutoff also determines whether a record counts as a nested document.
+This cutoff chooses nested comparison tables; any object makes a record nested
+for compact-card eligibility.
 
 Producers can compose a field's human value with `DisplayRule::Compose` and
 mark its literal top-level name with `DisplayRule::Notice` to show an unlabelled

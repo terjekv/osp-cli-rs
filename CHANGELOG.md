@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Use compact ruled cards for multi-row flat MREG results: shared short-field
+  grids, wrapped long fields and no blank card separators. Single and nested
+  records retain the classic layout; title-only records use labelled entries.
+
 - Render human single-column row lists as titled, width-aware grids. Explicit
   MREG prints consecutive labelled entries; explicit tables and Markdown remain
   tables, while machine and Value outputs retain their existing representation.

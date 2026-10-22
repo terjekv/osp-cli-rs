@@ -1,6 +1,9 @@
 //! Format and layout decisions for the human rendering pipeline.
 
+mod cards;
 mod table;
+
+pub(super) use cards::CompactCard;
 
 use super::doc::{GridBlock, GridCell};
 use super::emit::grid::PreparedGridList;
@@ -23,6 +26,7 @@ pub(super) enum MregLayout {
     Table,
     Cards,
     Entries,
+    Compact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +55,7 @@ pub struct RenderPlan {
     pub format: OutputFormat,
     pub provenance: FormatProvenance,
     pub settings: ResolvedRenderSettings,
+    pub(super) compact_cards: Vec<CompactCard>,
     pub(super) grid_list: Option<(String, GridBlock)>,
     pub(super) markdown_record: bool,
     pub(super) mreg_layout: MregLayout,
@@ -74,6 +79,7 @@ pub fn plan_format(
         format,
         provenance,
         settings: resolved,
+        compact_cards: Vec::new(),
         grid_list: None,
         markdown_record: false,
         mreg_layout: MregLayout::Table,
@@ -269,6 +275,19 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .iter()
         .map(|record| plan_record(record, &plan.settings, 0))
         .collect();
+    let rows = crate::core::output_model::output_items_to_rows(&output.items);
+    if rows.len() > 1 && rows.iter().all(cards::is_flat) {
+        plan.compact_cards = cards::plan_compact_cards(
+            &rows,
+            &projection.records,
+            &output.meta.key_index,
+            &output.meta.display_rules,
+            &plan.settings,
+        );
+        if plan.mreg_layout == MregLayout::Cards {
+            plan.mreg_layout = MregLayout::Compact;
+        }
+    }
     plan.document_tables = projection
         .document_tables
         .iter()

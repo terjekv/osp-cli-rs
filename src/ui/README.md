@@ -24,7 +24,7 @@ OutputResult / Document
 
 | Path | Owns |
 |---|---|
-| `plan/` | Format provenance, single-column grids, MREG layout and table fitting/visibility |
+| `plan/` | Format provenance, single-column grids, compact/classic MREG layout and table fitting/visibility |
 | `projection.rs` | Human field/value projection, style annotations, limits, sanitization and table candidates |
 | `doc.rs`, `lower.rs` | One human document IR and lowering according to the plan |
 | `emit/` | Terminal/Markdown IR emitters and separate typed JSON/delimited writers |
@@ -77,3 +77,7 @@ margin; pager/editor/clipboard/pipe targets have no width or display limits.
 The host retains staged structured output for action re-renders, rather than
 reusing a fitted screen string. Emitters apply the resolved margin uniformly,
 including machine output on the REPL screen.
+
+`plan/cards.rs` owns compact flat-list cards: ruled first values, globally sized
+short-field grids and wrapped long fields. Single and nested records retain
+classic cards. Lowering copies planned grids into the data-only IR.

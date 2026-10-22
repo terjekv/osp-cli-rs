@@ -14,7 +14,9 @@ use super::doc::{
     Block, Doc, EntriesBlock, EntryRow, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
-use super::plan::{FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan};
+use super::plan::{
+    CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan,
+};
 use super::projection::{display_value, ordered_keys};
 use super::settings::HelpLayout;
 use super::text::display_width;
@@ -486,6 +488,46 @@ fn lower_markdown_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
 fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     if plan.mreg_layout == MregLayout::Table {
         return lower_table_doc(output, plan);
+    }
+    if plan.mreg_layout == MregLayout::Compact {
+        let mut blocks = Vec::new();
+        for (card, record) in plan
+            .compact_cards
+            .iter()
+            .zip(output_items_to_rows(&output.items))
+        {
+            for rule in &output.meta.display_rules {
+                if let DisplayRule::Notice { field } = rule
+                    && let Some(value) = record.get(field)
+                {
+                    blocks.push(Block::Paragraph(ParagraphBlock {
+                        text: display_value(value),
+                        indent: 0,
+                        inline_markup: false,
+                    }));
+                }
+            }
+            match card {
+                CompactCard::Entry(field) => blocks.push(Block::KeyValue(KeyValueBlock {
+                    rows: vec![KeyValueRow {
+                        key: field.label.clone(),
+                        value: KeyValueValue::Scalar(field.value.clone()),
+                        value_style: field.value_style.clone(),
+                        indent: None,
+                        gap: None,
+                    }],
+                })),
+                CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
+                    title: Some(title.clone()),
+                    title_chrome: SectionTitleChrome::Ruled,
+                    body_indent: 0,
+                    inline_title_suffix: None,
+                    trailing_newline: false,
+                    blocks: body.iter().cloned().map(Block::Grid).collect(),
+                })),
+            }
+        }
+        return Doc { blocks };
     }
     let mut blocks = Vec::new();
     for (index, mut record) in output_items_to_rows(&output.items).into_iter().enumerate() {
