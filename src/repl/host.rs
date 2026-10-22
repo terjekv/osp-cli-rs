@@ -166,6 +166,16 @@ fn run_repl_cycle(
                     },
                 ));
             }
+            crate::repl::ReplEvent::Action(id @ ("pagination.prev" | "pagination.next")) => {
+                if state.session.native_context.pagination().is_none() {
+                    return Ok(crate::repl::ReplResult::Continue);
+                }
+                if id == "pagination.prev" {
+                    "prev"
+                } else {
+                    "next"
+                }
+            }
             crate::repl::ReplEvent::Action(
                 id @ ("output.page" | "output.editor" | "output.copy"),
             ) => {

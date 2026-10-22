@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Ignore paging keys when no paginated REPL result exists; typed `next` and
+  `prev` retain their guidance.
+
 - Deliver background notices above the complete multiline REPL prompt.
 
 - Preserve terminal scrollback when clearing the REPL for its intro or Ctrl-L.

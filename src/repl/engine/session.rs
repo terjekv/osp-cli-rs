@@ -526,11 +526,17 @@ where
                 }]);
                 return Ok(None);
             }
-            let command = if previous { "prev" } else { "next" };
-            Ok(apply_submission(
-                evaluate_repl_submission(command, submission),
-                Some(editor),
-            ))
+            let id = if previous {
+                "pagination.prev"
+            } else {
+                "pagination.next"
+            };
+            let result = (submission.execute)(crate::repl::ReplEvent::Action(id), history_store)
+                .unwrap_or_else(|err| {
+                    eprintln!("{err}");
+                    ReplResult::Continue
+                });
+            Ok(apply_submission(result, Some(editor)))
         }
         Signal::Success(line) => Ok(apply_submission(
             evaluate_repl_submission(&line, submission),

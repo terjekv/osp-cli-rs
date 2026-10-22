@@ -208,7 +208,9 @@ The REPL provides:
 - history search, bang replay and leading-space privacy; see
   [COMPLETION.md](COMPLETION.md#history) for keys and persistence rules
 - paged results: `next` and `prev`, or Shift+→ / Shift+← (also PageDown /
-  PageUp) on an empty line; with text on the line, Shift+arrows move the cursor
+  PageUp) on an empty line; these keys do nothing without a paginated result.
+  Typed `next` / `prev` still report when there is no result to continue.
+  With text on the line, Shift+arrows move the cursor
 
 Completion does not call remote services while you are typing. It works from
 the known command catalog, config vocabulary, and already-available runtime
