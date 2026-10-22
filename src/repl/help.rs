@@ -177,6 +177,7 @@ mod tests {
             style_overrides: StyleOverrides::default(),
 
             chrome_frame: frame,
+            ruled_section_policy: crate::ui::RuledSectionPolicy::Shared,
         }
     }
 

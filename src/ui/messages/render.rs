@@ -44,7 +44,7 @@ pub(super) fn render_messages(buffer: &MessageBuffer, request: &super::MessageRe
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     let chrome = MessageChrome {
         frame_style: settings.chrome_frame,
-        ruled_policy: request.ruled_policy,
+        ruled_policy: settings.ruled_section_policy,
         unicode: settings.unicode,
         width: settings.width,
     };
@@ -187,7 +187,7 @@ fn render_shared_full_sections(
     chrome: MessageChrome,
 ) -> String {
     let render = section_render_context(styler);
-    let width = chrome.width.or(Some(24));
+    let width = chrome.width;
     let mut lines = Vec::new();
     for section in sections {
         lines.push(render_section_divider(
@@ -232,7 +232,7 @@ fn render_full_section(
         &body,
         chrome.frame_style,
         chrome.unicode,
-        chrome.width.or(Some(24)),
+        chrome.width,
         section_render_context(styler),
         SectionStyleTokens::same(section.level.style_token()),
     )
@@ -352,7 +352,7 @@ mod tests {
         );
         request.layout = options.layout;
         request.settings.chrome_frame = chrome.frame_style;
-        request.ruled_policy = chrome.ruled_policy;
+        request.settings.ruled_section_policy = chrome.ruled_policy;
         request.settings.unicode = chrome.unicode;
         request.settings.width = chrome.width;
         if let Some(styler) = styler {

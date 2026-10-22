@@ -592,6 +592,7 @@ pub struct ResolvedRenderSettings {
     pub theme: ThemeDefinition,
     pub style_overrides: style::StyleOverrides,
     pub chrome_frame: SectionFrameStyle,
+    pub ruled_section_policy: RuledSectionPolicy,
 }
 
 impl RenderSettings {
@@ -685,6 +686,7 @@ impl RenderSettings {
             theme,
             style_overrides: self.style_overrides.clone(),
             chrome_frame: self.chrome_frame,
+            ruled_section_policy: self.ruled_section_policy,
         }
     }
 

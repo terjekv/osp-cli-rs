@@ -2,7 +2,6 @@
 
 mod render;
 use crate::config::ResolvedConfig;
-use crate::ui::section_chrome::RuledSectionPolicy;
 use crate::ui::settings::{RenderProfile, RenderSettings, resolve_settings};
 use crate::ui::style::StyleToken;
 
@@ -99,7 +98,6 @@ pub struct MessageRequest {
     pub max_level: MessageLevel,
     pub layout: MessageLayout,
     pub settings: crate::ui::ResolvedRenderSettings,
-    pub ruled_policy: RuledSectionPolicy,
 }
 
 impl MessageRequest {
@@ -109,7 +107,6 @@ impl MessageRequest {
             max_level,
             layout: MessageLayout::Grouped,
             settings: resolve_settings(settings, RenderProfile::Normal),
-            ruled_policy: settings.ruled_section_policy,
         }
     }
 }

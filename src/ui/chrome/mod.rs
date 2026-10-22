@@ -51,7 +51,7 @@ impl SectionChrome {
     ) -> RenderedTitle {
         match self.title {
             SectionTitleStyle::Plain => plain_section_title(title),
-            SectionTitleStyle::Ruled => ruled_section_title(title, width, unicode),
+            SectionTitleStyle::Ruled => ruled_section_title(title, width, unicode, 2),
         }
     }
 
@@ -70,7 +70,7 @@ impl SectionChrome {
 fn plain_section_title(title: &str) -> RenderedTitle {
     RenderedTitle {
         prefix: String::new(),
-        title: title.trim_end_matches(':').to_string(),
+        title: normalize_title(title).to_string(),
         suffix: ":".to_string(),
     }
 }
@@ -82,26 +82,38 @@ fn ruled_line(width: Option<usize>, unicode: bool) -> Option<String> {
         .map(|width| fill.to_string().repeat(width))
 }
 
-fn ruled_section_title(title: &str, width: Option<usize>, unicode: bool) -> RenderedTitle {
-    let title = title.trim_end_matches(':').to_string();
+pub(crate) fn normalize_title(title: &str) -> &str {
+    title.trim().trim_end_matches(':').trim_end()
+}
+
+/// Shared geometry only; callers retain the policy for showing a title/rule.
+pub(crate) fn ruled_section_title(
+    title: &str,
+    width: Option<usize>,
+    unicode: bool,
+    title_columns: usize,
+) -> RenderedTitle {
+    let title = normalize_title(title).to_string();
     let fill = if unicode { '─' } else { '-' };
-    let prefix = format!("{fill} ");
-    let target_width = match width {
-        Some(width) => width.max(12),
-        None => 24,
-    };
-    let used = UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(title.as_str()) + 1;
-    if used >= target_width {
+    let target_width = width.unwrap_or(24).max(12);
+    if title.is_empty() {
         return RenderedTitle {
-            prefix,
+            prefix: String::new(),
             title,
-            suffix: String::new(),
+            suffix: fill.to_string().repeat(target_width),
         };
     }
+    let prefix = format!("{} ", fill.to_string().repeat(title_columns.max(2) - 1));
+    let used = UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(title.as_str()) + 1;
+    let suffix = if used >= target_width {
+        String::new()
+    } else {
+        format!(" {}", fill.to_string().repeat(target_width - used))
+    };
     RenderedTitle {
         prefix,
         title,
-        suffix: format!(" {}", fill.to_string().repeat(target_width - used)),
+        suffix,
     }
 }
 

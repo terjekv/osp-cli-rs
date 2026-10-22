@@ -181,70 +181,22 @@ pub struct SectionDividerRequest<'a> {
 
 /// Renders a section divider using the requested width and styling.
 pub fn render_section_divider(title: &str, request: &SectionDividerRequest<'_>) -> String {
-    let SectionDividerRequest {
-        unicode,
-        width,
-        title_columns,
-        render,
-        tokens,
-    } = *request;
-    let border_token = tokens.border;
-    let title_token = tokens.title;
-    let fill_char = if unicode { '─' } else { '-' };
-    let target_width = width.unwrap_or(12).max(12);
-    let title = title.trim();
-
-    let raw = if title.is_empty() {
-        fill_char.to_string().repeat(target_width)
-    } else {
-        let title_columns = title_columns.max(2);
-        let prefix = format!(
-            "{} {title} ",
-            fill_char
-                .to_string()
-                .repeat(title_columns.saturating_sub(1))
-        );
-        let prefix_width = display_width(&prefix);
-        if prefix_width >= target_width {
-            prefix
-        } else {
-            format!(
-                "{prefix}{}",
-                fill_char.to_string().repeat(target_width - prefix_width)
-            )
-        }
-    };
-
-    if !render.color {
-        return raw;
-    }
-
-    if title.is_empty() || title_token == border_token {
-        return render.style(&raw, border_token);
-    }
-
-    let title_columns = title_columns.max(2);
-    let prefix = format!(
-        "{} ",
-        fill_char
-            .to_string()
-            .repeat(title_columns.saturating_sub(1))
+    let geometry = crate::ui::chrome::ruled_section_title(
+        title,
+        request.width,
+        request.unicode,
+        request.title_columns,
     );
-    let title_text = title;
-    let prefix_width = display_width(&prefix);
-    let title_width = display_width(title_text);
-    let base_width = prefix_width + title_width + 1;
-    let fill_len = target_width.saturating_sub(base_width);
-    let suffix = if fill_len == 0 {
-        " ".to_string()
-    } else {
-        format!(" {}", fill_char.to_string().repeat(fill_len))
-    };
-
-    let styled_prefix = render.style(&prefix, border_token);
-    let styled_title = render.style(title_text, title_token);
-    let styled_suffix = render.style(&suffix, border_token);
-    format!("{styled_prefix}{styled_title}{styled_suffix}")
+    format!(
+        "{}{}{}",
+        request
+            .render
+            .style(&geometry.prefix, request.tokens.border),
+        request.render.style(&geometry.title, request.tokens.title),
+        request
+            .render
+            .style(&geometry.suffix, request.tokens.border)
+    )
 }
 
 /// Renders one titled section body with the requested frame and style tokens.
@@ -326,7 +278,7 @@ fn render_plain_section(
     title_token: StyleToken,
 ) -> String {
     let mut out = String::new();
-    let title = title.trim();
+    let title = crate::ui::chrome::normalize_title(title);
     let body = body.trim_end_matches('\n');
 
     if !title.is_empty() {
@@ -355,7 +307,7 @@ fn render_ruled_section(
 ) -> String {
     let mut out = String::new();
     let body = body.trim_end_matches('\n');
-    let title = title.trim();
+    let title = crate::ui::chrome::normalize_title(title);
 
     if top_rule {
         out.push_str(&render_section_divider(
@@ -458,7 +410,7 @@ fn render_boxed_section(
     chars: BoxFrameChars,
 ) -> String {
     let lines = section_body_lines(body);
-    let title = title.trim();
+    let title = crate::ui::chrome::normalize_title(title);
     let body_width = lines
         .iter()
         .map(|line| display_width(line))
@@ -653,7 +605,7 @@ mod tests {
             None => unsafe { std::env::remove_var("COLUMNS") },
         }
 
-        assert_eq!(divider.len(), 12);
+        assert_eq!(divider.len(), 24);
     }
 
     #[test]
