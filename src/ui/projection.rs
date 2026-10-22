@@ -21,6 +21,7 @@ pub(super) struct HumanProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ProjectedTable {
+    pub list_items: BTreeMap<(usize, usize), Vec<String>>,
     pub cell_styles: Vec<Vec<Option<CellStyle>>>,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
@@ -1005,6 +1006,28 @@ pub(super) fn project_table(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     ProjectedTable {
+        list_items: rows
+            .iter()
+            .enumerate()
+            .flat_map(|(row_index, row)| {
+                let all_headers = &all_headers;
+                visible_columns
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(column, original)| {
+                        let items = row.get(&all_headers[*original])?.as_array()?;
+                        items
+                            .iter()
+                            .all(|item| !item.is_array() && !item.is_object())
+                            .then(|| {
+                                (
+                                    (row_index, column),
+                                    items.iter().map(display_value).collect(),
+                                )
+                            })
+                    })
+            })
+            .collect(),
         cell_styles: Vec::new(),
         headers: visible_columns
             .iter()

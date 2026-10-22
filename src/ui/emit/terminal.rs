@@ -437,7 +437,10 @@ fn table_row_lines(
         .enumerate()
         .map(|(index, width)| {
             let raw = cells.get(index).map(|cell| cell.raw.as_str()).unwrap_or("");
-            table_cell_lines(raw, *width, overflow)
+            cells
+                .get(index)
+                .and_then(|cell| cell.lines.clone())
+                .unwrap_or_else(|| table_cell_lines(raw, *width, overflow))
         })
         .collect::<Vec<_>>();
     let height = cell_lines.iter().map(Vec::len).max().unwrap_or(1);
@@ -448,6 +451,7 @@ fn table_row_lines(
                 .iter()
                 .enumerate()
                 .map(|(index, lines)| PreparedCell {
+                    lines: None,
                     style: cells.get(index).and_then(|cell| cell.style.clone()),
                     raw: lines.get(line_index).cloned().unwrap_or_default(),
                     markdown: String::new(),

@@ -14,6 +14,7 @@ pub(super) struct PreparedTable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PreparedCell {
+    pub lines: Option<Vec<String>>,
     pub raw: String,
     pub markdown: String,
     pub width: usize,
@@ -38,6 +39,11 @@ impl PreparedTable {
             .map(|(index, row)| {
                 let mut cells = prepare_cells(row);
                 for (col, cell) in cells.iter_mut().enumerate() {
+                    cell.lines = block
+                        .cell_lines
+                        .get(index)
+                        .and_then(|row| row.get(col))
+                        .cloned();
                     cell.style = block
                         .cell_styles
                         .get(index)
@@ -77,6 +83,7 @@ fn prepare_cells(cells: &[String]) -> Vec<PreparedCell> {
 impl PreparedCell {
     fn new(raw: &str) -> Self {
         Self {
+            lines: None,
             style: None,
             raw: raw.to_string(),
             markdown: escape_markdown_table_cell(raw),
@@ -94,6 +101,7 @@ mod tests {
     #[test]
     fn prepared_table_captures_shared_width_and_markdown_shape_unit() {
         let table = TableBlock {
+            cell_lines: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {

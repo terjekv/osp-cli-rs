@@ -98,3 +98,7 @@ recommendation, then shape inference. Machine recommendations bypass card rules.
 
 Projection drops fields empty in every object-array item and reduces remaining
 single-field object lists to value lists before table/card classification.
+
+Projected tables retain scalar list items. The planner fits whole-item list
+cells and stores their physical lines in the IR; terminal emission uses those
+lines directly. Wrap mode prints one complete item per line.

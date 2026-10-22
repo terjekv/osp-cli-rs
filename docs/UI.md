@@ -273,7 +273,11 @@ have table density `56 / (1 + 8 + 3 + 1) = 4.31`. If the complete cards need
 24 lines, their density is `88 / 24 = 3.67`, so the table stays. A single
 ordinary row already infers MREG before this comparison.
 
-Table cells comma-join lists. Markdown keeps complete cell values and escapes
+Table cells comma-join lists. Fitted list cells keep leading whole items and a
+remaining count: `ns1.nrec.no +1`. Only when the first item cannot fit is that
+item ellipsized, for example `long-name… +1`. Lists count as prose when shrinking;
+wrap mode measures the longest item and prints one complete item per line.
+Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.
 Terminal fitting measures the exact escaped representation for `none`, `clip`
 and `ellipsis`, and the widest physical line for `wrap`.

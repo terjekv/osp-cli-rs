@@ -869,6 +869,7 @@ fn is_scalar_like(value: &Value) -> bool {
 
 fn table_from_plan(table: &PlannedTable) -> TableBlock {
     TableBlock {
+        cell_lines: table.cell_lines.clone(),
         widths: table.widths.clone(),
         headers: table.data.headers.clone(),
         rows: table.data.rows.clone(),

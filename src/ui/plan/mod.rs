@@ -12,7 +12,7 @@ use super::settings::{
     FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableBorderStyle,
     TableOverflow, TableTooWide, resolve_settings,
 };
-use super::text::{escape_table_line_breaks, table_cell_lines, table_cell_width};
+use super::text::{escape_table_line_breaks, list_cell_lines, table_cell_lines, table_cell_width};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{OutputItems, OutputResult};
 use std::collections::BTreeMap;
@@ -36,6 +36,7 @@ pub(super) enum MregLayout {
 pub(super) struct PlannedTable {
     pub data: ProjectedTable,
     pub widths: Vec<usize>,
+    pub cell_lines: Vec<Vec<Vec<String>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,8 +107,22 @@ fn plan_table(
         .map(|(index, header)| {
             data.rows
                 .iter()
-                .filter_map(|row| row.get(index))
-                .map(|cell| table_cell_width(cell, settings.table_overflow))
+                .enumerate()
+                .filter_map(|(row_index, row)| {
+                    row.get(index).map(|cell| {
+                        if settings.table_overflow == TableOverflow::Wrap
+                            && let Some(items) = data.list_items.get(&(row_index, index))
+                        {
+                            items
+                                .iter()
+                                .map(|item| table_cell_width(item, TableOverflow::None))
+                                .max()
+                                .unwrap_or(0)
+                        } else {
+                            table_cell_width(cell, settings.table_overflow)
+                        }
+                    })
+                })
                 .fold(
                     table_cell_width(header, settings.table_overflow),
                     usize::max,
@@ -116,8 +131,7 @@ fn plan_table(
         .collect::<Vec<_>>();
     let widths = table::fitted_table_widths(
         &natural,
-        &data.headers,
-        &data.rows,
+        data,
         settings
             .width
             .map(|width| width.saturating_sub(settings.margin + indent)),
@@ -127,9 +141,32 @@ fn plan_table(
             TableOverflow::None
         },
     );
+    let cell_lines = data
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            widths
+                .iter()
+                .enumerate()
+                .map(|(column, width)| {
+                    if let Some(items) = data.list_items.get(&(row_index, column)) {
+                        list_cell_lines(items, *width, settings.table_overflow)
+                    } else {
+                        table_cell_lines(
+                            row.get(column).map(String::as_str).unwrap_or_default(),
+                            *width,
+                            settings.table_overflow,
+                        )
+                    }
+                })
+                .collect()
+        })
+        .collect();
     PlannedTable {
         data: data.clone(),
         widths,
+        cell_lines,
     }
 }
 
@@ -292,25 +329,9 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .collect();
     if compare_cards && let [table] = plan.tables.as_slice() {
         let row_lines = table
-            .data
-            .rows
+            .cell_lines
             .iter()
-            .map(|row| {
-                table
-                    .widths
-                    .iter()
-                    .enumerate()
-                    .map(|(index, width)| {
-                        table_cell_lines(
-                            row.get(index).map(String::as_str).unwrap_or_default(),
-                            *width,
-                            plan.settings.table_overflow,
-                        )
-                        .len()
-                    })
-                    .max()
-                    .unwrap_or(1)
-            })
+            .map(|row| row.iter().map(Vec::len).max().unwrap_or(1))
             .sum::<usize>();
         let table_lines = TABLE_HEADER_LINES
             + row_lines

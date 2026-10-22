@@ -289,6 +289,59 @@ pub(super) fn table_cell_lines(
     }
 }
 
+pub(super) fn list_cell_lines(
+    items: &[String],
+    width: usize,
+    overflow: super::settings::TableOverflow,
+) -> Vec<String> {
+    use super::settings::TableOverflow;
+    let items = items
+        .iter()
+        .map(|item| escape_table_line_breaks(item))
+        .collect::<Vec<_>>();
+    if overflow == TableOverflow::Wrap {
+        return if items.is_empty() {
+            vec![String::new()]
+        } else {
+            items
+        };
+    }
+    let full = items.join(", ");
+    if overflow == TableOverflow::None || UnicodeWidthStr::width(full.as_str()) <= width {
+        return vec![full];
+    }
+    let mut prefix = String::new();
+    let mut fitted = None;
+    let mut prefix_width = 0;
+    for (index, item) in items.iter().take(items.len().saturating_sub(1)).enumerate() {
+        prefix_width += UnicodeWidthStr::width(item.as_str()) + if index == 0 { 0 } else { 2 };
+        if prefix_width > width {
+            break;
+        }
+        if index > 0 {
+            prefix.push_str(", ");
+        }
+        prefix.push_str(item);
+        let remaining = items.len() - index - 1;
+        if prefix_width + 2 + remaining.to_string().len() <= width {
+            fitted = Some((prefix.len(), remaining));
+        }
+    }
+    if let Some((bytes, remaining)) = fitted {
+        return vec![format!("{} +{remaining}", &prefix[..bytes])];
+    }
+    let suffix = if items.len() > 1 {
+        format!(" +{}", items.len() - 1)
+    } else {
+        String::new()
+    };
+    let room = width.saturating_sub(UnicodeWidthStr::width(suffix.as_str()) + 1);
+    vec![format!(
+        "{}…{suffix}",
+        crop_display_width(items.first().map(String::as_str).unwrap_or_default(), room)
+    )]
+}
+
 #[cfg(test)]
 mod tests {
     use super::{crop_display_width, display_width, visible_inline_text, wrap_display_width};

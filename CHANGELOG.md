@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Fit list table cells between items with a remaining `+N` count. Only an
+  overwide first item is ellipsized; wrap mode prints whole items on separate
+  lines. Lists shrink as prose instead of protecting the joined text as a token.
+
 - Reduce nested single-field object arrays to value lists for human rendering
   after removing uniformly empty fields. These scalar lists qualify for compact
   cards; nested tables also omit empty fields. Exports retain canonical data.
