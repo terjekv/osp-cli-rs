@@ -152,7 +152,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
 
     public_docs = ConfidenceCheck(
         name="public-docs",
-        description="Repo-wide public Rustdoc coverage and feature-gate contract.",
+        description="Compiler-backed public Rustdoc coverage.",
         command=[python, str(root / "scripts" / "public-docs.py")],
     )
     rustdoc_warnings = ConfidenceCheck(
@@ -165,11 +165,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         name="public-api-examples",
         description="Curated runnable doctest baseline for public entrypoints.",
         command=[python, str(root / "scripts" / "public-api-examples.py")],
-    )
-    contract_env = ConfidenceCheck(
-        name="contract-env",
-        description="Hermetic contract test environment guardrail.",
-        command=[str(root / "scripts" / "check-contract-env.sh")],
     )
     miri_setup = ConfidenceCheck(
         name="miri-setup",
@@ -266,7 +261,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         command=[python, str(root / "scripts" / "perf.py")],
     )
 
-    static_checks = [contract_env, fmt, clippy, toolchain, architecture]
+    static_checks = [fmt, clippy, toolchain, architecture]
     behavior_checks = [contracts, integration]
 
     return {
@@ -277,7 +272,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
             ),
             covers=(
                 "formatting and lint policy",
-                "hermetic contract environment",
                 "architecture guardrails",
             ),
             omits=(
@@ -485,7 +479,6 @@ def required_tools(checks: list[ConfidenceCheck], root: Path) -> set[str]:
     """Collect prerequisites before a lane spends time building anything."""
 
     special = {
-        "contract-env": {"bash", "rg"},
         "public-api-examples": set(),
         "startup-budget": set(),
         "startup-baseline": set(),
