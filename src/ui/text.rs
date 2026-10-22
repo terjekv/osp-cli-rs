@@ -278,7 +278,13 @@ pub(super) fn table_cell_lines(
         }
         TableOverflow::Wrap => raw
             .split('\n')
-            .flat_map(|line| wrap_display_width(line, width))
+            .flat_map(|line| {
+                if UnicodeWidthStr::width(line) <= width {
+                    vec![line.to_owned()]
+                } else {
+                    wrap_display_width(line, width)
+                }
+            })
             .collect(),
     }
 }
