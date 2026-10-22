@@ -28,6 +28,11 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Protect list table columns with an item-aware minimum: keep each single value
+  or the first complete item plus its remaining count, and hide columns that
+  cannot fit. Spare width reveals more items. Mixed prose/list columns retain
+  prose fitting; wrap and natural-width output keep their existing behavior.
+
 - Summarize multi-field object arrays and objects in terminal table cells as
   item or field counts. Protect counts during fitting and include them in the
   shortened-values footer with a card action; cards and exports keep details.
@@ -48,9 +53,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   pager, card and quoted column-pick actions. Wrap the footer instead of cropping
   it; nested card tables omit actions. Quiet/help-none output suppresses it.
 
-- Fit list table cells between items with a remaining `+N` count. Only an
-  overwide first item is ellipsized; wrap mode prints whole items on separate
-  lines. Lists shrink as prose instead of protecting the joined text as a token.
+- Fit list table cells between items with a remaining `+N` count. Wrap mode
+  prints whole items on separate lines; mixed prose/list columns use prose
+  fitting and may ellipsize an overwide first item.
 
 - Reduce nested single-field object arrays to value lists for human rendering
   after removing uniformly empty fields. These scalar lists qualify for compact

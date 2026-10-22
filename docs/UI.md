@@ -269,9 +269,10 @@ columns (`ATOMIC_MAX_WIDTH`). Atomic columns and the first column retain their
 natural widths. Prose columns shrink to the smaller of their natural width and
 the larger of 12 (`PROSE_MIN_WIDTH`) or their header width. Headers stay whole.
 If those minimum widths do not fit, columns drop from the right in producer
-order, with the `+N hidden: …` footer. Spare width grows prose columns from left
-to right up to natural width. The first column may exceed the available width.
-`clip`, `ellipsis` and `wrap` affect prose cells only; atomic values remain whole.
+order, with the `+N hidden: …` footer. Spare width grows prose and list columns
+from left to right up to natural width. The first column may exceed the available
+width.
+Prose cells may be clipped, ellipsized or wrapped; atomic values remain whole.
 `none` uses natural widths without fitting.
 
 Within those guards, the planner compares values per rendered line. Table
@@ -289,8 +290,14 @@ ordinary row already infers MREG before this comparison.
 
 Table cells comma-join lists. Fitted list cells keep leading whole items and a
 remaining count: `ns1.nrec.no +1`. Only when the first item cannot fit is that
-item ellipsized, for example `long-name… +1`. Lists count as prose when shrinking;
-wrap mode measures the longest item and prints one complete item per line.
+item ellipsized in mixed prose/list columns. A column is a list column when at
+least one projected cell is a scalar list (including a reduced single-field
+object list) and every other nonempty cell is a list or an atomic value under
+the rule above. Mixed prose/list columns remain prose. A list column's minimum
+is the maximum across rows of the complete single value or first item plus its
+` +N` remaining count, never below the header width. If that minimum cannot fit,
+the column is hidden instead of cutting inside an item. Wrap mode measures the
+longest item and prints one complete item per line; `none` retains natural widths.
 Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.
 Terminal fitting measures the exact escaped representation for `none`, `clip`

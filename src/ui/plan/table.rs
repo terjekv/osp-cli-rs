@@ -24,33 +24,65 @@ pub(super) fn fitted_table_widths(
         .iter()
         .enumerate()
         .map(|(column, header)| {
-            let list_column = data.list_items.keys().any(|(_, index)| *index == column);
-            let atomic = !list_column
+            let atomic_cell = |row_index, cell: &str| {
+                let rendered = if overflow == TableOverflow::Wrap {
+                    cell.to_owned()
+                } else {
+                    escape_table_line_breaks(cell)
+                };
+                data.summarized_cells.contains(&(row_index, column))
+                    || rendered.is_empty()
+                    || (!rendered.chars().any(char::is_whitespace)
+                        && table_cell_width(cell, overflow) <= ATOMIC_MAX_WIDTH)
+            };
+            let has_list = data.list_items.keys().any(|(_, index)| *index == column);
+            let list_column = has_list
                 && data
                     .rows
                     .iter()
                     .enumerate()
                     .filter_map(|(row_index, row)| row.get(column).map(|cell| (row_index, cell)))
                     .all(|(row_index, cell)| {
-                        let rendered = if overflow == TableOverflow::Wrap {
-                            cell.clone()
-                        } else {
-                            escape_table_line_breaks(cell)
-                        };
-                        data.summarized_cells.contains(&(row_index, column))
-                            || rendered.is_empty()
-                            || (!rendered.chars().any(char::is_whitespace)
-                                && table_cell_width(cell, overflow) <= ATOMIC_MAX_WIDTH)
+                        data.list_items.contains_key(&(row_index, column))
+                            || atomic_cell(row_index, cell)
                     });
+            let atomic = !has_list
+                && data.rows.iter().enumerate().all(|(row_index, row)| {
+                    row.get(column)
+                        .is_none_or(|cell| atomic_cell(row_index, cell))
+                });
             if column == 0 || atomic {
                 natural[column]
             } else {
-                let item_width = if overflow == TableOverflow::Wrap {
-                    data.list_items
+                let item_width = if list_column || overflow == TableOverflow::Wrap {
+                    data.rows
                         .iter()
-                        .filter(|((_, index), _)| *index == column)
-                        .flat_map(|(_, items)| items)
-                        .map(|item| table_cell_width(item, TableOverflow::None))
+                        .enumerate()
+                        .map(|(row_index, row)| {
+                            if let Some(items) = data.list_items.get(&(row_index, column)) {
+                                if overflow == TableOverflow::Wrap {
+                                    items
+                                        .iter()
+                                        .map(|item| table_cell_width(item, TableOverflow::None))
+                                        .max()
+                                        .unwrap_or(0)
+                                } else {
+                                    items.first().map_or(0, |first| {
+                                        table_cell_width(first, TableOverflow::None)
+                                            + if items.len() > 1 {
+                                                2 + (items.len() - 1).to_string().len()
+                                            } else {
+                                                0
+                                            }
+                                    })
+                                }
+                            } else if list_column {
+                                row.get(column)
+                                    .map_or(0, |cell| table_cell_width(cell, overflow))
+                            } else {
+                                0
+                            }
+                        })
                         .max()
                         .unwrap_or(0)
                 } else {
@@ -63,12 +95,14 @@ pub(super) fn fitted_table_widths(
                     .map(|(row, column)| table_cell_width(&data.rows[*row][*column], overflow))
                     .max()
                     .unwrap_or(0);
-                natural[column].min(
-                    PROSE_MIN_WIDTH
-                        .max(table_cell_width(header, overflow))
-                        .max(item_width)
-                        .max(summary_width),
-                )
+                let protected = table_cell_width(header, overflow)
+                    .max(item_width)
+                    .max(summary_width);
+                if list_column {
+                    protected
+                } else {
+                    natural[column].min(PROSE_MIN_WIDTH.max(protected))
+                }
             }
         })
         .collect::<Vec<_>>();
@@ -82,7 +116,7 @@ pub(super) fn fitted_table_widths(
         .saturating_sub(widths.len() * 3 + 1)
         .saturating_sub(widths.iter().sum());
     for (index, width) in widths.iter_mut().enumerate() {
-        let extra = spare.min(natural[index] - *width);
+        let extra = spare.min(natural[index].saturating_sub(*width));
         *width += extra;
         spare -= extra;
     }
