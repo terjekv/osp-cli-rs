@@ -219,6 +219,17 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("ellipsis")),
             },
             BuiltinKey {
+                key: "ui.table.too_wide",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(
+                        crate::ui::settings::TableTooWide::ALL
+                            .iter()
+                            .map(|value| value.as_str()),
+                    )
+                    .with_doc("Use MREG cards or hide columns when an automatic table cannot fit"),
+                default: Some(ConfigValue::from("mreg")),
+            },
+            BuiltinKey {
                 key: "ui.table.border",
                 schema: SchemaEntry::string()
                     .with_allowed_values(

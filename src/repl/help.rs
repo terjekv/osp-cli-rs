@@ -116,6 +116,7 @@ fn canonical_help_settings(resolved: &ResolvedRenderSettings) -> crate::ui::Rend
         width_max: 0,
         margin: resolved.margin,
 
+        table_too_wide: crate::ui::settings::TableTooWide::Mreg,
         table_overflow: crate::ui::TableOverflow::Clip,
         table_border: crate::ui::TableBorderStyle::None,
         nested_table_border: crate::ui::TableBorderOverride::Inherit,
@@ -166,6 +167,7 @@ mod tests {
             width: Some(24),
             margin: 0,
 
+            table_too_wide: crate::ui::settings::TableTooWide::Mreg,
             table_overflow: TableOverflow::Clip,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderStyle::None,

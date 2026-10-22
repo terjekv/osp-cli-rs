@@ -123,7 +123,9 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     );
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "--help"]);
-    assert_eq!(mreg, table);
+    assert!(mreg.contains("section: Usage"));
+    assert!(mreg.contains("description: Inspect and edit runtime config"));
+    assert!(!mreg.lines().any(|line| line.starts_with('|')));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "--help"]);
     assert!(value.contains("OSP CLI"));

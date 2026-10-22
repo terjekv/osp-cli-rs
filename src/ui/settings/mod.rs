@@ -49,6 +49,43 @@ pub enum TableOverflow {
     Wrap,
 }
 
+/// How automatically selected tables handle columns that cannot fit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TableTooWide {
+    #[default]
+    Mreg,
+    Hide,
+}
+
+impl TableTooWide {
+    /// All variants in canonical configuration order.
+    pub const ALL: [Self; 2] = [Self::Mreg, Self::Hide];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "mreg" => Some(Self::Mreg),
+            "hide" => Some(Self::Hide),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mreg => "mreg",
+            Self::Hide => "hide",
+        }
+    }
+}
+
+/// Where the effective output format was selected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatProvenance {
+    Explicit,
+    Configured,
+    Recommended,
+    Inferred,
+}
+
 /// Layout density for guide/help rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HelpLayout {
@@ -208,6 +245,7 @@ pub struct RenderSettings {
     pub width_max: usize,
     pub margin: usize,
     pub table_overflow: TableOverflow,
+    pub table_too_wide: TableTooWide,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
@@ -233,6 +271,7 @@ impl Default for RenderSettings {
             width_max: usize::try_from(DEFAULT_UI_WIDTH_MAX).unwrap_or(0),
             margin: 0,
             table_overflow: TableOverflow::Ellipsis,
+            table_too_wide: TableTooWide::Mreg,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
@@ -486,6 +525,12 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.table_overflow = parsed;
     }
 
+    if let Some(value) = config.get_string("ui.table.too_wide")
+        && let Some(parsed) = TableTooWide::parse(value)
+    {
+        settings.table_too_wide = parsed;
+    }
+
     if let Some(value) = config.get_string("ui.table.border")
         && let Some(parsed) = TableBorderStyle::parse(value)
     {
@@ -540,6 +585,7 @@ pub struct ResolvedRenderSettings {
     pub width: Option<usize>,
     pub margin: usize,
     pub table_overflow: TableOverflow,
+    pub table_too_wide: TableTooWide,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
     pub theme_name: String,
@@ -632,6 +678,7 @@ impl RenderSettings {
             width: self.resolve_width(),
             margin: self.margin,
             table_overflow: self.table_overflow,
+            table_too_wide: self.table_too_wide,
             table_border: self.table_border,
             nested_table_border: self.nested_table_border.resolve(self.table_border),
             theme_name,
@@ -656,44 +703,50 @@ impl RenderSettings {
         }
     }
 
-    pub(crate) fn resolve_output_format(&self, output: &OutputResult) -> OutputFormat {
-        if self.format_explicit && !matches!(self.format, OutputFormat::Auto) {
-            return self.format;
+    pub(crate) fn resolve_output_format(
+        &self,
+        output: &OutputResult,
+    ) -> (OutputFormat, FormatProvenance) {
+        use FormatProvenance::{Configured, Explicit, Inferred, Recommended};
+        if self.format_explicit && self.format != OutputFormat::Auto {
+            return (self.format, Explicit);
         }
-
-        // Documents keep their layout unless a format is asked for explicitly.
+        // Documents keep their layout unless an invocation requests a format.
         if output.meta.document_rows {
-            return if self.guide_default_format {
-                OutputFormat::Auto
+            return if self.guide_default_format || self.format == OutputFormat::Auto {
+                (OutputFormat::Auto, Inferred)
             } else {
-                self.format
+                (self.format, Configured)
             };
         }
-
         if let Some(recommended) = output.meta.render_recommendation {
-            return match recommended {
-                RenderRecommendation::Format(format) => format,
-                RenderRecommendation::Document => OutputFormat::Auto,
-            };
+            return (
+                match recommended {
+                    RenderRecommendation::Format(format) => format,
+                    RenderRecommendation::Document if self.format == OutputFormat::Auto => {
+                        OutputFormat::Auto
+                    }
+                    RenderRecommendation::Document => self.format,
+                },
+                Recommended,
+            );
         }
-
-        if !matches!(self.format, OutputFormat::Auto) {
-            return self.format;
+        if self.format != OutputFormat::Auto {
+            return (self.format, Configured);
         }
-
-        let OutputItems::Rows(rows) = &output.items else {
-            return OutputFormat::Table;
+        let format = match &output.items {
+            OutputItems::Groups(_) => OutputFormat::Table,
+            OutputItems::Rows(rows)
+                if rows
+                    .iter()
+                    .all(|row| row.len() == 1 && row.contains_key("value")) =>
+            {
+                OutputFormat::Value
+            }
+            OutputItems::Rows(rows) if rows.len() <= 1 => OutputFormat::Mreg,
+            _ => OutputFormat::Table,
         };
-        if rows
-            .iter()
-            .all(|row| row.len() == 1 && row.contains_key("value"))
-        {
-            OutputFormat::Value
-        } else if rows.len() <= 1 {
-            OutputFormat::Mreg
-        } else {
-            OutputFormat::Table
-        }
+        (format, Inferred)
     }
 }
 
@@ -938,14 +991,14 @@ mod tests {
         let guide_output =
             Document::from_help_text("Usage: osp history <COMMAND>\n").to_output_result();
         assert_eq!(
-            plain_settings.resolve_output_format(&guide_output),
+            plain_settings.resolve_output_format(&guide_output).0,
             OutputFormat::Auto
         );
 
         let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
         explicit_json.format_explicit = true;
         assert_eq!(
-            explicit_json.resolve_output_format(&guide_output),
+            explicit_json.resolve_output_format(&guide_output).0,
             OutputFormat::Json
         );
 
@@ -953,7 +1006,7 @@ mod tests {
         recommended.meta.render_recommendation =
             Some(RenderRecommendation::Format(OutputFormat::Markdown));
         assert_eq!(
-            plain_settings.resolve_output_format(&recommended),
+            plain_settings.resolve_output_format(&recommended).0,
             OutputFormat::Markdown
         );
 
@@ -987,19 +1040,19 @@ mod tests {
             },
         };
         assert_eq!(
-            plain_settings.resolve_output_format(&grouped),
+            plain_settings.resolve_output_format(&grouped).0,
             OutputFormat::Table
         );
 
         let value_output = OutputResult::from_rows(vec![row! { "value" => "hello" }]);
         assert_eq!(
-            plain_settings.resolve_output_format(&value_output),
+            plain_settings.resolve_output_format(&value_output).0,
             OutputFormat::Value
         );
 
         let mreg_output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]);
         assert_eq!(
-            plain_settings.resolve_output_format(&mreg_output),
+            plain_settings.resolve_output_format(&mreg_output).0,
             OutputFormat::Mreg
         );
     }

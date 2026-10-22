@@ -695,7 +695,11 @@ fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
-    let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
+    let output = guide.to_output_result();
+    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let projection =
+        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
+    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
 
     let compact =
         super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
@@ -727,7 +731,11 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
         "Usage: osp history <COMMAND>\n\nCommands:\n  list   List history entries\n",
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
-    let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
+    let output = guide.to_output_result();
+    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let projection =
+        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
+    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
 
     let full = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, true);
 
@@ -740,7 +748,11 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
 fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
     let guide = Document::from_help_text("Commands:\n  list   List history entries\n");
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
-    let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
+    let output = guide.to_output_result();
+    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let projection =
+        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
+    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
     let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(block) = &doc.blocks[0] else {
@@ -766,20 +778,24 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
     };
     let output = guide.to_output_result();
 
-    let guide_plan = plan_output(
+    let mut guide_plan = plan_output(
         &output,
         &RenderSettings::test_plain(OutputFormat::Auto),
         RenderProfile::Normal,
     );
-    let guide_doc = super::lower::lower_output(
-        &super::projection::project(
-            &output,
-            guide_plan.format,
-            &RenderSettings::test_plain(OutputFormat::Auto),
-            RenderProfile::Normal,
-        ),
-        &guide_plan,
+    let projection = super::projection::project(
+        &output,
+        guide_plan.format,
+        &RenderSettings::test_plain(OutputFormat::Auto),
+        RenderProfile::Normal,
     );
+    super::plan::plan_layout(
+        &projection,
+        &mut guide_plan,
+        &RenderSettings::test_plain(OutputFormat::Auto),
+        RenderProfile::Normal,
+    );
+    let guide_doc = super::lower::lower_output(&projection, &guide_plan);
     let Block::Section(guide_section) = &guide_doc.blocks[0] else {
         panic!("expected direct guide section");
     };
@@ -794,16 +810,20 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
-    let markdown_plan = plan_output(&output, &markdown_settings, RenderProfile::Normal);
-    let markdown_doc = super::lower::lower_output(
-        &super::projection::project(
-            &output,
-            markdown_plan.format,
-            &markdown_settings,
-            RenderProfile::Normal,
-        ),
-        &markdown_plan,
+    let mut markdown_plan = plan_output(&output, &markdown_settings, RenderProfile::Normal);
+    let projection = super::projection::project(
+        &output,
+        markdown_plan.format,
+        &markdown_settings,
+        RenderProfile::Normal,
     );
+    super::plan::plan_layout(
+        &projection,
+        &mut markdown_plan,
+        &markdown_settings,
+        RenderProfile::Normal,
+    );
+    let markdown_doc = super::lower::lower_output(&projection, &markdown_plan);
     let Block::Section(markdown_section) = &markdown_doc.blocks[0] else {
         panic!("expected markdown guide section");
     };
@@ -851,23 +871,24 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         },
     };
 
-    let table_plan = plan_output(
+    let mut table_plan = plan_output(
         &output,
         &RenderSettings::test_plain(OutputFormat::Table),
         RenderProfile::Normal,
     );
-    let table_doc = super::lower::lower_output(
-        &super::projection::project(
-            &output,
-            table_plan.format,
-            &RenderSettings::test_plain(OutputFormat::Table),
-            RenderProfile::Normal,
-        ),
-        &table_plan,
+    let projection = super::projection::project(
+        &output,
+        table_plan.format,
+        &RenderSettings::test_plain(OutputFormat::Table),
+        RenderProfile::Normal,
     );
-    assert!(matches!(table_doc.blocks[0], Block::Table(_)));
-    assert!(matches!(table_doc.blocks[1], Block::Blank));
-    assert!(matches!(table_doc.blocks[2], Block::Table(_)));
+    super::plan::plan_layout(
+        &projection,
+        &mut table_plan,
+        &RenderSettings::test_plain(OutputFormat::Table),
+        RenderProfile::Normal,
+    );
+    let table_doc = super::lower::lower_output(&projection, &table_plan);
     let Block::Table(first_group) = &table_doc.blocks[0] else {
         panic!("expected first grouped table");
     };
@@ -930,7 +951,11 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     };
     let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(40);
-    let plan = plan_output(&guide.to_output_result(), &settings, RenderProfile::Normal);
+    let output = guide.to_output_result();
+    let mut plan = plan_output(&output, &settings, RenderProfile::Normal);
+    let projection =
+        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
+    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
     let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, false);
 
     let Block::Section(session) = &doc.blocks[0] else {

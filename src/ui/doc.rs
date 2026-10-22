@@ -55,6 +55,7 @@ pub enum SectionTitleChrome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableBlock {
+    pub widths: Vec<usize>,
     pub cell_styles: Vec<Vec<Option<String>>>,
     pub summary: Vec<KeyValueRow>,
     pub headers: Vec<String>,

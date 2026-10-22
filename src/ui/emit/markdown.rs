@@ -322,6 +322,7 @@ mod tests {
     #[test]
     fn markdown_emitter_handles_empty_and_summary_tables_unit() {
         let empty = TableBlock {
+            widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: Vec::new(),
             headers: Vec::new(),
@@ -332,6 +333,7 @@ mod tests {
         assert_eq!(emit_table(&empty), "");
 
         let table = TableBlock {
+            widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
                 value_style: None,

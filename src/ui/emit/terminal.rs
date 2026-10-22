@@ -8,7 +8,7 @@ use crate::ui::doc::{
     Block, Doc, EntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock, ParagraphBlock,
     SectionBlock, SectionTitleChrome, TableBlock,
 };
-use crate::ui::settings::{RenderBackend, ResolvedRenderSettings, TableBorderStyle, TableOverflow};
+use crate::ui::settings::{ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
 use crate::ui::text::{crop_display_width, escape_table_line_breaks, wrap_display_width};
 
@@ -265,16 +265,8 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
     }
 
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
-    let table = PreparedTable::for_terminal(block, settings.table_overflow);
-    let widths = fitted_table_widths(
-        &table.widths,
-        &table.headers,
-        &table.rows,
-        settings
-            .width
-            .map(|width| width.saturating_sub(settings.margin)),
-        settings.table_overflow,
-    );
+    let table = PreparedTable::for_terminal(block);
+    let widths = &block.widths;
     let mut lines = Vec::new();
     if !block.summary.is_empty() {
         lines.push(indent_lines(
@@ -283,8 +275,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         ));
     }
 
-    let unicode =
-        settings.unicode && matches!(settings.backend, RenderBackend::Rich | RenderBackend::Plain);
+    let unicode = settings.unicode;
     let style = if block.nested {
         settings.nested_table_border
     } else {
@@ -303,7 +294,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         indent_lines(
             &styler.paint(
                 &table_rule(
-                    &widths,
+                    widths,
                     border.top_left,
                     border.join_top,
                     border.top_right,
@@ -317,7 +308,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
     lines.extend(
         table_row_lines(
             &table.headers,
-            &widths,
+            widths,
             &table.column_align,
             border.vertical,
             &styler,
@@ -332,7 +323,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         indent_lines(
             &styler.paint(
                 &table_rule(
-                    &widths,
+                    widths,
                     border.join_left,
                     border.join_mid,
                     border.join_right,
@@ -347,7 +338,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         lines.extend(
             table_row_lines(
                 row,
-                &widths,
+                widths,
                 &table.column_align,
                 border.vertical,
                 &styler,
@@ -363,7 +354,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         indent_lines(
             &styler.paint(
                 &table_rule(
-                    &widths,
+                    widths,
                     border.bottom_left,
                     border.join_bottom,
                     border.bottom_right,
@@ -400,87 +391,6 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
         ));
     }
     lines.join("\n")
-}
-
-fn fitted_table_widths(
-    natural: &[usize],
-    headers: &[PreparedCell],
-    rows: &[Vec<PreparedCell>],
-    available_width: Option<usize>,
-    overflow: TableOverflow,
-) -> Vec<usize> {
-    let Some(available_width) = available_width else {
-        return natural.to_vec();
-    };
-    if matches!(overflow, TableOverflow::None) || natural.is_empty() {
-        return natural.to_vec();
-    }
-
-    let mut widths = natural.to_vec();
-    let mut minimum = headers
-        .iter()
-        .map(|cell| cell.width.max(1))
-        .collect::<Vec<_>>();
-    if matches!(overflow, TableOverflow::Ellipsis | TableOverflow::Wrap) {
-        // Protect identifier cells and comma-separated identifier lists without
-        // treating an isolated URL or long word inside prose as a column floor.
-        let secondary_room = available_width
-            .saturating_sub(widths.len() * 3 + 1)
-            .saturating_sub(natural.first().copied().unwrap_or(0));
-        let token_width_limit = (available_width / 3)
-            .min(secondary_room / widths.len().saturating_sub(1).max(1))
-            .max(1);
-        for (column, minimum_width) in minimum.iter_mut().enumerate() {
-            for cell in rows.iter().filter_map(|row| row.get(column)) {
-                let tokens = cell.raw.split(", ").collect::<Vec<_>>();
-                if tokens
-                    .iter()
-                    .all(|token| !token.is_empty() && !token.chars().any(char::is_whitespace))
-                {
-                    let token_width = tokens
-                        .iter()
-                        .enumerate()
-                        .map(|(index, token)| {
-                            UnicodeWidthStr::width(*token) + usize::from(index + 1 < tokens.len())
-                        })
-                        .max()
-                        .unwrap_or(1)
-                        .min(token_width_limit);
-                    *minimum_width = (*minimum_width).max(token_width);
-                }
-            }
-        }
-    }
-    // The first column names the row; cutting it would make rows unusable,
-    // so it keeps its whole width and later columns give way instead.
-    if let (Some(first), Some(natural_first)) = (minimum.first_mut(), natural.first()) {
-        *first = (*first).max(*natural_first);
-    }
-    // Column order expresses product priority. Drop secondary columns when
-    // headings or useful tokens cannot fit; prose can use the remaining room.
-    while widths.len() > 1
-        && minimum[..widths.len()].iter().sum::<usize>() + widths.len() * 3 + 1 > available_width
-    {
-        widths.pop();
-    }
-    let budget = available_width.saturating_sub(widths.len() * 3 + 1);
-    while widths.iter().sum::<usize>() > budget {
-        let Some(index) = (0..widths.len())
-            .filter(|index| widths[*index] > minimum[*index])
-            .max_by_key(|index| widths[*index])
-        else {
-            break;
-        };
-        let excess = widths.iter().sum::<usize>() - budget;
-        let reduction = excess
-            .div_ceil(widths.len())
-            .min(widths[index] - minimum[index]);
-        widths[index] -= reduction;
-    }
-    if widths.len() == 1 {
-        widths[0] = widths[0].min(budget.max(1));
-    }
-    widths
 }
 
 fn table_row_lines(

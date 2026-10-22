@@ -18,7 +18,7 @@ use super::doc::{
     Block, Doc, EntriesBlock, EntryRow, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
-use super::plan::RenderPlan;
+use super::plan::{FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan};
 use super::projection::{display_labels, display_path, display_value, ordered_keys};
 use super::settings::HelpLayout;
 use super::text::display_width;
@@ -26,8 +26,7 @@ use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
-    ColumnAlignment, DisplayRule, Group, OutputDocument, OutputItems, OutputResult, group_rows,
-    output_items_to_rows,
+    DisplayRule, Group, OutputDocument, OutputItems, OutputResult, output_items_to_rows,
 };
 use crate::core::row::Row;
 
@@ -66,7 +65,7 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
         )
     {
         let doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
-            Some(document) => lower_document(document, plan.format),
+            Some(document) => lower_document(document, plan),
             None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
         };
         return doc;
@@ -107,10 +106,10 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
     }
 
     let mut doc = match plan.format {
-        OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output),
-        OutputFormat::Markdown => lower_markdown_doc(output),
+        OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output, plan),
+        OutputFormat::Markdown => lower_markdown_doc(output, plan),
         OutputFormat::Value => lower_value_doc(output),
-        OutputFormat::Mreg => lower_mreg_doc(output),
+        OutputFormat::Mreg => lower_mreg_doc(output, plan),
         OutputFormat::Auto | OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv => {
             Doc::default()
         }
@@ -139,13 +138,14 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
     doc
 }
 
-pub(crate) fn lower_document(document: &Document, format: OutputFormat) -> Doc {
+pub(crate) fn lower_document(document: &Document, plan: &RenderPlan) -> Doc {
     Doc {
         blocks: lower_document_blocks(
             &document.blocks,
-            DocumentLayout::Direct { format },
+            DocumentLayout::Direct { plan },
             false,
             false,
+            &mut Vec::new(),
         ),
     }
 }
@@ -202,7 +202,7 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
             } else {
                 let mut data = row.clone();
                 data.remove("section");
-                body.extend(lower_value_blocks(&Value::Object(data)));
+                body.extend(lower_value_blocks(&Value::Object(data), None));
             }
         }
         let next = if section.is_empty() {
@@ -230,7 +230,7 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
 #[derive(Clone, Copy)]
 enum DocumentLayout<'a> {
     Direct {
-        format: OutputFormat,
+        plan: &'a RenderPlan,
     },
     Help {
         plan: &'a RenderPlan,
@@ -243,13 +243,15 @@ fn lower_document_blocks(
     layout: DocumentLayout<'_>,
     inside: bool,
     long_help: bool,
+    path: &mut Vec<usize>,
 ) -> Vec<Block> {
-    let (format, help) = match layout {
-        DocumentLayout::Direct { format } => (format, None),
-        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, Some((plan, layout))),
+    let (format, help, plan) = match layout {
+        DocumentLayout::Direct { plan } => (plan.format, None, plan),
+        DocumentLayout::Help { plan, layout } => (OutputFormat::Auto, Some((plan, layout)), plan),
     };
     let mut lowered = Vec::new();
-    for block in blocks {
+    for (index, block) in blocks.iter().enumerate() {
+        path.push(index);
         let next = match block {
             DocBlock::Section { title, blocks, .. } => {
                 let suffix = match blocks.as_slice() {
@@ -272,6 +274,7 @@ fn lower_document_blocks(
                                 title.as_str(),
                                 "Common Invocation Options" | "Product options"
                             ),
+                        path,
                     )
                 };
                 vec![Block::Section(SectionBlock {
@@ -345,10 +348,15 @@ fn lower_document_blocks(
                 auto_grid: false,
             })],
             DocBlock::Data { value } => match help {
-                Some(_) => help_layout_blocks_from_value(value, if inside { 0 } else { 2 }),
-                None => lower_value_blocks(value),
+                Some(_) => help_layout_blocks_from_value(
+                    value,
+                    if inside { 0 } else { 2 },
+                    plan.document_tables.get(path),
+                ),
+                None => lower_value_blocks(value, plan.document_tables.get(path)),
             },
         };
+        path.pop();
         if help.is_some() {
             let section_break = matches!(block, DocBlock::Section { .. })
                 || matches!(lowered.last(), Some(Block::Section(_)));
@@ -507,6 +515,7 @@ pub(crate) fn lower_document_help_layout(
         DocumentLayout::Help { plan, layout },
         false,
         plan.document_long_help,
+        &mut Vec::new(),
     );
     if footer
         && blocks
@@ -540,17 +549,14 @@ pub(crate) fn json_value(output: &OutputResult) -> Value {
     }
 }
 
-fn lower_table_doc(output: &OutputResult) -> Doc {
+fn lower_table_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     match &output.items {
-        OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
-        OutputItems::Rows(rows) => Doc {
-            blocks: vec![Block::Table(table_from_projection(
-                super::projection::project_table(
-                    rows,
-                    &output.meta.key_index,
-                    &output.meta.column_align,
-                ),
-            ))],
+        OutputItems::Rows(_) => Doc {
+            blocks: plan
+                .tables
+                .iter()
+                .map(|table| Block::Table(table_from_plan(table)))
+                .collect(),
         },
         OutputItems::Groups(groups) => {
             let mut blocks = Vec::new();
@@ -558,26 +564,24 @@ fn lower_table_doc(output: &OutputResult) -> Doc {
                 if index > 0 {
                     blocks.push(Block::Blank);
                 }
-                blocks.push(Block::Table(table_from_group(
-                    group,
-                    &output.meta.key_index,
-                    &output.meta.column_align,
-                )));
+                let mut table = table_from_plan(&plan.tables[index]);
+                table.summary = summary_from_group(group, &output.meta.key_index);
+                blocks.push(Block::Table(table));
             }
             Doc { blocks }
         }
     }
 }
 
-fn lower_markdown_doc(output: &OutputResult) -> Doc {
+fn lower_markdown_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     match &output.items {
-        OutputItems::Rows(rows) if rows.len() == 1 && row_has_nested_values(&rows[0]) => Doc {
+        OutputItems::Rows(rows) if plan.markdown_record => Doc {
             blocks: vec![Block::KeyValue(key_value_from_map(
                 &rows[0],
                 &output.meta.key_index,
             ))],
         },
-        _ => lower_table_doc(output),
+        _ => lower_table_doc(output, plan),
     }
 }
 
@@ -602,14 +606,10 @@ fn json_group_value(group: &Group) -> Value {
     Value::Object(item)
 }
 
-fn lower_mreg_doc(output: &OutputResult) -> Doc {
+fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
-        OutputItems::Rows(rows)
-            // Several nested documents (e.g. hosts sharing an address) are cards like
-            // mreg-cli; flat list rows stay a table.
-            if rows.len() == 1 || rows.iter().all(|row| row.values().any(value_has_table_arrays)) =>
-        {
+        OutputItems::Rows(rows) if plan.mreg_layout == MregLayout::Cards => {
             let mut blocks = Vec::new();
             for (index, row) in rows.iter().enumerate() {
                 if index > 0 {
@@ -627,15 +627,19 @@ fn lower_mreg_doc(output: &OutputResult) -> Doc {
                         }));
                     }
                 }
-                blocks.extend(mreg_record_blocks(&record, &output.meta.key_index));
+                blocks.extend(mreg_record_blocks(
+                    &record,
+                    &output.meta.key_index,
+                    &plan.records[index],
+                ));
             }
             Doc { blocks }
         }
-        _ => lower_table_doc(output),
+        _ => lower_table_doc(output, plan),
     }
 }
 
-fn lower_value_blocks(value: &Value) -> Vec<Block> {
+fn lower_value_blocks(value: &Value, table: Option<&PlannedTable>) -> Vec<Block> {
     match value {
         Value::Null => Vec::new(),
         Value::Bool(_) | Value::Number(_) | Value::String(_) => {
@@ -646,8 +650,8 @@ fn lower_value_blocks(value: &Value) -> Vec<Block> {
             })]
         }
         Value::Array(items) => {
-            if let Some(table) = table_from_value_array(items) {
-                return vec![Block::Table(table)];
+            if let Some(table) = table {
+                return vec![Block::Table(table_from_plan(table))];
             }
             vec![Block::List(ListBlock {
                 items: items.iter().map(display_value).collect(),
@@ -700,7 +704,11 @@ fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::
     })
 }
 
-fn help_layout_blocks_from_value(value: &Value, indent: usize) -> Vec<Block> {
+fn help_layout_blocks_from_value(
+    value: &Value,
+    indent: usize,
+    table: Option<&PlannedTable>,
+) -> Vec<Block> {
     match value {
         Value::Object(map) if should_render_as_key_value_group(map) => {
             vec![Block::KeyValue(key_value_from_document_data_map(
@@ -725,8 +733,8 @@ fn help_layout_blocks_from_value(value: &Value, indent: usize) -> Vec<Block> {
                     inline_markup: true,
                     auto_grid: true,
                 })]
-            } else if let Some(table) = table_from_value_array(items) {
-                vec![Block::Table(table)]
+            } else if let Some(table) = table {
+                vec![Block::Table(table_from_plan(table))]
             } else {
                 vec![Block::List(ListBlock {
                     items: items.iter().map(display_value).collect(),
@@ -815,11 +823,17 @@ impl MregRecordBuilder {
     }
 }
 
-fn mreg_record_blocks(map: &Map<String, Value>, preferred_keys: &[String]) -> Vec<Block> {
+fn mreg_record_blocks(
+    map: &Map<String, Value>,
+    preferred_keys: &[String],
+    layout: &RecordLayout,
+) -> Vec<Block> {
     let mut builder = MregRecordBuilder::default();
     for key in ordered_keys(preferred_keys, map.keys()) {
-        if let Some(value) = map.get(key) {
-            visit_mreg_record_field(&mut builder, key, value, 0);
+        if let Some(value) = map.get(key)
+            && let Some((_, field)) = layout.iter().find(|(name, _)| name == key)
+        {
+            visit_mreg_record_field(&mut builder, key, value, 0, field);
         }
     }
     builder.flush();
@@ -831,34 +845,21 @@ fn visit_mreg_record_field(
     key: &str,
     value: &Value,
     depth: usize,
+    layout: &FieldLayout,
 ) {
-    match value {
-        Value::Array(items) => {
-            if let Some(table) = table_from_nonempty_object_array(items) {
-                builder.push_table(key, items.len(), table, depth);
-            } else {
-                builder.push_row(key, lower_key_value_value(value, false), depth);
-            }
+    match layout {
+        FieldLayout::Table(table) => {
+            builder.push_table(key, table.data.rows.len(), table_from_plan(table), depth)
         }
-        Value::Object(map) if object_has_table_arrays(map) => {
+        FieldLayout::Record(fields) => {
             builder.push_row(key, KeyValueValue::Empty, depth);
-            for (nested_key, nested) in map {
-                visit_mreg_record_field(builder, nested_key, nested, depth + 1);
+            for (nested_key, layout) in fields {
+                if let Some(nested) = value.get(nested_key) {
+                    visit_mreg_record_field(builder, nested_key, nested, depth + 1, layout);
+                }
             }
         }
-        other => builder.push_row(key, lower_key_value_value(other, false), depth),
-    }
-}
-
-fn object_has_table_arrays(map: &Map<String, Value>) -> bool {
-    map.values().any(value_has_table_arrays)
-}
-
-fn value_has_table_arrays(value: &Value) -> bool {
-    match value {
-        Value::Array(items) => table_from_nonempty_object_array(items).is_some(),
-        Value::Object(map) => object_has_table_arrays(map),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
+        FieldLayout::Value => builder.push_row(key, lower_key_value_value(value, false), depth),
     }
 }
 
@@ -879,17 +880,7 @@ fn lower_key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
     }
 }
 
-fn row_has_nested_values(row: &Row) -> bool {
-    row.values()
-        .any(|value| matches!(value, Value::Array(_) | Value::Object(_)))
-}
-
-fn table_from_group(
-    group: &Group,
-    preferred_keys: &[String],
-    column_align: &[ColumnAlignment],
-) -> TableBlock {
-    let merged_rows = group_rows(group);
+fn summary_from_group(group: &Group, preferred_keys: &[String]) -> Vec<KeyValueRow> {
     let mut summary = Vec::new();
     for key in ordered_keys(
         preferred_keys,
@@ -905,36 +896,7 @@ fn table_from_group(
             });
         }
     }
-    let mut table = table_from_projection(super::projection::project_table(
-        &merged_rows,
-        preferred_keys,
-        column_align,
-    ));
-    table.summary = summary;
-    table
-}
-
-fn table_from_value_array(items: &[Value]) -> Option<TableBlock> {
-    let mut rows = Vec::new();
-    for item in items {
-        let Value::Object(map) = item else {
-            return None;
-        };
-        rows.push(map.clone());
-    }
-    Some(table_from_projection(super::projection::project_table(
-        &rows,
-        &[],
-        &[],
-    )))
-}
-
-fn table_from_nonempty_object_array(items: &[Value]) -> Option<TableBlock> {
-    if items.is_empty() {
-        return None;
-    }
-    let table = table_from_value_array(items)?;
-    (table.headers.len() <= 8).then_some(table)
+    summary
 }
 
 fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> KeyValueBlock {
@@ -997,11 +959,12 @@ fn is_scalar_like(value: &Value) -> bool {
     )
 }
 
-fn table_from_projection(table: super::projection::ProjectedTable) -> TableBlock {
+fn table_from_plan(table: &PlannedTable) -> TableBlock {
     TableBlock {
-        headers: table.headers,
-        rows: table.rows,
-        column_align: table.column_align,
+        widths: table.widths.clone(),
+        headers: table.data.headers.clone(),
+        rows: table.data.rows.clone(),
+        column_align: table.data.column_align.clone(),
         cell_styles: Vec::new(),
         summary: Vec::new(),
         nested: false,

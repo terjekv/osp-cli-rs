@@ -185,7 +185,7 @@ impl<'a> RenderRequest<'a> {
 /// assert!(rendered.contains("alice"));
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
-    let plan = plan_output(output, request.settings, request.profile);
+    let mut plan = plan_output(output, request.settings, request.profile);
     match plan.format {
         OutputFormat::Csv | OutputFormat::Tsv => {
             return emit::delimited::render(output, plan.format);
@@ -194,6 +194,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
         _ => {}
     }
     let projection = projection::project(output, plan.format, request.settings, request.profile);
+    plan::plan_layout(&projection, &mut plan, request.settings, request.profile);
     let output = &projection.output;
     let doc = if matches!(
         plan.format,
@@ -214,7 +215,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
             *title = format!("{} · {title}", sanitize_human_text(prefix));
         }
         if plan.format == OutputFormat::Markdown {
-            lower::lower_document(&document, plan.format)
+            lower::lower_document(&document, &plan)
         } else {
             lower::lower_document_help_layout(
                 &document,

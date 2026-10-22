@@ -231,7 +231,7 @@ impl CommandOutput {
         let effective = resolve_render_settings_with_hint(settings, self.format_hint);
         match &self.body {
             CommandBody::Json(_) => OutputFormat::Json,
-            CommandBody::Output(output) => effective.resolve_output_format(output),
+            CommandBody::Output(output) => effective.resolve_output_format(output).0,
             _ => effective.format,
         }
     }

@@ -13,6 +13,9 @@ pub(super) struct HumanProjection {
     pub output: OutputResult,
     pub source: OutputResult,
     pub shortened: Option<(usize, usize)>,
+    pub tables: Vec<ProjectedTable>,
+    pub records: Vec<RecordProjection>,
+    pub document_tables: std::collections::BTreeMap<Vec<usize>, ProjectedTable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +23,58 @@ pub(super) struct ProjectedTable {
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
     pub column_align: Vec<ColumnAlignment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ValueProjection {
+    pub table: Option<ProjectedTable>,
+    pub fields: RecordProjection,
+}
+
+pub(super) type RecordProjection = Vec<(String, ValueProjection)>;
+
+fn project_record(row: &Row) -> RecordProjection {
+    row.iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                ValueProjection {
+                    table: value.as_array().and_then(|items| project_array(items)),
+                    fields: value.as_object().map(project_record).unwrap_or_default(),
+                },
+            )
+        })
+        .collect()
+}
+
+pub(super) fn project_array(items: &[Value]) -> Option<ProjectedTable> {
+    let rows = items
+        .iter()
+        .map(|item| item.as_object().cloned())
+        .collect::<Option<Vec<_>>>()?;
+    Some(project_table(&rows, &[], &[]))
+}
+
+fn project_document_tables(
+    blocks: &[DocBlock],
+    path: &mut Vec<usize>,
+    tables: &mut std::collections::BTreeMap<Vec<usize>, ProjectedTable>,
+) {
+    for (index, block) in blocks.iter().enumerate() {
+        path.push(index);
+        match block {
+            DocBlock::Section { blocks, .. } => project_document_tables(blocks, path, tables),
+            DocBlock::Data {
+                value: Value::Array(items),
+            } => {
+                if let Some(table) = project_array(items) {
+                    tables.insert(path.clone(), table);
+                }
+            }
+            _ => {}
+        }
+        path.pop();
+    }
 }
 
 pub(super) fn project(
@@ -46,7 +101,37 @@ pub(super) fn project(
         None
     };
     sanitize_output(&mut display);
+    let tables = match &display.items {
+        OutputItems::Rows(rows) => vec![project_table(
+            rows,
+            &display.meta.key_index,
+            &display.meta.column_align,
+        )],
+        OutputItems::Groups(groups) => groups
+            .iter()
+            .map(|group| {
+                project_table(
+                    &crate::core::output_model::group_rows(group),
+                    &display.meta.key_index,
+                    &display.meta.column_align,
+                )
+            })
+            .collect(),
+    };
+    let records = display
+        .as_rows()
+        .unwrap_or_default()
+        .iter()
+        .map(project_record)
+        .collect();
+    let mut document_tables = std::collections::BTreeMap::new();
+    if let Some(document) = display.document.as_ref().and_then(OutputDocument::semantic) {
+        project_document_tables(&document.blocks, &mut Vec::new(), &mut document_tables);
+    }
     HumanProjection {
+        tables,
+        records,
+        document_tables,
         output: display,
         source,
         shortened,
