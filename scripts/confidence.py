@@ -636,7 +636,7 @@ def run_check(root: Path, check: ConfidenceCheck, *, to_stderr: bool = False) ->
     started = time.perf_counter()
     env = None
     if check.env:
-        env = dict(**os.environ, **check.env)
+        env = {**os.environ, **check.env}
     result = subprocess.run(check.command, cwd=root, env=env)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:
