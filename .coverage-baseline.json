@@ -4,8 +4,11 @@
   "changed_file_review_line_percent": 85.0,
   "min_executable_lines": 20,
   "non_executable_files": {
+    "src/config/mod.rs": "1b4d814782b054c69048161e25adcbb952dfb2bb45ad7104b645a78b6794efd3",
+    "src/core/mod.rs": "7ab5673c5513eb21ced5dd1ca6c6478f679963fb3f00b43980ed1174a5bebbab",
     "src/lib.rs": "6317427a4faa5c2c74ea0b52dd21594a062474e9ea01b7421b774f90366ef65d",
+    "src/repl/mod.rs": "6b350b01f4ea5e8f4936ca59b23ca20beedb384ba1688ceb6e568c21cbfca6d8",
     "src/ui/doc.rs": "ddb311dc720df6d5960b0b882b791952f03eb9d5ed154f31d148319a970676b3"
   },
-  "notes": "The user selected an 85% overall floor; the aim remains higher coverage through useful contract and integration workflows. Whole-file 85% is a review warning, not a requirement to add overlapping tests. The pinned src/lib.rs contains only docs, module declarations and reexports; any byte change requires renewed review. The pinned src/ui/doc.rs contains only private document data types and derives; the full LLVM reports emit no executable entry for it. This missing-entry review does not remove any LLVM lines or alter the percentage. Any byte change requires renewed review."
+  "notes": "The user selected an 85% overall floor; the aim remains higher coverage through useful contract and integration workflows. Whole-file 85% is a review warning, not a requirement to add overlapping tests. Reviewed non_executable_files contain only docs, module declarations, imports, reexports, data types and derives, with no executable entry in the full LLVM report. Content changes require renewed review. These pins do not remove LLVM lines or alter the percentage."
 }
