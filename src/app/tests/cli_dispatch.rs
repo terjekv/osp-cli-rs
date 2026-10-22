@@ -80,17 +80,18 @@ fn invocation_ui_and_format_hints_overlay_runtime_defaults_unit() {
     assert_eq!(resolved.ui.debug_level, 3);
 
     let base = RenderSettings::test_plain(OutputFormat::Auto);
-    let hinted = resolve_render_settings_with_hint(&base, Some(OutputFormat::Table));
-    assert_eq!(hinted.format, OutputFormat::Table);
-
-    let pinned = resolve_render_settings_with_hint(
-        &RenderSettings {
-            format: OutputFormat::Json,
-            ..base
-        },
+    let output = CommandOutput::output(
+        crate::core::OutputResult::from_rows(Vec::new()),
         Some(OutputFormat::Table),
     );
-    assert_eq!(pinned.format, OutputFormat::Json);
+    assert_eq!(output.output_format(&base), OutputFormat::Table);
+    assert_eq!(base.format, OutputFormat::Auto);
+    let pinned = RenderSettings {
+        format: OutputFormat::Json,
+        format_explicit: true,
+        ..base
+    };
+    assert_eq!(output.output_format(&pinned), OutputFormat::Json);
 }
 
 #[test]

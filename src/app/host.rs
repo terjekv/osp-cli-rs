@@ -6,7 +6,6 @@
 //! dispatch helpers.
 
 use crate::config::ResolvedConfig;
-use crate::core::output::OutputFormat;
 use crate::native::NativeCommandRegistry;
 use crate::repl;
 use clap::{CommandFactory, FromArgMatches};
@@ -1429,18 +1428,4 @@ fn add_product_option_help(view: &mut Document, options: &[(String, String)]) {
             .with_role(crate::core::document::SectionRole::CompactOptions),
         );
     }
-}
-
-pub(crate) fn resolve_render_settings_with_hint(
-    settings: &RenderSettings,
-    format_hint: Option<OutputFormat>,
-) -> RenderSettings {
-    if matches!(settings.format, OutputFormat::Auto)
-        && let Some(format) = format_hint
-    {
-        let mut effective = settings.clone();
-        effective.format = format;
-        return effective;
-    }
-    settings.clone()
 }

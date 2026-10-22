@@ -15,7 +15,6 @@ use miette::{Result, WrapErr, miette};
 use serde_json::Value;
 use terminal_size::{Height, terminal_size};
 
-use crate::app::resolve_render_settings_with_hint;
 use crate::app::sink::UiSink;
 use crate::app::{AppSession, UiState};
 use crate::cli::rows::output::{plugin_data_to_output_result, rows_to_output_result};
@@ -228,20 +227,26 @@ impl CommandOutput {
     }
 
     pub(crate) fn output_format(&self, settings: &RenderSettings) -> OutputFormat {
-        let effective = resolve_render_settings_with_hint(settings, self.format_hint);
         match &self.body {
             CommandBody::Json(_) => OutputFormat::Json,
-            CommandBody::Output(output) => effective.resolve_output_format(output).0,
-            _ => effective.format,
+            CommandBody::Output(output) => {
+                settings
+                    .resolve_output_format(&output_with_format_hint(output, self.format_hint))
+                    .0
+            }
+            _ => self
+                .format_hint
+                .filter(|_| settings.format == OutputFormat::Auto)
+                .unwrap_or(settings.format),
         }
     }
 
     pub(super) fn render(&self, config: &ResolvedConfig, settings: &RenderSettings) -> String {
-        let mut effective = resolve_render_settings_with_hint(settings, self.format_hint);
+        let mut effective = settings.clone();
         let output = match &self.body {
             CommandBody::None => return String::new(),
             CommandBody::Text(text) => return text.clone(),
-            CommandBody::Output(output) => std::borrow::Cow::Borrowed(output.as_ref()),
+            CommandBody::Output(output) => output_with_format_hint(output, self.format_hint),
             CommandBody::Json(payload) => {
                 effective.format = OutputFormat::Json;
                 effective.format_explicit = true;
@@ -492,9 +497,7 @@ pub(crate) fn run_progress_command_with_ui(
     let CommandBody::Output(output) = &result.body else {
         return Ok(());
     };
-    let json_output = resolve_render_settings_with_hint(&ui.render_settings, result.format_hint)
-        .format
-        == OutputFormat::Json;
+    let json_output = result.output_format(&ui.render_settings) == OutputFormat::Json;
     if stream && json_output {
         emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
         if progress_output_is_empty(output) {
@@ -721,16 +724,25 @@ pub(crate) fn cli_result_from_plugin_response(
     Ok(result)
 }
 
+pub(crate) fn output_with_format_hint(
+    output: &OutputResult,
+    format_hint: Option<OutputFormat>,
+) -> std::borrow::Cow<'_, OutputResult> {
+    let mut output = std::borrow::Cow::Borrowed(output);
+    if output.meta.render_recommendation.is_none()
+        && let Some(format) = format_hint
+    {
+        output.to_mut().meta.render_recommendation = Some(RenderRecommendation::Format(format));
+    }
+    output
+}
+
 pub(crate) fn apply_output_stages(
     mut output: OutputResult,
     stages: &[String],
     format_hint: Option<OutputFormat>,
 ) -> Result<(OutputResult, Option<OutputFormat>)> {
-    if output.meta.render_recommendation.is_none()
-        && let Some(format) = format_hint
-    {
-        output.meta.render_recommendation = Some(RenderRecommendation::Format(format));
-    }
+    output = output_with_format_hint(&output, format_hint).into_owned();
 
     if !stages.is_empty() {
         output

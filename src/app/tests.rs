@@ -3,8 +3,7 @@ use super::help::parse_help_render_overrides;
 use super::{
     CommandOutput, EXIT_CODE_ERROR, EXIT_CODE_USAGE, RunAction, RuntimeConfigRequest,
     build_cli_session_layer, build_dispatch_plan, classify_exit_code, is_sensitive_key,
-    render_report_message, resolve_invocation_ui, resolve_render_settings_with_hint,
-    run_inline_builtin_command,
+    render_report_message, resolve_invocation_ui, run_inline_builtin_command,
 };
 use super::{
     authorized_command_catalog_for, command_output, resolve_runtime_config, run_from,
