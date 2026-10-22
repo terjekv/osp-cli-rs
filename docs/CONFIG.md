@@ -387,6 +387,10 @@ These keys currently drive user-visible rendering and REPL presentation:
     density; `hide` retains trailing-column removal and the combined fit summary
   - explicit/configured tables keep their chosen format; see [UI.md](UI.md#tables-and-mreg-layout)
     for the width, row-count and output-shape guards
+- `ui.mreg.gap`
+  - `auto | 0..10`; defaults to `auto` for all presentation presets
+  - blank lines between MREG cards; `auto` uses 0 for compact cards (including
+    one-line entries) and 1 for classic/nested cards
 - `ui.help.level`
   - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `theme.name`

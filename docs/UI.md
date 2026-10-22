@@ -95,9 +95,9 @@ are sized across all records; the whole list uses this layout or the titled
 layout together. Values use their projected, escaped display widths.
 Otherwise each card uses its first field's value in a title-styled `value:`
 heading at the effective margin, followed by nonempty fields in producer order,
-without blank separators. Every body line is indented four spaces under the
-heading; body width budgets include that indent. Records with only a title value
-after omitting empty fields print `Label: value` entries instead.
+without blank separators by default. Every body line is indented four spaces
+under the heading; body width budgets include that indent. Records with only a
+title value after omitting empty fields print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack
 row-major with one shared column count and label width for the whole result.
@@ -124,6 +124,12 @@ Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
 separators. Classic card scalar values and scalar lists wrap within the same
 resolved screen budget, including their labels and indentation.
+
+`ui.mreg.gap` controls blank lines between consecutive cards, including automatic
+fallback and one-line compact entries. The default `auto` keeps compact cards
+dense and inserts one blank line between classic/nested cards. An integer from
+0 to 10 overrides both styles. Single records, tables, card interiors and nested
+blocks are unchanged; presentation presets leave the setting at `auto`.
 
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.

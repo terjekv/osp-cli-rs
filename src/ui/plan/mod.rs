@@ -63,6 +63,7 @@ pub struct RenderPlan {
     pub(super) grid_list: Option<(String, GridBlock)>,
     pub(super) markdown_record: bool,
     pub(super) mreg_layout: MregLayout,
+    pub(super) mreg_gap: usize,
     pub(super) tables: Vec<PlannedTable>,
     pub(super) records: Vec<RecordLayout>,
     pub(super) document_tables: BTreeMap<Vec<usize>, PlannedTable>,
@@ -87,6 +88,7 @@ pub fn plan_format(
         grid_list: None,
         markdown_record: false,
         mreg_layout: MregLayout::Table,
+        mreg_gap: 0,
         tables: Vec::new(),
         records: Vec::new(),
         document_tables: BTreeMap::new(),
@@ -324,6 +326,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             }
         }
     }
+    plan.mreg_gap = planned_card_gap(plan);
     plan.document_tables = projection
         .document_tables
         .iter()
@@ -375,6 +378,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         } else {
             MregLayout::Compact
         };
+        cards.mreg_gap = planned_card_gap(&cards);
         // Measure the actual candidate, including classic nested tables/lists,
         // rather than duplicating their line geometry in a density estimate.
         let card_doc = super::lower::lower_mreg_doc(output, &cards);
@@ -384,8 +388,15 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         if card_values * table_lines > table_values * card_lines {
             plan.format = cards.format;
             plan.mreg_layout = cards.mreg_layout;
+            plan.mreg_gap = cards.mreg_gap;
         }
     }
+}
+
+fn planned_card_gap(plan: &RenderPlan) -> usize {
+    plan.settings
+        .mreg_gap
+        .unwrap_or(usize::from(plan.mreg_layout == MregLayout::Cards))
 }
 
 fn can_compare_cards(projection: &HumanProjection, plan: &RenderPlan) -> bool {

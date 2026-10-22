@@ -230,6 +230,17 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("mreg")),
             },
             BuiltinKey {
+                key: "ui.mreg.gap",
+                schema: SchemaEntry::string()
+                    .with_allowed_values(
+                        std::iter::once("auto".to_owned()).chain((0..=10).map(|n| n.to_string())),
+                    )
+                    .with_doc(
+                        "Blank lines between MREG cards: auto (compact 0, classic 1) or 0–10",
+                    ),
+                default: Some(ConfigValue::from("auto")),
+            },
+            BuiltinKey {
                 key: "ui.table.border",
                 schema: SchemaEntry::string()
                     .with_allowed_values(

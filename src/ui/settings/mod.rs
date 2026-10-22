@@ -248,6 +248,8 @@ pub struct RenderSettings {
     pub margin: usize,
     pub table_overflow: TableOverflow,
     pub table_too_wide: TableTooWide,
+    /// Blank lines between cards; `None` preserves each style's default.
+    pub mreg_gap: Option<usize>,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
@@ -275,6 +277,7 @@ impl Default for RenderSettings {
             margin: 0,
             table_overflow: TableOverflow::Ellipsis,
             table_too_wide: TableTooWide::Mreg,
+            mreg_gap: None,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
@@ -546,6 +549,10 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.table_too_wide = parsed;
     }
 
+    if let Some(value) = config.get_string("ui.mreg.gap") {
+        settings.mreg_gap = value.parse().ok();
+    }
+
     if let Some(value) = config.get_string("ui.table.border")
         && let Some(parsed) = TableBorderStyle::parse(value)
     {
@@ -628,6 +635,8 @@ pub struct ResolvedRenderSettings {
     pub margin: usize,
     pub table_overflow: TableOverflow,
     pub table_too_wide: TableTooWide,
+    /// Blank lines between cards; `None` preserves each style's default.
+    pub mreg_gap: Option<usize>,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
     pub theme_name: String,
@@ -724,6 +733,7 @@ impl RenderSettings {
             margin: self.margin,
             table_overflow: self.table_overflow,
             table_too_wide: self.table_too_wide,
+            mreg_gap: self.mreg_gap,
             table_border: self.table_border,
             nested_table_border: self.nested_table_border.resolve(self.table_border),
             theme_name,

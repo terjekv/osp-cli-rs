@@ -493,11 +493,15 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
     if plan.mreg_layout == MregLayout::Compact {
         let mut blocks = Vec::new();
-        for (card, record) in plan
+        for (index, (card, record)) in plan
             .compact_cards
             .iter()
             .zip(output_items_to_rows(&output.items))
+            .enumerate()
         {
+            if index > 0 {
+                push_blank_lines(&mut blocks, plan.mreg_gap);
+            }
             for rule in &output.meta.display_rules {
                 if let DisplayRule::Notice { field } = rule
                     && let Some(value) = record.get(field)
@@ -541,8 +545,8 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }
             }
         }
-        if index > 0 && plan.mreg_layout != MregLayout::Entries {
-            push_blank_lines(&mut blocks, 1);
+        if index > 0 {
+            push_blank_lines(&mut blocks, plan.mreg_gap);
         }
         for rule in &output.meta.display_rules {
             if let DisplayRule::Notice { field } = rule

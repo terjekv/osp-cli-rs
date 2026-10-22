@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Configure blank lines between MREG cards with `ui.mreg.gap=auto|0..10`.
+  The default preserves dense compact cards and spaced classic/nested cards.
+
 - Use title-styled colon headings for compact cards at the effective margin,
   with fields and wrapped continuations indented four spaces. Include the
   indent in width planning; inline compact cards and classic cards are unchanged.
