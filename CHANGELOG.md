@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Honour explicit colour and Unicode choices on screen, pager and pipe targets;
+  automatic pipe rendering stays plain. Editor and clipboard suppress colour.
+
 - Add producer-declared colour swatches. Coloured `theme list` shows two-cell
   blocks measured before fitting; plain output and exports keep raw colours.
 

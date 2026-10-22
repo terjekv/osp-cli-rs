@@ -29,10 +29,17 @@ fn help_color_unicode_presentation_matrix_contract() {
             "missing usage for {presentation}/{color}/{unicode}: {plain:?}"
         );
 
-        assert!(
-            !output.contains("\x1b["),
-            "captured output must be colour-free for {presentation}/{color}/{unicode}: {output:?}"
-        );
+        if color == "always" {
+            assert!(
+                output.contains("\x1b["),
+                "missing color for {presentation}/{color}/{unicode}: {output:?}"
+            );
+        } else {
+            assert!(
+                !output.contains("\x1b["),
+                "unexpected ANSI for {presentation}/{color}/{unicode}: {output:?}"
+            );
+        }
 
         match presentation {
             "expressive" => {
@@ -69,10 +76,17 @@ fn help_color_unicode_presentation_matrix_contract() {
                     !plain.contains("─ Usage") && !plain.contains("- Usage"),
                     "{presentation} help should not render ruled section chrome for {color}/{unicode}: {plain:?}"
                 );
-                assert!(
-                    !output.contains("\x1b["),
-                    "captured output must be colour-free for {presentation}/{color}/{unicode}: {output:?}"
-                );
+                if color == "always" {
+                    assert!(
+                        output.contains("\x1b["),
+                        "missing command color for {presentation}/{unicode}: {output:?}"
+                    );
+                } else {
+                    assert!(
+                        !output.contains("\x1b["),
+                        "unexpected ANSI for {presentation}/{color}/{unicode}: {output:?}"
+                    );
+                }
             }
             _ => unreachable!("unknown presentation: {presentation}"),
         }
@@ -111,10 +125,17 @@ fn table_color_unicode_presentation_matrix_contract() {
             "missing table headers for {presentation}/{color}/{unicode}: {plain:?}"
         );
 
-        assert!(
-            !output.contains("\x1b["),
-            "captured output must be colour-free for {presentation}/{color}/{unicode}: {output:?}"
-        );
+        if color == "always" {
+            assert!(
+                output.contains("\x1b["),
+                "missing header color for {presentation}/{color}/{unicode}: {output:?}"
+            );
+        } else {
+            assert!(
+                !output.contains("\x1b["),
+                "unexpected ANSI for {presentation}/{color}/{unicode}: {output:?}"
+            );
+        }
 
         if unicode == "always" {
             let expected_corner = if presentation == "expressive" {

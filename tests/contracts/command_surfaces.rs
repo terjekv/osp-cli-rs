@@ -424,7 +424,7 @@ repl.simple_prompt = true
         ],
     );
 
-    assert!(!unicode.contains("\u{1b}["), "{unicode:?}");
+    assert!(unicode.contains("\u{1b}["), "{unicode:?}");
 
     let unicode_plain = strip_ansi(&unicode);
     let ascii_plain = strip_ansi(&ascii);

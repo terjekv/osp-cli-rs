@@ -46,7 +46,7 @@ labels, grouping, array filtering and display limits.
 human terminal output projects a valid colour/style value to `██` painted with
 its foreground colour; invalid, empty or modifier-only specifications project
 to empty text. Width planning measures the two-cell block. Plain, editor,
-clipboard, NO_COLOR, Markdown and Value output keep the raw value. JSON/CSV/TSV
+clipboard, automatic NO_COLOR, Markdown and Value output keep the raw value. JSON/CSV/TSV
 remain canonical. The serialized rule is `{"kind":"swatch","field":"accent"}`.
 Like other field rules, it survives row-preserving stages and is cleared for
 synthesized fields or shape-changing stages. Producers declare swatches; the

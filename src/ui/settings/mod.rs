@@ -782,10 +782,10 @@ fn settings_for_target(settings: &RenderSettings, target: RenderTarget) -> Rende
         effective.table_overflow = TableOverflow::None;
         effective.table_too_wide = TableTooWide::Hide;
     }
-    if matches!(
-        target,
-        RenderTarget::Editor | RenderTarget::Clipboard | RenderTarget::Pipe
-    ) {
+    if target == RenderTarget::Pipe {
+        effective.runtime.stdout_is_tty = false;
+    }
+    if matches!(target, RenderTarget::Editor | RenderTarget::Clipboard) {
         effective.color = ColorMode::Never;
         effective.runtime.no_color = true;
     }

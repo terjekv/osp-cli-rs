@@ -99,7 +99,7 @@ for compact-card eligibility.
 
 `theme list` declares `DisplayRule::Swatch` for its nine palette colour fields.
 With colour enabled, valid colour values become two-cell painted blocks before
-width planning; invalid/empty values become empty. Plain, NO_COLOR, editor,
+width planning; invalid/empty values become empty. Plain, automatic NO_COLOR, editor,
 clipboard, Markdown and Value output retain raw values. Machine exports always
 retain canonical data. The generic renderer has no theme-column name rules.
 
@@ -185,7 +185,14 @@ regardless of these terminal preferences.
 | Pager | Unlimited | Per settings | 0 | No | No |
 | Editor | Unlimited | Never | 0 | No | No |
 | Clipboard | Unlimited | Never; ASCII | 0 | No | No |
-| Pipe, file, non-TTY | Unlimited | Never | 0 | No | No |
+| Pipe, file, non-TTY | Auto off; explicit wins | 0 | No | No |
+
+Targets supply defaults for automatic colour and Unicode only. Explicit
+`--color always|never` and `--unicode always|never`, or their configured modes,
+win on screen, pager and pipe targets. Thus `--color always | less -R` retains
+ANSI; `auto` on a pipe remains colour-free and ASCII. NO_COLOR disables automatic
+colour; an explicit `always` still wins. Strict plain render mode stays plain.
+Editor and clipboard always suppress colour; clipboard also stays ASCII.
 
 Margin is REPL screen chrome for every format, including JSON. It never enters
 one-shot output, pipes, files, pagers, editors or clipboard content.

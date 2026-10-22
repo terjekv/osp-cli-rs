@@ -83,3 +83,6 @@ including machine output on the REPL screen.
 `plan/cards.rs` owns compact flat-list cards: ruled first values, globally sized
 short-field grids and wrapped long fields. Single and nested records retain
 classic cards. Lowering copies planned grids into the data-only IR.
+
+Targets set automatic colour/Unicode defaults. Explicit choices survive screen,
+pager and pipe rendering; editor and clipboard always suppress colour.
