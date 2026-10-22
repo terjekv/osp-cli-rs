@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Limit the singleton card override to Table recommendations; other recommended
+  formats retain precedence for single records.
+
 - Combine screen table hidden-column and shortened-cell summaries with concise
   pager, card and quoted column-pick actions. Wrap the footer instead of cropping
   it; nested card tables omit actions. Quiet/help-none output suppresses it.

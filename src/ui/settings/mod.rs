@@ -771,17 +771,7 @@ impl RenderSettings {
             }
             _ => None,
         };
-        // Machine recommendations bypass human shape rules.
-        if let Some(
-            format @ (OutputFormat::Json
-            | OutputFormat::Csv
-            | OutputFormat::Tsv
-            | OutputFormat::Value),
-        ) = recommendation
-        {
-            return (format, Recommended);
-        }
-        if inferred == OutputFormat::Mreg {
+        if inferred == OutputFormat::Mreg && recommendation == Some(OutputFormat::Table) {
             return (OutputFormat::Mreg, Inferred);
         }
         if let Some(format) = recommendation {
@@ -1075,7 +1065,7 @@ mod tests {
             Some(RenderRecommendation::Format(OutputFormat::Markdown));
         assert_eq!(
             plain_settings.resolve_output_format(&recommended).0,
-            OutputFormat::Mreg
+            OutputFormat::Markdown
         );
 
         let grouped = OutputResult {

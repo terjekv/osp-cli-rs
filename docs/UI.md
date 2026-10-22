@@ -45,7 +45,7 @@ Selection order is:
 
 1. an explicit invocation format (`--format`, `--table`, `--mreg`, etc.)
 2. a non-auto configured `ui.format`
-3. one ordinary record selects a classic MREG card
+3. one ordinary record overrides a Table recommendation with a classic MREG card
 4. a command/plugin recommendation attached to the output
 5. automatic inference from the output shape
 
@@ -55,7 +55,8 @@ not turn ordinary rows into a document. Configured defaults beat recommendations
 one-element record array becomes a classic card even with a table recommendation;
 `--table`, `--format table` or configured `ui.format=table` keeps a table.
 For example, `[{"Name":"example","Count":2}]` with a table hint is a card.
-Machine recommendations retain their export format. The plan retains whether the
+Other recommendations, including Markdown, Value, Guide and MREG, retain their
+format for single records. The plan retains whether the
 choice was explicit, configured, recommended or inferred.
 
 Help and intro documents keep their document layout when
