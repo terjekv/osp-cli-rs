@@ -179,6 +179,15 @@ fn add_palette_swatches(output: &mut OutputResult) {
                     field: role.name().into(),
                 }),
         );
+    output
+        .meta
+        .display_rules
+        .extend(
+            ["selection", "link", "bg", "bg_alt"].map(|field| DisplayRule::ValueStyle {
+                field: field.into(),
+                bold: false,
+            }),
+        );
 }
 
 fn theme_list_rows(themes: &ThemeCatalog, active_theme: &str) -> Vec<Row> {

@@ -20,6 +20,10 @@ impl PreparedGridList {
             GRID_COLUMN_WEIGHT,
         );
         let height = values.len().div_ceil(column_widths.len().max(1));
+        let preserves_empty_rows = values.len() <= 1
+            || values
+                .iter()
+                .any(|value| UnicodeWidthStr::width(value.as_str()) > available_width);
         let source_indices = (0..height)
             .map(|row| {
                 (0..column_widths.len())
@@ -30,7 +34,7 @@ impl PreparedGridList {
                     .collect::<Vec<_>>()
             })
             .filter(|row| {
-                values.len() <= 1 || row.iter().flatten().any(|index| !values[*index].is_empty())
+                preserves_empty_rows || row.iter().flatten().any(|index| !values[*index].is_empty())
             })
             .collect();
         Self {
