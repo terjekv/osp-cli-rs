@@ -86,18 +86,24 @@ comparison table. Flat lists and non-explicit grouped MREG remain tables unless
 the eligible density comparison below selects cards.
 When several flat records render as cards (explicit MREG or automatic table
 fallback), the planner selects compact cards. Flat means every value is a
-scalar or an array of scalars, including reduced single-field object lists. Each card uses its first field's value in a
-styled `── title ──…` rule, followed by nonempty fields in producer order, without
+scalar or an array of scalars, including reduced single-field object lists.
+When every record's title and remaining nonempty fields fit together at the
+available width, the planner uses one line per record: `title  label value`
+with three spaces between subsequent pairs. Title, label and value columns
+are sized across all records; the whole list uses this layout or the titled
+layout together. Values use their projected, escaped display widths.
+Otherwise each card uses its first field's value in a styled `── title ──…`
+rule, followed by nonempty fields in producer order, without
 blank separators. Every body line is indented two columns under the title;
-body width budgets include that indent. Records with only a title value after omitting empty fields
-print `Label: value` entries instead.
+body width budgets include that indent. Records with only a title value after
+omitting empty fields print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack
 row-major with one shared column count and label width for the whole result.
 Each grid column sizes its values from their rendered widths across records,
 including projected swatches. Labels and values have a two-space gap; grid
-pairs have a three-space gap. A long field breaks the run, shares the first grid column's label width and
-wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
+pairs have a three-space gap. A long field breaks the run, shares the first
+grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
 list geometry; short arrays are comma-joined. Unknown widths use 100 columns
 for compact body geometry. Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank

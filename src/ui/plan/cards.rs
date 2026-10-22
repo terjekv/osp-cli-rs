@@ -19,6 +19,7 @@ const UNKNOWN_CARD_WIDTH: usize = 100;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) enum CompactCard {
     Entry(GridCell),
+    Inline(GridBlock),
     Titled { title: String, body: Vec<GridBlock> },
 }
 
@@ -42,7 +43,7 @@ pub(super) fn plan_compact_cards(
     let available = settings
         .width
         .unwrap_or(UNKNOWN_CARD_WIDTH)
-        .saturating_sub(settings.margin + 2)
+        .saturating_sub(settings.margin)
         .max(1);
     let fields = rows
         .iter()
@@ -63,6 +64,10 @@ pub(super) fn plan_compact_cards(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
+    if let Some(cards) = plan_inline_cards(&fields, available) {
+        return cards;
+    }
+    let available = available.saturating_sub(2).max(1);
     let mut longest = BTreeMap::<&str, usize>::new();
     for field in fields.iter().flatten() {
         let width = UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());
@@ -150,7 +155,7 @@ pub(super) fn plan_compact_cards(
                     body.push(GridBlock {
                         rows: run.chunks(columns).map(<[GridCell]>::to_vec).collect(),
                         column_widths: column_widths.clone(),
-                        label_width: key_width,
+                        label_widths: vec![key_width + CARD_FIELD_GAP; columns],
                         gap: CARD_GRID_GAP,
                     });
                     run.clear();
@@ -188,7 +193,7 @@ pub(super) fn plan_compact_cards(
                             ..field.clone()
                         }]],
                         column_widths: vec![available],
-                        label_width: key_width,
+                        label_widths: vec![key_width + CARD_FIELD_GAP],
                         gap: 0,
                     });
                     body.push(GridBlock {
@@ -206,7 +211,7 @@ pub(super) fn plan_compact_cards(
                             })
                             .collect(),
                         column_widths: grid.column_widths,
-                        label_width: 0,
+                        label_widths: Vec::new(),
                         gap: grid.gap,
                     });
                 } else {
@@ -229,7 +234,7 @@ pub(super) fn plan_compact_cards(
                             })
                             .collect(),
                         column_widths: vec![available],
-                        label_width: key_width,
+                        label_widths: vec![key_width + CARD_FIELD_GAP],
                         gap: 0,
                     });
                 }
@@ -241,4 +246,84 @@ pub(super) fn plan_compact_cards(
             }
         })
         .collect()
+}
+
+fn plan_inline_cards(fields: &[Vec<GridCell>], available: usize) -> Option<Vec<CompactCard>> {
+    let mut labels = Vec::new();
+    for field in fields.iter().flat_map(|record| record.iter().skip(1)) {
+        if !field.value.trim().is_empty() && !labels.contains(&field.label) {
+            labels.push(field.label.clone());
+        }
+    }
+    if labels.is_empty() {
+        return None;
+    }
+    let rows = fields
+        .iter()
+        .map(|record| {
+            let mut title = record.first().cloned().unwrap_or(GridCell {
+                label: String::new(),
+                value: String::new(),
+                value_style: None,
+            });
+            title.label.clear();
+            title.value = escape_table_line_breaks(&title.value);
+            std::iter::once(title)
+                .chain(labels.iter().map(|label| {
+                    record
+                        .iter()
+                        .skip(1)
+                        .find(|field| &field.label == label && !field.value.trim().is_empty())
+                        .map(|field| GridCell {
+                            value: escape_table_line_breaks(&field.value),
+                            ..field.clone()
+                        })
+                        .unwrap_or(GridCell {
+                            label: String::new(),
+                            value: String::new(),
+                            value_style: None,
+                        })
+                }))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let label_widths = std::iter::once(0)
+        .chain(
+            labels
+                .iter()
+                .map(|label| UnicodeWidthStr::width(label.as_str()) + 1),
+        )
+        .collect::<Vec<_>>();
+    let column_widths = (0..label_widths.len())
+        .map(|column| {
+            label_widths[column]
+                + rows
+                    .iter()
+                    .map(|row| UnicodeWidthStr::width(row[column].value.as_str()))
+                    .max()
+                    .unwrap_or(0)
+                + if column == 0 {
+                    2
+                } else if column < labels.len() {
+                    CARD_GRID_GAP
+                } else {
+                    0
+                }
+        })
+        .collect::<Vec<_>>();
+    if column_widths.iter().sum::<usize>() > available {
+        return None;
+    }
+    Some(
+        rows.into_iter()
+            .map(|row| {
+                CompactCard::Inline(GridBlock {
+                    rows: vec![row],
+                    column_widths: column_widths.clone(),
+                    label_widths: label_widths.clone(),
+                    gap: 0,
+                })
+            })
+            .collect(),
+    )
 }

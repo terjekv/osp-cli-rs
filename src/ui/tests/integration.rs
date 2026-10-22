@@ -206,9 +206,9 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
         &crate::ui::RenderRequest::new(&export_settings(OutputFormat::Mreg)),
     );
     for expected in [
-        "- eu|west",
-        "- us",
-        "total  ",
+        "eu|west  total 3.5",
+        "us       total 4.0",
+        "total ",
         "3.5",
         "4",
         "alice|operator",

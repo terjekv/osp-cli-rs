@@ -124,7 +124,8 @@ pub struct ListBlock {
 pub struct GridBlock {
     pub rows: Vec<Vec<GridCell>>,
     pub column_widths: Vec<usize>,
-    pub label_width: usize,
+    /// Reserved label columns, including the label/value gap.
+    pub label_widths: Vec<usize>,
     pub gap: usize,
 }
 

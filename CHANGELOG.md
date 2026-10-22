@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Render compact cards on one aligned line per record when every title and
+  nonempty field fits at the target width; otherwise retain titled cards.
+
 - Size each compact grid value column from its own rendered values across
   records, with two spaces after labels and three spaces between pairs.
 

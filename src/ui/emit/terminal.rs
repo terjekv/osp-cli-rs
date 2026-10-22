@@ -224,20 +224,13 @@ fn emit_grid(block: &GridBlock, settings: &ResolvedRenderSettings) -> String {
                 if index > 0 {
                     line.push_str(&" ".repeat(block.gap));
                 }
-                let label_width = if block.label_width > 0 {
+                let label_width = block.label_widths.get(index).copied().unwrap_or(0);
+                if label_width > 0 {
                     line.push_str(&styler.paint(&cell.label, StyleToken::Key));
-                    line.push_str(
-                        &" ".repeat(
-                            block
-                                .label_width
-                                .saturating_sub(UnicodeWidthStr::width(cell.label.as_str()))
-                                + 2,
-                        ),
-                    );
-                    block.label_width + 2
-                } else {
-                    0
-                };
+                    line.push_str(&" ".repeat(
+                        label_width.saturating_sub(UnicodeWidthStr::width(cell.label.as_str())),
+                    ));
+                }
                 line.push_str(
                     &styler
                         .with_value_style(cell.value_style.as_ref())

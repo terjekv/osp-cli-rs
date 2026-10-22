@@ -294,7 +294,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                         })
                         .collect(),
                     column_widths: grid.column_widths,
-                    label_width: 0,
+                    label_widths: Vec::new(),
                     gap: grid.gap,
                 },
             ));

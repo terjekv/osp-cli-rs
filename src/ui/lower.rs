@@ -508,6 +508,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }
             }
             match card {
+                CompactCard::Inline(grid) => blocks.push(Block::Grid(grid.clone())),
                 CompactCard::Entry(field) => blocks.push(Block::KeyValue(KeyValueBlock {
                     rows: vec![KeyValueRow {
                         key: field.label.clone(),
