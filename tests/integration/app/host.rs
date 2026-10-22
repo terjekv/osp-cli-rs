@@ -41,6 +41,25 @@ struct SourceRecordCommand {
     include_source: bool,
 }
 
+struct DoctorSourceRecordCommand;
+
+impl NativeCommand for DoctorSourceRecordCommand {
+    fn command(&self) -> Command {
+        Command::new("doctor").subcommand(Command::new("source-record"))
+    }
+
+    fn execute(
+        &self,
+        args: &[String],
+        context: &NativeCommandContext<'_>,
+    ) -> Result<NativeCommandOutcome> {
+        SourceRecordCommand {
+            include_source: true,
+        }
+        .execute(args, context)
+    }
+}
+
 impl NativeCommand for SourceRecordCommand {
     fn command(&self) -> Command {
         Command::new("source-record")
@@ -77,11 +96,13 @@ impl NativeCommand for SourceRecordCommand {
 
 #[test]
 fn source_selection_drives_rendering_json_pipelines_and_quick_search() {
-    let app = App::new().with_native_commands(NativeCommandRegistry::new().with_command(
-        SourceRecordCommand {
-            include_source: true,
-        },
-    ));
+    let app = App::new().with_native_commands(
+        NativeCommandRegistry::new()
+            .with_command(SourceRecordCommand {
+                include_source: true,
+            })
+            .with_command(DoctorSourceRecordCommand),
+    );
     for (args, expected) in [
         (
             vec!["source-record", "--json"],
@@ -95,6 +116,17 @@ fn source_selection_drives_rendering_json_pipelines_and_quick_search() {
             vec![
                 "--source-record",
                 "source-record",
+                "--json",
+                "|",
+                "P new_name",
+            ],
+            json!([{"new_name": "server"}]),
+        ),
+        (
+            vec![
+                "doctor",
+                "source-record",
+                "--source-record",
                 "--json",
                 "|",
                 "P new_name",
