@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Keep classic card grid lists at their fallback indent when aligning them to
+  scalar values would reduce the number of grid columns at narrow widths.
+
 - Honor recommended MREG for flat record cards; omit empty card fields and
   all-empty table columns unless `-v` requests detail. Multiple classic cards
   consume their first field as a title and indent the body four spaces.

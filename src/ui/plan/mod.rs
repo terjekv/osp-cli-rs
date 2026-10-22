@@ -212,11 +212,23 @@ fn plan_grid_indents(
                     .unwrap_or(usize::MAX)
                     .saturating_sub(settings.margin + depth * 2 + value_indent)
                     .max(1);
-                if items.iter().filter_map(scalar_text).all(|value| {
-                    value
-                        .split('\n')
-                        .all(|line| super::text::display_width(line) <= room)
-                }) {
+                let values = items
+                    .iter()
+                    .filter_map(scalar_text)
+                    .flat_map(|value| value.split('\n').map(str::to_owned))
+                    .collect::<Vec<_>>();
+                let fallback_room = settings
+                    .width
+                    .unwrap_or(usize::MAX)
+                    .saturating_sub(settings.margin + depth * 2 + 2)
+                    .max(1);
+                let aligned = PreparedGridList::from_items(&values, room);
+                let fallback = PreparedGridList::from_items(&values, fallback_room);
+                if values
+                    .iter()
+                    .all(|value| super::text::display_width(value) <= room)
+                    && aligned.column_widths.len() >= fallback.column_widths.len()
+                {
                     row.block_indent = Some(value_indent);
                 }
             }

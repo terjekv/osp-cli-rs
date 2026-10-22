@@ -136,10 +136,11 @@ become a heading. Empty implicit titles show their field label when
 retained. JSON, CSV/TSV and DSL values are unchanged.
 Classic card scalar values and scalar lists wrap within the same
 resolved screen budget, including their labels and indentation. Nested tables
-and grid lists start at the card's scalar value column when the block fits
-there without hiding columns or shortening additional values compared with
-its usual indent. Each block chooses independently; otherwise it keeps its
-usual indent. Planning includes the chosen indent, card depth and margin in
+start at the card's scalar value column when the block fits there without
+hiding columns or shortening additional values compared with its usual indent.
+Grid lists align there only when every value fits and their planned grid column
+count is at least the count at the usual indent. Each block chooses
+independently; otherwise it keeps its usual indent. Planning includes the chosen indent, card depth and margin in
 the block's width budget. Compact cards retain their existing layout.
 
 `ui.mreg.gap` controls blank lines between consecutive cards, including automatic
