@@ -62,7 +62,9 @@ pub(super) fn fit_prose(text: &str, width: usize) -> String {
                 }
                 columns += ch.width().unwrap_or(0);
                 if columns > available {
-                    end = space.filter(|index| *index > 0).unwrap_or(index);
+                    // Even a two-column scalar in a one-column viewport must advance.
+                    let next = if index == 0 { ch.len_utf8() } else { index };
+                    end = space.filter(|index| *index > 0).unwrap_or(next);
                     break;
                 }
                 if ch == ' ' {
