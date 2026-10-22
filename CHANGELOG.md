@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Reduce nested single-field object arrays to value lists for human rendering
+  after removing uniformly empty fields. These scalar lists qualify for compact
+  cards; nested tables also omit empty fields. Exports retain canonical data.
+
 - Align compact card grid values and long-field values in one label column
   sized across the whole result.
 

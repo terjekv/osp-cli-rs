@@ -95,3 +95,6 @@ pager and pipe rendering; editor and clipboard always suppress colour.
 
 Format precedence is explicit, configured, single-record classic card, producer
 recommendation, then shape inference. Machine recommendations bypass card rules.
+
+Projection drops fields empty in every object-array item and reduces remaining
+single-field object lists to value lists before table/card classification.

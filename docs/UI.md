@@ -85,7 +85,7 @@ comparison table. Flat lists and non-explicit grouped MREG remain tables unless
 the eligible density comparison below selects cards.
 When several flat records render as cards (explicit MREG or automatic table
 fallback), the planner selects compact cards. Flat means every value is a
-scalar or an array of scalars. Each card uses its first field's value in a
+scalar or an array of scalars, including reduced single-field object lists. Each card uses its first field's value in a
 styled ruled title, followed by nonempty fields in producer order, without
 blank separators. Records with only a title value after omitting empty fields
 print `Label: value` entries instead.
@@ -101,8 +101,14 @@ separators exactly.
 
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
-This cutoff chooses nested comparison tables; any object makes a record nested
-for compact-card eligibility.
+Before human layout, object arrays drop fields that are empty (`null`, `""`,
+`[]`, `{}`) in every item. If exactly one field remains, the array becomes a
+list of its values. For example, `[{"hostname":"ns1.nrec.no","TTL":null},
+{"hostname":"ns2.nrec.no","TTL":null}]` displays as `ns1.nrec.no, ns2.nrec.no`
+in table cells and as a list in cards, without a nested hostname header.
+Records containing only scalars and scalar lists after reduction count as flat.
+Remaining object arrays use nested tables with the same empty-column removal.
+JSON, CSV, TSV and DSL data retain the original objects and empty fields.
 
 `theme list` declares `DisplayRule::Swatch` for its nine palette colour fields.
 With colour enabled, valid colour values become two-cell painted blocks before
