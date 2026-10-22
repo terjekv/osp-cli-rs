@@ -258,7 +258,23 @@ fn execute_repl_line_inner(
         // history backend does not own. Classify before a command can edit it.
         privacy_allows_history =
             input::ReplParsedLine::parse(&resolved, state.runtime.config.resolved()).is_ok_and(
-                |parsed| !super::history_store::has_sensitive_arguments(&parsed.dispatch_tokens),
+                |parsed| {
+                    if super::history_store::has_sensitive_arguments(&parsed.dispatch_tokens) {
+                        return false;
+                    }
+                    let tokens = parsed.prefixed_tokens(&state.session.scope);
+                    let Ok(scanned) = scan_command_tokens(&tokens) else {
+                        return false;
+                    };
+                    let tokens = scanned
+                        .tokens
+                        .strip_prefix(&["sudo".to_owned()])
+                        .unwrap_or(&scanned.tokens);
+                    tokens
+                        .first()
+                        .and_then(|root| state.clients.native_commands().command(root))
+                        .is_none_or(|native| !native.has_sensitive_args(&tokens[1..]))
+                },
             );
         admitted = super::history::admits_repl_line(state, &resolved);
         if let Some(rest) = line.trim_start().strip_prefix("osp")

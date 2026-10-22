@@ -835,6 +835,13 @@ pub trait NativeCommand: Send + Sync {
         self.normalize_args(&args)
     }
 
+    /// Whether raw invocation arguments contain secrets and must be excluded
+    /// from REPL history, including rejected invocations. Arguments exclude the
+    /// registered root. Use only local metadata; this runs before execution.
+    fn has_sensitive_args(&self, _args: &[String]) -> bool {
+        false
+    }
+
     /// Converts supplied arguments to the canonical command grammar.
     ///
     /// The host calls this before native clap parsing and command-path
