@@ -90,6 +90,7 @@ pub(super) fn plan_compact_cards(
             long_key_width = long_key_width.max(UnicodeWidthStr::width(field.label.as_str()));
         }
     }
+    key_width = key_width.max(long_key_width);
     let cell_width = key_width + CARD_FIELD_GAP + value_width;
     let columns = ((available + CARD_GRID_GAP) / (cell_width + CARD_GRID_GAP)).max(1);
     fields
@@ -134,9 +135,7 @@ pub(super) fn plan_compact_cards(
                     continue;
                 }
                 flush(&mut run, &mut body);
-                let room = available
-                    .saturating_sub(long_key_width + CARD_FIELD_GAP)
-                    .max(1);
+                let room = available.saturating_sub(key_width + CARD_FIELD_GAP).max(1);
                 if let Some(Value::Array(items)) = source.get(&field.label) {
                     let values = items
                         .iter()
@@ -156,7 +155,7 @@ pub(super) fn plan_compact_cards(
                             ..field.clone()
                         }]],
                         column_widths: vec![available],
-                        label_width: long_key_width,
+                        label_width: key_width,
                         gap: 0,
                     });
                     body.push(GridBlock {
@@ -197,7 +196,7 @@ pub(super) fn plan_compact_cards(
                             })
                             .collect(),
                         column_widths: vec![available],
-                        label_width: long_key_width,
+                        label_width: key_width,
                         gap: 0,
                     });
                 }

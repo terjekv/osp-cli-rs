@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Align compact card grid values and long-field values in one label column
+  sized across the whole result.
+
 - Prefer classic cards for one ordinary record, including table-recommended
   results. Explicit and configured formats take precedence over recommendations.
 
