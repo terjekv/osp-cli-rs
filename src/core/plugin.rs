@@ -59,7 +59,7 @@ pub const PLUGIN_PROTOCOL_V1: u32 = 1;
 pub struct PluginDescribe {
     /// Entity production and consumption declarations.
     #[serde(flatten)]
-    pub context: crate::context::ContextContract,
+    pub context: crate::core::context::ContextContract,
     /// Short help text.
     #[serde(default)]
     pub about: String,
@@ -104,7 +104,7 @@ impl PluginDescribe {
 pub struct DescribeCommandV1 {
     /// Entity production and consumption declarations.
     #[serde(flatten)]
-    pub context: crate::context::ContextContract,
+    pub context: crate::core::context::ContextContract,
     /// Command name exposed by the plugin.
     pub name: String,
     /// Short help text for the command.
@@ -878,7 +878,7 @@ impl DescribeCommandV1 {
     /// ```
     pub fn from_clap(command: clap::Command) -> Self {
         let mut context = command
-            .get::<crate::context::ContextContract>()
+            .get::<crate::core::context::ContextContract>()
             .cloned()
             .unwrap_or_default();
         for consume in &mut context.consumes {
@@ -964,7 +964,7 @@ fn clap_suggestions(arg: &clap::Arg) -> Vec<DescribeSuggestionV1> {
 
 pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String> {
     for consume in &command.context.consumes {
-        if !crate::context::KINDS.contains(&consume.kind.as_str()) {
+        if !crate::core::context::KINDS.contains(&consume.kind.as_str()) {
             return Err(format!("unknown context kind: {}", consume.kind));
         }
         if matches!(
@@ -975,7 +975,7 @@ pub(crate) fn validate_command(command: &DescribeCommandV1) -> Result<(), String
         }
     }
     for kind in command.context.produces.keys() {
-        if !crate::context::KINDS.contains(&kind.as_str()) {
+        if !crate::core::context::KINDS.contains(&kind.as_str()) {
             return Err(format!("unknown context kind: {kind}"));
         }
     }
