@@ -41,6 +41,7 @@ pub(super) fn plan_compact_cards(
     records: &[RecordProjection],
     key_order: &[String],
     rules: &[crate::core::DisplayRule],
+    title_field: Option<&str>,
     settings: &ResolvedRenderSettings,
 ) -> Vec<CompactCard> {
     let available = settings
@@ -52,11 +53,11 @@ pub(super) fn plan_compact_cards(
         .iter()
         .zip(records)
         .map(|(row, record)| {
-            ordered_keys(key_order, row.keys())
+            let mut fields = ordered_keys(key_order, row.keys())
                 .filter(|key| !rules.iter().any(|rule| matches!(rule, crate::core::DisplayRule::Notice { field } if field == *key)))
                 .filter_map(|key| {
                     row.get(key)
-                        .filter(|value| settings.verbosity > 0 || !super::super::projection::empty_value(value))
+                        .filter(|value| settings.verbosity > 0 || Some(key.as_str()) == title_field || !super::super::projection::empty_value(value))
                         .map(|value| GridCell {
                         label: key.clone(),
                         value: display_value(value),
@@ -66,11 +67,27 @@ pub(super) fn plan_compact_cards(
                             .and_then(|(_, field)| field.style.clone()),
                     })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            if let Some(index) = fields.iter().position(|field| Some(field.label.as_str()) == title_field) {
+                let title = fields.remove(index);
+                fields.insert(0, title);
+            }
+            fields
         })
         .collect::<Vec<_>>();
-    if let Some(cards) = plan_inline_cards(&fields, available) {
-        return cards;
+    let declared = fields
+        .iter()
+        .map(|fields| {
+            fields
+                .first()
+                .is_some_and(|field| Some(field.label.as_str()) == title_field)
+        })
+        .collect::<Vec<_>>();
+    let inline = plan_inline_cards(&fields, available);
+    if !declared.iter().any(|declared| *declared)
+        && let Some(cards) = &inline
+    {
+        return cards.clone();
     }
     let available = available.saturating_sub(COMPACT_CARD_BODY_INDENT).max(1);
     let mut longest = BTreeMap::<&str, usize>::new();
@@ -131,14 +148,20 @@ pub(super) fn plan_compact_cards(
     fields
         .iter()
         .zip(rows)
-        .map(|(fields, source)| {
+        .enumerate()
+        .map(|(index, (fields, source))| {
+            if !declared[index]
+                && let Some(cards) = &inline
+            {
+                return cards[index].clone();
+            }
             let Some(title) = fields.first() else {
                 return CompactCard::Titled {
                     title: None,
                     body: Vec::new(),
                 };
             };
-            if fields.len() == 1 {
+            if fields.len() == 1 && !declared[index] {
                 return CompactCard::Entry(title.clone());
             }
             let mut body = Vec::new();
@@ -234,7 +257,11 @@ pub(super) fn plan_compact_cards(
             }
             flush(&mut run, &mut body);
             CompactCard::Titled {
-                title: Some(title.value.clone()),
+                title: Some(if title.value.is_empty() && !declared[index] {
+                    title.label.clone()
+                } else {
+                    title.value.clone()
+                }),
                 body,
             }
         })
@@ -259,8 +286,12 @@ fn plan_inline_cards(fields: &[Vec<GridCell>], available: usize) -> Option<Vec<C
                 value: String::new(),
                 value_style: None,
             });
+            title.value = if title.value.is_empty() && !title.label.is_empty() {
+                format!("{}:", title.label)
+            } else {
+                escape_table_line_breaks(&title.value)
+            };
             title.label.clear();
-            title.value = escape_table_line_breaks(&title.value);
             std::iter::once(title)
                 .chain(labels.iter().map(|label| {
                     record

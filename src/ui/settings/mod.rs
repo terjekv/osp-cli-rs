@@ -1104,6 +1104,7 @@ mod tests {
             }]),
             document: None,
             meta: OutputMeta {
+                title_field: None,
                 display_notes: Vec::new(),
                 context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],

@@ -335,9 +335,21 @@ pub(crate) fn run_compiled(
             output.meta.document_row_roles.clear();
             rows = apply_stage(rows, stage)?;
         }
+        if (narrows || !stage.behavior().preserves_render_recommendation)
+            && output.meta.title_field.as_ref().is_some_and(|field| {
+                !rows.partitions.iter().any(|partition| {
+                    partition.groups.contains_key(field)
+                        || partition.aggregates.contains_key(field)
+                        || partition.rows.iter().any(|row| row.contains_key(field))
+                })
+            })
+        {
+            output.meta.title_field = None;
+        }
         match stage.synthesized_fields() {
             Some(created) => forget_formatting(&mut output.meta, &created),
             None => {
+                output.meta.title_field = None;
                 output.meta.unix_timestamp_columns.clear();
                 output.meta.display_rules.clear();
             }
@@ -423,6 +435,9 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
                 .map(|key| key.replace("~1", "/").replace("~0", "~"))
                 .is_some_and(|key| synthesized.contains(&key))
     };
+    if meta.title_field.as_ref().is_some_and(created) {
+        meta.title_field = None;
+    }
     meta.unix_timestamp_columns.retain(|field| !created(field));
     meta.display_rules.retain(|rule| match rule {
         DisplayRule::AddressRangeTotal { ranges, field, .. } => !created(ranges) && !created(field),

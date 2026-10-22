@@ -72,6 +72,12 @@ hints, conditional display rules and renderer recommendations. Guide layout
 survives only row-preserving stages; cleanup (`?`), projection, aggregation and
 JQ expose their resulting row shape.
 
+Optional `OutputMeta.title_field` (plugin `meta.title_field`) names a literal
+record field for human card headings, even for a single record. Curated labels
+are resolved at projection; data remains unchanged. Filter, sort and limit
+preserve it. Structural stages clear it when the field disappears or is renamed;
+synthesized fields lose their title hint, and arbitrary JQ clears it.
+
 ## Selector contract
 
 All inputs use the same selector resolver. Bare keys search descendants;

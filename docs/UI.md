@@ -72,7 +72,7 @@ When `format=auto`, the current rules are:
 
 A top-level list of multiple rows that all contain exactly one scalar field with the same
 key renders as a titled `Key (N):` grid for inferred, recommended or configured
-human formats. The planner reuses the card grid-list geometry at the target's
+human formats, except when MREG requests cards. The planner reuses the card grid-list geometry at the target's
 width. An unmeasured screen uses a single 100-column fallback resolved in
 settings; pager, editor, clipboard and pipe targets use natural, unlimited width.
 Explicit `--table` and Markdown keep a table; explicit `--mreg` prints consecutive
@@ -127,7 +127,14 @@ separators. With two or more classic cards, each first field's value in producer
 order becomes a title-styled `value:` heading at the effective margin. The field
 is omitted from the body, which is indented four spaces and planned within that
 width. A single classic record keeps its first field as a normal row, without a
-heading. Classic card scalar values and scalar lists wrap within the same
+heading. Producers can set optional `title_field` metadata to a literal record
+field name. When that field is present, classic and compact cards always use
+its value as a `value:` heading, including for one record, and omit it from the
+body. A missing title field falls back to the usual card behavior. Curated
+columns map the title field to its displayed label; an unselected field cannot
+become a heading. Empty implicit titles show their field label when
+retained. JSON, CSV/TSV and DSL values are unchanged.
+Classic card scalar values and scalar lists wrap within the same
 resolved screen budget, including their labels and indentation. Nested tables
 and grid lists start at the card's scalar value column when the block fits
 there without hiding columns or shortening additional values compared with

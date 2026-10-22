@@ -28,6 +28,12 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Honor recommended MREG for flat record cards; omit empty card fields and
+  all-empty table columns unless `-v` requests detail. Multiple classic cards
+  consume their first field as a title and indent the body four spaces.
+  Optional plugin/output `title_field` selects an explicit heading, including
+  for single cards, without changing exported data or DSL values.
+
 - Align classic card nested tables and grid lists with scalar values when they
   fit without hiding columns or shortening additional values. Each block keeps
   its usual indent when it needs the extra width; compact cards are unchanged.

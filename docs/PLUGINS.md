@@ -121,6 +121,11 @@ may be omitted. An `ok: false` response is rendered as an error.
 `ResponseMetaV1` in `src/core/plugin.rs` is the wire schema. Final output comes
 from `data` through the shared renderer; `columns`, `column_labels`,
 `display_rules`, `row_path` and `preserve_json_document` describe its projection.
+Optional `title_field` names a literal record field to consume as the card
+heading. A present field forces a `value:` heading even for a single classic or
+compact card; a missing field uses the usual card layout. This hint changes
+human cards only; data exports and DSL values remain canonical. It defaults to
+absent and is omitted when unset.
 A colour specimen can declare `{"kind":"swatch","field":"accent"}` in
 `display_rules`: coloured human output shows a two-cell painted block, while
 plain output and machine exports retain the raw colour value. Invalid colours

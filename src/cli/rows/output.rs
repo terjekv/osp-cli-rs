@@ -40,6 +40,7 @@ pub(crate) fn plugin_data_to_output_result(
             context: meta.map(|m| m.context.clone()).unwrap_or_default(),
             key_index,
             display_columns: meta.and_then(|meta| meta.columns.clone()),
+            title_field: meta.and_then(|meta| meta.title_field.clone()),
             display_column_labels: meta.and_then(|meta| {
                 (!meta.column_labels.is_empty()).then(|| meta.column_labels.clone())
             }),
@@ -103,6 +104,7 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2 }]),
             Some(&ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),
@@ -133,6 +135,7 @@ mod tests {
         let output = plugin_data_to_output_result(
             json!([{ "name": "alice", "count": 2, "status": "ok", "notes": "ready" }]),
             Some(&ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),
@@ -452,6 +455,7 @@ mod tests {
             ]),
             document: None,
             meta: OutputMeta {
+                title_field: None,
                 display_notes: Vec::new(),
                 context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "user".to_string()],

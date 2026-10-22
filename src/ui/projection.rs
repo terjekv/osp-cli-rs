@@ -625,6 +625,7 @@ fn sanitize_document(document: &mut Document) {
 }
 
 fn sanitize_output(output: &mut OutputResult) {
+    output.meta.title_field = output.meta.title_field.as_deref().map(sanitize_human_text);
     match &mut output.items {
         OutputItems::Rows(rows) => rows.iter_mut().for_each(sanitize_row),
         OutputItems::Groups(groups) => {
@@ -886,7 +887,14 @@ fn display_output(
             row_styles.push(styles);
         }
         if let Some(columns) = &output.meta.display_columns {
-            display.meta.key_index = display_labels(output, columns);
+            let labels = display_labels(output, columns);
+            display.meta.title_field = output.meta.title_field.as_ref().and_then(|field| {
+                columns
+                    .iter()
+                    .position(|column| column == field)
+                    .map(|index| labels[index].clone())
+            });
+            display.meta.key_index = labels;
             display.meta.display_columns = Some(display.meta.key_index.clone());
         }
     }

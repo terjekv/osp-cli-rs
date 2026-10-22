@@ -419,7 +419,14 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                     .is_some_and(|value| !value.is_array() && !value.is_object())
         })
     {
-        if plan.format == OutputFormat::Mreg && plan.provenance == FormatProvenance::Explicit {
+        if plan.format == OutputFormat::Mreg
+            && plan.provenance == FormatProvenance::Explicit
+            && !output
+                .meta
+                .title_field
+                .as_ref()
+                .is_some_and(|field| rows.iter().any(|row| row.contains_key(field)))
+        {
             plan.mreg_layout = MregLayout::Entries;
         } else if matches!(
             plan.format,
@@ -490,9 +497,14 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                 .filter(|key| !output.meta.display_rules.iter().any(|rule| matches!(rule, crate::core::DisplayRule::Notice { field } if field == *key)))
                 .filter_map(|key| record.iter().find(|(name, _)| name == key).cloned())
                 .collect();
-            let title_field = (projection.records.len() > 1 && plan.mreg_layout != MregLayout::Entries)
-                .then(|| record.first().map(|(key, _)| key.clone()))
-                .flatten();
+            let title_field = output.meta.title_field.as_ref()
+                .filter(|field| record.iter().any(|(key, _)| key == *field))
+                .cloned()
+                .or_else(|| (projection.records.len() > 1 && plan.mreg_layout != MregLayout::Entries)
+                    .then(|| record.first()
+                        .filter(|(key, _)| !super::projection::empty_value(&row[key]))
+                        .map(|(key, _)| key.clone()))
+                    .flatten());
             let title = title_field.as_ref().map(|key| super::projection::display_value(&row[key]));
             record.retain(|(key, _)| Some(key) != title_field.as_ref());
             let mut settings = plan.settings.clone();
@@ -508,12 +520,20 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
     if compare_cards || (plan.format == OutputFormat::Mreg && plan.mreg_layout == MregLayout::Cards)
     {
         let rows = crate::core::output_model::output_items_to_rows(&output.items);
-        if rows.len() > 1 && rows.iter().all(cards::is_flat) {
+        if (rows.len() > 1
+            || output
+                .meta
+                .title_field
+                .as_ref()
+                .is_some_and(|field| rows.iter().any(|row| row.contains_key(field))))
+            && rows.iter().all(cards::is_flat)
+        {
             plan.compact_cards = cards::plan_compact_cards(
                 &rows,
                 &projection.records,
                 &output.meta.key_index,
                 &output.meta.display_rules,
+                output.meta.title_field.as_deref(),
                 &plan.settings,
             );
             if plan.mreg_layout == MregLayout::Cards {
