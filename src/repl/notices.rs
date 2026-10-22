@@ -14,38 +14,36 @@ struct Notices {
     printer: Option<SyncSender<String>>,
     pending: Vec<String>,
     basic: bool,
-    foreground: bool,
     owner: Option<ReplSession>,
 }
 
 impl Notices {
     fn post(&mut self, line: String) {
         let line = inline(&line);
-        if self.foreground {
-            if self.pending.len() < 8 {
-                self.pending.push(line);
-            }
-        } else if self.basic {
+        if self.basic {
             eprintln!("\n{line}");
-        } else if let Some(printer) = &self.printer {
-            let _ = printer.try_send(line);
         } else if self.pending.len() < 8 {
             self.pending.push(line);
         }
     }
 
-    fn flush(&mut self) {
-        if let Some(printer) = &self.printer {
-            for line in self.pending.drain(..) {
-                let _ = printer.try_send(line);
+    fn flush(&mut self, prompt_rows: usize) {
+        if let Some(printer) = &self.printer
+            && !self.pending.is_empty()
+        {
+            let mut batch = self.pending.join("\n");
+            self.pending.clear();
+            // Reedline counts buffer rows, but misses the multiline prompt header.
+            if prompt_rows > 0 {
+                batch = format!("\x1b[{prompt_rows}A\r\x1b[2K{batch}");
             }
+            let _ = printer.try_send(batch);
         }
     }
 
     fn attach(&mut self, printer: &ExternalPrinter<String>) {
         self.basic = false;
         self.printer = Some(printer.sender());
-        self.flush();
     }
 }
 
@@ -53,7 +51,6 @@ static NOTICES: Mutex<Notices> = Mutex::new(Notices {
     printer: None,
     pending: Vec::new(),
     basic: false,
-    foreground: false,
     owner: None,
 });
 
@@ -156,7 +153,6 @@ impl Drop for SessionOwner {
         let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
         if self.0.is_current(&notices) {
             notices.owner = None;
-            notices.foreground = false;
             notices.printer = None;
             notices.pending.clear();
         }
@@ -176,6 +172,22 @@ pub(crate) fn attach(printer: &ExternalPrinter<String>) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .attach(printer);
+}
+
+pub(crate) fn flush(prompt_left: &str) {
+    let columns = crossterm::terminal::size()
+        .map(|(columns, _)| usize::from(columns).max(1))
+        .unwrap_or(80);
+    let prompt_rows = prompt_left.rsplit_once('\n').map_or(0, |(header, _)| {
+        header
+            .split('\n')
+            .map(|line| crate::ui::display_width(line).div_ceil(columns).max(1))
+            .sum()
+    });
+    NOTICES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .flush(prompt_rows);
 }
 
 pub(crate) fn attach_basic() {
@@ -216,24 +228,6 @@ pub(crate) fn request_foreground_bell(
     }
 }
 
-pub(crate) fn begin_foreground() {
-    NOTICES.lock().unwrap_or_else(|e| e.into_inner()).foreground = true;
-}
-
-pub(crate) fn finish_foreground() {
-    let pending = {
-        let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
-        notices.foreground = false;
-        std::mem::take(&mut notices.pending)
-    };
-    // There is no live prompt between command output and the next input read.
-    // Sending these through ExternalPrinter would redraw the old prompt over them.
-    for line in pending {
-        eprintln!("{line}");
-    }
-    crate::repl::bell::finish();
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -246,8 +240,12 @@ mod tests {
         let printer = ExternalPrinter::<String>::default();
         notices.attach(&printer);
         notices.post("late".into());
-        assert_eq!(printer.get_line().as_deref(), Some("early"));
-        assert_eq!(printer.get_line().as_deref(), Some("late"));
+        assert_eq!(printer.get_line(), None);
+        notices.flush(1);
+        assert_eq!(
+            printer.get_line().as_deref(),
+            Some("\x1b[1A\r\x1b[2Kearly\nlate")
+        );
         assert_eq!(printer.get_line(), None);
     }
 }

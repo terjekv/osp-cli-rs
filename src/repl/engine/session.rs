@@ -125,7 +125,12 @@ where
         )
     };
     // Reedline enters the idle callback after flushing its initial repaint.
-    editor = editor.with_idle_callback(after_paint);
+    let mut after_paint = after_paint;
+    let prompt_left = prompt.left().to_string();
+    editor = editor.with_idle_callback(Box::new(move || {
+        after_paint();
+        crate::repl::notices::flush(&prompt_left);
+    }));
     drive_interactive_editor(
         &appearance,
         &history_store,
@@ -217,10 +222,9 @@ where
             continue;
         }
 
-        crate::repl::notices::begin_foreground();
         let result =
             handle_interactive_signal(signal, editor, history_store, appearance, submission)?;
-        crate::repl::notices::finish_foreground();
+        crate::repl::bell::finish();
         if let Some(result) = result {
             return Ok(result);
         }

@@ -80,6 +80,8 @@ Launch `-v`/`-q`/`-d` flags set session defaults. Per-line flags add to those
 defaults for one command only. `-v` explains service and session selection,
 `-vv` shows exchanges, and `-vvv` adds response/cache evidence. These diagnostics
 and verbose field supplements are complete stderr lines above the prompt.
+Background notices use the editor's printer to appear above the entire prompt,
+including multiline prompts, and wait until input resumes after commands.
 `-d` shows host dispatch; `-dd` adds internal host decisions and captured
 backtraces. File logging is independent of per-line stderr settings.
 
