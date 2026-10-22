@@ -50,7 +50,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
-from confidence import MIRI_TOOLCHAIN, check_coverage_exclusions
+from confidence import MIRI_TOOLCHAIN, check_coverage_exclusions, coverage_target_directory
 
 
 hermetic_env = runpy.run_path(
@@ -242,6 +242,7 @@ def prepare_workspace(prefix: str) -> tuple[Path, dict[str, str]]:
     home = run_dir / "home"
     home.mkdir()
     env = hermetic_env(home)
+    env["CARGO_LLVM_COV_TARGET_DIR"] = coverage_target_directory(repo_root())
     for key in ("TMPDIR", "TMP", "TEMP", "TEMPDIR"):
         env[key] = str(tmp_root)
     return run_dir, env

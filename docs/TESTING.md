@@ -98,6 +98,8 @@ Coverage alone uses the pinned Miri nightly and excludes only `#[cfg(test)]`
 modules/helpers with `#[cfg_attr(coverage_nightly, coverage(off))]`; the gate
 rejects any exclusion without an immediately preceding `#[cfg(test)]`.
 Normal builds, lint and tests remain on stable Rust.
+Instrumented artifacts use a separate directory per repository and nightly pin,
+so older stable Cargo layouts cannot contaminate the report.
 
 Publication rehearsal uses `--check publish-dry-run` and its own
 `target/publish-dry-run` directory. Sharing the normal build directory can

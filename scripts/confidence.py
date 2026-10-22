@@ -123,6 +123,13 @@ def check_coverage_exclusions(root: Path) -> None:
             fail(f"{path}: coverage(off) requires an immediately preceding #[cfg(test)]")
 
 
+def coverage_target_directory(root: Path) -> str:
+    """Keep nightly objects separate from older Cargo artifact layouts."""
+
+    target = (root / os.environ.get("CARGO_TARGET_DIR", "target")).resolve()
+    return str(target / root.name / f"llvm-cov-{MIRI_TOOLCHAIN}")
+
+
 def cargo_test_command(*target_args: str) -> list[str]:
     """Build a locked `cargo test` invocation for one target slice.
 
@@ -648,8 +655,10 @@ def run_check(root: Path, check: ConfidenceCheck, *, to_stderr: bool = False) ->
         (root / "target").mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     env = None
-    if check.env:
-        env = {**os.environ, **check.env}
+    if check.env or check.name.startswith("coverage"):
+        env = {**os.environ, **(check.env or {})}
+    if check.name.startswith("coverage"):
+        env["CARGO_LLVM_COV_TARGET_DIR"] = coverage_target_directory(root)
     result = subprocess.run(check.command, cwd=root, env=env)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:

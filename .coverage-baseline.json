@@ -119,6 +119,10 @@
         "count": 74816
       }
     },
-    "comparison_note": "Total deltas measure excluded test scope; covered counts describe separate complete runs and may vary slightly."
+    "comparison_note": "Total deltas measure excluded test scope; covered counts describe separate complete runs and may vary slightly.",
+    "mapping_audit": {
+      "remaining_test_only_groups": 0,
+      "removed_product_code_regions": 0
+    }
   }
 }
