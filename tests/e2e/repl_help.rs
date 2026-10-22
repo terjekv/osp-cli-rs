@@ -1,10 +1,7 @@
 #![allow(missing_docs)]
 
 #[cfg(unix)]
-use std::time::Duration;
-
-#[cfg(unix)]
-use crate::support::{ReplPtyColorMode, ReplPtyConfig, ReplPtySession};
+use crate::support::{HANG_TIMEOUT, ReplPtyColorMode, ReplPtyConfig, ReplPtySession};
 
 #[cfg(unix)]
 fn run_repl_command(command: &str, colored: bool) -> (String, String) {
@@ -16,7 +13,7 @@ fn run_repl_command(command: &str, colored: bool) -> (String, String) {
     let mut session = ReplPtySession::spawn(ReplPtyConfig::default().with_color_mode(color_mode));
 
     assert!(
-        session.wait_for_plain_output("default>", Duration::from_secs(3)),
+        session.wait_for_plain_output("default>", HANG_TIMEOUT),
         "expected prompt output after REPL startup; output:\n{}",
         session.output_snapshot(4000),
     );
@@ -32,14 +29,14 @@ fn run_repl_command(command: &str, colored: bool) -> (String, String) {
         "Usage"
     };
     assert!(
-        session.wait_for_plain_output_since(start, expected, Duration::from_secs(3)),
+        session.wait_for_plain_output_since(start, expected, HANG_TIMEOUT),
         "expected output from `{command}`; output:\n{}",
         session.output_snapshot(4000),
     );
     let response = session.output_since(start);
     let response_end = start + response.find(expected).expect("response marker") + expected.len();
     assert!(
-        session.wait_for_plain_output_since(response_end, "default>", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(response_end, "default>", HANG_TIMEOUT),
         "expected prompt after `{command}`; output:\n{}",
         session.output_snapshot(8000),
     );
@@ -48,7 +45,7 @@ fn run_repl_command(command: &str, colored: bool) -> (String, String) {
 
     session.write_bytes(b"exit\r\r");
     assert!(
-        session.wait_for_exit(Duration::from_secs(3)),
+        session.wait_for_exit(HANG_TIMEOUT),
         "expected REPL to exit after `{command}`; output:\n{}",
         session.output_snapshot(4000),
     );

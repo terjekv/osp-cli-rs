@@ -2,8 +2,8 @@
 
 #[cfg(unix)]
 use crate::support::{
-    ReplPtyConfig, ReplPtySession, osp_command, parse_json_stdout, strip_ansi_preserve_newlines,
-    write_config,
+    HANG_TIMEOUT, ReplPtyConfig, ReplPtySession, osp_command, parse_json_stdout,
+    strip_ansi_preserve_newlines, write_config,
 };
 #[cfg(unix)]
 use crate::temp_support::make_temp_dir;
@@ -37,7 +37,7 @@ theme.name = "dracula"
             history.to_str().unwrap()
         );
         let mut session = ReplPtySession::spawn(ReplPtyConfig::default().with_config(&config));
-        let timeout = std::time::Duration::from_secs(3);
+        let timeout = HANG_TIMEOUT;
         let prompt = format!("{profile}>");
         assert!(session.wait_for_plain_output(&prompt, timeout));
         session.type_text("config set --session repl.history.enabled true");
