@@ -208,6 +208,9 @@ pub(super) fn project(
     } else {
         display_output(output, format)
     };
+    if format != OutputFormat::Value {
+        localize_timestamps(&mut display);
+    }
     let source_row_count = output.as_rows().map(<[Row]>::len);
     let mut grouped_styles = match &output.items {
         OutputItems::Groups(groups) => groups
@@ -302,6 +305,46 @@ pub(super) fn project(
         output: display,
         source_row_count,
         shortened,
+    }
+}
+
+fn localize_timestamps(output: &mut OutputResult) {
+    fn value(data: &mut Value) {
+        match data {
+            Value::String(text) => {
+                if let Some(local) = super::format_local_timestamp(text) {
+                    *text = local;
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(value),
+            Value::Object(fields) => row(fields),
+            _ => {}
+        }
+    }
+    fn row(row: &mut Row) {
+        row.values_mut().for_each(value);
+    }
+    fn blocks(items: &mut [DocBlock]) {
+        for block in items {
+            match block {
+                DocBlock::Section { blocks: body, .. } => blocks(body),
+                DocBlock::Data { value: data } => value(data),
+                _ => {}
+            }
+        }
+    }
+    match &mut output.items {
+        OutputItems::Rows(rows) => rows.iter_mut().for_each(row),
+        OutputItems::Groups(groups) => {
+            for group in groups {
+                row(&mut group.groups);
+                row(&mut group.aggregates);
+                group.rows.iter_mut().for_each(row);
+            }
+        }
+    }
+    if let Some(OutputDocument::Semantic(document)) = &mut output.document {
+        blocks(&mut document.blocks);
     }
 }
 

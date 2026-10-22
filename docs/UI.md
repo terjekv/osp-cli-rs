@@ -170,9 +170,10 @@ embedded newlines as `<br>`; JSON preserves the original typed values.
 Terminal fitting measures the exact escaped representation for `none`, `clip`
 and `ellipsis`, and the widest physical line for `wrap`.
 
-Human timestamp formatting is opt-in through `DisplayRule::Date`,
-`DisplayRule::RelativeTimestamp` or `unix_timestamp_columns`; ordinary RFC3339
-strings retain their text. Pipe-oriented `value` output skips these timestamp
+Human formats automatically localize RFC3339 strings at seconds precision,
+including nested data and document data blocks. `DisplayRule::Date` and
+`DisplayRule::RelativeTimestamp` take precedence; `unix_timestamp_columns`
+marks numeric Unix seconds. Pipe-oriented `value` output skips these timestamp
 rewrites, including explicitly annotated numeric timestamps. Other declared
 human display rules still apply. Derived totals see unlimited data before a
 terminal display limit is applied; JSON/CSV/TSV always receive canonical data.

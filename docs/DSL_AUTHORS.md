@@ -29,8 +29,9 @@ parallel implementations of verbs.
   non-null presence (`BlankWhenPresent`), binary byte units for numeric fields
   (`Bytes`), and compact relative RFC3339 or Unix-second timestamps
   (`RelativeTimestamp`). Use producer display rules rather than UI formatting
-  helpers in product code. Timestamp formatting is opt-in; Value format skips
-  date, relative-time and Unix timestamp rewrites. Conditions always read the
+  helpers in product code. Human formats also localize ordinary RFC3339 strings;
+  Value format keeps raw timestamps and skips date, relative-time and Unix
+  timestamp rewrites. Conditions always read the
   original row; only explicitly derived display rules synthesize fields.
   Derived totals see unlimited input before display limiting. JSON preserves raw
   values, and filters use canonical values before these display changes.

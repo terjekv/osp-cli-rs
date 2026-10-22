@@ -76,9 +76,10 @@ usage or compact option sections. `OutputMeta::document_row_roles` carries
 `DocumentRowRole` alongside a document's rows. `Document::to_output_result` and
 `OutputResult::with_document` populate it. Canonical JSON omits presentation
 roles, so JSON round trips retain content rather than presentation intent.
-The unused `StyleOverrides::mreg_key` and `json_key` fields and public timestamp/
-byte-formatting helpers have been removed from the embedding surface. Use
-`DisplayRule` metadata for human presentation.
+The unused `StyleOverrides::mreg_key` and `json_key` fields and public byte
+formatting helper have been removed from the embedding surface. Public
+`ui::format_local_timestamp` and `ui::format_relative_timestamp` remain available.
+Use `DisplayRule` metadata for producer-specific human presentation.
 
 Native command contexts retain `may_prompt()` and `can_present()`. Terminal
 confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.

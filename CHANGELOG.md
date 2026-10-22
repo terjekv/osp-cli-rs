@@ -40,7 +40,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Project human data once before layout. Derived totals use unlimited input;
   newline cells are measured as rendered. Empty declared tables retain headings.
-  RFC3339 formatting is opt-in, and Value output preserves timestamp values.
+  Human formats localize RFC3339 strings; Value and machine output keep raw
+  timestamp values.
 
 - Require producer roles for usage/options, command styling and document rows.
   Entry-shaped data remains data; JSON retains its existing content schema and
@@ -52,8 +53,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   Remove the test-only help shim; existing checks use the production help path.
 
 - Narrow the alpha rendering API: remove unused `StyleOverrides::mreg_key` and
-  `json_key`, make byte/relative-time formatting internal, and remove the dead
-  local-timestamp helper. Export document roles and `ui::TableTooWide` for typed
+  `json_key` and make byte formatting internal. Keep the public local and
+  relative timestamp helpers. Export document roles and `ui::TableTooWide` for typed
   producers and embedders.
 
 - Cycle distinct inline history suggestions with Ctrl-Right at the end of
