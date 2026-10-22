@@ -475,36 +475,32 @@ fn lower_markdown_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
 }
 
 fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
-    match &output.items {
-        OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
-        OutputItems::Rows(rows) if plan.mreg_layout == MregLayout::Cards => {
-            let mut blocks = Vec::new();
-            for (index, row) in rows.iter().enumerate() {
-                if index > 0 {
-                    push_blank_lines(&mut blocks, 1);
-                }
-                let mut record = row.clone();
-                for rule in &output.meta.display_rules {
-                    if let DisplayRule::Notice { field } = rule
-                        && let Some(value) = record.shift_remove(field)
-                    {
-                        blocks.push(Block::Paragraph(ParagraphBlock {
-                            text: display_value(&value),
-                            indent: 0,
-                            inline_markup: false,
-                        }));
-                    }
-                }
-                blocks.extend(mreg_record_blocks(
-                    &record,
-                    &output.meta.key_index,
-                    &plan.records[index],
-                ));
-            }
-            Doc { blocks }
-        }
-        _ => lower_table_doc(output, plan),
+    if plan.mreg_layout == MregLayout::Table {
+        return lower_table_doc(output, plan);
     }
+    let mut blocks = Vec::new();
+    for (index, mut record) in output_items_to_rows(&output.items).into_iter().enumerate() {
+        if index > 0 {
+            push_blank_lines(&mut blocks, 1);
+        }
+        for rule in &output.meta.display_rules {
+            if let DisplayRule::Notice { field } = rule
+                && let Some(value) = record.shift_remove(field)
+            {
+                blocks.push(Block::Paragraph(ParagraphBlock {
+                    text: display_value(&value),
+                    indent: 0,
+                    inline_markup: false,
+                }));
+            }
+        }
+        blocks.extend(mreg_record_blocks(
+            &record,
+            &output.meta.key_index,
+            &plan.records[index],
+        ));
+    }
+    Doc { blocks }
 }
 
 fn lower_value_blocks(value: &Value, table: Option<&PlannedTable>) -> Vec<Block> {

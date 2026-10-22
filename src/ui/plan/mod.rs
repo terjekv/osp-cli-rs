@@ -169,8 +169,8 @@ pub(super) fn plan_layout(
         .map(|table| plan_table(table, &plan.settings, 0))
         .collect();
     plan.mreg_layout = if plan.provenance == FormatProvenance::Explicit
-        || projection.records.len() <= 1
-        || projection.records.iter().all(has_nested_table)
+        || (matches!(projection.output.items, OutputItems::Rows(_))
+            && (projection.records.len() <= 1 || projection.records.iter().all(has_nested_table)))
     {
         MregLayout::Cards
     } else {

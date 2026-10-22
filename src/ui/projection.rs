@@ -209,6 +209,20 @@ pub(super) fn project(
         display_output(output, format)
     };
     let source_row_count = output.as_rows().map(<[Row]>::len);
+    let mut grouped_styles = match &output.items {
+        OutputItems::Groups(groups) => groups
+            .iter()
+            .map(|group| {
+                crate::core::output_model::group_rows(group)
+                    .iter()
+                    .map(|row| {
+                        field_styles(&Value::Object(row.clone()), &output.meta.display_rules)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
     // Derived display values must see every row and nested item.
     let shortened = if settings.runtime.stdout_is_tty && profile == RenderProfile::Normal {
         display.meta.display_limit.and_then(|limit| {
@@ -222,7 +236,7 @@ pub(super) fn project(
     };
     sanitize_output(&mut display);
     // Style addresses follow the same sanitized field names as the data.
-    for row in &mut styles {
+    for row in styles.iter_mut().chain(grouped_styles.iter_mut().flatten()) {
         *row = std::mem::take(row)
             .into_iter()
             .map(|(path, style)| {
@@ -244,30 +258,39 @@ pub(super) fn project(
         }
         OutputItems::Groups(groups) => groups
             .iter()
-            .map(|group| {
+            .enumerate()
+            .map(|(index, group)| {
                 let rows = crate::core::output_model::group_rows(group);
-                let styles = rows
-                    .iter()
-                    .map(|row| {
-                        field_styles(&Value::Object(row.clone()), &output.meta.display_rules)
-                    })
-                    .collect::<Vec<_>>();
+                let styles = &grouped_styles[index];
                 let mut table =
                     project_table(&rows, &display.meta.key_index, &display.meta.column_align);
-                style_table(&mut table, &styles);
+                style_table(&mut table, styles);
                 table
             })
             .collect(),
     };
-    let records = display
-        .as_rows()
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .map(|(index, row)| {
-            project_record(row, &[], styles.get(index).unwrap_or(&FieldStyles::new()))
-        })
-        .collect();
+    let records = match &display.items {
+        OutputItems::Rows(rows) => rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                project_record(row, &[], styles.get(index).unwrap_or(&FieldStyles::new()))
+            })
+            .collect(),
+        OutputItems::Groups(groups) => groups
+            .iter()
+            .enumerate()
+            .flat_map(|(index, group)| {
+                crate::core::output_model::group_rows(group)
+                    .iter()
+                    .enumerate()
+                    .map(|(row_index, row)| {
+                        project_record(row, &[], &grouped_styles[index][row_index])
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
+    };
     let mut document_tables = std::collections::BTreeMap::new();
     if let Some(document) = display.document.as_ref().and_then(OutputDocument::semantic) {
         project_document_tables(&document.blocks, &mut Vec::new(), &mut document_tables);

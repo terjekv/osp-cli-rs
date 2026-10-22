@@ -215,7 +215,8 @@ fn grouped_report_exports_restore_aggregates_and_member_rows() {
         "alice|operator",
         "bob",
         "carol",
-        "dns, vm",
+        "dns",
+        "vm",
     ] {
         assert!(
             mreg.contains(expected),
