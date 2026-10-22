@@ -173,7 +173,10 @@ pub(super) fn plan_compact_cards(
                 }
                 flush(&mut run, &mut body);
                 let room = available.saturating_sub(key_width + CARD_FIELD_GAP).max(1);
-                if let Some(Value::Array(items)) = source.get(&field.label) {
+                if let Some(Value::Array(items)) = source.get(&field.label)
+                    && (field.value.contains('\n')
+                        || UnicodeWidthStr::width(field.value.as_str()) > room)
+                {
                     let values = items
                         .iter()
                         .flat_map(|item| {
@@ -186,31 +189,32 @@ pub(super) fn plan_compact_cards(
                         .collect::<Vec<_>>();
                     let grid =
                         super::super::emit::grid::PreparedGridList::from_items(&values, room);
-                    body.push(GridBlock {
-                        rows: vec![vec![GridCell {
-                            value: String::new(),
-                            ..field.clone()
-                        }]],
-                        column_widths: vec![available],
-                        label_widths: vec![key_width + CARD_FIELD_GAP],
-                        gap: 0,
-                    });
+                    let mut column_widths = grid.column_widths;
+                    if let Some(first) = column_widths.first_mut() {
+                        *first += key_width + CARD_FIELD_GAP;
+                    }
                     body.push(GridBlock {
                         rows: grid
                             .rows
                             .iter()
-                            .map(|row| {
+                            .enumerate()
+                            .map(|(row_index, row)| {
                                 row.iter()
-                                    .map(|value| GridCell {
-                                        label: String::new(),
+                                    .enumerate()
+                                    .map(|(column_index, value)| GridCell {
+                                        label: if row_index == 0 && column_index == 0 {
+                                            field.label.clone()
+                                        } else {
+                                            String::new()
+                                        },
                                         value: value.clone(),
                                         value_style: field.value_style.clone(),
                                     })
                                     .collect()
                             })
                             .collect(),
-                        column_widths: grid.column_widths,
-                        label_widths: Vec::new(),
+                        column_widths,
+                        label_widths: vec![key_width + CARD_FIELD_GAP],
                         gap: grid.gap,
                     });
                 } else {
