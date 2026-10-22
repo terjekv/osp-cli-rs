@@ -470,27 +470,26 @@ pub(crate) fn run_cli_command(
             &ui.render_settings,
         );
     }
-    if result.failure_report.is_none() {
-        let rendered = result.render(config, &ui.render_settings);
-        if result
+    let rendered = result.render(config, &ui.render_settings);
+    if result.failure_report.is_some()
+        || result
             .messages
             .entries()
             .iter()
             .any(|entry| entry.level == MessageLevel::Error)
+    {
+        sink.write_stderr(&rendered);
+    } else {
+        let rendered = apply_output_sinks(config, ui, result, rendered, sink)?;
+        if !rendered.is_empty()
+            && let Some(pager) = pager_for_output(config, ui, result, &rendered)
         {
-            sink.write_stderr(&rendered);
+            sink.write_stdout_paged(
+                &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
+                &pager,
+            );
         } else {
-            let rendered = apply_output_sinks(config, ui, result, rendered, sink)?;
-            if !rendered.is_empty()
-                && let Some(pager) = pager_for_output(config, ui, result, &rendered)
-            {
-                sink.write_stdout_paged(
-                    &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
-                    &pager,
-                );
-            } else {
-                sink.write_stdout(&rendered);
-            }
+            sink.write_stdout(&rendered);
         }
     }
     if ui.debug_level >= 2
