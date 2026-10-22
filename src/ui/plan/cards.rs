@@ -11,7 +11,7 @@ use super::super::settings::ResolvedRenderSettings;
 use super::super::text::{escape_table_line_breaks, wrap_display_width};
 use crate::core::row::Row;
 
-const CARD_GRID_GAP: usize = 4;
+const CARD_GRID_GAP: usize = 3;
 const CARD_FIELD_GAP: usize = 2;
 const SHORT_FIELD_WIDTH_DIVISOR: usize = 2;
 const UNKNOWN_CARD_WIDTH: usize = 100;
@@ -77,7 +77,7 @@ pub(super) fn plan_compact_cards(
             + longest[field.label.as_str()]
             <= available / SHORT_FIELD_WIDTH_DIVISOR
     };
-    let (mut key_width, mut value_width, mut long_key_width) = (0, 0, 0);
+    let (mut key_width, mut long_key_width) = (0, 0);
     for field in fields
         .iter()
         .flat_map(|fields| fields.iter().skip(1))
@@ -85,14 +85,47 @@ pub(super) fn plan_compact_cards(
     {
         if short(field) {
             key_width = key_width.max(UnicodeWidthStr::width(field.label.as_str()));
-            value_width = value_width.max(longest[field.label.as_str()]);
         } else {
             long_key_width = long_key_width.max(UnicodeWidthStr::width(field.label.as_str()));
         }
     }
     key_width = key_width.max(long_key_width);
-    let cell_width = key_width + CARD_FIELD_GAP + value_width;
-    let columns = ((available + CARD_GRID_GAP) / (cell_width + CARD_GRID_GAP)).max(1);
+    let grid_widths = |columns: usize| {
+        let mut widths = vec![0; columns];
+        for record in &fields {
+            let mut index = 0;
+            for field in record
+                .iter()
+                .skip(1)
+                .filter(|field| !field.value.trim().is_empty())
+            {
+                if short(field) {
+                    let width =
+                        UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());
+                    widths[index % columns] =
+                        widths[index % columns].max(key_width + CARD_FIELD_GAP + width);
+                    index += 1;
+                } else {
+                    index = 0;
+                }
+            }
+        }
+        widths
+    };
+    let max_columns = fields
+        .iter()
+        .map(|record| record.len().saturating_sub(1))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let column_widths = (1..=max_columns)
+        .rev()
+        .map(grid_widths)
+        .find(|widths| {
+            widths.iter().sum::<usize>() + CARD_GRID_GAP * (widths.len() - 1) <= available
+        })
+        .unwrap_or_else(|| grid_widths(1));
+    let columns = column_widths.len();
     fields
         .iter()
         .zip(rows)
@@ -116,7 +149,7 @@ pub(super) fn plan_compact_cards(
                 if !run.is_empty() {
                     body.push(GridBlock {
                         rows: run.chunks(columns).map(<[GridCell]>::to_vec).collect(),
-                        column_widths: vec![cell_width; columns],
+                        column_widths: column_widths.clone(),
                         label_width: key_width,
                         gap: CARD_GRID_GAP,
                     });

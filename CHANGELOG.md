@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Size each compact grid value column from its own rendered values across
+  records, with two spaces after labels and three spaces between pairs.
+
 - Indent compact card fields and wrapped continuations two columns under
   double-rule titles, including the indent in width planning.
 

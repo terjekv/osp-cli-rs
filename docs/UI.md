@@ -93,8 +93,10 @@ body width budgets include that indent. Records with only a title value after om
 print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack
-row-major with one shared column count and label/value widths for the whole
-result. A long field breaks the run, shares the first grid column's label width and
+row-major with one shared column count and label width for the whole result.
+Each grid column sizes its values from their rendered widths across records,
+including projected swatches. Labels and values have a two-space gap; grid
+pairs have a three-space gap. A long field breaks the run, shares the first grid column's label width and
 wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
 list geometry; short arrays are comma-joined. Unknown widths use 100 columns
 for compact body geometry. Single records and lists containing objects or arrays
