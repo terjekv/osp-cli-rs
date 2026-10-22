@@ -19,7 +19,8 @@ the public contract changes.
 | `contracts` | Spawned CLI behavior, help, output, exit codes and configuration |
 | `integration` | In-process flows across configuration, dispatch, plugins, guides and DSL evaluation |
 | `e2e` | Real process/PTY behavior, prompts, completion and multi-command REPL state |
-| `architecture` | Active stable/Miri workflow and toolchain alignment |
+| `architecture` | Core, UI and DSL module dependency boundaries |
+| `toolchain` | Stable/Miri pins in metadata and selected workflow jobs |
 | `unit` and `src/**/tests*` | Local invariants, parser edges and awkward failure paths |
 
 Prefer contracts or integration for stable behavior. Use existing PTY checks
@@ -76,6 +77,7 @@ For a focused existing target:
 
 ```bash
 python3 scripts/confidence.py --check architecture
+python3 scripts/confidence.py --check toolchain
 python3 scripts/confidence.py --check contracts
 python3 scripts/confidence.py --check integration
 python3 scripts/confidence.py --check e2e

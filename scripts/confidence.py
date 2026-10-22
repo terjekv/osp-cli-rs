@@ -204,9 +204,14 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         description="Fast lint and static correctness checks.",
         command=clippy_command(),
     )
+    toolchain = ConfidenceCheck(
+        name="toolchain",
+        description="Stable and Miri pin consistency in metadata and selected workflow jobs.",
+        command=cargo_test_command("--test", "toolchain"),
+    )
     architecture = ConfidenceCheck(
         name="architecture",
-        description="Architecture guardrail tests.",
+        description="Core, UI and DSL module dependency boundaries.",
         command=cargo_test_command("--test", "architecture"),
     )
     dependency_audit = ConfidenceCheck(
@@ -261,7 +266,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         command=[python, str(root / "scripts" / "perf.py")],
     )
 
-    static_checks = [contract_env, fmt, clippy, architecture]
+    static_checks = [contract_env, fmt, clippy, toolchain, architecture]
     behavior_checks = [contracts, integration]
 
     return {
