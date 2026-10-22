@@ -38,5 +38,10 @@ mod snapshots;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "integration/diagnostic_output.rs"]
+mod diagnostic_output;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "integration/context_persistence.rs"]
 mod context_persistence;
