@@ -254,6 +254,35 @@ pub(super) fn table_cell_width(raw: &str, overflow: super::settings::TableOverfl
     }
 }
 
+pub(super) fn table_cell_lines(
+    raw: &str,
+    width: usize,
+    overflow: super::settings::TableOverflow,
+) -> Vec<String> {
+    use super::settings::TableOverflow;
+    if width == 0 {
+        return vec![String::new()];
+    }
+    match overflow {
+        TableOverflow::None => vec![escape_table_line_breaks(raw)],
+        TableOverflow::Clip => vec![crop_display_width(&escape_table_line_breaks(raw), width)],
+        TableOverflow::Ellipsis => {
+            let raw = escape_table_line_breaks(raw);
+            if UnicodeWidthStr::width(raw.as_str()) <= width {
+                vec![raw]
+            } else if width == 1 {
+                vec!["…".to_string()]
+            } else {
+                vec![format!("{}…", crop_display_width(&raw, width - 1))]
+            }
+        }
+        TableOverflow::Wrap => raw
+            .split('\n')
+            .flat_map(|line| wrap_display_width(line, width))
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{crop_display_width, display_width, visible_inline_text, wrap_display_width};

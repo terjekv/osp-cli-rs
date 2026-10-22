@@ -212,8 +212,8 @@ Table-oriented tuning lives here:
 - `ui.table.too_wide`
   - `mreg | hide`; defaults to `mreg` in every presentation preset
   - `hide` drops trailing columns and emits the existing `+N hidden` footer
-  - `mreg` switches an eligible automatic table to cards only when the shared
-    fit rule would actually hide a column; natural width alone is insufficient
+  - `mreg` compares eligible planned tables and cards by visible-value density;
+    hidden columns alone do not force cards
 
 Automatic card fallback requires **all** of the following: inferred or
 recommended Table format, normal TTY output, a known width, a single ungrouped
@@ -233,6 +233,19 @@ order, with the `+N hidden: …` footer. Spare width grows prose columns from le
 to right up to natural width. The first column may exceed the available width.
 `clip`, `ellipsis` and `wrap` affect prose cells only; atomic values remain whole.
 `none` uses natural widths without fitting.
+
+Within those guards, the planner compares values per rendered line. Table
+lines include the header, physical row lines, three border lines when bordered,
+and one hidden-columns footer if needed. Table values are row count times
+visible columns. Card lines are measured from the planned compact (or classic
+nested) layout; card values are row count times all fields capable of nonempty
+display. Cards win only when their density is strictly greater; ties keep the
+table. `TABLE_HEADER_LINES`, `TABLE_BORDER_LINES` and
+`HIDDEN_COLUMNS_FOOTER_LINES` name the table geometry constants.
+For example, eight rows with eleven populated fields and seven visible columns
+have table density `56 / (1 + 8 + 3 + 1) = 4.31`. If the complete cards need
+24 lines, their density is `88 / 24 = 3.67`, so the table stays. A single
+ordinary row already infers MREG before this comparison.
 
 Table cells comma-join lists. Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.

@@ -485,7 +485,7 @@ fn lower_markdown_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
 }
 
-fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
+pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     if plan.mreg_layout == MregLayout::Table {
         return lower_table_doc(output, plan);
     }

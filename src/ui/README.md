@@ -68,7 +68,8 @@ The renderer never infers document intent from ordinary row fields.
 
 `MAX_NESTED_TABLE_COLUMNS` names the eight-column nested comparison-table rule.
 `MAX_FALLBACK_CARD_ROWS` limits automatic table-to-card fallback to 20 source
-rows. `ui.table.too_wide=mreg|hide` selects automatic cards or the retained hide
+rows. Eligible candidates compare visible values per rendered line; cards win
+only at strictly higher density. `ui.table.too_wide=mreg|hide` selects automatic cards or the retained hide
 path; explicit/configured tables, grouped output, documents, copy-safe sinks
 and nested tables never fall back. See `docs/UI.md` for the full contract.
 

@@ -9,10 +9,10 @@ use super::doc::{GridBlock, GridCell};
 use super::emit::grid::PreparedGridList;
 use super::projection::{HumanProjection, ProjectedTable, RecordProjection, ValueProjection};
 use super::settings::{
-    FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableOverflow,
-    TableTooWide, resolve_settings,
+    FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableBorderStyle,
+    TableOverflow, TableTooWide, resolve_settings,
 };
-use super::text::table_cell_width;
+use super::text::{table_cell_lines, table_cell_width};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{OutputItems, OutputResult};
 use std::collections::BTreeMap;
@@ -20,6 +20,9 @@ use std::collections::BTreeMap;
 // Small nested records are useful comparison tables; wider records remain lists.
 const MAX_NESTED_TABLE_COLUMNS: usize = 8;
 const MAX_FALLBACK_CARD_ROWS: usize = 20;
+const TABLE_HEADER_LINES: usize = 1;
+const TABLE_BORDER_LINES: usize = 3;
+const HIDDEN_COLUMNS_FOOTER_LINES: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MregLayout {
@@ -249,27 +252,6 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
 
     plan.markdown_record = matches!(&output.items, OutputItems::Rows(rows)
         if rows.len() == 1 && rows[0].values().any(|value| value.is_array() || value.is_object()));
-    if plan.grid_list.is_none()
-        && plan.format == OutputFormat::Table
-        && matches!(
-            plan.provenance,
-            FormatProvenance::Inferred | FormatProvenance::Recommended
-        )
-        && plan.settings.table_too_wide == TableTooWide::Mreg
-        && plan.settings.display_limits
-        && plan.settings.width.is_some()
-        && plan.settings.table_overflow != TableOverflow::None
-        && !output.meta.grouped
-        && !output.meta.document_rows
-        && projection
-            .source_row_count
-            .is_some_and(|count| (1..=MAX_FALLBACK_CARD_ROWS).contains(&count))
-        && let [table] = plan.tables.as_slice()
-        && table.widths.len() < table.data.headers.len()
-    {
-        plan.format = OutputFormat::Mreg;
-        plan.mreg_layout = MregLayout::Cards;
-    }
     plan.records = projection
         .records
         .iter()
@@ -298,4 +280,87 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             )
         })
         .collect();
+    if plan.grid_list.is_none()
+        && plan.format == OutputFormat::Table
+        && matches!(
+            plan.provenance,
+            FormatProvenance::Inferred | FormatProvenance::Recommended
+        )
+        && plan.settings.table_too_wide == TableTooWide::Mreg
+        && plan.settings.display_limits
+        && plan.settings.width.is_some()
+        && plan.settings.table_overflow != TableOverflow::None
+        && !output.meta.grouped
+        && !output.meta.document_rows
+        && projection
+            .source_row_count
+            .is_some_and(|count| (1..=MAX_FALLBACK_CARD_ROWS).contains(&count))
+        && let [table] = plan.tables.as_slice()
+    {
+        let row_lines = table
+            .data
+            .rows
+            .iter()
+            .map(|row| {
+                table
+                    .widths
+                    .iter()
+                    .enumerate()
+                    .map(|(index, width)| {
+                        table_cell_lines(
+                            row.get(index).map(String::as_str).unwrap_or_default(),
+                            *width,
+                            plan.settings.table_overflow,
+                        )
+                        .len()
+                    })
+                    .max()
+                    .unwrap_or(1)
+            })
+            .sum::<usize>();
+        let table_lines = TABLE_HEADER_LINES
+            + row_lines
+            + if plan.settings.table_border == TableBorderStyle::None {
+                0
+            } else {
+                TABLE_BORDER_LINES
+            }
+            + if table.widths.len() < table.data.headers.len() {
+                HIDDEN_COLUMNS_FOOTER_LINES
+            } else {
+                0
+            };
+        let row_count = table.data.rows.len();
+        let table_values = row_count * table.widths.len();
+        let card_values = row_count
+            * table
+                .data
+                .headers
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    table.data.rows.iter().any(|row| {
+                        row.get(*index)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                })
+                .count();
+        let mut cards = plan.clone();
+        cards.format = OutputFormat::Mreg;
+        cards.mreg_layout = if cards.compact_cards.is_empty() {
+            MregLayout::Cards
+        } else {
+            MregLayout::Compact
+        };
+        // Measure the actual candidate, including classic nested tables/lists,
+        // rather than duplicating their line geometry in a density estimate.
+        let card_doc = super::lower::lower_mreg_doc(output, &cards);
+        let card_lines = super::emit::emit_doc(&card_doc, OutputFormat::Mreg, &cards.settings)
+            .lines()
+            .count();
+        if card_values * table_lines > table_values * card_lines {
+            plan.format = cards.format;
+            plan.mreg_layout = cards.mreg_layout;
+        }
+    }
 }

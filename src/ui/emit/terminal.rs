@@ -10,7 +10,7 @@ use crate::ui::doc::{
 };
 use crate::ui::settings::{ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
-use crate::ui::text::{crop_display_width, escape_table_line_breaks, wrap_display_width};
+use crate::ui::text::table_cell_lines;
 
 use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
@@ -460,30 +460,6 @@ fn table_row_lines(
             table_row(&line_cells, widths, column_align, vertical, styler, header)
         })
         .collect()
-}
-
-fn table_cell_lines(raw: &str, width: usize, overflow: TableOverflow) -> Vec<String> {
-    if width == 0 {
-        return vec![String::new()];
-    }
-    match overflow {
-        TableOverflow::None => vec![escape_table_line_breaks(raw)],
-        TableOverflow::Clip => vec![crop_display_width(&escape_table_line_breaks(raw), width)],
-        TableOverflow::Ellipsis => {
-            let raw = escape_table_line_breaks(raw);
-            if UnicodeWidthStr::width(raw.as_str()) <= width {
-                vec![raw]
-            } else if width == 1 {
-                vec!["…".to_string()]
-            } else {
-                vec![format!("{}…", crop_display_width(&raw, width - 1))]
-            }
-        }
-        TableOverflow::Wrap => raw
-            .split('\n')
-            .flat_map(|line| wrap_display_width(line, width))
-            .collect(),
-    }
 }
 
 fn format_summary(

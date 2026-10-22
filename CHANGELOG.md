@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Choose eligible automatic table/card layouts by visible values per rendered
+  line, keeping tables on ties. Hidden columns alone no longer force cards.
+
 - Use compact ruled cards for multi-row flat MREG results: shared short-field
   grids, wrapped long fields and no blank card separators. Single and nested
   records retain the classic layout; title-only records use labelled entries.
