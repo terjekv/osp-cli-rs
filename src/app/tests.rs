@@ -5,10 +5,7 @@ use super::{
     build_cli_session_layer, build_dispatch_plan, classify_exit_code, is_sensitive_key,
     render_report_message, resolve_invocation_ui, run_inline_builtin_command,
 };
-use super::{
-    authorized_command_catalog_for, command_output, resolve_runtime_config, run_from,
-    run_from_with_sink,
-};
+use super::{authorized_command_catalog_for, command_output, resolve_runtime_config, run_from};
 use crate::app::sink::BufferedUiSink;
 use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
 use crate::cli::commands::doctor as doctor_cmd;

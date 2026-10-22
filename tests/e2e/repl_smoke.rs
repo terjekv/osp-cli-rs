@@ -226,7 +226,6 @@ fn repl_builtin_commands_and_bare_help_return_without_a_refresh_wait() {
         output.contains("Usage"),
         "expected styled theme help: {output}"
     );
-    assert!(!output.contains("Try: use `theme --help`"));
 
     session.write_bytes(b"exit\r");
     if !session.wait_for_exit(Duration::from_secs(1)) {

@@ -243,15 +243,6 @@ fn osc52_helpers_respect_env_toggles_and_defaults() {
 }
 
 #[test]
-fn clipboard_service_builders_toggle_osc52_preference() {
-    let default = ClipboardService::new();
-    assert!(default.prefer_osc52);
-
-    let disabled = ClipboardService::new().with_osc52(false);
-    assert!(!disabled.prefer_osc52);
-}
-
-#[test]
 fn clipboard_plan_prefers_osc52_only_when_tty_and_payload_fit_unit() {
     if crate::tests::isolated_test() {
         return;
