@@ -108,13 +108,26 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
         return doc;
     }
 
-    let mut doc = match plan.format {
-        OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output, plan),
-        OutputFormat::Markdown => lower_markdown_doc(output, plan),
-        OutputFormat::Value => lower_value_doc(output),
-        OutputFormat::Mreg => lower_mreg_doc(output, plan),
-        OutputFormat::Auto | OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv => {
-            Doc::default()
+    let mut doc = if let Some((title, grid)) = &plan.grid_list {
+        Doc {
+            blocks: vec![Block::Section(SectionBlock {
+                title: Some(title.clone()),
+                title_chrome: SectionTitleChrome::Plain,
+                body_indent: 2,
+                inline_title_suffix: None,
+                trailing_newline: false,
+                blocks: vec![Block::Grid(grid.clone())],
+            })],
+        }
+    } else {
+        match plan.format {
+            OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output, plan),
+            OutputFormat::Markdown => lower_markdown_doc(output, plan),
+            OutputFormat::Value => lower_value_doc(output),
+            OutputFormat::Mreg => lower_mreg_doc(output, plan),
+            OutputFormat::Auto | OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv => {
+                Doc::default()
+            }
         }
     };
     if plan.format != OutputFormat::Json {
@@ -476,7 +489,7 @@ fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
     let mut blocks = Vec::new();
     for (index, mut record) in output_items_to_rows(&output.items).into_iter().enumerate() {
-        if index > 0 {
+        if index > 0 && plan.mreg_layout != MregLayout::Entries {
             push_blank_lines(&mut blocks, 1);
         }
         for rule in &output.meta.display_rules {

@@ -29,6 +29,18 @@ fn emit_blocks(blocks: &[Block]) -> String {
             Block::Entries(block) => out.push(emit_entries(block)),
             Block::KeyValue(block) => out.push(emit_key_value(block)),
             Block::List(block) => out.push(emit_list(block)),
+            Block::Grid(block) => out.extend(block.rows.iter().map(|row| {
+                row.iter()
+                    .map(|cell| {
+                        if cell.label.is_empty() {
+                            cell.value.clone()
+                        } else {
+                            format!("{}: {}", cell.label, cell.value)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            })),
         }
     }
     out.join("\n")

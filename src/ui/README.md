@@ -15,7 +15,7 @@ OutputResult / Document
    ▼ plan_format   choose format, provenance and resolved settings
    ├ JSON/CSV/TSV  dispatch to typed machine writers
    ▼ projection    project human values, labels, styles, limits; sanitize once
-   ▼ plan_layout   fit projected tables; choose table/card layout
+   ▼ plan_layout   fit projected tables; choose grids, tables or cards
    ▼ lower.rs      copy the plan and projected content into doc.rs
    ▼ emit/         render terminal or Markdown text
 ```
@@ -24,7 +24,7 @@ OutputResult / Document
 
 | Path | Owns |
 |---|---|
-| `plan/` | Format provenance, MREG layout and table fitting/visibility |
+| `plan/` | Format provenance, single-column grids, MREG layout and table fitting/visibility |
 | `projection.rs` | Human field/value projection, style annotations, limits, sanitization and table candidates |
 | `doc.rs`, `lower.rs` | One human document IR and lowering according to the plan |
 | `emit/` | Terminal/Markdown IR emitters and separate typed JSON/delimited writers |

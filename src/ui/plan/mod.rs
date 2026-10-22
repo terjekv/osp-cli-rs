@@ -2,6 +2,8 @@
 
 mod table;
 
+use super::doc::{GridBlock, GridCell};
+use super::emit::grid::PreparedGridList;
 use super::projection::{HumanProjection, ProjectedTable, RecordProjection, ValueProjection};
 use super::settings::{
     FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableOverflow,
@@ -20,6 +22,7 @@ const MAX_FALLBACK_CARD_ROWS: usize = 20;
 pub(super) enum MregLayout {
     Table,
     Cards,
+    Entries,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +51,7 @@ pub struct RenderPlan {
     pub format: OutputFormat,
     pub provenance: FormatProvenance,
     pub settings: ResolvedRenderSettings,
+    pub(super) grid_list: Option<(String, GridBlock)>,
     pub(super) markdown_record: bool,
     pub(super) mreg_layout: MregLayout,
     pub(super) tables: Vec<PlannedTable>,
@@ -70,6 +74,7 @@ pub fn plan_format(
         format,
         provenance,
         settings: resolved,
+        grid_list: None,
         markdown_record: false,
         mreg_layout: MregLayout::Table,
         tables: Vec::new(),
@@ -172,9 +177,74 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         MregLayout::Table
     };
     let output = &projection.output;
+    if !output.meta.grouped
+        && !output.meta.document_rows
+        && let OutputItems::Rows(rows) = &output.items
+        && let Some(first) = rows.first()
+        && first.len() == 1
+        && let Some(key) = first.keys().next()
+        && rows.iter().all(|row| {
+            row.len() == 1
+                && row
+                    .get(key)
+                    .is_some_and(|value| !value.is_array() && !value.is_object())
+        })
+    {
+        if plan.format == OutputFormat::Mreg && plan.provenance == FormatProvenance::Explicit {
+            plan.mreg_layout = MregLayout::Entries;
+        } else if matches!(
+            plan.format,
+            OutputFormat::Table | OutputFormat::Mreg | OutputFormat::Guide
+        ) && plan.provenance != FormatProvenance::Explicit
+        {
+            let values = rows
+                .iter()
+                .map(|row| super::projection::display_value(&row[key]))
+                .collect::<Vec<_>>();
+            let grid = PreparedGridList::from_items(
+                &values,
+                plan.settings
+                    .width
+                    .unwrap_or(100)
+                    .saturating_sub(plan.settings.margin + 2)
+                    .max(1),
+            );
+            plan.grid_list = Some((
+                format!(
+                    "{key} ({}):",
+                    projection.source_row_count.unwrap_or(rows.len())
+                ),
+                GridBlock {
+                    rows: grid
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|value| GridCell {
+                                    label: String::new(),
+                                    value: value.clone(),
+                                    value_style: values
+                                        .iter()
+                                        .position(|item| item == value)
+                                        .and_then(|index| projection.records.get(index))
+                                        .and_then(|record| record.first())
+                                        .and_then(|(_, field)| field.style.clone()),
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                    column_widths: grid.column_widths,
+                    label_width: 0,
+                    gap: grid.gap,
+                },
+            ));
+        }
+    }
+
     plan.markdown_record = matches!(&output.items, OutputItems::Rows(rows)
         if rows.len() == 1 && rows[0].values().any(|value| value.is_array() || value.is_object()));
-    if plan.format == OutputFormat::Table
+    if plan.grid_list.is_none()
+        && plan.format == OutputFormat::Table
         && matches!(
             plan.provenance,
             FormatProvenance::Inferred | FormatProvenance::Recommended

@@ -5,8 +5,8 @@ use crate::ui::chrome::{
     FULL_HELP_LAYOUT_CHROME, GUIDE_SECTION_CHROME, PLAIN_SECTION_CHROME, RenderedTitle,
 };
 use crate::ui::doc::{
-    Block, Doc, EntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock, ParagraphBlock,
-    SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, GridBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
+    ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use crate::ui::settings::{ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
@@ -43,6 +43,7 @@ fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
             Block::Entries(block) => out.push(emit_entries(block, settings)),
             Block::KeyValue(block) => out.push(emit_key_value(block, settings)),
             Block::List(block) => out.push(emit_list(block, settings)),
+            Block::Grid(block) => out.push(emit_grid(block, settings)),
         }
     }
     out.join("\n")
@@ -202,6 +203,48 @@ fn emit_entry_row(
         };
         format!("{}{}{}{}", row.indent, key, row.gap, value)
     }
+}
+
+fn emit_grid(block: &GridBlock, settings: &ResolvedRenderSettings) -> String {
+    let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
+    block
+        .rows
+        .iter()
+        .map(|row| {
+            let mut line = String::new();
+            for (index, cell) in row.iter().enumerate() {
+                if index > 0 {
+                    line.push_str(&" ".repeat(block.gap));
+                }
+                let label_width = if block.label_width > 0 {
+                    line.push_str(&styler.paint(&cell.label, StyleToken::Key));
+                    line.push_str(
+                        &" ".repeat(
+                            block
+                                .label_width
+                                .saturating_sub(UnicodeWidthStr::width(cell.label.as_str()))
+                                + 2,
+                        ),
+                    );
+                    block.label_width + 2
+                } else {
+                    0
+                };
+                line.push_str(
+                    &styler
+                        .with_value_style(cell.value_style.as_ref())
+                        .paint_value(&cell.value),
+                );
+                if index + 1 < row.len() {
+                    line.push_str(&" ".repeat(block.column_widths[index].saturating_sub(
+                        label_width + UnicodeWidthStr::width(cell.value.as_str()),
+                    )));
+                }
+            }
+            indent_lines(line.trim_end(), settings.margin)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn emit_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> String {

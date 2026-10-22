@@ -27,6 +27,7 @@ pub enum Block {
     Entries(EntriesBlock),
     KeyValue(KeyValueBlock),
     List(ListBlock),
+    Grid(GridBlock),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,4 +115,19 @@ pub struct ListBlock {
     pub indent: usize,
     pub inline_markup: bool,
     pub auto_grid: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridBlock {
+    pub rows: Vec<Vec<GridCell>>,
+    pub column_widths: Vec<usize>,
+    pub label_width: usize,
+    pub gap: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridCell {
+    pub label: String,
+    pub value: String,
+    pub value_style: Option<crate::ui::style::CellStyle>,
 }

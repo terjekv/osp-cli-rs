@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Render human single-column row lists as titled, width-aware grids. Explicit
+  MREG prints consecutive labelled entries; explicit tables and Markdown remain
+  tables, while machine and Value outputs retain their existing representation.
+
 - Preserve complete atomic table values (tokens up to 24 columns) and the first
   column. Shrink prose columns and drop trailing columns with a hidden footer
   instead of truncating identifiers, colours or addresses.

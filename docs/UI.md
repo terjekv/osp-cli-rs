@@ -65,6 +65,13 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg` (value-only rows use `value`)
 - larger row sets render as `table`
 
+A top-level list whose rows all contain exactly one scalar field with the same
+key renders as a titled `Key (N):` grid for inferred, recommended or configured
+human formats. The planner reuses the card grid-list geometry at the target's
+width, with its existing 100-column fallback for unlimited/unknown widths.
+Explicit `--table` and Markdown keep a table; explicit `--mreg` prints consecutive
+`Key: value` lines without blank separators. JSON, CSV, TSV and Value are unchanged.
+
 An explicit `--mreg` or `--format mreg` always requests cards, including flat
 multi-row and grouped output. Grouped cards carry each member's group keys and
 aggregates; an empty group still has its context card. Other MREG sources use
