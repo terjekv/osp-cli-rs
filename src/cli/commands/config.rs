@@ -1362,4 +1362,5 @@ pub(crate) fn store_secret(runtime: &AppRuntime, key: &str, value: &ConfigValue)
 mod picker;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

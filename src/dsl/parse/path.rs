@@ -248,6 +248,7 @@ fn parse_optional_i64(value: &str) -> Result<Option<i64>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         PathParseError, Selector, expression_to_flat_key, is_structural_path_token, parse_path,

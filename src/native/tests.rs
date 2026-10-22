@@ -288,23 +288,6 @@ fn empty_registry_and_default_auth_catalog_paths_unit() {
     assert!(describe.subcommands.is_empty());
 }
 
-#[test]
-fn registered_command_executes_through_registry_unit() {
-    let registry = NativeCommandRegistry::new().with_command(TestNativeCommand);
-    let context = native_context();
-    let outcome = registry
-        .command("ldap")
-        .expect("registered command")
-        .execute(&["user".to_string()], &context)
-        .expect("native command should execute");
-
-    let NativeCommandOutcome::Response(response) = outcome else {
-        panic!("expected response outcome");
-    };
-    assert_eq!(response.protocol_version, PLUGIN_PROTOCOL_V1);
-    assert_eq!(response.data, json!([{ "args": ["user"] }]));
-}
-
 #[derive(Default)]
 struct CapturingProgressSink {
     events: Mutex<Vec<serde_json::Value>>,

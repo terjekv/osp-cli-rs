@@ -178,6 +178,7 @@ pub fn evaluate_auth(auth: Option<&DescribeCommandAuthV1>, facts: &SessionFacts)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

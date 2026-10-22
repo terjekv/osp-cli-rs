@@ -218,6 +218,7 @@ fn is_unquoted_safe(ch: char) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

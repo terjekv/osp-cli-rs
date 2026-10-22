@@ -48,15 +48,13 @@ pub(crate) use messages::{MessageRequest, render as render_messages};
 pub(crate) use plan::plan_format;
 pub use section_chrome::{RuledSectionPolicy, SectionFrameStyle};
 pub(crate) use settings::RenderBackend;
-#[cfg(test)]
-use settings::resolve_settings;
 pub use settings::{
     HelpLayout, RenderRuntime, RenderSettings, RenderTarget, TableBorderOverride, TableBorderStyle,
     TableOverflow, TableTooWide, UiPresentation,
 };
+pub use settings::{ResolvedRenderSettings, resolve_settings};
 pub(crate) use settings::{
-    ResolvedRenderSettings, build_presentation_defaults_layer, explain_presentation_effect,
-    help_layout_from_config,
+    build_presentation_defaults_layer, explain_presentation_effect, help_layout_from_config,
 };
 pub use style::StyleOverrides;
 #[cfg(test)]
@@ -147,6 +145,9 @@ pub struct RenderRequest<'a> {
     pub title_prefix: Option<&'a str>,
     /// Override the layout's default closing rule.
     pub show_footer_rule: Option<bool>,
+    /// Trusted artwork beside an opening paragraph, with prose fitted to the screen.
+    /// An empty slice fits prose without artwork; exports ignore this decoration.
+    pub leading_decoration: Option<&'a [String]>,
 }
 
 impl<'a> RenderRequest<'a> {
@@ -158,6 +159,7 @@ impl<'a> RenderRequest<'a> {
             layout: None,
             title_prefix: None,
             show_footer_rule: None,
+            leading_decoration: None,
         }
     }
 }
@@ -229,7 +231,20 @@ fn render_planned(
     } else {
         lower::lower_output(&projection, &plan)
     };
-    let text = emit::emit_doc(&doc, plan.format, &plan.settings);
+    let text = if matches!(plan.format, OutputFormat::Auto | OutputFormat::Guide)
+        && request.target.is_screen()
+        && request.settings.runtime.stdout_is_tty
+        && canonical
+            .document
+            .as_ref()
+            .and_then(crate::core::output_model::OutputDocument::semantic)
+            .is_some()
+        && let Some(decoration) = request.leading_decoration
+    {
+        emit::emit_with_leading_decoration(&doc, plan.format, &plan.settings, decoration)
+    } else {
+        emit::emit_doc(&doc, plan.format, &plan.settings)
+    };
     if plan.settings.backend == RenderBackend::Rich
         && request.settings.runtime.stdout_is_tty
         && request.target.is_screen()
@@ -275,10 +290,13 @@ fn default_show_footer_rule(layout: HelpLayout) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod document_tests;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
+pub mod interrupt;
 pub mod picker;
 pub mod prompt;
 

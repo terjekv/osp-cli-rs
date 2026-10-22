@@ -36,13 +36,16 @@ pub(crate) fn run_intro_command(
     _args: IntroArgs,
 ) -> Result<CommandOutput> {
     let (view, surface) = intro_surface(runtime, session, clients, ui);
-    Ok(CommandOutput::output(
+    let mut output = CommandOutput::output(
         repl_document_output(&build_repl_intro_payload(view, &surface, None)),
         None,
-    ))
+    );
+    output.intro_decoration = Some(crate::repl::presentation::intro_decoration(view));
+    Ok(output)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};

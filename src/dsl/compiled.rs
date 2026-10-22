@@ -191,6 +191,7 @@ impl CompiledStage {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{CompiledStage, SemanticEffect};
     use crate::dsl::verbs::{filter, limit, project};

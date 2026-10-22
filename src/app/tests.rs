@@ -5,10 +5,7 @@ use super::{
     build_cli_session_layer, build_dispatch_plan, classify_exit_code, is_sensitive_key,
     render_report_message, resolve_invocation_ui, run_inline_builtin_command,
 };
-use super::{
-    authorized_command_catalog_for, command_output, resolve_runtime_config, run_from,
-    run_from_with_sink,
-};
+use super::{authorized_command_catalog_for, command_output, resolve_runtime_config, run_from};
 use crate::app::sink::BufferedUiSink;
 use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};
 use crate::cli::commands::doctor as doctor_cmd;
@@ -334,13 +331,14 @@ fn layer_value<'a>(layer: &'a ConfigLayer, key: &str) -> Option<&'a ConfigValue>
 }
 
 #[cfg(unix)]
-fn make_test_history(state: &mut AppState) -> SharedHistory {
+fn make_test_history(state: &mut AppState) -> (SharedHistory, Option<crate::tests::TestTempDir>) {
+    let root = miri_temp_dir("osp-cli-test-history");
     let history_shell = state.session.history_shell.clone();
     state.sync_history_shell_context();
 
     let history_config = HistoryConfig {
         legacy_path: None,
-        path: miri_history_path(),
+        path: root.as_ref().map(|root| root.join("history.jsonl")),
         max_entries: 128,
         enabled: true,
         dedupe: true,
@@ -349,11 +347,13 @@ fn make_test_history(state: &mut AppState) -> SharedHistory {
     }
     .normalized();
 
-    SharedHistory::new(history_config)
+    (SharedHistory::new(history_config), root)
 }
 
 #[cfg(unix)]
-fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
+fn make_test_state(
+    plugin_dirs: Vec<std::path::PathBuf>,
+) -> (AppState, Option<crate::tests::TestTempDir>) {
     let mut defaults = ConfigLayer::default();
     defaults.set("profile.default", "default");
     defaults.set(
@@ -374,8 +374,9 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
 
     let settings = RenderSettings::test_plain(OutputFormat::Json);
 
-    let config_root = miri_root_dir("osp-cli-test-config");
-    let cache_root = miri_root_dir("osp-cli-test-cache");
+    let root = miri_temp_dir("osp-cli-test-state");
+    let config_root = root.as_ref().map(|root| root.join("config"));
+    let cache_root = root.as_ref().map(|root| root.join("cache"));
     let launch = LaunchContext::default()
         .with_plugin_dirs(plugin_dirs.clone())
         .with_config_root(config_root.clone())
@@ -407,24 +408,15 @@ fn make_test_state(plugin_dirs: Vec<std::path::PathBuf>) -> AppState {
         .session
         .config_overrides
         .set("theme.path", Vec::<String>::new());
-    state
+    (state, root)
 }
 
 #[cfg(unix)]
-fn miri_history_path() -> Option<std::path::PathBuf> {
+fn miri_temp_dir(prefix: &str) -> Option<crate::tests::TestTempDir> {
     if cfg!(miri) {
         None
     } else {
-        Some(make_temp_dir("osp-cli-test-history").join("history.jsonl"))
-    }
-}
-
-#[cfg(unix)]
-fn miri_root_dir(prefix: &str) -> Option<std::path::PathBuf> {
-    if cfg!(miri) {
-        None
-    } else {
-        Some(make_temp_dir(prefix).to_path_buf())
+        Some(make_temp_dir(prefix))
     }
 }
 

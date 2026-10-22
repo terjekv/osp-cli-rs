@@ -330,6 +330,7 @@ impl CommandLineParser {
     /// boundary before the parser slices the line.
     ///
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn analyze(&self, line: &str, cursor: usize) -> ParsedCursorLine {
         self.analyze_with_flag_arity(line, cursor, |_, _| None)
     }
@@ -577,6 +578,7 @@ impl CommandLineParser {
     /// Returns the active quote style for the token being edited, if any.
     ///
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn compute_stub_quote(&self, text_before_cursor: &str) -> Option<QuoteStyle> {
         current_quote_state(text_before_cursor)
     }
@@ -612,12 +614,6 @@ impl CommandLineParser {
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
-                        #[cfg(test)]
-                        safe_cursor,
-                        #[cfg(test)]
-                        full_tokens: tokenized.full_tokens,
-                        #[cfg(test)]
-                        cursor_tokens: tokenized.cursor_tokens,
                         full_cmd,
                         cursor_cmd,
                     },
@@ -634,12 +630,6 @@ impl CommandLineParser {
 
                 ParsedCursorLine {
                     parsed: ParsedLine {
-                        #[cfg(test)]
-                        safe_cursor,
-                        #[cfg(test)]
-                        full_tokens,
-                        #[cfg(test)]
-                        cursor_tokens,
                         full_cmd,
                         cursor_cmd,
                     },
@@ -728,11 +718,13 @@ fn is_number(text: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn current_quote_state(text: &str) -> Option<QuoteStyle> {
     quote_style_for_state(scan_shell(text, |_| {}).state)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]
@@ -819,11 +811,13 @@ mod tests {
 
                 assert_eq!(span_values, tokens, "span token drift for {line:?}");
                 assert_eq!(
-                    analyzed.parsed.full_tokens, tokens,
+                    analyzed.parsed.full_cmd,
+                    parser.parse(&tokens),
                     "full token drift for {line:?}"
                 );
                 assert_eq!(
-                    analyzed.parsed.cursor_tokens, tokens,
+                    analyzed.parsed.cursor_cmd,
+                    parser.parse(&tokens),
                     "cursor token drift for {line:?}"
                 );
                 assert_eq!(
@@ -978,24 +972,14 @@ mod tests {
             let line = "service deploy --provider alpha --image red | F name";
             let cursor = "service deploy --provider alpha".len();
             let analyzed = parser.analyze(line, cursor);
+            assert_eq!(analyzed.parsed.full_cmd.head(), ["service", "deploy"]);
+            assert_eq!(analyzed.parsed.full_cmd.pipes(), ["F", "name"]);
             assert_eq!(
-                analyzed.parsed.full_tokens,
-                vec![
-                    "service",
-                    "deploy",
-                    "--provider",
-                    "alpha",
-                    "--image",
-                    "red",
-                    "|",
-                    "F",
-                    "name",
-                ]
+                analyzed.parsed.full_cmd.flag_values("--image"),
+                Some(&["red".to_string()][..])
             );
-            assert_eq!(
-                analyzed.parsed.cursor_tokens,
-                vec!["service", "deploy", "--provider", "alpha"]
-            );
+            assert_eq!(analyzed.parsed.cursor_cmd.head(), ["service", "deploy"]);
+            assert_eq!(analyzed.parsed.cursor_cmd.flag_values("--image"), None);
             assert_eq!(
                 analyzed.parsed.cursor_cmd.flag_values("--provider"),
                 Some(&["alpha".to_string()][..])
@@ -1015,9 +999,12 @@ mod tests {
             let parser = parser();
 
             let unbalanced = parser.analyze(r#"ldap user "alice"#, r#"ldap user "alice"#.len());
-            assert_eq!(unbalanced.parsed.full_tokens, vec!["ldap", "user", "alice"]);
             assert_eq!(
-                unbalanced.parsed.cursor_tokens,
+                unbalanced.parsed.full_cmd.head(),
+                vec!["ldap", "user", "alice"]
+            );
+            assert_eq!(
+                unbalanced.parsed.cursor_cmd.head(),
                 vec!["ldap", "user", "alice"]
             );
             assert_eq!(unbalanced.cursor.quote_style, Some(QuoteStyle::Double));
@@ -1025,7 +1012,8 @@ mod tests {
 
             let line = "ldap user å";
             let analyzed = parser.analyze(line, line.len() - 1);
-            assert!(analyzed.parsed.safe_cursor < line.len());
+            assert!(analyzed.cursor.replace_range.start < line.len());
+            assert!(line.is_char_boundary(analyzed.cursor.replace_range.start));
             assert_eq!(analyzed.cursor.token_stub, "");
         }
     }

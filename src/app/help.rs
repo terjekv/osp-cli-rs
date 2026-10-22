@@ -114,6 +114,7 @@ fn adjust_help_level(base: HelpLevel, verbose: u8, quiet: u8) -> HelpLevel {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn render_settings_for_help(
     args: &[OsString],
     product_defaults: &ConfigLayer,
@@ -222,6 +223,7 @@ fn build_help_override_layer(overrides: &HelpRenderOverrides) -> ConfigLayer {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn parse_help_render_overrides(args: &[OsString]) -> HelpRenderOverrides {
     let scanned = crate::cli::invocation::scan_cli_argv(args);
     parse_help_render_overrides_with_scan(&scanned)
@@ -297,6 +299,7 @@ fn parse_help_render_overrides_with_scan(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{parse_help_render_overrides, render_settings_for_help};
     use crate::config::ConfigLayer;

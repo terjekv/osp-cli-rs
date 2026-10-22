@@ -90,11 +90,13 @@ pub(crate) fn count_set(set: crate::dsl::model::RowSet) -> Result<crate::dsl::mo
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_with_plan(items: OutputItems, plan: &AggregatePlan) -> Result<OutputItems> {
     apply_set(items.into(), plan).map(Into::into)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn count_macro(items: OutputItems, spec: &str) -> Result<OutputItems> {
     if !spec.trim().is_empty() {
         return Err(anyhow!("C takes no arguments"));
@@ -103,6 +105,7 @@ fn count_macro(items: OutputItems, spec: &str) -> Result<OutputItems> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value_with_plan(value: Value, plan: &AggregatePlan) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -111,6 +114,7 @@ fn apply_value_with_plan(value: Value, plan: &AggregatePlan) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn count_macro_value(value: Value, spec: &str) -> Result<Value> {
     if !spec.trim().is_empty() {
         return Err(anyhow!("C takes no arguments"));
@@ -323,4 +327,5 @@ impl Display for AggregateFn {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

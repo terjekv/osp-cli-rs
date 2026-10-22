@@ -1,9 +1,7 @@
 #![allow(missing_docs)]
 
 #[cfg(unix)]
-use crate::support::{ReplPtyConfig, ReplPtySession};
-#[cfg(unix)]
-use std::time::Duration;
+use crate::support::{HANG_TIMEOUT, ReplPtyConfig, ReplPtySession};
 
 #[cfg(unix)]
 type PtySession = ReplPtySession;
@@ -14,7 +12,7 @@ fn spawn_repl() -> PtySession {
         ReplPtyConfig::default().with_config("[default]\nui.format = \"json\"\n"),
     );
     assert!(
-        session.wait_for_output_since(0, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(0, "\x1b[?25h", HANG_TIMEOUT),
         "expected editor startup repaint; output:\n{}",
         session.output_snapshot(4000),
     );
@@ -24,7 +22,7 @@ fn spawn_repl() -> PtySession {
 #[cfg(unix)]
 fn json_result(session: &ReplPtySession, start: usize) -> serde_json::Value {
     assert!(
-        session.wait_for_plain_output_since(start, "} ]", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(start, "} ]", HANG_TIMEOUT),
         "expected completed JSON command result; output:\n{}",
         session.output_snapshot(8000),
     );
@@ -51,14 +49,14 @@ fn repl_tab_completes_single_match_and_exits() {
     session.write_bytes(b"\t");
     session.write_bytes(b"\t");
     assert!(
-        session.wait_for_plain_output("exit Exit REPL", Duration::from_secs(5)),
+        session.wait_for_plain_output("exit Exit REPL", HANG_TIMEOUT),
         "expected tab completion to render `exit` with its status hint; output:\n{}",
         session.plain_output_snapshot(4000),
     );
     session.write_bytes(b"\r");
     session.write_bytes(b"\r");
 
-    if !session.wait_for_exit(Duration::from_secs(3)) {
+    if !session.wait_for_exit(HANG_TIMEOUT) {
         session.kill();
         panic!("expected repl to exit after completion");
     }
@@ -83,19 +81,19 @@ fn repl_tab_accepts_single_visible_completion() {
     let menu = session.output_len();
     session.write_bytes(b"\t");
     assert!(
-        session.wait_for_plain_output_since(menu, "theme", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(menu, "theme", HANG_TIMEOUT),
         "expected the single theme completion",
     );
     let selected = session.output_len();
     session.write_bytes(b"\t");
     assert!(
-        session.wait_for_output_since(selected, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(selected, "\x1b[?25h", HANG_TIMEOUT),
         "expected selected completion to repaint the input",
     );
     let accepted = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_output_since(accepted, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(accepted, "\x1b[?25h", HANG_TIMEOUT),
         "expected accepted completion to repaint the input",
     );
     session.type_text(" list | dracula");
@@ -106,10 +104,7 @@ fn repl_tab_accepts_single_visible_completion() {
     assert_eq!(result[0]["name"], "Dracula");
 
     session.write_bytes(b"exit\r\r");
-    assert!(
-        session.wait_for_exit(Duration::from_secs(3)),
-        "REPL should exit"
-    );
+    assert!(session.wait_for_exit(HANG_TIMEOUT), "REPL should exit");
 }
 
 #[cfg(unix)]
@@ -125,7 +120,7 @@ fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
     let start = session.output_len();
     session.write_bytes(b"\t");
     assert!(
-        session.wait_for_plain_output_since(start, "catppuccin", Duration::from_secs(5)),
+        session.wait_for_plain_output_since(start, "catppuccin", HANG_TIMEOUT),
         "expected visible theme completion menu for `theme use `; output:\n{}",
         session.plain_output_snapshot(8000),
     );
@@ -135,7 +130,7 @@ fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
         let start = session.output_len();
         session.write_bytes(b"\t");
         assert!(
-            session.wait_for_output_since(start, "\x1b[?25h", Duration::from_secs(3)),
+            session.wait_for_output_since(start, "\x1b[?25h", HANG_TIMEOUT),
             "expected completion selection repaint; output:\n{}",
             session.output_snapshot(8000),
         );
@@ -158,7 +153,7 @@ fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
     let accepted = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_output_since(accepted, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(accepted, "\x1b[?25h", HANG_TIMEOUT),
         "expected accepted completion to repaint the input",
     );
     let start = session.output_len();
@@ -166,15 +161,12 @@ fn repl_theme_use_tab_cycles_visible_suggestion_into_prompt_end_to_end() {
     assert!(session.wait_for_plain_output_since(
         start,
         &format!("active theme set to: {}", selections[1]),
-        Duration::from_secs(3)
+        HANG_TIMEOUT
     ));
-    assert!(session.wait_for_editor_since(start, Duration::from_secs(3)));
+    assert!(session.wait_for_editor_since(start, HANG_TIMEOUT));
 
     session.write_bytes(b"exit\r\r");
-    assert!(
-        session.wait_for_exit(Duration::from_secs(3)),
-        "REPL should exit"
-    );
+    assert!(session.wait_for_exit(HANG_TIMEOUT), "REPL should exit");
 }
 
 #[cfg(unix)]
@@ -188,7 +180,7 @@ fn repl_close_menu_keeps_typed_input() {
     let start = session.output_len();
     session.write_bytes(b"\t");
     assert!(
-        session.wait_for_plain_output_since(start, "help", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(start, "help", HANG_TIMEOUT),
         "expected visible root completion menu; output:\n{}",
         session.plain_output_snapshot(2000),
     );
@@ -196,7 +188,7 @@ fn repl_close_menu_keeps_typed_input() {
     let start = session.output_len();
     session.write_bytes(b"\x1b");
     assert!(
-        session.wait_for_output_since(start, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(start, "\x1b[?25h", HANG_TIMEOUT),
         "expected menu to close before typing; output:\n{}",
         session.plain_output_snapshot(2000),
     );
@@ -210,8 +202,5 @@ fn repl_close_menu_keeps_typed_input() {
     assert_eq!(result[0]["value"], "rose-pine-moon");
 
     session.write_bytes(b"exit\r\r");
-    assert!(
-        session.wait_for_exit(Duration::from_secs(3)),
-        "REPL should exit"
-    );
+    assert!(session.wait_for_exit(HANG_TIMEOUT), "REPL should exit");
 }

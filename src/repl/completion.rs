@@ -228,6 +228,7 @@ fn resolved_alias_target_node(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn scope_completion_tree(
     tree: &CompletionTree,
     scope: &crate::app::ReplScopeStack,
@@ -471,6 +472,7 @@ pub(crate) fn validate_dsl_stages(stages: &[String]) -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         ALIAS_PLACEHOLDER_TOKEN, alias_completion_command, alias_completion_node,

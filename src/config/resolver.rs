@@ -455,6 +455,7 @@ fn should_preserve_selected_secret(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

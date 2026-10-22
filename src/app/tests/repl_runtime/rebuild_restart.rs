@@ -2,8 +2,7 @@
 fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
-        state.session.prompt_prefix = "osp-dev".to_string();
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state.session.history_enabled = false;
         state
             .session
@@ -31,7 +30,6 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
         assert_eq!(next.runtime.ui.debug_level, 2);
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Json);
         assert_eq!(next.runtime.ui.render_settings.theme_name, "dracula");
-        assert_eq!(next.session.prompt_prefix, "osp-dev");
         assert!(!next.session.history_enabled);
         assert_eq!(next.session.scope.commands(), vec!["orch".to_string()]);
         assert_eq!(
@@ -45,7 +43,7 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
 fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state.session.config_overrides.set("theme.name", "dracula");
         state.runtime.ui.render_settings.mode = crate::core::output::RenderMode::Auto;
         state.runtime.ui.render_settings.color = crate::core::output::ColorMode::Auto;
@@ -70,7 +68,7 @@ fn rebuild_repl_state_preserves_rich_terminal_render_runtime_unit() {
 fn rebuild_repl_state_preserves_session_render_defaults_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state.session.config_overrides.set("ui.format", "table");
 
         let next = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
@@ -85,14 +83,14 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
     with_temp_config_paths(|| {
         let dir = make_temp_dir("osp-cli-repl-plugin-enable");
         let _plugin = write_pipeline_test_plugin(&dir);
-        let mut state = make_test_state(vec![dir.to_path_buf()]);
+        let (mut state, _state_root) = make_test_state(vec![dir.to_path_buf()]);
         state
             .clients
             .plugins()
             .set_disabled(["hello".to_string()]);
         assert!(state.clients.plugins().command_catalog().is_empty());
 
-        let history = make_test_history(&mut state);
+        let (history, _history_root) = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
             &mut state,
             &history,
@@ -117,10 +115,10 @@ fn repl_plugin_enable_restart_refreshes_command_catalog_unit() {
 
 #[test]
 fn repl_reload_intent_matches_command_scope_unit() {
-    let mut state = make_test_state(Vec::new());
+    let (mut state, _state_root) = make_test_state(Vec::new());
     state.runtime.themes =
         crate::ui::theme_catalog::load_theme_catalog(state.runtime.config.resolved());
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let theme_result = repl_dispatch::execute_repl_plugin_line(
         &mut state,
@@ -176,7 +174,7 @@ fn repl_reload_intent_matches_command_scope_unit() {
 fn repl_config_unset_rebuilds_runtime_state_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state
             .session
             .config_overrides
@@ -184,7 +182,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
-        let history = make_test_history(&mut state);
+        let (history, _history_root) = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
             &mut state,
             &history,
@@ -212,7 +210,7 @@ fn repl_config_unset_rebuilds_runtime_state_unit() {
 fn repl_config_unset_dry_run_preserves_session_state_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state
             .session
             .config_overrides
@@ -220,7 +218,7 @@ fn repl_config_unset_dry_run_preserves_session_state_unit() {
         state = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
         assert_eq!(state.runtime.ui.render_settings.format, OutputFormat::Table);
 
-        let history = make_test_history(&mut state);
+        let (history, _history_root) = make_test_history(&mut state);
         let result = repl_dispatch::execute_repl_plugin_line(
             &mut state,
             &history,

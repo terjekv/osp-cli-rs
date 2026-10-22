@@ -404,6 +404,14 @@ the same severity share a heading; a single message uses “Error” or “Warni
 Embedders can use `MessageBuffer::push_titled` for contextual headings. Message
 bodies and JSON error payloads are unchanged; titles are presentation metadata.
 
+Products can supply local artwork with `App::with_intro_decoration`. The
+callback receives resolved screen settings and returns trusted terminal rows;
+it must do no service I/O or output writes. Empty rows leave only the text.
+The renderer places artwork beside the opening paragraph and fits prose to
+that column, while later sections retain the full width. Minimal intros,
+exports and transformed data omit decoration. Pixels, palettes, terminal-size
+thresholds and product identity stay with the product.
+
 The REPL prompt and intro surface are controlled primarily by:
 
 - `repl.prompt`

@@ -66,6 +66,7 @@ pub(crate) struct CommandOutput {
     pub(crate) progress_replace: bool,
     /// Native display supplements, suppressed when the source is selected.
     pub(crate) display_details: String,
+    pub(crate) intro_decoration: Option<Vec<String>>,
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
@@ -86,6 +87,7 @@ impl CommandOutput {
             format_hint: None,
             progress_replace: false,
             display_details: String::new(),
+            intro_decoration: None,
             stderr_text: String::new(),
             failure_report: None,
             hint_command: None,
@@ -278,6 +280,7 @@ impl CommandOutput {
             &output,
             &RenderRequest {
                 target,
+                leading_decoration: self.intro_decoration.as_deref(),
                 layout: Some(crate::ui::help_layout_from_config(config)),
                 ..RenderRequest::new(&effective)
             },
@@ -470,27 +473,26 @@ pub(crate) fn run_cli_command(
             &ui.render_settings,
         );
     }
-    if result.failure_report.is_none() {
-        let rendered = result.render(config, &ui.render_settings);
-        if result
+    let rendered = result.render(config, &ui.render_settings);
+    if result.failure_report.is_some()
+        || result
             .messages
             .entries()
             .iter()
             .any(|entry| entry.level == MessageLevel::Error)
+    {
+        sink.write_stderr(&rendered);
+    } else {
+        let rendered = apply_output_sinks(config, ui, result, rendered, sink)?;
+        if !rendered.is_empty()
+            && let Some(pager) = pager_for_output(config, ui, result, &rendered)
         {
-            sink.write_stderr(&rendered);
+            sink.write_stdout_paged(
+                &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
+                &pager,
+            );
         } else {
-            let rendered = apply_output_sinks(config, ui, result, rendered, sink)?;
-            if !rendered.is_empty()
-                && let Some(pager) = pager_for_output(config, ui, result, &rendered)
-            {
-                sink.write_stdout_paged(
-                    &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
-                    &pager,
-                );
-            } else {
-                sink.write_stdout(&rendered);
-            }
+            sink.write_stdout(&rendered);
         }
     }
     if ui.debug_level >= 2

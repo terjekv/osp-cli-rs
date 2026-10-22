@@ -30,6 +30,7 @@
 
 pub(crate) mod clap_metadata;
 pub(crate) mod command_error;
+pub(crate) mod context;
 pub use command_error::CommandError;
 /// Reader-relative command suggestions.
 pub(crate) mod command_scope;

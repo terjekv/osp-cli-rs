@@ -563,6 +563,7 @@ pub(crate) fn save_custom_theme(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         ThemeCatalog, ThemePaletteFile, ThemeSource, ThemeSpec, apply_theme_overrides,

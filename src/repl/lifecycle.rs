@@ -334,7 +334,7 @@ pub(super) fn seed_native_context(
         let selected = session.native_context.for_service(name);
         for (kind, value) in command.context_seeds(runtime.config.resolved(), &identity) {
             if enabled.contains(&kind)
-                && crate::context::KINDS.contains(&kind.as_str())
+                && crate::core::context::KINDS.contains(&kind.as_str())
                 && crate::context::valid_value(&value)
                 && !session
                     .native_context
@@ -357,6 +357,7 @@ pub(super) fn seed_native_context(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ReplLoopState, build_cycle_chrome_output};
     use crate::app::sink::BufferedUiSink;

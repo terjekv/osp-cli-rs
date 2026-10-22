@@ -13,6 +13,7 @@ pub fn flatten_row(row: &Row) -> Row {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Flattens each row independently with [`flatten_row`].
 pub fn flatten_rows(rows: &[Row]) -> Vec<Row> {
     rows.iter().map(flatten_row).collect()
@@ -168,6 +169,7 @@ fn flatten_value(prefix: Option<&str>, value: &Value, out: &mut Row) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

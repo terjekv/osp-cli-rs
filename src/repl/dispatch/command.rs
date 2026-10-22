@@ -471,9 +471,11 @@ pub(super) fn finalize_repl_command(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn run_repl_command(
     state: &mut crate::app::AppState,
     command: Commands,

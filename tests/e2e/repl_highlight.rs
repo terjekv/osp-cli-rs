@@ -1,10 +1,7 @@
 #![allow(missing_docs)]
 
 #[cfg(unix)]
-use std::time::Duration;
-
-#[cfg(unix)]
-use crate::support::{ReplPtyColorMode, ReplPtyConfig, ReplPtySession};
+use crate::support::{HANG_TIMEOUT, ReplPtyColorMode, ReplPtyConfig, ReplPtySession};
 
 #[cfg(unix)]
 fn spawn_repl_with_color() -> ReplPtySession {
@@ -24,14 +21,14 @@ fn repl_highlights_commands_with_success_color() {
 
     let expected = "\x1b[38;2;139;213;202mconfig";
     assert!(
-        session.wait_for_output_since(start, expected, Duration::from_secs(3)),
+        session.wait_for_output_since(start, expected, HANG_TIMEOUT),
         "expected success-colored command in output; output:\n{}",
         session.output_snapshot(2000),
     );
 
     session.write_bytes(b"\x03");
     session.write_bytes(b"exit\r\r");
-    if !session.wait_for_exit(Duration::from_secs(3)) {
+    if !session.wait_for_exit(HANG_TIMEOUT) {
         session.kill();
     }
 }
@@ -44,22 +41,17 @@ fn repl_help_history_highlights_help_keyword() {
     }
     let mut session = spawn_repl_with_color();
 
-    session.write_bytes(b"help history");
-
     let start = session.output_len();
+    session.write_bytes(b"help history");
     assert!(
-        session.wait_for_output_since(
-            start,
-            "\x1b[38;2;139;213;202mhelp\x1b[0m",
-            Duration::from_secs(3)
-        ),
+        session.wait_for_output_since(start, "\x1b[38;2;139;213;202mhelp\x1b[0m", HANG_TIMEOUT),
         "expected `help` to be highlighted with the command color; output:\n{}",
         session.output_snapshot(4000),
     );
 
     session.write_bytes(b"\x03");
     session.write_bytes(b"exit\r\r");
-    if !session.wait_for_exit(Duration::from_secs(3)) {
+    if !session.wait_for_exit(HANG_TIMEOUT) {
         session.kill();
     }
 }

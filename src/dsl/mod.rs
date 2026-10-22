@@ -41,6 +41,8 @@ pub(crate) mod verb_info;
 
 mod engine;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "value_tests.rs"]
 mod value;
 mod verbs;
 
@@ -50,4 +52,5 @@ pub(crate) use verb_info::{registered_verbs, verb_info};
 pub(crate) use verbs::filter::parse_timestamp;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

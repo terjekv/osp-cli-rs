@@ -107,6 +107,7 @@ pub fn parse_quick_spec(input: &str) -> QuickSpec {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{QuickScope, parse_quick_spec};
 

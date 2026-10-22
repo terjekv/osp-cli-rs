@@ -368,6 +368,7 @@ impl SchemaEntry {
 
     /// Starts a schema entry for floating-point values.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn float() -> Self {
         Self {
             canonical_key: None,
@@ -2258,4 +2259,5 @@ pub(crate) fn normalize_scope(scope: Scope) -> Scope {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

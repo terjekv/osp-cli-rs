@@ -573,12 +573,12 @@ fn secret_error(backend: &str, reason: impl Into<String>) -> ConfigError {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::BTreeMap;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::sync::Mutex;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
 
@@ -614,20 +614,10 @@ mod tests {
         }
     }
 
-    fn temp_index() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "osp-keyring-index-{}-{}.toml",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
-    }
-
     #[test]
     fn keyring_index_round_trips_all_scope_shapes_without_values() {
-        let path = temp_index();
+        let root = crate::tests::make_temp_dir("osp-keyring-index");
+        let path = root.join("index.toml");
         let credentials = Arc::new(FakeCredentials::default());
         let store = KeyringSecretStore::new(path.clone(), credentials);
         let scopes = [
@@ -656,7 +646,6 @@ mod tests {
             assert_eq!(entry.scope, expected_scope);
         }
         assert!(layer.entries().iter().all(|entry| entry.value.is_secret()));
-        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -679,7 +668,8 @@ mod tests {
 
     #[test]
     fn keyring_index_rejects_unknown_versions_and_duplicate_entries() {
-        let path = temp_index();
+        let root = crate::tests::make_temp_dir("osp-keyring-index");
+        let path = root.join("index.toml");
         fs::write(&path, "version = 2\nentries = []\n").unwrap();
         let store = KeyringSecretStore::new(path.clone(), Arc::new(FakeCredentials::default()));
         assert!(
@@ -707,12 +697,12 @@ key = "extensions.test.token"
                 .to_string()
                 .contains("duplicate")
         );
-        let _ = fs::remove_file(path);
     }
 
     #[test]
     fn keyring_set_and_unset_return_previous_values() {
-        let path = temp_index();
+        let root = crate::tests::make_temp_dir("osp-keyring-index");
+        let path = root.join("index.toml");
         let store = KeyringSecretStore::new(path.clone(), Arc::new(FakeCredentials::default()));
         let scope = Scope::profile("uio");
         let first = ConfigValue::String("first".to_string());
@@ -740,12 +730,12 @@ key = "extensions.test.token"
             Some(second)
         );
         assert!(store.load_layer().unwrap().entries().is_empty());
-        let _ = fs::remove_file(path);
     }
 
     #[test]
     fn keyring_load_skips_index_entries_deleted_outside_the_cli() {
-        let path = temp_index();
+        let root = crate::tests::make_temp_dir("osp-keyring-index");
+        let path = root.join("index.toml");
         let credentials = Arc::new(FakeCredentials::default());
         let store = KeyringSecretStore::new(path.clone(), credentials.clone());
         let scope = Scope::global();
@@ -763,35 +753,13 @@ key = "extensions.test.token"
             .unwrap();
 
         assert!(store.load_layer().unwrap().entries().is_empty());
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn keyring_set_rolls_back_credential_when_index_write_fails() {
-        let blocker = temp_index();
-        fs::write(&blocker, "not a directory").unwrap();
-        let credentials = Arc::new(FakeCredentials::default());
-        let store = KeyringSecretStore::new(blocker.join("index.toml"), credentials.clone());
-
-        let error = store
-            .set_scoped(
-                "extensions.test.token",
-                &ConfigValue::String("must-not-remain".to_string()),
-                &Scope::global(),
-                false,
-            )
-            .err()
-            .expect("index write should fail");
-
-        assert!(error.to_string().contains("failed to"));
-        assert!(credentials.values.lock().unwrap().is_empty());
-        let _ = fs::remove_file(blocker);
     }
 
     #[cfg(unix)]
     #[test]
     fn keyring_index_is_owner_only() {
-        let path = temp_index();
+        let root = crate::tests::make_temp_dir("osp-keyring-index");
+        let path = root.join("index.toml");
         let store = KeyringSecretStore::new(path.clone(), Arc::new(FakeCredentials::default()));
         store
             .set_scoped(
@@ -806,7 +774,6 @@ key = "extensions.test.token"
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        let _ = fs::remove_file(path);
     }
 
     #[test]

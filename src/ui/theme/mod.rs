@@ -405,12 +405,14 @@ pub fn display_name_from_id(value: &str) -> String {
 /// This mirrors [`builtin_themes`] but makes the intent clearer at call sites
 /// that treat the shipped theme catalog as the full available set.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn all_themes() -> Vec<ThemeDefinition> {
     builtin_theme_defs().to_vec()
 }
 
 /// Returns the normalized identifiers of all available built-in themes.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn available_theme_names() -> Vec<String> {
     all_themes()
         .into_iter()
@@ -485,11 +487,13 @@ fn default_theme_fallback() -> ThemeDefinition {
 
 /// Returns whether a theme name resolves to a known theme.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn is_known_theme(name: &str) -> bool {
     find_theme(name).is_some()
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

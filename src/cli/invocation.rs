@@ -573,6 +573,7 @@ pub(crate) fn invocation_overview_summary() -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         InvocationOptions, extend_with_invocation_help, hidden_invocation_completion_flags,

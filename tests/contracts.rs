@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg(not(miri))]
 #![allow(missing_docs)]
 
@@ -69,3 +70,9 @@ mod plugin_processes;
 
 #[path = "contracts/cli_invocation.rs"]
 mod cli_invocation;
+
+#[cfg(unix)]
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "contracts/recording.rs"]
+mod recording;

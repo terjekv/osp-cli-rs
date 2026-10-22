@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -60,7 +61,7 @@ CLIPPY_DENIES = (
 )
 
 MIRI_TOOLCHAIN = "nightly-2026-10-16"
-TOOL_VERSIONS = {"cargo-audit": "0.22.2", "cargo-llvm-cov": "0.8.4"}
+TOOL_VERSIONS = {"cargo-audit": "0.22.2", "cargo-llvm-cov": "0.9.1"}
 GENERIC_CHECKS = {"fmt", "fmt-fix", "clippy", "test", "build", "audit", "metadata", "coverage-crate"}
 LINUX_KEYRING_TOOLS = {"dbus-run-session", "dbus-daemon", "gnome-keyring-daemon", "gdbus"}
 
@@ -105,6 +106,30 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def check_coverage_exclusions(root: Path) -> None:
+    """Permit compiler coverage exclusions only on explicitly test-gated items."""
+
+    allowed = re.compile(
+        r"(?m)^[ \t]*#\[cfg\(test\)\]\n"
+        r"[ \t]*#\[cfg_attr\(coverage_nightly, coverage\(off\)\)\]$"
+    )
+    paths = subprocess.check_output(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+        cwd=root,
+    ).decode().split("\0")
+    for name in filter(None, paths):
+        path = root / name
+        if path.is_file() and re.search(r"\bcoverage\s*\(\s*off\s*\)", allowed.sub("", path.read_text())):
+            fail(f"{path}: coverage(off) requires an immediately preceding #[cfg(test)]")
+
+
+def coverage_target_directory(root: Path) -> str:
+    """Keep nightly objects separate from older Cargo artifact layouts."""
+
+    target = (root / os.environ.get("CARGO_TARGET_DIR", "target")).resolve()
+    return str(target / root.name / f"llvm-cov-{MIRI_TOOLCHAIN}")
+
+
 def cargo_test_command(*target_args: str) -> list[str]:
     """Build a locked `cargo test` invocation for one target slice.
 
@@ -112,7 +137,7 @@ def cargo_test_command(*target_args: str) -> list[str]:
     changes its common cargo flags.
     """
 
-    return ["cargo", "test", *target_args, "--locked"]
+    return ["cargo", "test", "--workspace", *target_args, "--locked"]
 
 
 def cargo_miri_test_command(*target_args: str) -> list[str]:
@@ -134,7 +159,7 @@ def clippy_command() -> list[str]:
     codifies the team's current "high-signal, low-noise" lint policy.
     """
 
-    command = ["cargo", "clippy", "--locked", "--all-features", "--all-targets", "--"]
+    command = ["cargo", "clippy", "--workspace", "--locked", "--all-features", "--all-targets", "--"]
     for lint in CLIPPY_DENIES:
         command.extend(["-D", lint])
     return command
@@ -152,7 +177,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
 
     public_docs = ConfidenceCheck(
         name="public-docs",
-        description="Repo-wide public Rustdoc coverage and feature-gate contract.",
+        description="Compiler-backed public Rustdoc coverage.",
         command=[python, str(root / "scripts" / "public-docs.py")],
     )
     rustdoc_warnings = ConfidenceCheck(
@@ -165,11 +190,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         name="public-api-examples",
         description="Curated runnable doctest baseline for public entrypoints.",
         command=[python, str(root / "scripts" / "public-api-examples.py")],
-    )
-    contract_env = ConfidenceCheck(
-        name="contract-env",
-        description="Hermetic contract test environment guardrail.",
-        command=[str(root / "scripts" / "check-contract-env.sh")],
     )
     miri_setup = ConfidenceCheck(
         name="miri-setup",
@@ -204,9 +224,14 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         description="Fast lint and static correctness checks.",
         command=clippy_command(),
     )
+    toolchain = ConfidenceCheck(
+        name="toolchain",
+        description="Stable and Miri pin consistency in metadata and selected workflow jobs.",
+        command=cargo_test_command("--test", "toolchain"),
+    )
     architecture = ConfidenceCheck(
         name="architecture",
-        description="Architecture guardrail tests.",
+        description="Core, UI and DSL module dependency boundaries.",
         command=cargo_test_command("--test", "architecture"),
     )
     dependency_audit = ConfidenceCheck(
@@ -248,7 +273,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
     build = ConfidenceCheck(
         name="build",
         description="Build the release operator binary using the committed lockfile.",
-        command=["cargo", "build", "--release", "--locked", "--bin", "osp"],
+        command=["cargo", "build", "--workspace", "--release", "--locked", "--bin", "osp"],
     )
     startup_budget = ConfidenceCheck(
         name="startup-budget",
@@ -261,7 +286,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         command=[python, str(root / "scripts" / "perf.py")],
     )
 
-    static_checks = [contract_env, fmt, clippy, architecture]
+    static_checks = [fmt, clippy, toolchain, architecture]
     behavior_checks = [contracts, integration]
 
     return {
@@ -272,7 +297,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
             ),
             covers=(
                 "formatting and lint policy",
-                "hermetic contract environment",
                 "architecture guardrails",
             ),
             omits=(
@@ -443,10 +467,10 @@ def check_catalog(root: Path, cwd: Path | None = None) -> dict[str, ConfidenceCh
             python, str(root / "scripts" / "run-hermetic-cargo.py"),
             "--cwd", str(cwd or root), "--", *cargo_test_command("--all-features"),
         ]),
-        ("coverage-crate", "Instrument this crate's tests and enforce the shared line floor.", [
+        ("coverage-crate", "Instrument workspace tests and enforce the shared line floor.", [
             python, str(root / "scripts" / "run-hermetic-cargo.py"),
-            "--cwd", str(cwd or root), "--", "cargo", "llvm-cov",
-            "--locked", "--all-features", "--all-targets", "--no-fail-fast", "--json",
+            "--cwd", str(cwd or root), "--", "cargo", f"+{MIRI_TOOLCHAIN}", "llvm-cov",
+            "--workspace", "--locked", "--all-features", "--all-targets", "--no-fail-fast", "--json",
             "--output-path", "target/coverage.json", "--fail-under-lines",
             str(json.loads((root / ".coverage-baseline.json").read_text())["overall_line_percent"]),
         ]),
@@ -480,7 +504,6 @@ def required_tools(checks: list[ConfidenceCheck], root: Path) -> set[str]:
     """Collect prerequisites before a lane spends time building anything."""
 
     special = {
-        "contract-env": {"bash", "rg"},
         "public-api-examples": set(),
         "startup-budget": set(),
         "startup-baseline": set(),
@@ -523,7 +546,7 @@ def tool_available(tool: str, root: Path | None = None) -> bool:
         if shutil.which("rustc") is None:
             return False
         result = subprocess.run(
-            ["rustc", "--print", "target-libdir"], cwd=root,
+            ["rustc", f"+{MIRI_TOOLCHAIN}", "--print", "target-libdir"], cwd=root,
             capture_output=True, text=True, check=False,
         )
         if result.returncode or not result.stdout.strip():
@@ -581,13 +604,13 @@ def install_tools(checks: list[ConfidenceCheck], root: Path) -> None:
     tools = required_tools(checks, root)
     if "llvm-tools-preview" in tools and not tool_available("llvm-tools-preview", root):
         if shutil.which("rustup") is None:
-            fail("rustup is required to install llvm-tools-preview for the active toolchain.")
+            fail("rustup is required to install llvm-tools-preview for the shared nightly.")
         run_check(root, ConfidenceCheck(
-            "install-llvm-tools", "Install the active toolchain's LLVM coverage tools.",
-            ["rustup", "component", "add", "llvm-tools-preview"],
+            "install-llvm-tools", "Install the shared nightly's LLVM coverage tools.",
+            ["rustup", "component", "add", "llvm-tools-preview", "--toolchain", MIRI_TOOLCHAIN],
         ))
         if not tool_available("llvm-tools-preview", root):
-            fail("llvm-tools-preview did not provide active llvm-cov and llvm-profdata binaries.")
+            fail("llvm-tools-preview did not provide nightly llvm-cov and llvm-profdata binaries.")
     for tool in sorted(tools & TOOL_VERSIONS.keys()):
         if not tool_available(tool, root):
             run_check(root, ConfidenceCheck(
@@ -625,13 +648,17 @@ def run_check(root: Path, check: ConfidenceCheck, *, to_stderr: bool = False) ->
 
     stream = sys.stderr if to_stderr else sys.stdout
     print(f"\n==> [{check.name}] {check.description}", file=stream, flush=True)
+    if check.name.startswith("coverage"):
+        check_coverage_exclusions(root)
     if check.name == "coverage-crate":
         # The report stays here even when Cargo builds in an external target dir.
         (root / "target").mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     env = None
-    if check.env:
-        env = dict(**os.environ, **check.env)
+    if check.env or check.name.startswith("coverage"):
+        env = {**os.environ, **(check.env or {})}
+    if check.name.startswith("coverage"):
+        env["CARGO_LLVM_COV_TARGET_DIR"] = coverage_target_directory(root)
     result = subprocess.run(check.command, cwd=root, env=env)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:

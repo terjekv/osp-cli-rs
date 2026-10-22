@@ -27,6 +27,7 @@ pub fn parse_terms(spec: &str) -> Result<Vec<String>> {
 // transform the rows inside it. Keep that contract in one helper so new stages
 // do not silently diverge.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn map_group_rows(
     groups: Vec<Group>,
     map_rows: impl FnMut(Vec<Row>) -> Result<Vec<Row>>,
@@ -94,6 +95,7 @@ pub fn parse_alias_after_as(words: &[String], index: usize, verb: &str) -> Resul
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         map_group_rows, parse_alias_after_as, parse_optional_alias_after_key, parse_stage_words,

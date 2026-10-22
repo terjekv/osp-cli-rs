@@ -53,6 +53,12 @@ where
     } else {
         crate::repl::ReplEvent::Line(raw)
     };
+    if std::io::IsTerminal::is_terminal(&std::io::stdin())
+        && let Err(error) = crate::ui::interrupt::prepare()
+    {
+        eprintln!("{error}");
+        return ReplResult::Continue;
+    }
     match (ctx.execute)(event, ctx.history_store) {
         Ok(result) => result,
         Err(err) => {
@@ -240,7 +246,19 @@ where
         }
 
         let mut line = String::new();
-        let read = crate::ui::prompt::read_line(&mut line)?;
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            crate::ui::interrupt::prepare()?;
+        }
+        let read = match crate::ui::prompt::read_line(&mut line) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                eprintln!();
+                if submission.exit_on_interrupt {
+                    return Ok(ReplResult::Exit(0));
+                }
+                continue;
+            }
+            result => result?,
+        };
         if read == 0 {
             return Ok(ReplResult::Exit(0));
         }
@@ -589,6 +607,7 @@ pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::repl::engine::{HistoryConfig, ReplReloadKind};

@@ -308,6 +308,7 @@ pub(crate) fn explain_interpolation(
 /// Parse `${key}` segments once so interpolation and explain tracing can share
 /// the same validated template shape.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_template(key: &str, template: &str) -> Result<ParsedTemplate, ConfigError> {
     parse_template_with_sensitivity(key, template, is_sensitive_key(key))
 }
@@ -362,6 +363,7 @@ fn diagnostic_template(template: &str, sensitive: bool) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::BTreeMap;
 

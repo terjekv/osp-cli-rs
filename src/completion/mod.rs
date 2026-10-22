@@ -58,5 +58,6 @@ pub(crate) use parse::TokenSpan;
 pub(crate) use tree::ConfigKeySpec;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "tests/integration.rs"]
 mod integration_tests;

@@ -1044,6 +1044,7 @@ pub(crate) fn inline_help_document(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     mod pipeline_parse;
 

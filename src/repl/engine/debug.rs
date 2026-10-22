@@ -404,6 +404,7 @@ fn snapshot_menu_debug(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

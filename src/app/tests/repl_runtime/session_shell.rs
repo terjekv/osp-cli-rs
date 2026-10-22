@@ -1,7 +1,7 @@
 #[test]
 fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
-    let mut state = make_test_state(Vec::new());
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(Vec::new());
+    let (history, _history_root) = make_test_history(&mut state);
     let original_message = state.runtime.ui.verbosity;
     let original_error_detail = state.runtime.ui.verbosity;
     let original_debug = state.runtime.ui.debug_level;
@@ -27,8 +27,8 @@ fn repl_builtin_overrides_do_not_mutate_runtime_ui_state_unit() {
 
 #[test]
 fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
-    let mut state = make_test_state(Vec::new());
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(Vec::new());
+    let (history, _history_root) = make_test_history(&mut state);
 
     let root_exit = repl_dispatch::execute_repl_plugin_line(
         &mut state,
@@ -57,9 +57,9 @@ fn repl_exit_is_host_owned_at_root_but_leaves_shell_in_scope_unit() {
 
 #[test]
 fn repl_failure_is_cached_for_doctor_last_unit() {
-    let mut state = make_test_state(Vec::new());
+    let (mut state, _state_root) = make_test_state(Vec::new());
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(
@@ -98,7 +98,7 @@ fn repl_failure_is_cached_for_doctor_last_unit() {
 fn rebuild_repl_state_preserves_last_failure_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
-        let mut state = make_test_state(Vec::new());
+        let (mut state, _state_root) = make_test_state(Vec::new());
         state.record_repl_failure("ldap user nope", "boom", "boom detail");
 
         let next = super::super::rebuild_repl_state(&state).expect("rebuild should succeed");
@@ -139,8 +139,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     perms.set_mode(0o755);
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
 
-    let mut state = make_test_state(vec![dir.to_path_buf()]);
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(vec![dir.to_path_buf()]);
+    let (history, _history_root) = make_test_history(&mut state);
 
     repl_dispatch::execute_repl_plugin_line(
         &mut state,
@@ -191,8 +191,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
     perms.set_mode(0o755);
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
 
-    let mut state = make_test_state(vec![dir.to_path_buf()]);
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(vec![dir.to_path_buf()]);
+    let (history, _history_root) = make_test_history(&mut state);
 
     repl_dispatch::execute_repl_plugin_line(
         &mut state,
@@ -227,8 +227,8 @@ printf '{"protocol_version":1,"ok":true,"data":{"message":"ok","arg":"%s"},"erro
 
 #[test]
 fn repl_bang_contains_search_respects_shell_scope_unit() {
-    let mut state = make_test_state(Vec::new());
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(Vec::new());
+    let (history, _history_root) = make_test_history(&mut state);
 
     history
         .with(|store| store.save_command_line("config show"))

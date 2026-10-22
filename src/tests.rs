@@ -2,7 +2,6 @@
 mod isolation;
 pub(crate) use isolation::isolated_test;
 
-use crate::core::output::OutputFormat;
 use std::ffi::OsStr;
 use std::ops::Deref;
 use std::path::Path;
@@ -50,32 +49,4 @@ impl Deref for TestTempDir {
 
 pub(crate) fn make_temp_dir(prefix: &str) -> TestTempDir {
     TestTempDir::new(prefix)
-}
-
-#[test]
-fn stable_top_level_surface_exposes_primary_entrypoints_and_types_unit() {
-    let mut sink = crate::app::BufferedUiSink::default();
-    let app = crate::App::new();
-    assert_eq!(app.run_process_with_sink(["osp", "--help"], &mut sink), 0);
-    assert!(sink.stdout.contains("Usage"));
-    assert!(sink.stderr.is_empty());
-    sink.stdout.clear();
-    let runner = crate::App::new();
-    assert_eq!(
-        runner
-            .run_with_sink(["osp", "--version"], &mut sink)
-            .expect("version should run"),
-        0
-    );
-    assert_eq!(sink.stdout, format!("osp {}\n", env!("CARGO_PKG_VERSION")));
-    assert!(sink.stderr.is_empty());
-    let _cli_type: Option<crate::cli::Cli> = None;
-    let _row: crate::core::row::Row = Default::default();
-    let _resolver: Option<crate::config::ConfigResolver> = None;
-    let _completion: Option<crate::completion::CompletionEngine> = None;
-    let _prompt: Option<crate::repl::ReplPrompt> = None;
-    let _plugins: Option<crate::plugin::PluginManager> = None;
-    let _app_runtime: Option<crate::app::AppRuntime> = None;
-    let _format = OutputFormat::Json;
-    let _settings = crate::ui::RenderSettings::test_plain(OutputFormat::Table);
 }

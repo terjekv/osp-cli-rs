@@ -1,10 +1,11 @@
-//! JSON fixtures enter through the same command-output adapter as plugins.
+//! JSON fixtures enter through the canonical core row normalization.
 use super::compiled::{CompiledPipeline, CompiledStage};
+use crate::core::output_model::{OutputResult, rows_from_value};
 use anyhow::Result;
 use serde_json::Value;
 
 pub(crate) fn apply_stage(value: Value, stage: &CompiledStage) -> Result<Value> {
-    let output = crate::cli::rows::output::plugin_data_to_output_result(value, None);
+    let output = OutputResult::from_rows(rows_from_value(value));
     let output = super::engine::run_compiled(
         output,
         &CompiledPipeline {

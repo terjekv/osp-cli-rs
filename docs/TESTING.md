@@ -4,11 +4,13 @@ Choose the smallest existing check that exercises the changed behavior.
 Run broader checks when the change affects several components or a focused
 check leaves an interaction unverified.
 
-Do not add regression tests, including for bug fixes, or remove existing tests
-unless explicitly requested. Verify with existing integration, contract,
-end-to-end and architecture checks, static checks, and focused manual execution.
-Adjust existing tests when the public contract changes. Avoid assertions about
-implementation details or behavior already covered by another test.
+Do not add per-bug regression tests. Strengthen the existing boundary scenario
+when a bug reveals a missing promise. Deleting duplicate, internal-detail or
+obsolete tests is routine and needs no separate authorization; name the retained
+owner in the commit body. Remove tests that pin removed features or absent
+options. Verify with existing integration, contract, end-to-end and architecture
+checks, static checks, and focused manual execution. Adjust existing tests when
+the public contract changes.
 
 ## Choose a test target
 
@@ -17,7 +19,8 @@ implementation details or behavior already covered by another test.
 | `contracts` | Spawned CLI behavior, help, output, exit codes and configuration |
 | `integration` | In-process flows across configuration, dispatch, plugins, guides and DSL evaluation |
 | `e2e` | Real process/PTY behavior, prompts, completion and multi-command REPL state |
-| `architecture` | Active stable/Miri workflow and toolchain alignment |
+| `architecture` | Core, UI and DSL module dependency boundaries |
+| `toolchain` | Stable/Miri pins in metadata and selected workflow jobs |
 | `unit` and `src/**/tests*` | Local invariants, parser edges and awkward failure paths |
 
 Prefer contracts or integration for stable behavior. Use existing PTY checks
@@ -74,6 +77,7 @@ For a focused existing target:
 
 ```bash
 python3 scripts/confidence.py --check architecture
+python3 scripts/confidence.py --check toolchain
 python3 scripts/confidence.py --check contracts
 python3 scripts/confidence.py --check integration
 python3 scripts/confidence.py --check e2e
@@ -89,6 +93,13 @@ Coverage checks execute cases serially, including the generic check used by the
 product. Concurrent instrumented CLI and PTY starts have exceeded the fixtures'
 request deadlines on this machine; ordinary behavior checks remain parallel.
 Cargo still compiles dependencies in parallel.
+
+Coverage alone uses the pinned Miri nightly and excludes only `#[cfg(test)]`
+modules/helpers with `#[cfg_attr(coverage_nightly, coverage(off))]`; the gate
+rejects any exclusion without an immediately preceding `#[cfg(test)]`.
+Normal builds, lint and tests remain on stable Rust.
+Instrumented artifacts use a separate directory per repository and nightly pin,
+so older stable Cargo layouts cannot contaminate the report.
 
 Publication rehearsal uses `--check publish-dry-run` and its own
 `target/publish-dry-run` directory. Sharing the normal build directory can

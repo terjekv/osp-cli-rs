@@ -182,6 +182,7 @@ pub(super) fn handle_repl_exit_request(session: &mut AppSession) -> ReplResult {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn apply_repl_shell_prefix(
     scope: &crate::app::ReplScopeStack,
     tokens: &[String],
@@ -190,6 +191,7 @@ pub(crate) fn apply_repl_shell_prefix(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn leave_repl_shell(session: &mut AppSession) -> Option<String> {
     match session.request_repl_exit() {
         crate::app::session::ReplExitTransition::ExitRoot => None,
@@ -294,6 +296,7 @@ pub(super) fn render_repl_help_for_scope(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn repl_help_for_scope(
     state: &mut crate::app::AppState,
     invocation: &ResolvedInvocation,
@@ -332,6 +335,7 @@ fn repl_help_command_result_for_scope(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         ReplShortcutPlan, apply_repl_shell_prefix, classify_repl_shortcut, enter_repl_shell,

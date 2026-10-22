@@ -140,42 +140,6 @@ pub(crate) use store::{AtomicWriteDurability, lock_file_transaction, write_text_
 use defaults::DEFAULT_PROFILE_NAME;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "tests/loading_and_mutation.rs"]
 mod loading_and_mutation;
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn config_internal_example_1() {
-        let _example = || {
-            (|| {
-                use crate::config::{
-                    ResolveOptions, RuntimeConfig, RuntimeConfigPaths, RuntimeDefaults,
-                    RuntimeLoadOptions, build_runtime_pipeline,
-                };
-
-                let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
-                let paths = RuntimeConfigPaths::discover();
-                let presentation = None;
-                let cli = None;
-                let session = None;
-
-                let resolved = build_runtime_pipeline(
-                    defaults,
-                    presentation,
-                    &paths,
-                    RuntimeLoadOptions::default(),
-                    cli,
-                    session,
-                )
-                .resolve(ResolveOptions::new().with_terminal("cli"))?;
-
-                let runtime = RuntimeConfig::from_resolved(&resolved);
-                assert_eq!(runtime.active_profile, resolved.active_profile());
-                Ok::<(), crate::config::ConfigError>(())
-            })()
-            .unwrap();
-        };
-    }
-}

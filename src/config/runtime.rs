@@ -174,46 +174,8 @@ impl RuntimeLoadOptions {
     }
 }
 
-/// Minimal runtime-derived config that callers often need directly.
-///
-/// This is intentionally much smaller than [`ResolvedConfig`]. Keep the full
-/// [`ResolvedConfig`] when a caller needs arbitrary resolved keys, provenance,
-/// terminal selection, or explanation data. Use `RuntimeConfig` when the
-/// caller only needs the tiny runtime snapshot the host commonly carries
-/// around directly.
 #[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeConfig {
-    /// Active profile name selected for the current invocation.
-    pub active_profile: String,
-}
-
-#[cfg(test)]
-impl RuntimeConfig {
-    /// Extracts the small runtime snapshot most callers need from a resolved config.
-    ///
-    /// # Examples
-    ///
-    /// ```text
-    /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
-    ///
-    /// let mut defaults = ConfigLayer::default();
-    /// defaults.set("profile.default", "default");
-    /// defaults.set("theme.path", Vec::<String>::new());
-    ///
-    /// let mut resolver = ConfigResolver::default();
-    /// resolver.set_defaults(defaults);
-    /// let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
-    ///
-    /// let runtime = RuntimeConfig::from_resolved(&resolved);
-    /// assert_eq!(runtime.active_profile, "default");
-    /// ```
-    pub fn from_resolved(resolved: &ResolvedConfig) -> Self {
-        Self {
-            active_profile: resolved.active_profile().to_string(),
-        }
-    }
-}
+pub(crate) use tests::RuntimeConfig;
 
 /// Discovered filesystem paths for runtime config inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,7 +197,7 @@ impl RuntimeConfigPaths {
     ///
     /// # Examples
     ///
-    /// ```text
+    /// ```no_run
     /// use osp_cli::config::RuntimeConfigPaths;
     ///
     /// let paths = RuntimeConfigPaths::discover();
@@ -390,7 +352,7 @@ impl RuntimeDefaults {
 ///
 /// # Examples
 ///
-/// ```text
+/// ```no_run
 /// use osp_cli::config::{
 ///     ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
 ///     build_runtime_pipeline,
@@ -528,6 +490,7 @@ impl RuntimeEnvironment {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn from_pairs<I, K, V>(vars: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -671,7 +634,47 @@ fn project_dirs() -> Option<ProjectDirs> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use super::ResolvedConfig;
+    /// Minimal runtime-derived config that callers often need directly.
+    ///
+    /// This is intentionally much smaller than [`ResolvedConfig`]. Keep the full
+    /// [`ResolvedConfig`] when a caller needs arbitrary resolved keys, provenance,
+    /// terminal selection, or explanation data. Use `RuntimeConfig` when the
+    /// caller only needs the tiny runtime snapshot the host commonly carries
+    /// around directly.
+    #[derive(Debug, Clone)]
+    pub(crate) struct RuntimeConfig {
+        /// Active profile name selected for the current invocation.
+        pub active_profile: String,
+    }
+
+    impl RuntimeConfig {
+        /// Extracts the small runtime snapshot most callers need from a resolved config.
+        ///
+        /// # Examples
+        ///
+        /// ```text
+        /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
+        ///
+        /// let mut defaults = ConfigLayer::default();
+        /// defaults.set("profile.default", "default");
+        /// defaults.set("theme.path", Vec::<String>::new());
+        ///
+        /// let mut resolver = ConfigResolver::default();
+        /// resolver.set_defaults(defaults);
+        /// let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
+        ///
+        /// let runtime = RuntimeConfig::from_resolved(&resolved);
+        /// assert_eq!(runtime.active_profile, "default");
+        /// ```
+        pub fn from_resolved(resolved: &ResolvedConfig) -> Self {
+            Self {
+                active_profile: resolved.active_profile().to_string(),
+            }
+        }
+    }
 
     #[test]
     fn config_internal_example_1() {
@@ -687,51 +690,6 @@ mod tests {
 
         let runtime = RuntimeConfig::from_resolved(&resolved);
         assert_eq!(runtime.active_profile, "default");
-    }
-
-    #[test]
-    fn config_internal_example_2() {
-        let _example = || {
-            use crate::config::RuntimeConfigPaths;
-
-            let paths = RuntimeConfigPaths::discover();
-
-            let _config = paths.config_file.as_deref();
-            let _secrets = paths.secrets_file.as_deref();
-            let _keyring_index = paths.secrets_index_file.as_deref();
-        };
-    }
-
-    #[test]
-    fn config_internal_example_3() {
-        let _example = || {
-            (|| {
-                use crate::config::{
-                    ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
-                    build_runtime_pipeline,
-                };
-
-                let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
-                let paths = RuntimeConfigPaths::discover();
-                let presentation = None;
-                let cli = None;
-                let session = None;
-
-                let resolved = build_runtime_pipeline(
-                    defaults,
-                    presentation,
-                    &paths,
-                    RuntimeLoadOptions::default(),
-                    cli,
-                    session,
-                )
-                .resolve(ResolveOptions::new().with_terminal("cli"))?;
-
-                assert_eq!(resolved.terminal(), Some("cli"));
-                Ok::<(), crate::config::ConfigError>(())
-            })()
-            .unwrap();
-        };
     }
 
     use std::path::PathBuf;

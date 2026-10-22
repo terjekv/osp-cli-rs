@@ -283,6 +283,7 @@ fn child_index_addresses(addresses: &[Vec<AddressStep>], index: usize) -> Vec<Ve
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

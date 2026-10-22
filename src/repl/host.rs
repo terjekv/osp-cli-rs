@@ -32,6 +32,7 @@ pub(crate) struct ReplViewContext<'a> {
     pub(crate) native_context: &'a NativeSessionContext,
     pub(crate) history_enabled: bool,
     pub(crate) actions: &'a [crate::repl::ReplAction],
+    pub(crate) intro_decoration: Option<&'a crate::app::IntroDecoration>,
 }
 
 impl<'a> ReplViewContext<'a> {
@@ -46,6 +47,7 @@ impl<'a> ReplViewContext<'a> {
             native_context: &session.native_context,
             history_enabled: session.history_enabled,
             actions: &[],
+            intro_decoration: runtime.definition.intro_decoration.as_deref(),
         }
     }
 }
@@ -362,6 +364,7 @@ fn run_repl_debug_highlight(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         run_repl_debug_command_for, should_show_repl_intro, start_native_completion_refreshes,

@@ -98,7 +98,7 @@ pub(crate) fn build_dispatch_plan(cli: &mut Cli) -> Result<DispatchPlan> {
             explicit_profile,
         ));
     }
-    let command = cli.command.take().map(Commands::with_app_doctor);
+    let command = cli.command.take();
 
     if let Some(command) = &command {
         command.validate_dispatch_surface(false)?;
@@ -323,6 +323,7 @@ pub(crate) fn normalize_profile_override(value: Option<String>) -> Option<String
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         DispatchPlan, RunAction, build_dispatch_plan, normalize_cli_profile,

@@ -295,6 +295,7 @@ fn validate_dotted_key(key: &str) -> Result<(), ConfigError> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn load_or_create_toml_root(path: &Path) -> Result<toml::Value, ConfigError> {
     load_or_create_toml_root_with_source(path, true)
 }
@@ -965,4 +966,5 @@ pub(crate) fn validate_secrets_permissions(_path: &PathBuf) -> Result<(), Config
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

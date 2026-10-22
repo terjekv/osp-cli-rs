@@ -235,4 +235,5 @@ fn warn_basic_input_once(reason: BasicInputReason) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

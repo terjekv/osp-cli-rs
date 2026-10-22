@@ -329,6 +329,7 @@ pub(crate) fn with_path_context(path: String, error: ConfigError) -> ConfigError
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ConfigError, TomlParseDiagnostic, with_path_context};
     use crate::config::SchemaValueType;

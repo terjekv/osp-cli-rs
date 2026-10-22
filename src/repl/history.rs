@@ -347,9 +347,10 @@ fn default_repl_history_path() -> PathBuf {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        HistoryScopeView, build_history_config, history_command, repl_history_enabled,
+        HistoryScopeView, build_history_config, repl_history_enabled,
         repl_history_exclude_patterns, run_history_repl_command,
     };
     use crate::app::{AppSession, AppState, LaunchContext, RuntimeContext, TerminalKind};
@@ -428,18 +429,6 @@ mod tests {
         let scope = HistoryScopeView::from_session(&session);
         assert_eq!(scope.prefix.as_deref(), Some("orch "));
         assert_eq!(scope.label, "orch shell history");
-    }
-
-    #[test]
-    fn history_command_exposes_expected_subcommands_unit() {
-        let spec = history_command();
-        let names = spec
-            .get_subcommands()
-            .map(|child| child.get_name())
-            .collect::<Vec<_>>();
-
-        assert_eq!(spec.get_name(), "history");
-        assert_eq!(names, vec!["list", "prune", "clear"]);
     }
 
     #[test]

@@ -17,5 +17,6 @@ pub(crate) use manager::{
 pub(crate) use manager::PluginDispatchContext;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "tests/integration.rs"]
 mod integration_tests;

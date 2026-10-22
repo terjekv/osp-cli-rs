@@ -70,6 +70,7 @@ impl CursorState {
 
     /// Creates a synthetic cursor state for a standalone token stub.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn synthetic(token_stub: impl Into<String>) -> Self {
         let token_stub = token_stub.into();
         let len = token_stub.len();
@@ -554,6 +555,7 @@ impl FlagNode {
     ///
     /// If omitted, the flag is treated as non-repeatable.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn multi(mut self) -> Self {
         self.multi = true;
         self
@@ -563,6 +565,7 @@ impl FlagNode {
     ///
     /// If omitted, the flag carries no special value-type hint.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn value_type(mut self, value_type: ValueType) -> Self {
         self.value_type = Some(value_type);
         self
@@ -633,6 +636,7 @@ impl CompletionNode {
 
     /// Adds a child node keyed by command or value name.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_child(mut self, name: impl Into<String>, node: CompletionNode) -> Self {
         self.children.insert(name.into(), node);
         self
@@ -640,6 +644,7 @@ impl CompletionNode {
 
     /// Adds a flag node keyed by its spelling.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn with_flag(mut self, name: impl Into<String>, node: FlagNode) -> Self {
         self.flags.insert(name.into(), node);
         self
@@ -735,6 +740,7 @@ impl CommandLine {
 
     /// Returns the last flag occurrence, if any.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn last_flag_occurrence(&self) -> Option<&FlagOccurrence> {
         self.flag_occurrences().last()
     }
@@ -754,6 +760,7 @@ impl CommandLine {
 
     /// Appends a flag occurrence and merges its values into the lookup map.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn push_flag_occurrence(&mut self, occurrence: FlagOccurrence) {
         self.flag_values
             .entry(occurrence.name.clone())
@@ -764,6 +771,7 @@ impl CommandLine {
 
     /// Appends a positional argument to the tail.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn push_positional(&mut self, value: impl Into<String>) {
         self.tail.push(TailItem::Positional(value.into()));
     }
@@ -792,6 +800,7 @@ impl CommandLine {
 
     /// Marks the command line as piped and stores the pipe tokens.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn set_pipe(&mut self, pipes: Vec<String>) {
         self.has_pipe = true;
         self.pipes = pipes;
@@ -799,6 +808,7 @@ impl CommandLine {
 
     /// Appends one segment to the command path.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn push_head(&mut self, segment: impl Into<String>) {
         self.head.push(segment.into());
     }
@@ -807,15 +817,6 @@ impl CommandLine {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 /// Parser output for the full line and the cursor-local prefix.
 pub(crate) struct ParsedLine {
-    /// Cursor offset clamped to a valid UTF-8 boundary.
-    #[cfg(test)]
-    pub safe_cursor: usize,
-    /// Tokens parsed from the full line.
-    #[cfg(test)]
-    pub full_tokens: Vec<String>,
-    /// Tokens parsed from the line prefix before the cursor.
-    #[cfg(test)]
-    pub cursor_tokens: Vec<String>,
     /// Parsed command-line structure for the full line.
     pub full_cmd: CommandLine,
     /// Parsed command-line structure for the prefix before the cursor.
@@ -855,6 +856,7 @@ pub(crate) enum CompletionRequest {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 impl CompletionRequest {
     /// Returns the stable request-kind label used by tests.
     pub fn kind(&self) -> &'static str {
@@ -974,4 +976,5 @@ pub enum SuggestionOutput {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

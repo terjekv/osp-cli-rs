@@ -21,6 +21,7 @@ impl<'a> TreeResolver<'a> {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
         let mut node = &self.tree.root;
         let mut matched = 0usize;

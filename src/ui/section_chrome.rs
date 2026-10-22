@@ -526,6 +526,7 @@ fn section_body_lines(body: &str) -> Vec<&str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]
@@ -596,7 +597,7 @@ mod tests {
                     theme: &crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME),
                     style_overrides: &crate::ui::StyleOverrides::default(),
                 },
-                tokens: SectionStyleTokens::same(crate::ui::style::StyleToken::PanelBorder),
+                tokens: SectionStyleTokens::same(crate::ui::style::StyleToken::Border),
             },
         );
 
@@ -628,7 +629,7 @@ mod tests {
                     style_overrides: &overrides,
                 },
                 tokens: SectionStyleTokens {
-                    border: crate::ui::style::StyleToken::PanelBorder,
+                    border: crate::ui::style::StyleToken::Border,
                     title: crate::ui::style::StyleToken::PanelTitle,
                 },
             },
@@ -689,7 +690,7 @@ mod tests {
             style_overrides: &crate::ui::style::StyleOverrides::default(),
         };
         let tokens = SectionStyleTokens {
-            border: crate::ui::style::StyleToken::PanelBorder,
+            border: crate::ui::style::StyleToken::Border,
             title: crate::ui::style::StyleToken::PanelTitle,
         };
         let rendered = render_section_block_with_overrides(
@@ -721,7 +722,7 @@ mod tests {
             style_overrides: &crate::ui::style::StyleOverrides::default(),
         };
         let tokens = SectionStyleTokens {
-            border: crate::ui::style::StyleToken::PanelBorder,
+            border: crate::ui::style::StyleToken::Border,
             title: crate::ui::style::StyleToken::PanelTitle,
         };
         let rendered = render_section_block_with_overrides(
@@ -747,7 +748,7 @@ mod tests {
             theme: &theme,
             style_overrides: &crate::ui::style::StyleOverrides::default(),
         };
-        let tokens = SectionStyleTokens::same(crate::ui::style::StyleToken::PanelBorder);
+        let tokens = SectionStyleTokens::same(crate::ui::style::StyleToken::Border);
 
         let divider = render_section_divider(
             "界界界界界",
@@ -786,7 +787,7 @@ mod tests {
             style_overrides: &crate::ui::style::StyleOverrides::default(),
         };
         let tokens = SectionStyleTokens {
-            border: crate::ui::style::StyleToken::PanelBorder,
+            border: crate::ui::style::StyleToken::Border,
             title: crate::ui::style::StyleToken::PanelTitle,
         };
         let plain = render_section_block_with_overrides(

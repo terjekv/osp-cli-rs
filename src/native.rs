@@ -835,6 +835,21 @@ pub trait NativeCommand: Send + Sync {
         self.normalize_args(&args)
     }
 
+    /// Whether raw invocation arguments contain secrets and must be excluded
+    /// from REPL history, including rejected invocations. Arguments exclude the
+    /// registered root. Use only local metadata; this runs before execution.
+    fn has_sensitive_args(&self, _args: &[String]) -> bool {
+        false
+    }
+
+    /// Protects integration syntax before shell word decoding in the REPL.
+    /// Receives the command segment, including aliases and scoped input, without
+    /// pipeline stages. Return shell text; preserve ordinary words and quoting.
+    /// This local hook runs only for a command resolved to this integration.
+    fn prepare_repl_command(&self, command: &str) -> Result<String> {
+        Ok(command.to_owned())
+    }
+
     /// Converts supplied arguments to the canonical command grammar.
     ///
     /// The host calls this before native clap parsing and command-path
@@ -1301,4 +1316,5 @@ fn normalize_name(value: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

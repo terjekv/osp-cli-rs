@@ -48,6 +48,7 @@ pub fn match_row_keys_detailed_fuzzy(row: &Row, token: &str, exact: ExactMode) -
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Returns whether `value` contains `query`, recursing into arrays.
 pub fn value_contains(value: &serde_json::Value, query: &str, case_sensitive: bool) -> bool {
     match value {
@@ -463,6 +464,7 @@ fn clustered_fuzzy_match(candidate: &str, query_lc: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

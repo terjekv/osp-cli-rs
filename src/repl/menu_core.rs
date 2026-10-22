@@ -459,6 +459,7 @@ impl MenuCore {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn columns_for_test(&self) -> u16 {
         self.working_details.columns.max(1)
     }
@@ -958,4 +959,5 @@ fn menu_styles_debug(colors: &MenuTextStyle) -> MenuStyleDebug {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

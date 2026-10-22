@@ -69,6 +69,7 @@ impl PreparedEntryRow {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{PreparedEntriesBlock, PreparedEntryRow};
     use crate::ui::doc::{EntriesBlock, EntryRow};

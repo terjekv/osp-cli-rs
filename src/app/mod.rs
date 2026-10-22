@@ -88,6 +88,7 @@ pub(crate) mod session;
 /// UI sink abstractions used by the host entrypoints.
 pub(crate) mod sink;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 pub(crate) mod timing;
 
@@ -138,6 +139,9 @@ struct ProductActionFlag {
     run: Arc<ProductAction>,
 }
 
+pub(crate) type IntroDecoration =
+    dyn Fn(&crate::ui::ResolvedRenderSettings) -> Vec<String> + Send + Sync;
+
 #[derive(Clone, Default)]
 pub(crate) struct AppDefinition {
     native_commands: NativeCommandRegistry,
@@ -147,6 +151,7 @@ pub(crate) struct AppDefinition {
     config_flags: Vec<(clap::Arg, &'static str, Option<&'static str>)>,
     access_policy: Option<Arc<dyn AccessPolicy>>,
     pub(crate) repl_line_handler: Option<Arc<ReplLineHandler>>,
+    pub(crate) intro_decoration: Option<Arc<IntroDecoration>>,
 }
 
 #[derive(Clone, Default)]
@@ -261,6 +266,19 @@ impl App {
     /// When omitted, the application uses only the built-in runtime defaults.
     pub fn with_product_defaults(mut self, product_defaults: ConfigLayer) -> Self {
         Arc::make_mut(&mut self.definition).product_defaults = product_defaults;
+        self
+    }
+
+    /// Supplies local, trusted terminal artwork beside the intro's opening paragraph.
+    ///
+    /// Return no rows when decoration is unsuitable. The callback receives resolved
+    /// screen capabilities and must not block, perform service calls or write output.
+    /// Artwork is omitted from machine output and transformed intro data.
+    pub fn with_intro_decoration<F>(mut self, render: F) -> Self
+    where
+        F: Fn(&crate::ui::ResolvedRenderSettings) -> Vec<String> + Send + Sync + 'static,
+    {
+        Arc::make_mut(&mut self.definition).intro_decoration = Some(Arc::new(render));
         self
     }
 
@@ -650,6 +668,7 @@ where
 /// assert!(sink.stderr.is_empty());
 /// ```
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn run_process_with_sink<I, T>(args: I, sink: &mut dyn UiSink) -> i32
 where
     I: IntoIterator<Item = T>,

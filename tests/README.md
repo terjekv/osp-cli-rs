@@ -38,10 +38,9 @@ python3 scripts/run-hermetic-cargo.py -- cargo test --locked --all-features --no
 ```
 
 Do not add individual-bug regression tests. Reuse existing behavior scenarios;
-remove only mapped duplicates, private details already covered at a boundary,
-or explicitly deleted features. Record every distinct removed assertion and
-its retained owner in [coverage-ownership.md](coverage-ownership.md), which also
-lists unresolved pre-existing coverage gaps.
+remove duplicates, private details already covered at a boundary, and obsolete
+feature checks as routine maintenance. Name the retained owner of each removed
+promise in the commit body.
 
 For a focused edit/test loop, keep default test threads, use your own
 `CARGO_TARGET_DIR`, and select the owning target plus an existing name filter.
@@ -58,9 +57,9 @@ Times are for a one-line edit with a warm target:
 
 `--lib` does not build the `osp` binary. Integration, contract and e2e targets do.
 Downstream app contracts also cover framework edits; see that repository's
-`tests/README.md`. `cargo-nextest` works here too: 1052 tests in about 7-8s, with no
-failures. It skips the 80 doctests, so the total is about the same as `cargo test`.
-It stays optional.
+`tests/README.md`. `cargo-nextest` is optional and skips doctests; run those
+separately when using it. Measure timings with a warm task-specific target
+directory and record the command and revision with any comparison.
 
 The dev/test profiles retain line tables for local backtraces and omit dependency
 debug information. The thin `osp` entrypoint has no unit tests; binary behavior

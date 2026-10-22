@@ -2,6 +2,7 @@ use crate::core::row::Row;
 use serde_json::Value;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn apply(
     items: crate::core::output_model::OutputItems,
     spec: &str,
@@ -43,6 +44,7 @@ pub(crate) fn is_empty_value(value: &Value) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::core::output_model::{Group, OutputItems};
     use serde_json::json;
