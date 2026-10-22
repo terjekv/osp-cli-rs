@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg(not(miri))]
 #![allow(missing_docs)]
 
@@ -24,3 +25,13 @@ mod config;
 
 #[path = "integration/dsl_output.rs"]
 mod dsl_output;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "integration/context_resolution.rs"]
+mod context_resolution;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "integration/context_persistence.rs"]
+mod context_persistence;
