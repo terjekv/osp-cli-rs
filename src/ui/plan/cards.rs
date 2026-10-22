@@ -14,7 +14,6 @@ use crate::core::row::Row;
 const CARD_GRID_GAP: usize = 3;
 const CARD_FIELD_GAP: usize = 2;
 const SHORT_FIELD_WIDTH_DIVISOR: usize = 2;
-const UNKNOWN_CARD_WIDTH: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) enum CompactCard {
@@ -42,7 +41,7 @@ pub(super) fn plan_compact_cards(
 ) -> Vec<CompactCard> {
     let available = settings
         .width
-        .unwrap_or(UNKNOWN_CARD_WIDTH)
+        .unwrap_or(usize::MAX)
         .saturating_sub(settings.margin)
         .max(1);
     let fields = rows

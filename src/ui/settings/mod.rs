@@ -616,6 +616,7 @@ pub struct ResolvedRenderSettings {
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
+    /// Screen width, including any fallback; `None` means an unlimited target.
     pub width: Option<usize>,
     pub margin: usize,
     pub table_overflow: TableOverflow,
@@ -798,6 +799,9 @@ fn settings_for_target(settings: &RenderSettings, target: RenderTarget) -> Rende
         effective.runtime.width = None;
         effective.table_overflow = TableOverflow::None;
         effective.table_too_wide = TableTooWide::Hide;
+    } else if effective.runtime.stdout_is_tty && effective.resolve_width().is_none() {
+        // The only width fallback: an unmeasured screen, never an unlimited target.
+        effective.width = Some(100);
     }
     if target == RenderTarget::Pipe {
         effective.runtime.stdout_is_tty = false;

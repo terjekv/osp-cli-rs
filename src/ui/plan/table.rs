@@ -206,7 +206,7 @@ pub(super) fn fit_footer(
     }
     let room = settings
         .width
-        .unwrap_or(100)
+        .unwrap_or(usize::MAX)
         .saturating_sub(settings.margin + indent)
         .max(1);
     let mut footer = Vec::new();

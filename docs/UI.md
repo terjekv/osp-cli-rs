@@ -73,7 +73,8 @@ When `format=auto`, the current rules are:
 A top-level list of multiple rows that all contain exactly one scalar field with the same
 key renders as a titled `Key (N):` grid for inferred, recommended or configured
 human formats. The planner reuses the card grid-list geometry at the target's
-width, with its existing 100-column fallback for unlimited/unknown widths.
+width. An unmeasured screen uses a single 100-column fallback resolved in
+settings; pager, editor, clipboard and pipe targets use natural, unlimited width.
 Explicit `--table` and Markdown keep a table; explicit `--mreg` prints consecutive
 `Key: value` lines without blank separators. Grid and entry values show embedded
 line breaks as literal escapes. JSON, CSV, TSV and Value are unchanged.
@@ -104,10 +105,11 @@ Each grid column sizes its values from their rendered widths across records,
 including projected swatches. Labels and values have a two-space gap; grid
 pairs have a three-space gap. A long field breaks the run, shares the first
 grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
-list geometry; short arrays are comma-joined. Unknown widths use 100 columns
-for compact body geometry. Single records and lists containing objects or arrays
+list geometry; short arrays are comma-joined. Title rules and body geometry use
+the same resolved screen width. Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
-separators exactly.
+separators. Classic card scalar values and scalar lists wrap within the same
+resolved screen budget, including their labels and indentation.
 
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.

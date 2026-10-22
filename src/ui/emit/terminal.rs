@@ -10,7 +10,7 @@ use crate::ui::doc::{
 };
 use crate::ui::settings::{ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
-use crate::ui::text::table_cell_lines;
+use crate::ui::text::{display_width, table_cell_lines, wrap_display_width};
 
 use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
@@ -273,10 +273,9 @@ fn emit_grid_list(block: &ListBlock, settings: &ResolvedRenderSettings) -> Strin
         .iter()
         .map(|item| format_list_item(item, block.inline_markup))
         .collect::<Vec<_>>();
-    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
-        .unwrap_or(100)
+        .unwrap_or(usize::MAX)
         .saturating_sub(settings.margin + block.indent)
         .max(1);
     let grid = PreparedGridList::from_items(&visible, available_width);
@@ -526,18 +525,13 @@ fn emit_plain_row_lines(
     match &row.value {
         KeyValueValue::Empty => vec![label],
         KeyValueValue::Scalar(text) if text.is_empty() => vec![label],
-        KeyValueValue::Scalar(text) => text
-            .split('\n')
-            .enumerate()
-            .map(|(index, line)| {
-                let prefix = if index == 0 {
-                    format!("{label}{value_spacing}")
-                } else {
-                    continuation_indent.clone()
-                };
-                format!("{prefix}{}", styler.paint_value(line))
-            })
-            .collect(),
+        KeyValueValue::Scalar(text) => render_terminal_scalar_lines(
+            text,
+            &format!("{label}{value_spacing}"),
+            &continuation_indent,
+            settings,
+            styler,
+        ),
         KeyValueValue::Object(rows) => {
             let mut lines = vec![label];
             if !rows.is_empty() {
@@ -572,9 +566,6 @@ fn emit_plain_array_lines(
 
     match scalar_items.as_slice() {
         [] => vec![label.to_string()],
-        [only] => {
-            vec![format!("{inline_prefix}{}", styler.paint_value(only))]
-        }
         values if values.len() > 5 => {
             let mut lines = vec![label.to_string()];
             lines.extend(render_terminal_scalar_grid(
@@ -585,14 +576,23 @@ fn emit_plain_array_lines(
             ));
             lines
         }
-        [first, rest @ ..] => {
-            let mut lines = vec![format!("{inline_prefix}{}", styler.paint_value(first))];
-            lines.extend(
-                rest.iter()
-                    .map(|value| format!("{continuation_indent}{}", styler.paint_value(value))),
-            );
-            lines
-        }
+        values => values
+            .iter()
+            .enumerate()
+            .flat_map(|(index, value)| {
+                render_terminal_scalar_lines(
+                    value,
+                    if index == 0 {
+                        inline_prefix
+                    } else {
+                        continuation_indent
+                    },
+                    continuation_indent,
+                    settings,
+                    styler,
+                )
+            })
+            .collect(),
     }
 }
 
@@ -628,10 +628,14 @@ fn emit_plain_array_item_lines(
     match item {
         KeyValueValue::Empty => vec![format!("{child_indent}{marker}")],
         KeyValueValue::Scalar(text) => {
-            vec![format!(
-                "{child_indent}{marker} {colon} {}",
-                styler.paint_value(text)
-            )]
+            let prefix = format!("{child_indent}{marker} {colon} ");
+            render_terminal_scalar_lines(
+                text,
+                &prefix,
+                &" ".repeat(display_width(&prefix)),
+                settings,
+                styler,
+            )
         }
         KeyValueValue::Object(rows) => {
             let nested_indent = format!("{child_indent}{}", " ".repeat(2));
@@ -658,22 +662,61 @@ fn emit_plain_array_item_lines(
     }
 }
 
+fn render_terminal_scalar_lines(
+    text: &str,
+    prefix: &str,
+    continuation_indent: &str,
+    settings: &ResolvedRenderSettings,
+    styler: &ThemeStyler<'_>,
+) -> Vec<String> {
+    let room = settings.width.map(|width| {
+        width
+            .saturating_sub(settings.margin + display_width(continuation_indent))
+            .max(1)
+    });
+    text.split('\n')
+        .flat_map(|line| match room {
+            Some(room) if display_width(line) > room => wrap_display_width(line, room),
+            _ => vec![line.to_string()],
+        })
+        .enumerate()
+        .map(|(index, line)| {
+            format!(
+                "{}{}",
+                if index == 0 {
+                    prefix
+                } else {
+                    continuation_indent
+                },
+                styler.paint_value(&line)
+            )
+        })
+        .collect()
+}
+
 fn render_terminal_scalar_grid(
     values: &[&str],
     indent: &str,
     settings: &ResolvedRenderSettings,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
-    let visible = values
-        .iter()
-        .map(|value| (*value).to_string())
-        .collect::<Vec<_>>();
-    // Unknown width only shapes the layout; the grid never crops values.
     let available_width = settings
         .width
-        .unwrap_or(100)
+        .unwrap_or(usize::MAX)
         .saturating_sub(settings.margin + UnicodeWidthStr::width(indent))
         .max(1);
+    let visible = values
+        .iter()
+        .flat_map(|value| {
+            value.split('\n').flat_map(|line| {
+                if display_width(line) > available_width {
+                    wrap_display_width(line, available_width)
+                } else {
+                    vec![line.to_string()]
+                }
+            })
+        })
+        .collect::<Vec<_>>();
     let grid = PreparedGridList::from_items(&visible, available_width);
     render_grid_rows(&grid, indent, |cell| styler.paint_value(cell))
 }

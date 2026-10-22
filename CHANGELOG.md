@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Resolve unknown screen widths once at 100 columns instead of applying local
+  card/list defaults to unlimited pager and export output. Classic card values
+  wrap within the resolved screen width, including labels and indentation.
+
 - Protect list table columns with an item-aware minimum: keep each single value
   or the first complete item plus its remaining count, and hide columns that
   cannot fit. Spare width reveals more items. Mixed prose/list columns retain

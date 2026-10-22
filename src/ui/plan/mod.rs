@@ -259,7 +259,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                 &values,
                 plan.settings
                     .width
-                    .unwrap_or(100)
+                    .unwrap_or(usize::MAX)
                     .saturating_sub(plan.settings.margin + 2)
                     .max(1),
             );
