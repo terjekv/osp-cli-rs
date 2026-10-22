@@ -230,6 +230,24 @@ pub(super) fn builtin_keys() -> &'static [BuiltinKey] {
                 default: Some(ConfigValue::from("mreg")),
             },
             BuiltinKey {
+                key: "ui.mreg.min_width",
+                schema: SchemaEntry::positive_integer()
+                    .with_doc("Minimum card width in display columns"),
+                default: Some(ConfigValue::Integer(40)),
+            },
+            BuiltinKey {
+                key: "ui.mreg.max_width",
+                schema: SchemaEntry::positive_integer()
+                    .with_doc("Maximum card width in display columns"),
+                default: Some(ConfigValue::Integer(80)),
+            },
+            BuiltinKey {
+                key: "ui.mreg.label_max",
+                schema: SchemaEntry::positive_integer()
+                    .with_doc("Maximum aligned card label column in display columns"),
+                default: Some(ConfigValue::Integer(18)),
+            },
+            BuiltinKey {
                 key: "ui.mreg.gap",
                 schema: SchemaEntry::string()
                     .with_allowed_values(

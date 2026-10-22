@@ -26,7 +26,7 @@ pub(in crate::ui) fn aligned_display_key_width<'a>(
 
 /// A count is shown only when it says something: never for a single row.
 fn should_include_count(items: &[KeyValueValue]) -> bool {
-    items.len() != 1
+    items.len() > 1
 }
 
 pub(in crate::ui) fn scalar_text(value: &KeyValueValue) -> Option<&str> {

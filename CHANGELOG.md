@@ -28,6 +28,13 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Always render single MREG records as classic cards, including producer titles:
+  colon labels, one field per line and counts only for multiple list items.
+  Derive card width from scalar lines so lists cannot widen cards; hang
+  longer lists and wrap prose with aligned continuations or a two-space hanging
+  block under long labels. Configure `ui.mreg.min_width` (40),
+  `ui.mreg.max_width` (80) and `ui.mreg.label_max` (18).
+
 - Use two columns per card level: titles at the margin, fields one level in,
   and nested tables, objects and multiline lists hanging one further level in.
   Keep lists inline when they fit on one line; cap label columns at 18 display

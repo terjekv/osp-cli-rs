@@ -1,6 +1,6 @@
 //! Shared card indentation, label columns and list geometry.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
@@ -16,11 +16,10 @@ const CARD_GRID_GAP: usize = 3;
 const CARD_FIELD_GAP: usize = 2;
 const SHORT_FIELD_WIDTH_DIVISOR: usize = 2;
 pub(in crate::ui) const CARD_INDENT: usize = 2;
-const CARD_LABEL_CAP: usize = 18;
 
-fn label_column(label: &str) -> usize {
+fn label_column(label: &str, cap: usize) -> usize {
     let width = UnicodeWidthStr::width(label) + CARD_FIELD_GAP;
-    if width <= CARD_LABEL_CAP { width } else { 0 }
+    if width <= cap { width } else { 0 }
 }
 
 pub(super) fn plan_list_grid(
@@ -57,63 +56,124 @@ pub(super) fn plan_list_grid(
     }
 }
 
+fn plan_scalar_block(
+    value: &str,
+    room: usize,
+    style: Option<crate::ui::style::CellStyle>,
+) -> GridBlock {
+    GridBlock {
+        rows: value
+            .split('\n')
+            .flat_map(|line| wrap_display_width(line, room))
+            .map(|value| {
+                vec![GridCell {
+                    label: String::new(),
+                    value,
+                    value_style: style.clone(),
+                }]
+            })
+            .collect(),
+        column_widths: vec![room],
+        label_widths: Vec::new(),
+        gap: 0,
+    }
+}
+
 pub(super) fn plan_classic_rows(
     rows: &mut [KeyValueRow],
     settings: &ResolvedRenderSettings,
     depth: usize,
 ) {
-    let available = settings
-        .width
-        .unwrap_or(usize::MAX)
-        .saturating_sub(settings.margin + depth * CARD_INDENT)
-        .max(1);
-    let inline_value = |row: &KeyValueRow| match &row.value {
-        KeyValueValue::Scalar(value) if !value.is_empty() => Some(value.clone()),
-        KeyValueValue::Array(items) if !items.is_empty() => items
-            .iter()
-            .map(scalar_text)
-            .collect::<Option<Vec<_>>>()
-            .map(|values| values.join(", ")),
-        _ => None,
-    };
+    let indent = settings.margin + depth * CARD_INDENT;
+    let maximum = settings.mreg_max_width.max(1);
+    let limit = maximum.min(settings.width.unwrap_or(usize::MAX));
+    let available = limit.saturating_sub(indent).max(1);
     let column = rows
         .iter()
-        .filter(|row| {
-            inline_value(row).is_some_and(|value| match &row.value {
-                KeyValueValue::Array(_) => {
-                    !value.contains('\n')
-                        && UnicodeWidthStr::width(value.as_str())
+        .filter(|row| match &row.value {
+            KeyValueValue::Scalar(value) => !value.is_empty(),
+            KeyValueValue::Array(items) => items
+                .iter()
+                .map(scalar_text)
+                .collect::<Option<Vec<_>>>()
+                .is_some_and(|values| {
+                    !values.is_empty()
+                        && values.iter().all(|value| !value.contains('\n'))
+                        && UnicodeWidthStr::width(values.join(", ").as_str())
                             + UnicodeWidthStr::width(display_key(row).as_str())
                             + 2
                             <= available
-                }
-                _ => true,
-            })
+                }),
+            _ => false,
         })
-        .map(|row| label_column(&display_key(row)))
+        .map(|row| label_column(&display_key(row), settings.mreg_label_max))
         .max()
         .unwrap_or(0);
+    let prefix_width = |label: &str| column.max(UnicodeWidthStr::width(label) + 2);
+    // Collections never determine a card's width.
+    let scalar_width = rows
+        .iter()
+        .filter_map(|row| match &row.value {
+            KeyValueValue::Scalar(value) => Some(
+                indent
+                    + prefix_width(&display_key(row))
+                    + value
+                        .split('\n')
+                        .map(UnicodeWidthStr::width)
+                        .max()
+                        .unwrap_or(0),
+            ),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let card_width = scalar_width
+        .max(settings.mreg_min_width.min(maximum))
+        .min(limit)
+        .saturating_sub(indent)
+        .max(1);
     for row in rows {
         let label = display_key(row);
-        let prefix = column.max(UnicodeWidthStr::width(label.as_str()) + 2);
+        let prefix = prefix_width(&label);
         row.gap = Some(" ".repeat(prefix - UnicodeWidthStr::width(label.as_str()) - 1));
-        if let KeyValueValue::Array(items) = &row.value
-            && let Some(values) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>()
-            && !values.is_empty()
-        {
-            let joined = values.join(", ");
-            if !joined.contains('\n')
-                && UnicodeWidthStr::width(joined.as_str()) + prefix <= available
-            {
-                row.key = label;
-                row.value = KeyValueValue::Scalar(joined);
-            } else {
-                row.list_grid = Some(plan_list_grid(
-                    &values,
-                    available.saturating_sub(CARD_INDENT).max(1),
-                    row.value_style.clone(),
-                ));
+        match &mut row.value {
+            KeyValueValue::Array(items) => {
+                if let Some(values) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>()
+                    && !values.is_empty()
+                {
+                    let joined = values.join(", ");
+                    if !joined.contains('\n')
+                        && UnicodeWidthStr::width(joined.as_str()) + prefix <= card_width
+                    {
+                        row.key = label;
+                        row.value = KeyValueValue::Scalar(joined);
+                    } else {
+                        row.list_grid = Some(plan_list_grid(
+                            &values,
+                            card_width.saturating_sub(CARD_INDENT).max(1),
+                            row.value_style.clone(),
+                        ));
+                    }
+                }
             }
+            KeyValueValue::Scalar(value) => {
+                let room = card_width.saturating_sub(prefix).max(1);
+                if label_column(&label, settings.mreg_label_max) == 0
+                    && value
+                        .split('\n')
+                        .any(|line| UnicodeWidthStr::width(line) > room)
+                {
+                    let room = card_width.saturating_sub(CARD_INDENT).max(1);
+                    row.list_grid = Some(plan_scalar_block(value, room, row.value_style.clone()));
+                } else {
+                    *value = value
+                        .split('\n')
+                        .flat_map(|line| wrap_display_width(line, room))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
+            }
+            _ => {}
         }
         plan_nested_rows(&mut row.value, settings, depth + 1);
     }
@@ -162,6 +222,7 @@ pub(super) fn plan_compact_cards(
     let available = settings
         .width
         .unwrap_or(usize::MAX)
+        .min(settings.mreg_max_width.max(1))
         .saturating_sub(settings.margin)
         .max(1);
     let fields = rows
@@ -198,7 +259,65 @@ pub(super) fn plan_compact_cards(
                 .is_some_and(|field| Some(field.label.as_str()) == title_field)
         })
         .collect::<Vec<_>>();
-    let inline = plan_inline_cards(&fields, available);
+    let key_width = fields
+        .iter()
+        .flat_map(|fields| fields.iter().skip(1))
+        .map(|field| label_column(&field.label, settings.mreg_label_max))
+        .max()
+        .unwrap_or(0);
+    let field_prefix = |field: &GridCell| {
+        key_width.max(UnicodeWidthStr::width(field.label.as_str()) + CARD_FIELD_GAP)
+    };
+    let card_widths = fields
+        .iter()
+        .zip(rows)
+        .map(|(fields, source)| {
+            fields
+                .iter()
+                .skip(1)
+                .filter(|field| !source[&field.label].is_array())
+                .map(|field| {
+                    field_prefix(field)
+                        + field
+                            .value
+                            .split('\n')
+                            .map(UnicodeWidthStr::width)
+                            .max()
+                            .unwrap_or(0)
+                })
+                .max()
+                .unwrap_or(0)
+                .max(
+                    settings
+                        .mreg_min_width
+                        .min(settings.mreg_max_width)
+                        .saturating_sub(settings.margin + CARD_INDENT),
+                )
+                .min(available.saturating_sub(CARD_INDENT).max(1))
+        })
+        .collect::<Vec<_>>();
+    let hanging_lists = fields
+        .iter()
+        .zip(rows)
+        .zip(&card_widths)
+        .flat_map(|((fields, source), width)| {
+            fields
+                .iter()
+                .skip(1)
+                .filter(|field| {
+                    source[&field.label].is_array()
+                        && (field.value.contains('\n')
+                            || field_prefix(field) + UnicodeWidthStr::width(field.value.as_str())
+                                > *width)
+                })
+                .map(|field| field.label.as_str())
+        })
+        .collect::<BTreeSet<_>>();
+    let inline = if hanging_lists.is_empty() {
+        plan_inline_cards(&fields, available)
+    } else {
+        None
+    };
     if !declared.iter().any(|declared| *declared)
         && let Some(cards) = &inline
     {
@@ -213,17 +332,9 @@ pub(super) fn plan_compact_cards(
             .and_modify(|longest| *longest = (*longest).max(width))
             .or_insert(width);
     }
-    let key_width = fields
-        .iter()
-        .flat_map(|fields| fields.iter().skip(1))
-        .map(|field| label_column(&field.label))
-        .max()
-        .unwrap_or(0);
-    let field_prefix = |field: &GridCell| {
-        key_width.max(UnicodeWidthStr::width(field.label.as_str()) + CARD_FIELD_GAP)
-    };
     let short = |field: &GridCell| {
-        field_prefix(field) + longest[field.label.as_str()] <= available
+        !hanging_lists.contains(field.label.as_str())
+            && field_prefix(field) + longest[field.label.as_str()] <= available
             && (!field.value.contains('\n')
                 || !rows
                     .iter()
@@ -308,7 +419,8 @@ pub(super) fn plan_compact_cards(
                 }
                 flush(&mut run, &mut body);
                 let prefix = field_prefix(field);
-                let room = available.saturating_sub(prefix).max(1);
+                let width = card_widths[index];
+                let room = width.saturating_sub(prefix).max(1);
                 if let Some(Value::Array(items)) = source.get(&field.label)
                     && (field.value.contains('\n')
                         || UnicodeWidthStr::width(field.value.as_str()) > room)
@@ -326,7 +438,7 @@ pub(super) fn plan_compact_cards(
                     let values = values.iter().map(String::as_str).collect::<Vec<_>>();
                     let mut grid = plan_list_grid(
                         &values,
-                        available.saturating_sub(CARD_INDENT).max(1),
+                        width.saturating_sub(CARD_INDENT).max(1),
                         field.value_style.clone(),
                     );
                     grid.label_widths = vec![CARD_INDENT];
@@ -334,6 +446,29 @@ pub(super) fn plan_compact_cards(
                         *first += CARD_INDENT;
                     }
                     body.push(grid);
+                } else if label_column(&field.label, settings.mreg_label_max) == 0
+                    && field
+                        .value
+                        .split('\n')
+                        .any(|line| UnicodeWidthStr::width(line) > room)
+                {
+                    body.push(GridBlock {
+                        rows: vec![vec![GridCell {
+                            value: String::new(),
+                            ..field.clone()
+                        }]],
+                        column_widths: vec![width],
+                        label_widths: vec![prefix],
+                        gap: 0,
+                    });
+                    let mut block = plan_scalar_block(
+                        &field.value,
+                        width.saturating_sub(CARD_INDENT).max(1),
+                        field.value_style.clone(),
+                    );
+                    block.label_widths = vec![CARD_INDENT];
+                    block.column_widths[0] += CARD_INDENT;
+                    body.push(block);
                 } else {
                     body.push(GridBlock {
                         rows: field

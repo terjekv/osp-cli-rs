@@ -396,14 +396,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
     if compare_cards || (plan.format == OutputFormat::Mreg && plan.mreg_layout == MregLayout::Cards)
     {
         let rows = crate::core::output_model::output_items_to_rows(&output.items);
-        if (rows.len() > 1
-            || output
-                .meta
-                .title_field
-                .as_ref()
-                .is_some_and(|field| rows.iter().any(|row| row.contains_key(field))))
-            && rows.iter().all(cards::is_flat)
-        {
+        if rows.len() > 1 && rows.iter().all(cards::is_flat) {
             plan.compact_cards = cards::plan_compact_cards(
                 &rows,
                 &projection.records,

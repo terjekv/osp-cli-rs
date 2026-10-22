@@ -137,10 +137,26 @@ retained. JSON, CSV/TSV and DSL values are unchanged.
 **Indent = 2 columns per level, everywhere; never align across levels.**
 
 1. Card title (`<value>:` heading, classic or compact) at the effective margin m.
-2. The record's fields one level in (m+2 under a title; m when there is no title). Siblings at the same level share a value column; that column is sized to fit labels up to a cap of 18 display columns (label incl. its colon/separator). Labels longer than the cap do not widen the column: they render `label: value` (classic) / `label  value` (compact) with the normal single separator, unaligned. Compact cards' multi-column grid packing keeps working with this column rule.
+2. The record's fields one level in (m+2 under a title; m when there is no title). Siblings at the same level share a value column; that column is sized to fit labels up to `ui.mreg.label_max` (default 18) display columns (label incl. its colon/separator). Labels longer than the cap do not widen the column: they render `label: value` (classic) / `label  value` (compact) with the normal single separator, unaligned. Compact cards' multi-column grid packing keeps working with this column rule.
 3. Anything nested under a field — nested tables, grid lists, multi-line lists, nested objects — is a hanging block one more level in (field indent + 2), on the lines after the label line. Never aligned to the level-0 value column.
-4. A list value that fits on ONE line within the width stays inline as a normal value (`Groups:  usit-gsd-clients`, `Nameservers  ns1.nrec.no, ns2.nrec.no`). Only lists that need more than one line become a hanging block (label line `Roles (7):` then items at +2, grid layout as today).
+4. A list value that fits on ONE line within the card width stays inline as a normal value (`Groups:  usit-gsd-clients`, `Nameservers  ns1.nrec.no, ns2.nrec.no`). Only lists that need more than one line become a hanging block (label line `Roles (7):` then items at +2, grid layout as today).
 5. Long scalar text values still wrap with continuation lines aligned to that field's value column (that is the same level, so allowed).
+
+A single record always uses classic cards, including with a declared title and
+an MREG recommendation. Fields use colons, one field per line, and list counts
+appear only for multiple items. Compact packing is reserved for multiple records.
+
+For each card, the widest scalar field line (including its indentation,
+label and separator, excluding lists) determines the card width. Clamp it between
+`ui.mreg.min_width` (default 40) and `ui.mreg.max_width` (default 80), then to the
+available terminal width. The maximum wins when configured below the minimum.
+These settings accept positive integers.
+Lists stay inline only when their complete line fits that width; otherwise they
+hang two spaces deeper using the shared grid geometry. Lists never widen a card.
+Long scalar strings wrap at the maximum, with continuations under their own
+value column. If a label exceeds the alignment cap and its value needs wrapping,
+the value hangs two spaces deeper instead. Terminals wider than the maximum do
+not alter card layout. These card limits also apply to unlimited targets.
 
 `ui.mreg.gap` controls blank lines between consecutive cards, including automatic
 fallback and one-line compact entries. The default `auto` keeps compact cards

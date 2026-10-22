@@ -222,10 +222,10 @@ fn ui2_mreg_renders_scalar_arrays_inline_or_as_hanging_lists_unit() {
     assert!(rendered.contains("uid:"));
     assert!(rendered.contains("oistes\n"));
     assert!(rendered.contains("eduPersonAffiliation (3):"));
-    assert!(rendered.contains("eduPersonAffiliation (3): employee, member, staff\n"));
+    assert!(rendered.contains("eduPersonAffiliation (3):\n  employee"));
     assert!(rendered.contains("filegroups (4):"));
     assert!(rendered.contains("oistes\n"));
-    assert!(rendered.contains("oistes, ucore, usit, vortex-opptak\n"));
+    assert!(rendered.contains("filegroups (4):\n  oistes"));
     assert!(rendered.contains("netgroups (6):"));
     assert!(rendered.contains("ansatt-373034"));
     assert!(rendered.contains("it-uio-ms365-ansatt-publisert"));
@@ -286,7 +286,9 @@ fn ui2_rich_mreg_inline_lists_keep_key_and_value_styling_unit() {
     let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("\x1b[38;2;189;147;249meduPersonAffiliation (3)\x1b[0m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242memployee, member, staff\x1b[0m"));
+    for value in ["employee", "member", "staff"] {
+        assert!(rendered.contains(&format!("\x1b[38;2;248;248;242m{value}\x1b[0m")));
+    }
 }
 
 #[test]

@@ -535,6 +535,21 @@ fn emit_plain_row_lines(
     match &row.value {
         KeyValueValue::Empty => vec![label],
         KeyValueValue::Scalar(text) if text.is_empty() => vec![label],
+        KeyValueValue::Scalar(text) if row.gap.is_some() => text
+            .split('\n')
+            .enumerate()
+            .map(|(index, line)| {
+                format!(
+                    "{}{}",
+                    if index == 0 {
+                        format!("{label}{value_spacing}")
+                    } else {
+                        continuation_indent.clone()
+                    },
+                    styler.paint_value(line)
+                )
+            })
+            .collect(),
         KeyValueValue::Scalar(text) => render_terminal_scalar_lines(
             text,
             &format!("{label}{value_spacing}"),

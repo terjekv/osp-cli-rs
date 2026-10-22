@@ -252,6 +252,12 @@ pub struct RenderSettings {
     pub table_too_wide: TableTooWide,
     /// Blank lines between cards; `None` preserves each style's default.
     pub mreg_gap: Option<usize>,
+    /// Minimum scalar-derived card width, including indentation.
+    pub mreg_min_width: usize,
+    /// Maximum card width, also limited by the terminal.
+    pub mreg_max_width: usize,
+    /// Maximum aligned label column, including separators.
+    pub mreg_label_max: usize,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
@@ -281,6 +287,9 @@ impl Default for RenderSettings {
             table_overflow: TableOverflow::Ellipsis,
             table_too_wide: TableTooWide::Mreg,
             mreg_gap: None,
+            mreg_min_width: 40,
+            mreg_max_width: 80,
+            mreg_label_max: 18,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
@@ -552,6 +561,18 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.table_too_wide = parsed;
     }
 
+    for (key, setting) in [
+        ("ui.mreg.min_width", &mut settings.mreg_min_width),
+        ("ui.mreg.max_width", &mut settings.mreg_max_width),
+        ("ui.mreg.label_max", &mut settings.mreg_label_max),
+    ] {
+        if let Some(value) = config_int(config, key).and_then(|value| usize::try_from(value).ok())
+            && value > 0
+        {
+            *setting = value;
+        }
+    }
+
     if let Some(value) = config.get_string("ui.mreg.gap") {
         settings.mreg_gap = value.parse().ok();
     }
@@ -642,6 +663,12 @@ pub struct ResolvedRenderSettings {
     pub table_too_wide: TableTooWide,
     /// Blank lines between cards; `None` preserves each style's default.
     pub mreg_gap: Option<usize>,
+    /// Minimum scalar-derived card width, including indentation.
+    pub mreg_min_width: usize,
+    /// Maximum card width, also limited by the terminal.
+    pub mreg_max_width: usize,
+    /// Maximum aligned label column, including separators.
+    pub mreg_label_max: usize,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
     pub theme_name: String,
@@ -740,6 +767,9 @@ impl RenderSettings {
             table_overflow: self.table_overflow,
             table_too_wide: self.table_too_wide,
             mreg_gap: self.mreg_gap,
+            mreg_min_width: self.mreg_min_width,
+            mreg_max_width: self.mreg_max_width,
+            mreg_label_max: self.mreg_label_max,
             table_border: self.table_border,
             nested_table_border: self.nested_table_border.resolve(self.table_border),
             theme_name,

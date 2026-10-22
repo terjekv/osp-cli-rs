@@ -114,3 +114,10 @@ Top-level terminal table cells summarize remaining multi-field object arrays as
 item counts and objects as nonempty field counts. Counts stay whole when fitted
 and contribute to shortened-cell footers; cards retain nested tables and exports
 retain their complete data.
+
+Classic card planning derives width from scalar lines, clamped by
+`ui.mreg.min_width` / `ui.mreg.max_width` (40 / 80) and the terminal. Lists use
+that width without widening the card. `ui.mreg.label_max` (18) caps alignment;
+wrapped values under longer labels hang at the child level. Scalar wrapping and
+hanging grids are planned before emission. Single records always remain classic,
+including declared titles and MREG recommendations.
