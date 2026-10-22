@@ -17,8 +17,7 @@ pub(super) struct PreparedCell {
     pub raw: String,
     pub markdown: String,
     pub width: usize,
-    pub command: bool,
-    pub style: Option<String>,
+    pub style: Option<crate::ui::style::CellStyle>,
 }
 
 impl PreparedTable {
@@ -45,7 +44,6 @@ impl PreparedTable {
                         .and_then(|row| row.get(col))
                         .cloned()
                         .flatten();
-                    cell.command = block.command_columns.get(col).copied().unwrap_or(false);
                 }
                 cells
             })
@@ -79,7 +77,6 @@ fn prepare_cells(cells: &[String]) -> Vec<PreparedCell> {
 impl PreparedCell {
     fn new(raw: &str) -> Self {
         Self {
-            command: false,
             style: None,
             raw: raw.to_string(),
             markdown: escape_markdown_table_cell(raw),
@@ -97,7 +94,6 @@ mod tests {
     #[test]
     fn prepared_table_captures_shared_width_and_markdown_shape_unit() {
         let table = TableBlock {
-            command_columns: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {

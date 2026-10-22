@@ -18,8 +18,8 @@ use super::doc::{
     Block, Doc, EntriesBlock, EntryRow, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
-use super::plan::{FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan};
-use super::projection::{display_labels, display_path, display_value, ordered_keys};
+use super::plan::{FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan};
+use super::projection::{display_value, ordered_keys};
 use super::settings::HelpLayout;
 use super::text::display_width;
 use super::visible_inline_text;
@@ -121,10 +121,6 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
             Doc::default()
         }
     };
-    if plan.settings.color && plan.format != OutputFormat::Json {
-        apply_value_styles(&mut doc.blocks, &projection.source);
-        apply_warning_styles(&mut doc.blocks, &projection.source, &plan.settings);
-    }
     if plan.format != OutputFormat::Json {
         doc.blocks
             .extend(output.meta.display_notes.iter().map(|text| {
@@ -397,109 +393,6 @@ fn section_title(key: &str, count: usize) -> String {
         format!("{key}:")
     } else {
         format!("{key} ({count}):")
-    }
-}
-
-fn apply_warning_styles(
-    blocks: &mut [Block],
-    output: &OutputResult,
-    settings: &crate::ui::settings::ResolvedRenderSettings,
-) {
-    use crate::core::DisplayRule;
-    use crate::ui::style::{StyleToken, style_spec};
-    let warns = |key: &str| {
-        output
-            .meta
-            .display_rules
-            .iter()
-            .any(|rule| matches!(rule, DisplayRule::Warning { field } if field == key))
-    };
-    for block in blocks {
-        match block {
-            Block::Section(section) => apply_warning_styles(&mut section.blocks, output, settings),
-            Block::KeyValue(block) => {
-                for row in &mut block.rows {
-                    if warns(&row.key) {
-                        row.value_style = Some(StyleToken::Warning);
-                    }
-                }
-            }
-            Block::Table(table) => {
-                for (index, key) in table.headers.iter().enumerate() {
-                    if warns(key) {
-                        table.cell_styles.resize_with(table.rows.len(), Vec::new);
-                        for styles in &mut table.cell_styles {
-                            styles.resize(table.headers.len(), None);
-                            styles[index] = Some(
-                                style_spec(
-                                    &settings.theme,
-                                    &settings.style_overrides,
-                                    StyleToken::Warning,
-                                )
-                                .into(),
-                            );
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
-    use crate::core::output_model::DisplayRule;
-    let columns = output
-        .meta
-        .display_columns
-        .as_deref()
-        .unwrap_or(&output.meta.key_index);
-    let labels = display_labels(output, columns);
-    let style = |key: &str, value: &str, row_index: usize| {
-        output.meta.display_rules.iter().find_map(|rule| {
-            let DisplayRule::ValueStyle { field, bold } = rule else {
-                return None;
-            };
-            let label = columns
-                .iter()
-                .position(|column| column == field)
-                .and_then(|index| labels.get(index))
-                .unwrap_or(field);
-            if key != label {
-                return None;
-            }
-            let original = output
-                .as_rows()
-                .and_then(|rows| rows.get(row_index))
-                .and_then(|row| display_path(&Value::Object(row.clone()), field).cloned());
-            let value = original.as_ref().and_then(Value::as_str).unwrap_or(value);
-            crate::core::style::is_valid_style_spec(value).then(|| {
-                if *bold {
-                    format!("bold {value}")
-                } else {
-                    value.to_owned()
-                }
-            })
-        })
-    };
-    for block in blocks {
-        match block {
-            Block::Section(section) => apply_value_styles(&mut section.blocks, output),
-            Block::Table(table) => {
-                table.cell_styles = table
-                    .rows
-                    .iter()
-                    .enumerate()
-                    .map(|(row_index, row)| {
-                        row.iter()
-                            .zip(&table.headers)
-                            .map(|(value, key)| style(key, value, row_index))
-                            .collect()
-                    })
-                    .collect();
-            }
-            _ => {}
-        }
     }
 }
 
@@ -777,9 +670,15 @@ struct MregRecordBuilder {
 }
 
 impl MregRecordBuilder {
-    fn push_row(&mut self, key: &str, value: KeyValueValue, depth: usize) {
+    fn push_row(
+        &mut self,
+        key: &str,
+        value: KeyValueValue,
+        depth: usize,
+        style: Option<crate::ui::style::CellStyle>,
+    ) {
         self.pending_rows.push(KeyValueRow {
-            value_style: None,
+            value_style: style,
             key: key.to_string(),
             value,
             indent: (depth > 0).then(|| " ".repeat(depth * 2)),
@@ -839,19 +738,24 @@ fn visit_mreg_record_field(
     depth: usize,
     layout: &FieldLayout,
 ) {
-    match layout {
-        FieldLayout::Table(table) => {
+    match &layout.kind {
+        FieldKind::Table(table) => {
             builder.push_table(key, table.data.rows.len(), table_from_plan(table), depth)
         }
-        FieldLayout::Record(fields) => {
-            builder.push_row(key, KeyValueValue::Empty, depth);
+        FieldKind::Record(fields) => {
+            builder.push_row(key, KeyValueValue::Empty, depth, layout.style.clone());
             for (nested_key, layout) in fields {
                 if let Some(nested) = value.get(nested_key) {
                     visit_mreg_record_field(builder, nested_key, nested, depth + 1, layout);
                 }
             }
         }
-        FieldLayout::Value => builder.push_row(key, lower_key_value_value(value, false), depth),
+        FieldKind::Value => builder.push_row(
+            key,
+            lower_key_value_value(value, false),
+            depth,
+            layout.style.clone(),
+        ),
     }
 }
 
@@ -954,12 +858,11 @@ fn is_scalar_like(value: &Value) -> bool {
 
 fn table_from_plan(table: &PlannedTable) -> TableBlock {
     TableBlock {
-        command_columns: table.data.command_columns.clone(),
         widths: table.widths.clone(),
         headers: table.data.headers.clone(),
         rows: table.data.rows.clone(),
         column_align: table.data.column_align.clone(),
-        cell_styles: Vec::new(),
+        cell_styles: table.data.cell_styles.clone(),
         summary: Vec::new(),
         nested: false,
     }

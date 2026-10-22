@@ -29,10 +29,16 @@ pub(super) struct PlannedTable {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum FieldLayout {
+pub(super) enum FieldKind {
     Value,
     Record(RecordLayout),
     Table(PlannedTable),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FieldLayout {
+    pub style: Option<super::style::CellStyle>,
+    pub kind: FieldKind,
 }
 
 pub(super) type RecordLayout = Vec<(String, FieldLayout)>;
@@ -136,12 +142,15 @@ fn plan_record(
         .map(|(key, value)| {
             (
                 key.clone(),
-                if let Some(table) = nested_table(value) {
-                    FieldLayout::Table(plan_table(table, settings, (depth + 1) * 2))
-                } else if has_nested_table(&value.fields) {
-                    FieldLayout::Record(plan_record(&value.fields, settings, depth + 1))
-                } else {
-                    FieldLayout::Value
+                FieldLayout {
+                    style: value.style.clone(),
+                    kind: if let Some(table) = nested_table(value) {
+                        FieldKind::Table(plan_table(table, settings, (depth + 1) * 2))
+                    } else if has_nested_table(&value.fields) {
+                        FieldKind::Record(plan_record(&value.fields, settings, depth + 1))
+                    } else {
+                        FieldKind::Value
+                    },
                 },
             )
         })
@@ -182,7 +191,9 @@ pub(super) fn plan_layout(
         && plan.settings.table_overflow != TableOverflow::None
         && !output.meta.grouped
         && !output.meta.document_rows
-        && matches!(&projection.source.items, OutputItems::Rows(rows) if rows.len() <= MAX_FALLBACK_CARD_ROWS)
+        && projection
+            .source_row_count
+            .is_some_and(|count| count <= MAX_FALLBACK_CARD_ROWS)
         && let [table] = plan.tables.as_slice()
         && table.widths.len() < table.data.headers.len()
     {

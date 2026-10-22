@@ -1,17 +1,18 @@
 //! Pure human data projection, shared by layout planning and lowering.
 
 use super::settings::{RenderProfile, RenderSettings};
+use super::style::{CellStyle, StyleToken};
 use super::text::sanitize_human_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{ColumnAlignment, OutputDocument, OutputItems, OutputResult};
 use crate::core::row::Row;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct HumanProjection {
     pub output: OutputResult,
-    pub source: OutputResult,
+    pub source_row_count: Option<usize>,
     pub shortened: Option<(usize, usize)>,
     pub tables: Vec<ProjectedTable>,
     pub records: Vec<RecordProjection>,
@@ -20,7 +21,7 @@ pub(super) struct HumanProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ProjectedTable {
-    pub command_columns: Vec<bool>,
+    pub cell_styles: Vec<Vec<Option<CellStyle>>>,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
     pub column_align: Vec<ColumnAlignment>,
@@ -28,32 +29,150 @@ pub(super) struct ProjectedTable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ValueProjection {
+    pub style: Option<CellStyle>,
     pub table: Option<ProjectedTable>,
     pub fields: RecordProjection,
 }
 
 pub(super) type RecordProjection = Vec<(String, ValueProjection)>;
 
-fn project_record(row: &Row) -> RecordProjection {
+type FieldStyles = BTreeMap<Vec<String>, CellStyle>;
+
+fn field_path(value: &Value, selector: &str) -> Vec<String> {
+    if value.get(selector).is_some() {
+        return vec![selector.into()];
+    }
+    if selector.starts_with('/') {
+        selector[1..]
+            .split('/')
+            .map(|part| part.replace("~1", "/").replace("~0", "~"))
+            .collect()
+    } else {
+        selector.split('.').map(str::to_owned).collect()
+    }
+}
+
+fn field_styles(value: &Value, rules: &[crate::core::DisplayRule]) -> FieldStyles {
+    use crate::core::DisplayRule;
+    let mut styles = FieldStyles::new();
+    for rule in rules {
+        if let DisplayRule::Command { field } = rule {
+            styles.insert(
+                field_path(value, field),
+                CellStyle::Token(StyleToken::PromptCommand),
+            );
+        }
+    }
+    for rule in rules {
+        if let DisplayRule::ValueStyle { field, bold } = rule
+            && let Some(spec) = display_path(value, field).and_then(Value::as_str)
+            && crate::core::style::is_valid_style_spec(spec)
+        {
+            styles.insert(
+                field_path(value, field),
+                CellStyle::Spec(if *bold {
+                    format!("bold {spec}")
+                } else {
+                    spec.to_owned()
+                }),
+            );
+        }
+    }
+    for rule in rules {
+        if let DisplayRule::Warning { field } = rule {
+            styles.insert(
+                field_path(value, field),
+                CellStyle::Token(StyleToken::Warning),
+            );
+        }
+    }
+    styles
+}
+
+fn project_record(row: &Row, path: &[String], styles: &FieldStyles) -> RecordProjection {
     row.iter()
         .map(|(key, value)| {
+            let mut path = path.to_vec();
+            path.push(key.clone());
             (
                 key.clone(),
                 ValueProjection {
-                    table: value.as_array().and_then(|items| project_array(items)),
-                    fields: value.as_object().map(project_record).unwrap_or_default(),
+                    style: styles.get(&path).cloned(),
+                    table: value
+                        .as_array()
+                        .and_then(|items| project_array(items, &path, styles)),
+                    fields: value
+                        .as_object()
+                        .map(|row| project_record(row, &path, styles))
+                        .unwrap_or_default(),
                 },
             )
         })
         .collect()
 }
 
-pub(super) fn project_array(items: &[Value]) -> Option<ProjectedTable> {
+fn project_array(items: &[Value], path: &[String], styles: &FieldStyles) -> Option<ProjectedTable> {
     let rows = items
         .iter()
         .map(|item| item.as_object().cloned())
         .collect::<Option<Vec<_>>>()?;
-    Some(project_table(&rows, &[], &[]))
+    let mut table = project_table(&rows, &[], &[]);
+    table.cell_styles = table
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            table
+                .headers
+                .iter()
+                .map(|key| {
+                    let mut path = path.to_vec();
+                    path.push(index.to_string());
+                    path.push(key.clone());
+                    styles.get(&path).cloned()
+                })
+                .collect()
+        })
+        .collect();
+    Some(table)
+}
+
+fn style_table(table: &mut ProjectedTable, styles: &[FieldStyles]) {
+    table.cell_styles = table
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            table
+                .headers
+                .iter()
+                .map(|header| {
+                    styles
+                        .get(index)
+                        .and_then(|styles| styles.get(&vec![header.clone()]))
+                        .cloned()
+                })
+                .collect()
+        })
+        .collect();
+}
+
+fn retain_array_styles(styles: &mut FieldStyles, path: &[String], retained: &[usize]) {
+    *styles = std::mem::take(styles)
+        .into_iter()
+        .filter_map(|(mut address, style)| {
+            if address.starts_with(path)
+                && address.len() > path.len()
+                && let Ok(index) = address[path.len()].parse::<usize>()
+            {
+                address[path.len()] = retained
+                    .iter()
+                    .position(|original| *original == index)?
+                    .to_string();
+            }
+            Some((address, style))
+        })
+        .collect();
 }
 
 fn project_document_tables(
@@ -68,7 +187,7 @@ fn project_document_tables(
             DocBlock::Data {
                 value: Value::Array(items),
             } => {
-                if let Some(table) = project_array(items) {
+                if let Some(table) = project_array(items, &[], &FieldStyles::new()) {
                     tables.insert(path.clone(), table);
                 }
             }
@@ -84,12 +203,12 @@ pub(super) fn project(
     settings: &RenderSettings,
     profile: RenderProfile,
 ) -> HumanProjection {
-    let mut display = if output.meta.document_rows {
-        output.clone()
+    let (mut display, mut styles) = if output.meta.document_rows {
+        (output.clone(), Vec::new())
     } else {
         display_output(output, format)
     };
-    let source = output.clone();
+    let source_row_count = output.as_rows().map(<[Row]>::len);
     // Derived display values must see every row and nested item.
     let shortened = if settings.runtime.stdout_is_tty && profile == RenderProfile::Normal {
         display.meta.display_limit.and_then(|limit| {
@@ -102,58 +221,52 @@ pub(super) fn project(
         None
     };
     sanitize_output(&mut display);
-    let mut tables = match &display.items {
-        OutputItems::Rows(rows) => vec![project_table(
-            rows,
-            &display.meta.key_index,
-            &display.meta.column_align,
-        )],
+    // Style addresses follow the same sanitized field names as the data.
+    for row in &mut styles {
+        *row = std::mem::take(row)
+            .into_iter()
+            .map(|(path, style)| {
+                (
+                    path.into_iter()
+                        .map(|key| sanitize_human_text(&key))
+                        .collect(),
+                    style,
+                )
+            })
+            .collect();
+    }
+    let tables = match &display.items {
+        OutputItems::Rows(rows) => {
+            let mut table =
+                project_table(rows, &display.meta.key_index, &display.meta.column_align);
+            style_table(&mut table, &styles);
+            vec![table]
+        }
         OutputItems::Groups(groups) => groups
             .iter()
             .map(|group| {
-                project_table(
-                    &crate::core::output_model::group_rows(group),
-                    &display.meta.key_index,
-                    &display.meta.column_align,
-                )
+                let rows = crate::core::output_model::group_rows(group);
+                let styles = rows
+                    .iter()
+                    .map(|row| {
+                        field_styles(&Value::Object(row.clone()), &output.meta.display_rules)
+                    })
+                    .collect::<Vec<_>>();
+                let mut table =
+                    project_table(&rows, &display.meta.key_index, &display.meta.column_align);
+                style_table(&mut table, &styles);
+                table
             })
             .collect(),
     };
-    let columns = source
-        .meta
-        .display_columns
-        .as_deref()
-        .unwrap_or(&source.meta.key_index);
-    let labels = display_labels(&source, columns);
-    let command_labels = source
-        .meta
-        .display_rules
-        .iter()
-        .filter_map(|rule| {
-            let crate::core::output_model::DisplayRule::Command { field } = rule else {
-                return None;
-            };
-            Some(
-                columns
-                    .iter()
-                    .position(|column| column == field)
-                    .and_then(|index| labels.get(index))
-                    .unwrap_or(field),
-            )
-        })
-        .collect::<Vec<_>>();
-    for table in &mut tables {
-        table.command_columns = table
-            .headers
-            .iter()
-            .map(|header| command_labels.contains(&header))
-            .collect();
-    }
     let records = display
         .as_rows()
         .unwrap_or_default()
         .iter()
-        .map(project_record)
+        .enumerate()
+        .map(|(index, row)| {
+            project_record(row, &[], styles.get(index).unwrap_or(&FieldStyles::new()))
+        })
         .collect();
     let mut document_tables = std::collections::BTreeMap::new();
     if let Some(document) = display.document.as_ref().and_then(OutputDocument::semantic) {
@@ -164,7 +277,7 @@ pub(super) fn project(
         records,
         document_tables,
         output: display,
-        source,
+        source_row_count,
         shortened,
     }
 }
@@ -272,12 +385,14 @@ fn address_range_total(ranges: &Value, start: &str, end: &str) -> Option<String>
     })
 }
 
-fn display_output(output: &OutputResult, format: OutputFormat) -> OutputResult {
+fn display_output(output: &OutputResult, format: OutputFormat) -> (OutputResult, Vec<FieldStyles>) {
     let mut display = output.clone();
+    let mut row_styles = Vec::new();
     if let OutputItems::Rows(rows) = &mut display.items {
         for row in rows.iter_mut() {
             let mut original = Value::Object(std::mem::take(row));
             let raw = original.clone();
+            let mut styles = field_styles(&raw, &output.meta.display_rules);
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
@@ -371,10 +486,20 @@ fn display_output(output: &OutputResult, format: OutputFormat) -> OutputResult {
                         }
                     }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
+                        let path = field_path(&original, field);
                         if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
+                            let mut retained = Vec::new();
+                            let mut index = 0;
                             items.retain(|item| {
-                                display_path(item, when).and_then(Value::as_bool) != Some(true)
+                                let keep =
+                                    display_path(item, when).and_then(Value::as_bool) != Some(true);
+                                if keep {
+                                    retained.push(index);
+                                }
+                                index += 1;
+                                keep
                             });
+                            retain_array_styles(&mut styles, &path, &retained);
                         }
                     }
                     DisplayRule::SuffixWhenTrue {
@@ -432,25 +557,41 @@ fn display_output(output: &OutputResult, format: OutputFormat) -> OutputResult {
             }
             *row = if let Some(columns) = &output.meta.display_columns {
                 let labels = display_labels(output, columns);
-                columns
+                let mut selected_styles = FieldStyles::new();
+                let row = columns
                     .iter()
                     .enumerate()
-                    .map(|(index, path)| {
-                        let value = display_path(&original, path);
+                    .map(|(index, selector)| {
+                        let path = field_path(&original, selector);
                         let label = &labels[index];
-                        (label.clone(), value.cloned().unwrap_or(Value::Null))
+                        for (address, style) in &styles {
+                            if let Some(suffix) = address.strip_prefix(path.as_slice()) {
+                                let mut address = vec![label.clone()];
+                                address.extend_from_slice(suffix);
+                                selected_styles.insert(address, style.clone());
+                            }
+                        }
+                        (
+                            label.clone(),
+                            display_path(&original, selector)
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        )
                     })
-                    .collect()
+                    .collect();
+                styles = selected_styles;
+                row
             } else {
                 original.as_object().cloned().unwrap_or_default()
             };
+            row_styles.push(styles);
         }
         if let Some(columns) = &output.meta.display_columns {
             display.meta.key_index = display_labels(output, columns);
             display.meta.display_columns = Some(display.meta.key_index.clone());
         }
     }
-    display
+    (display, row_styles)
 }
 
 fn format_date(text: &str, pattern: &str) -> Option<String> {
@@ -624,7 +765,7 @@ pub(super) fn project_table(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     ProjectedTable {
-        command_columns: Vec::new(),
+        cell_styles: Vec::new(),
         headers: visible_columns
             .iter()
             .map(|index| all_headers[*index].clone())

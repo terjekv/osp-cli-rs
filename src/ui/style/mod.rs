@@ -36,6 +36,14 @@ pub enum StyleToken {
     Punctuation,
 }
 
+/// A semantic role or a producer-supplied validated palette specimen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CellStyle {
+    Token(StyleToken),
+    // Theme inspection intentionally paints a palette value using itself.
+    Spec(String),
+}
+
 /// Per-token style overrides layered over the resolved theme palette.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleOverrides {
@@ -69,6 +77,7 @@ pub struct ThemeStyler<'a> {
     pub(crate) theme: &'a ThemeDefinition,
     pub(crate) overrides: &'a StyleOverrides,
     pub(crate) value_token: Option<StyleToken>,
+    pub(crate) value_spec: Option<&'a str>,
 }
 
 impl<'a> ThemeStyler<'a> {
@@ -78,6 +87,7 @@ impl<'a> ThemeStyler<'a> {
             theme,
             overrides,
             value_token: None,
+            value_spec: None,
         }
     }
 
@@ -90,10 +100,33 @@ impl<'a> ThemeStyler<'a> {
     }
 
     pub fn paint_value(&self, text: &str) -> String {
+        if let Some(spec) = self.value_spec {
+            return apply_style_spec(text, spec, self.enabled);
+        }
         self.paint(
             text,
             self.value_token.unwrap_or_else(|| value_style_token(text)),
         )
+    }
+
+    pub(crate) fn with_value_style(self, style: Option<&'a CellStyle>) -> Self {
+        match style {
+            Some(CellStyle::Token(token)) => Self {
+                value_token: Some(*token),
+                value_spec: None,
+                ..self
+            },
+            Some(CellStyle::Spec(spec)) => Self {
+                value_token: None,
+                value_spec: Some(spec),
+                ..self
+            },
+            None => self,
+        }
+    }
+
+    pub(crate) fn paint_cell(&self, text: &str, style: &'a CellStyle) -> String {
+        self.with_value_style(Some(style)).paint_value(text)
     }
 
     /// Style inline code without treating ordinary prose as a data value.

@@ -405,7 +405,6 @@ fn table_row_lines(
                 .iter()
                 .enumerate()
                 .map(|(index, lines)| PreparedCell {
-                    command: cells.get(index).is_some_and(|cell| cell.command),
                     style: cells.get(index).and_then(|cell| cell.style.clone()),
                     raw: lines.get(line_index).cloned().unwrap_or_default(),
                     markdown: String::new(),
@@ -461,11 +460,9 @@ fn format_summary(
                 "{}{} {}",
                 styler.paint(&display_key(row), StyleToken::Key),
                 styler.paint(":", StyleToken::Punctuation),
-                ThemeStyler {
-                    value_token: row.value_style,
-                    ..*styler
-                }
-                .paint_value(scalar_text(&row.value).unwrap_or_default())
+                styler
+                    .with_value_style(row.value_style.as_ref())
+                    .paint_value(scalar_text(&row.value).unwrap_or_default())
             )
         })
         .collect::<Vec<_>>()
@@ -492,10 +489,7 @@ fn emit_plain_row_lines(
     settings: &ResolvedRenderSettings,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
-    let value_styler = ThemeStyler {
-        value_token: row.value_style.or(styler.value_token),
-        ..*styler
-    };
+    let value_styler = styler.with_value_style(row.value_style.as_ref());
     let styler = &value_styler;
     let effective_indent = format!("{base_indent}{}", row.indent.as_deref().unwrap_or_default());
     let display_key = display_key(row);
@@ -744,10 +738,8 @@ fn table_row(
         );
         let styled_cell = if header {
             styler.paint(raw_cell, StyleToken::TableHeader)
-        } else if let Some(spec) = cell.and_then(|cell| cell.style.as_deref()) {
-            crate::ui::style::apply_style_spec(raw_cell, spec, styler.enabled)
-        } else if cell.is_some_and(|cell| cell.command) {
-            styler.paint(raw_cell, StyleToken::PromptCommand)
+        } else if let Some(style) = cell.and_then(|cell| cell.style.as_ref()) {
+            styler.paint_cell(raw_cell, style)
         } else {
             styler.paint_value(raw_cell)
         };

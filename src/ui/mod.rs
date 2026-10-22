@@ -185,6 +185,7 @@ impl<'a> RenderRequest<'a> {
 /// assert!(rendered.contains("alice"));
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
+    let canonical = output;
     let mut plan = plan_output(output, request.settings, request.profile);
     match plan.format {
         OutputFormat::Csv | OutputFormat::Tsv => {
@@ -235,7 +236,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
         && request.profile == RenderProfile::Normal
         && !matches!(plan.format, OutputFormat::Json | OutputFormat::Markdown)
     {
-        return link_urls(text, output);
+        return link_urls(text, canonical);
     }
     text
 }
