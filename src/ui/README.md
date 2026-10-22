@@ -8,6 +8,9 @@ Imports `core` and `config` (render settings). It does not re-run
 commands, re-resolve config, or invent data. If a value is wrong here, it was
 wrong before it arrived.
 
+General layout rules use shape, value type and measured width only. Field names
+and value meanings belong to producer metadata and declared display rules.
+
 ## Flow
 
 ```text
@@ -41,10 +44,12 @@ OutputResult / Document
 - **Wrong human value, label or total:** start in `projection.rs`. Check `--json`
   for the canonical data; derived display values precede display limits.
 - **Wrong format, cards or hidden columns:** start in `plan/`. The fit function
-  measures projected cell text, preserves atomic values and drops trailing columns; `lower.rs` and emitters consume its decision.
+  measures projected cell text, preserves atomic values and drops trailing
+  columns; `lower.rs` and emitters consume its decision.
 - **Wrong spacing, border or colour:** start in the emitter and `ThemeStyler`.
-  The IR carries tokens; palette specimens and declared swatches retain validated raw specs. Swatches
-  project to two cells before width planning when terminal colour is enabled.
+  The IR carries tokens; palette specimens and declared swatches retain validated
+  raw specs. Swatches project to two cells before width planning when terminal
+  colour is enabled.
 - **New style role:** add the token in `style/`, map it in each builtin theme
   in `theme/`, document it in `docs/THEMES.md`.
 - **New output format:** add format planning and `core/output.rs` vocabulary;
@@ -70,8 +75,9 @@ The renderer never infers document intent from ordinary row fields.
 `MAX_NESTED_TABLE_COLUMNS` names the eight-column nested comparison-table rule.
 `MAX_FALLBACK_CARD_ROWS` limits automatic table-to-card fallback to 20 source
 rows. Eligible candidates compare visible values per rendered line; cards win
-only at strictly higher density. `ui.table.too_wide=mreg|hide` selects automatic cards or the retained hide
-path; explicit/configured tables, grouped output, documents, copy-safe sinks
+only at strictly higher density. `ui.table.too_wide=mreg|hide` selects automatic
+cards or the retained hide path; explicit/configured tables, grouped output,
+documents, copy-safe sinks
 and nested tables never fall back. See `docs/UI.md` for the full contract.
 
 `RenderTarget` owns destination policy in `settings/`: only REPL screens retain

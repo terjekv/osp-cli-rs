@@ -89,7 +89,8 @@ inference comes last. Help/intro documents keep guide layout by default unless
 an invocation explicitly requests another format. This applies equally to
 JSON, CSV and TSV; machine exports bypass human display shaping.
 
-Automatic TTY tables can become MREG cards when fitting would hide columns.
+Automatic TTY tables become MREG cards only when planned cards show more values
+per rendered line than the fitted table; ties keep tables.
 `ui.table.too_wide=hide` keeps the fitted table and hidden-column footer.
 Explicit `--table` and configured `ui.format=table` retain tables. See
 [UI.md](UI.md#tables-and-mreg-layout) for all fallback conditions.

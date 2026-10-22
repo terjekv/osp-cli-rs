@@ -262,17 +262,21 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .iter()
         .map(|record| plan_record(record, &plan.settings, 0))
         .collect();
-    let rows = crate::core::output_model::output_items_to_rows(&output.items);
-    if rows.len() > 1 && rows.iter().all(cards::is_flat) {
-        plan.compact_cards = cards::plan_compact_cards(
-            &rows,
-            &projection.records,
-            &output.meta.key_index,
-            &output.meta.display_rules,
-            &plan.settings,
-        );
-        if plan.mreg_layout == MregLayout::Cards {
-            plan.mreg_layout = MregLayout::Compact;
+    let compare_cards = can_compare_cards(projection, plan);
+    if compare_cards || (plan.format == OutputFormat::Mreg && plan.mreg_layout == MregLayout::Cards)
+    {
+        let rows = crate::core::output_model::output_items_to_rows(&output.items);
+        if rows.len() > 1 && rows.iter().all(cards::is_flat) {
+            plan.compact_cards = cards::plan_compact_cards(
+                &rows,
+                &projection.records,
+                &output.meta.key_index,
+                &output.meta.display_rules,
+                &plan.settings,
+            );
+            if plan.mreg_layout == MregLayout::Cards {
+                plan.mreg_layout = MregLayout::Compact;
+            }
         }
     }
     plan.document_tables = projection
@@ -285,23 +289,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             )
         })
         .collect();
-    if plan.grid_list.is_none()
-        && plan.format == OutputFormat::Table
-        && matches!(
-            plan.provenance,
-            FormatProvenance::Inferred | FormatProvenance::Recommended
-        )
-        && plan.settings.table_too_wide == TableTooWide::Mreg
-        && plan.settings.display_limits
-        && plan.settings.width.is_some()
-        && plan.settings.table_overflow != TableOverflow::None
-        && !output.meta.grouped
-        && !output.meta.document_rows
-        && projection
-            .source_row_count
-            .is_some_and(|count| (1..=MAX_FALLBACK_CARD_ROWS).contains(&count))
-        && let [table] = plan.tables.as_slice()
-    {
+    if compare_cards && let [table] = plan.tables.as_slice() {
         let row_lines = table
             .data
             .rows
@@ -368,4 +356,24 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             plan.mreg_layout = cards.mreg_layout;
         }
     }
+}
+
+fn can_compare_cards(projection: &HumanProjection, plan: &RenderPlan) -> bool {
+    let output = &projection.output;
+    plan.grid_list.is_none()
+        && plan.format == OutputFormat::Table
+        && matches!(
+            plan.provenance,
+            FormatProvenance::Inferred | FormatProvenance::Recommended
+        )
+        && plan.settings.table_too_wide == TableTooWide::Mreg
+        && plan.settings.display_limits
+        && plan.settings.width.is_some()
+        && plan.settings.table_overflow != TableOverflow::None
+        && !output.meta.grouped
+        && !output.meta.document_rows
+        && projection
+            .source_row_count
+            .is_some_and(|count| (1..=MAX_FALLBACK_CARD_ROWS).contains(&count))
+        && plan.tables.len() == 1
 }

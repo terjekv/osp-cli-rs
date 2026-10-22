@@ -63,7 +63,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
   to data inference; machine exports never auto-page.
 
 - Add `ui.table.too_wide=mreg|hide` (default `mreg` in every preset). Eligible
-  automatic TTY tables become cards only when fitting would hide columns;
+  automatic TTY tables become cards only at higher value-per-line density;
   explicit/configured tables retain the hide path. See `docs/UI.md` for guards.
   Explicit MREG always requests cards, including flat lists and grouped rows.
 
