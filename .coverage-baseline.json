@@ -20,35 +20,37 @@
     "date": "2026-10-22",
     "toolchain": "nightly-2026-10-16",
     "cargo_llvm_cov": "0.9.1",
+    "rust_test_threads": 1,
     "scope": "Product code only; test-gated exclusions. This measurement does not set the gate floor.",
     "source": {
       "integration_parent": "db86985e87eea237fed7b65ac1a69c806297460e",
       "coverage_scope": "72444648da366de557efa4d240dac94b60b5affd",
       "coverage_scope_merge": "47e5a9a3d6eec0cb59f2e6e2cb36ca08c2701c09",
-      "oneshot_pipeline": "254e3a3cb6d77c5591c624de015776ce439b823e"
+      "oneshot_pipeline": "254e3a3cb6d77c5591c624de015776ce439b823e",
+      "mreg_failure_output": "8bb57d6c94814dc79df572e801c4c558549b11ba"
     },
     "same_source_with_test_code": {
       "lines": {
         "covered": 41558,
-        "count": 48459,
-        "percent": 85.75909531769125
+        "count": 48458,
+        "percent": 85.76086507903752
       },
       "regions": {
         "covered": 41328,
-        "count": 49239,
-        "percent": 83.93346737342351
+        "count": 49238,
+        "percent": 83.93517202160933
       }
     },
     "product_code": {
       "lines": {
         "covered": 32065,
-        "count": 38864,
-        "percent": 82.50566076574722
+        "count": 38863,
+        "percent": 82.50778375318426
       },
       "regions": {
         "covered": 30618,
-        "count": 38416,
-        "percent": 79.70116618075802
+        "count": 38415,
+        "percent": 79.70324092151505
       }
     },
     "excluded_test_code": {
@@ -98,25 +100,25 @@
         "with_test_code": {
           "lines": {
             "covered": 41558,
-            "count": 48459,
-            "percent": 85.75909531769125
+            "count": 48458,
+            "percent": 85.76086507903752
           },
           "regions": {
             "covered": 41328,
-            "count": 49239,
-            "percent": 83.93346737342351
+            "count": 49238,
+            "percent": 83.93517202160933
           }
         },
         "product_code": {
           "lines": {
             "covered": 32065,
-            "count": 38864,
-            "percent": 82.50566076574722
+            "count": 38863,
+            "percent": 82.50778375318426
           },
           "regions": {
             "covered": 30618,
-            "count": 38416,
-            "percent": 79.70116618075802
+            "count": 38415,
+            "percent": 79.70324092151503
           }
         }
       }
