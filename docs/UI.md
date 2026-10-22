@@ -81,11 +81,12 @@ line breaks as literal escapes. JSON, CSV, TSV and Value are unchanged.
 
 An explicit `--mreg` or `--format mreg` always requests cards, including flat
 multi-row and grouped output. Grouped cards carry each member's group keys and
-aggregates; an empty group still has its context card. Other MREG sources use
-cards for one row, or for several rows only when every row contains a nested
-comparison table. Flat lists and non-explicit grouped MREG remain tables unless
-the eligible density comparison below selects cards.
-When several flat records render as cards (explicit MREG or automatic table
+aggregates; an empty group still has its context card. A producer recommendation
+of MREG also requests cards. Inferred and configured MREG use cards for one row,
+or for several rows only when every row contains a nested comparison table.
+Their flat lists and grouped output remain tables unless the eligible density
+comparison below selects cards.
+When several flat records render as cards (explicit or recommended MREG, or automatic table
 fallback), the planner selects compact cards. Flat means every value is a
 scalar or an array of scalars, including reduced single-field object lists.
 When every record's title and remaining nonempty fields fit together at the

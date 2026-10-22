@@ -367,9 +367,11 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .iter()
         .map(|table| plan_table(table, &plan.settings, 0, actions))
         .collect();
-    plan.mreg_layout = if plan.provenance == FormatProvenance::Explicit
-        || (matches!(projection.output.items, OutputItems::Rows(_))
-            && (projection.records.len() <= 1 || projection.records.iter().all(has_nested_table)))
+    plan.mreg_layout = if matches!(
+        plan.provenance,
+        FormatProvenance::Explicit | FormatProvenance::Recommended
+    ) || (matches!(projection.output.items, OutputItems::Rows(_))
+        && (projection.records.len() <= 1 || projection.records.iter().all(has_nested_table)))
     {
         MregLayout::Cards
     } else {
@@ -396,6 +398,8 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             plan.format,
             OutputFormat::Table | OutputFormat::Mreg | OutputFormat::Guide
         ) && plan.provenance != FormatProvenance::Explicit
+            && !(plan.format == OutputFormat::Mreg
+                && plan.provenance == FormatProvenance::Recommended)
         {
             let values = rows
                 .iter()
