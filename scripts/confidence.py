@@ -112,7 +112,7 @@ def cargo_test_command(*target_args: str) -> list[str]:
     changes its common cargo flags.
     """
 
-    return ["cargo", "test", *target_args, "--locked"]
+    return ["cargo", "test", "--workspace", *target_args, "--locked"]
 
 
 def cargo_miri_test_command(*target_args: str) -> list[str]:
@@ -134,7 +134,7 @@ def clippy_command() -> list[str]:
     codifies the team's current "high-signal, low-noise" lint policy.
     """
 
-    command = ["cargo", "clippy", "--locked", "--all-features", "--all-targets", "--"]
+    command = ["cargo", "clippy", "--workspace", "--locked", "--all-features", "--all-targets", "--"]
     for lint in CLIPPY_DENIES:
         command.extend(["-D", lint])
     return command
@@ -248,7 +248,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
     build = ConfidenceCheck(
         name="build",
         description="Build the release operator binary using the committed lockfile.",
-        command=["cargo", "build", "--release", "--locked", "--bin", "osp"],
+        command=["cargo", "build", "--workspace", "--release", "--locked", "--bin", "osp"],
     )
     startup_budget = ConfidenceCheck(
         name="startup-budget",
@@ -443,10 +443,10 @@ def check_catalog(root: Path, cwd: Path | None = None) -> dict[str, ConfidenceCh
             python, str(root / "scripts" / "run-hermetic-cargo.py"),
             "--cwd", str(cwd or root), "--", *cargo_test_command("--all-features"),
         ]),
-        ("coverage-crate", "Instrument this crate's tests and enforce the shared line floor.", [
+        ("coverage-crate", "Instrument workspace tests and enforce the shared line floor.", [
             python, str(root / "scripts" / "run-hermetic-cargo.py"),
             "--cwd", str(cwd or root), "--", "cargo", "llvm-cov",
-            "--locked", "--all-features", "--all-targets", "--no-fail-fast", "--json",
+            "--workspace", "--locked", "--all-features", "--all-targets", "--no-fail-fast", "--json",
             "--output-path", "target/coverage.json", "--fail-under-lines",
             str(json.loads((root / ".coverage-baseline.json").read_text())["overall_line_percent"]),
         ]),
