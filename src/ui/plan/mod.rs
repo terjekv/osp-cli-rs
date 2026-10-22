@@ -12,7 +12,7 @@ use super::settings::{
     FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableBorderStyle,
     TableOverflow, TableTooWide, resolve_settings,
 };
-use super::text::{table_cell_lines, table_cell_width};
+use super::text::{escape_table_line_breaks, table_cell_lines, table_cell_width};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{OutputItems, OutputResult};
 use std::collections::BTreeMap;
@@ -208,7 +208,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         {
             let values = rows
                 .iter()
-                .map(|row| super::projection::display_value(&row[key]))
+                .map(|row| escape_table_line_breaks(&super::projection::display_value(&row[key])))
                 .collect::<Vec<_>>();
             let grid = PreparedGridList::from_items(
                 &values,

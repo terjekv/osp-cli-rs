@@ -531,6 +531,13 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
     let mut blocks = Vec::new();
     for (index, mut record) in output_items_to_rows(&output.items).into_iter().enumerate() {
+        if plan.mreg_layout == MregLayout::Entries {
+            for value in record.values_mut() {
+                if let Value::String(text) = value {
+                    *text = super::text::escape_table_line_breaks(text);
+                }
+            }
+        }
         if index > 0 && plan.mreg_layout != MregLayout::Entries {
             push_blank_lines(&mut blocks, 1);
         }
