@@ -126,10 +126,17 @@ fn project_array(items: &[Value], path: &[String], styles: &FieldStyles) -> Opti
                 .headers
                 .iter()
                 .map(|key| {
-                    let mut path = path.to_vec();
-                    path.push(index.to_string());
-                    path.push(key.clone());
-                    styles.get(&path).cloned()
+                    let mut indexed_path = path.to_vec();
+                    indexed_path.push(index.to_string());
+                    indexed_path.push(key.clone());
+                    styles
+                        .get(&indexed_path)
+                        .or_else(|| {
+                            let mut field_path = path.to_vec();
+                            field_path.push(key.clone());
+                            styles.get(&field_path)
+                        })
+                        .cloned()
                 })
                 .collect()
         })
