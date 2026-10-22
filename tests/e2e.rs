@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg(not(miri))]
 #![allow(missing_docs)]
 
@@ -48,3 +49,9 @@ mod pty_support;
 
 #[path = "support/process.rs"]
 mod process_support;
+
+#[cfg(unix)]
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "e2e/pickers.rs"]
+mod pickers;

@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
@@ -94,6 +94,7 @@ pub(crate) struct ReplPtySession {
     terminal: Box<dyn portable_pty::MasterPty + Send>,
     // PTY reads can split UTF-8 characters; retain bytes until taking a view.
     output: Arc<Mutex<Vec<u8>>>,
+    output_changed: Arc<Condvar>,
     reader: Option<std::thread::JoinHandle<()>>,
     deadline: Instant,
     _home: TestTempDir,
@@ -204,6 +205,8 @@ impl ReplPtySession {
 
         let output = Arc::new(Mutex::new(Vec::new()));
         let output_clone = Arc::clone(&output);
+        let output_changed = Arc::new(Condvar::new());
+        let reader_changed = Arc::clone(&output_changed);
         let writer_clone = Arc::clone(&writer);
         let cursor_report_delay = config.cursor_report_delay;
         let child = pair.slave.spawn_command(cmd).expect("spawn osp repl");
@@ -213,6 +216,7 @@ impl ReplPtySession {
             writer,
             terminal: pair.master,
             output,
+            output_changed,
             reader: None,
             deadline: Instant::now() + Duration::from_secs(120),
             _home: home,
@@ -253,6 +257,7 @@ impl ReplPtySession {
                             .lock()
                             .expect("output lock")
                             .extend_from_slice(&buf[..n]);
+                        reader_changed.notify_all();
                     }
                     Err(_) => break,
                 }
@@ -260,6 +265,23 @@ impl ReplPtySession {
         }));
 
         session
+    }
+
+    /// Waits for picker output, whose cursor stays hidden until the picker closes.
+    pub(crate) fn wait_for_picker_since(&self, start: usize, text: &str) -> bool {
+        let output = self.output.lock().expect("output lock");
+        let (output, _) = self
+            .output_changed
+            .wait_timeout_while(
+                output,
+                self.wait_deadline(HANG_TIMEOUT)
+                    .saturating_duration_since(Instant::now()),
+                |bytes| {
+                    !strip_terminal_noise(&String::from_utf8_lossy(&bytes[start..])).contains(text)
+                },
+            )
+            .expect("picker output notification");
+        strip_terminal_noise(&String::from_utf8_lossy(&output[start..])).contains(text)
     }
 
     pub(crate) fn output_len(&self) -> usize {
