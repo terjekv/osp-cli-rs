@@ -193,7 +193,7 @@ pub(super) fn plan_layout(
         && !output.meta.document_rows
         && projection
             .source_row_count
-            .is_some_and(|count| count <= MAX_FALLBACK_CARD_ROWS)
+            .is_some_and(|count| (1..=MAX_FALLBACK_CARD_ROWS).contains(&count))
         && let [table] = plan.tables.as_slice()
         && table.widths.len() < table.data.headers.len()
     {
