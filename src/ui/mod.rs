@@ -70,7 +70,7 @@ pub(crate) use theme::DEFAULT_THEME_NAME;
 const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
 
 /// Formats an RFC3339 timestamp as a compact duration from the current time.
-pub(crate) fn format_relative_timestamp(value: &str) -> Option<String> {
+pub fn format_relative_timestamp(value: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|time| format_relative_unix_timestamp(time.timestamp()))
