@@ -161,18 +161,13 @@ impl RuntimeContext {
     }
 }
 
-/// Holds the current resolved config plus a monotonic in-memory revision.
-///
-/// The revision gives caches and rebuild logic a cheap way to notice when the
-/// effective config actually changed.
+/// Holds the current resolved configuration snapshot.
 pub(crate) struct ConfigState {
     resolved: ResolvedConfig,
-    #[cfg(test)]
-    revision: u64,
 }
 
 impl ConfigState {
-    /// Creates configuration state with an initial revision of `1`.
+    /// Creates configuration state from a resolved snapshot.
     ///
     /// # Examples
     ///
@@ -189,16 +184,10 @@ impl ConfigState {
     /// let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
     ///
     /// let mut state = ConfigState::new(resolved.clone());
-    /// assert_eq!(state.revision(), 1);
     /// assert!(!state.replace_resolved(resolved));
-    /// assert_eq!(state.revision(), 1);
     /// ```
     pub fn new(resolved: ResolvedConfig) -> Self {
-        Self {
-            resolved,
-            #[cfg(test)]
-            revision: 1,
-        }
+        Self { resolved }
     }
 
     /// Returns the current resolved configuration snapshot.
@@ -206,13 +195,7 @@ impl ConfigState {
         &self.resolved
     }
 
-    /// Returns the current configuration revision.
-    #[cfg(test)]
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    /// Replaces the resolved configuration and bumps the revision when it changes.
+    /// Replaces the resolved configuration when it changes.
     #[cfg(test)]
     pub fn replace_resolved(&mut self, next: ResolvedConfig) -> bool {
         if self.resolved == next {
@@ -220,7 +203,6 @@ impl ConfigState {
         }
 
         self.resolved = next;
-        self.revision += 1;
         true
     }
 
@@ -819,9 +801,7 @@ mod tests {
         let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
 
         let mut state = ConfigState::new(resolved.clone());
-        assert_eq!(state.revision(), 1);
         assert!(!state.replace_resolved(resolved));
-        assert_eq!(state.revision(), 1);
     }
 
     #[test]
@@ -903,13 +883,11 @@ mod tests {
     fn config_state_tracks_noops_changes_and_transaction_errors() {
         let resolved = resolved_with(&[]);
         let mut state = ConfigState::new(resolved.clone());
-        assert_eq!(state.revision(), 1);
         assert!(!state.replace_resolved(resolved.clone()));
-        assert_eq!(state.revision(), 1);
 
         let changed = resolved_with(&[("ui.format", "json")]);
         assert!(state.replace_resolved(changed));
-        assert_eq!(state.revision(), 2);
+        assert_eq!(state.resolved().get_string("ui.format"), Some("json"));
 
         let changed = state
             .transaction(|current| {
@@ -918,12 +896,12 @@ mod tests {
             })
             .expect("transaction should succeed");
         assert!(changed);
-        assert_eq!(state.revision(), 3);
+        assert_eq!(state.resolved().get_string("ui.format"), Some("mreg"));
 
         let err = state
             .transaction(|_| Err::<crate::config::ResolvedConfig, _>("boom"))
             .expect_err("transaction error should propagate");
         assert_eq!(err, "boom");
-        assert_eq!(state.revision(), 3);
+        assert_eq!(state.resolved().get_string("ui.format"), Some("mreg"));
     }
 }
