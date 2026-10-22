@@ -123,7 +123,11 @@ include.uiocloud.no:
 
 Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
-separators. Classic card scalar values and scalar lists wrap within the same
+separators. With two or more classic cards, each first field's value in producer
+order becomes a title-styled `value:` heading at the effective margin. The field
+is omitted from the body, which is indented four spaces and planned within that
+width. A single classic record keeps its first field as a normal row, without a
+heading. Classic card scalar values and scalar lists wrap within the same
 resolved screen budget, including their labels and indentation. Nested tables
 and grid lists start at the card's scalar value column when the block fits
 there without hiding columns or shortening additional values compared with

@@ -560,11 +560,20 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }));
             }
         }
-        blocks.extend(mreg_record_blocks(
-            &record,
-            &output.meta.key_index,
-            &plan.records[index],
-        ));
+        let planned = &plan.records[index];
+        let body = mreg_record_blocks(&record, &output.meta.key_index, &planned.fields);
+        if let Some(title) = &planned.title {
+            blocks.push(Block::Section(SectionBlock {
+                title: Some(title.clone()),
+                title_chrome: SectionTitleChrome::Card,
+                body_indent: COMPACT_CARD_BODY_INDENT,
+                inline_title_suffix: None,
+                trailing_newline: false,
+                blocks: body,
+            }));
+        } else {
+            blocks.extend(body);
+        }
     }
     Doc { blocks }
 }

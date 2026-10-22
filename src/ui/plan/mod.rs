@@ -57,6 +57,12 @@ pub(super) struct FieldLayout {
 pub(super) type RecordLayout = Vec<(String, FieldLayout)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PlannedRecord {
+    pub title: Option<String>,
+    pub fields: RecordLayout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderPlan {
     pub format: OutputFormat,
     pub provenance: FormatProvenance,
@@ -67,7 +73,7 @@ pub struct RenderPlan {
     pub(super) mreg_layout: MregLayout,
     pub(super) mreg_gap: usize,
     pub(super) tables: Vec<PlannedTable>,
-    pub(super) records: Vec<RecordLayout>,
+    pub(super) records: Vec<PlannedRecord>,
     pub(super) document_tables: BTreeMap<Vec<usize>, PlannedTable>,
     pub document_long_help: bool,
     pub document_entry_gap: Option<usize>,
@@ -480,13 +486,22 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             &output.items,
         ))
         .map(|(record, row)| {
-            let record = super::projection::ordered_keys(&output.meta.key_index, row.keys())
+            let mut record: RecordProjection = super::projection::ordered_keys(&output.meta.key_index, row.keys())
                 .filter(|key| !output.meta.display_rules.iter().any(|rule| matches!(rule, crate::core::DisplayRule::Notice { field } if field == *key)))
                 .filter_map(|key| record.iter().find(|(name, _)| name == key).cloned())
                 .collect();
-            let mut layout = plan_record(&record, &row, &plan.settings, 0);
-            plan_classic_indents(&mut layout, &plan.settings);
-            layout
+            let title_field = (projection.records.len() > 1 && plan.mreg_layout != MregLayout::Entries)
+                .then(|| record.first().map(|(key, _)| key.clone()))
+                .flatten();
+            let title = title_field.as_ref().map(|key| super::projection::display_value(&row[key]));
+            record.retain(|(key, _)| Some(key) != title_field.as_ref());
+            let mut settings = plan.settings.clone();
+            if title.is_some() {
+                settings.margin += COMPACT_CARD_BODY_INDENT;
+            }
+            let mut fields = plan_record(&record, &row, &settings, 0);
+            plan_classic_indents(&mut fields, &settings);
+            PlannedRecord { title, fields }
         })
         .collect();
     let compare_cards = can_compare_cards(projection, plan);
