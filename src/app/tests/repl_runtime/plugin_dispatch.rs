@@ -27,10 +27,10 @@ JSON
     perms.set_mode(0o755);
     std::fs::set_permissions(&plugin_path, perms).expect("script should be executable");
 
-    let mut state = make_test_state(vec![dir.to_path_buf()]);
+    let (mut state, _state_root) = make_test_state(vec![dir.to_path_buf()]);
     state.runtime.ui.render_settings.format = OutputFormat::Table;
 
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(
         &mut state,
@@ -46,8 +46,8 @@ JSON
 fn plugin_pipeline_rendering_matches_between_cli_and_repl_unit() {
     let dir = make_temp_dir("osp-cli-plugin-pipeline-parity");
     let _plugin_path = write_pipeline_test_plugin(&dir);
-    let mut state = make_test_state(vec![dir.to_path_buf()]);
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(vec![dir.to_path_buf()]);
+    let (history, _history_root) = make_test_history(&mut state);
     let stages = vec!["message".to_string()];
 
     let invocation = crate::app::resolve_invocation_ui(state.runtime.config.resolved(), &state.runtime.ui, &Default::default());

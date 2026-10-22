@@ -262,7 +262,7 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
         &[],
         NativeCommandRegistry::new().with_command(CompletionRefreshingNativeCommand),
     );
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let result =
         repl_dispatch::execute_repl_plugin_line(&mut state, &history, "refreshable refresh", None)
@@ -286,7 +286,7 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
         NativeCommandRegistry::new().with_command(CapabilityGatedNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
@@ -336,7 +336,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap usr", Some(&mut sink))
@@ -384,7 +384,7 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
