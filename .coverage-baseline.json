@@ -23,30 +23,32 @@
     "scope": "Product code only; test-gated exclusions. This measurement does not set the gate floor.",
     "source": {
       "integration_parent": "db86985e87eea237fed7b65ac1a69c806297460e",
-      "coverage_scope": "72444648da366de557efa4d240dac94b60b5affd"
+      "coverage_scope": "72444648da366de557efa4d240dac94b60b5affd",
+      "coverage_scope_merge": "47e5a9a3d6eec0cb59f2e6e2cb36ca08c2701c09",
+      "oneshot_pipeline": "254e3a3cb6d77c5591c624de015776ce439b823e"
     },
     "same_source_with_test_code": {
       "lines": {
-        "covered": 41556,
-        "count": 48458,
-        "percent": 85.75673779355319
+        "covered": 41558,
+        "count": 48459,
+        "percent": 85.75909531769125
       },
       "regions": {
-        "covered": 41325,
-        "count": 49237,
-        "percent": 83.93078376018035
+        "covered": 41328,
+        "count": 49239,
+        "percent": 83.93346737342351
       }
     },
     "product_code": {
       "lines": {
-        "covered": 32063,
-        "count": 38863,
-        "percent": 82.50263747008722
+        "covered": 32065,
+        "count": 38864,
+        "percent": 82.50566076574722
       },
       "regions": {
-        "covered": 30615,
-        "count": 38414,
-        "percent": 79.69750611756132
+        "covered": 30618,
+        "count": 38416,
+        "percent": 79.70116618075802
       }
     },
     "excluded_test_code": {
@@ -95,26 +97,26 @@
       "osp-cli": {
         "with_test_code": {
           "lines": {
-            "covered": 41556,
-            "count": 48458,
-            "percent": 85.75673779355319
+            "covered": 41558,
+            "count": 48459,
+            "percent": 85.75909531769125
           },
           "regions": {
-            "covered": 41325,
-            "count": 49237,
-            "percent": 83.93078376018035
+            "covered": 41328,
+            "count": 49239,
+            "percent": 83.93346737342351
           }
         },
         "product_code": {
           "lines": {
-            "covered": 32063,
-            "count": 38863,
-            "percent": 82.50263747008722
+            "covered": 32065,
+            "count": 38864,
+            "percent": 82.50566076574722
           },
           "regions": {
-            "covered": 30615,
-            "count": 38414,
-            "percent": 79.6975061175613
+            "covered": 30618,
+            "count": 38416,
+            "percent": 79.70116618075802
           }
         }
       }

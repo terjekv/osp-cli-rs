@@ -324,6 +324,8 @@ pub(crate) fn run_scanned_with_sink_and_app(
             .try_get_matches_from_mut(scanned.argv.iter().cloned())
             .and_then(|matches| {
                 let mut cli = Cli::from_arg_matches(&matches)?;
+                // Resolve built-in extensions before attaching one-shot stages.
+                cli.command = cli.command.map(Commands::with_app_doctor);
                 cli.product_overrides = product_config_overrides(app, &matches);
                 for flag in &app.action_flags {
                     if matches.value_source(flag.name) == Some(clap::parser::ValueSource::CommandLine) {
