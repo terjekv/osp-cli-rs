@@ -68,13 +68,20 @@ fn emit_paragraph(block: &ParagraphBlock, settings: &ResolvedRenderSettings) -> 
 fn emit_section(block: &SectionBlock, settings: &ResolvedRenderSettings) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     let chrome = section_chrome(block.title_chrome);
+    let title_width = if block.title_chrome == SectionTitleChrome::Card {
+        settings
+            .width
+            .map(|width| width.saturating_sub(settings.margin))
+    } else {
+        settings.width
+    };
     let mut body_settings = settings.clone();
     body_settings.margin += block.body_indent;
     let body = emit_blocks(&block.blocks, &body_settings);
     let mut parts = Vec::new();
     if let Some(title) = block.title.as_deref() {
         let mut title_line = style_title_line(
-            &chrome.render_title_line(title, settings.width, settings.unicode),
+            &chrome.render_title_line(title, title_width, settings.unicode),
             &styler,
         );
         if let Some(suffix) = block.inline_title_suffix.as_deref() {
@@ -82,7 +89,7 @@ fn emit_section(block: &SectionBlock, settings: &ResolvedRenderSettings) -> Stri
             title_line.push_str(&styler.paint(suffix, StyleToken::Text));
         }
         let title_margin = match block.title_chrome {
-            SectionTitleChrome::Plain => settings.margin,
+            SectionTitleChrome::Plain | SectionTitleChrome::Card => settings.margin,
             SectionTitleChrome::Ruled => 0,
         };
         parts.push(indent_lines(&title_line, title_margin));
@@ -109,6 +116,7 @@ fn section_chrome(title_chrome: SectionTitleChrome) -> crate::ui::chrome::Sectio
     match title_chrome {
         SectionTitleChrome::Plain => PLAIN_SECTION_CHROME,
         SectionTitleChrome::Ruled => GUIDE_SECTION_CHROME,
+        SectionTitleChrome::Card => crate::ui::chrome::CARD_SECTION_CHROME,
     }
 }
 

@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Indent compact card fields and wrapped continuations two columns under
+  double-rule titles, including the indent in width planning.
+
 - Limit the singleton card override to Table recommendations; other recommended
   formats retain precedence for single records.
 

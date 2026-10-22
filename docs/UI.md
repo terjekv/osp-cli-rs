@@ -87,8 +87,9 @@ the eligible density comparison below selects cards.
 When several flat records render as cards (explicit MREG or automatic table
 fallback), the planner selects compact cards. Flat means every value is a
 scalar or an array of scalars, including reduced single-field object lists. Each card uses its first field's value in a
-styled ruled title, followed by nonempty fields in producer order, without
-blank separators. Records with only a title value after omitting empty fields
+styled `── title ──…` rule, followed by nonempty fields in producer order, without
+blank separators. Every body line is indented two columns under the title;
+body width budgets include that indent. Records with only a title value after omitting empty fields
 print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack

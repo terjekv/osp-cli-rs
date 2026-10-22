@@ -52,6 +52,7 @@ pub enum SectionTitleChrome {
     #[default]
     Plain,
     Ruled,
+    Card,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

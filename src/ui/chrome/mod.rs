@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SectionTitleStyle {
     Plain,
-    Ruled,
+    Ruled(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,9 +34,12 @@ pub(crate) struct SectionChrome {
 pub(crate) const PLAIN_SECTION_CHROME: SectionChrome =
     SectionChrome::new(SectionTitleStyle::Plain, FooterRuleStyle::None);
 pub(crate) const GUIDE_SECTION_CHROME: SectionChrome =
-    SectionChrome::new(SectionTitleStyle::Ruled, FooterRuleStyle::None);
+    SectionChrome::new(SectionTitleStyle::Ruled(2), FooterRuleStyle::None);
 pub(crate) const FULL_HELP_LAYOUT_CHROME: SectionChrome =
-    SectionChrome::new(SectionTitleStyle::Ruled, FooterRuleStyle::Rule);
+    SectionChrome::new(SectionTitleStyle::Ruled(2), FooterRuleStyle::Rule);
+
+pub(crate) const CARD_SECTION_CHROME: SectionChrome =
+    SectionChrome::new(SectionTitleStyle::Ruled(3), FooterRuleStyle::None);
 
 impl SectionChrome {
     const fn new(title: SectionTitleStyle, footer: FooterRuleStyle) -> Self {
@@ -51,7 +54,9 @@ impl SectionChrome {
     ) -> RenderedTitle {
         match self.title {
             SectionTitleStyle::Plain => plain_section_title(title),
-            SectionTitleStyle::Ruled => ruled_section_title(title, width, unicode, 2),
+            SectionTitleStyle::Ruled(columns) => {
+                ruled_section_title(title, width, unicode, columns)
+            }
         }
     }
 

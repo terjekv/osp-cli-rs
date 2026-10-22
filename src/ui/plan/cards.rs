@@ -42,7 +42,7 @@ pub(super) fn plan_compact_cards(
     let available = settings
         .width
         .unwrap_or(UNKNOWN_CARD_WIDTH)
-        .saturating_sub(settings.margin)
+        .saturating_sub(settings.margin + 2)
         .max(1);
     let fields = rows
         .iter()

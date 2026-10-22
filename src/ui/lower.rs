@@ -519,8 +519,8 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 })),
                 CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
                     title: Some(title.clone()),
-                    title_chrome: SectionTitleChrome::Ruled,
-                    body_indent: 0,
+                    title_chrome: SectionTitleChrome::Card,
+                    body_indent: 2,
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: body.iter().cloned().map(Block::Grid).collect(),

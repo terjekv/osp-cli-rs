@@ -58,7 +58,7 @@ fn emit_section(block: &SectionBlock) -> String {
                 out.push_str(title.trim_end_matches(':'));
                 out.push(':');
             }
-            SectionTitleChrome::Ruled => {
+            SectionTitleChrome::Ruled | SectionTitleChrome::Card => {
                 out.push_str("## ");
                 out.push_str(title.trim_end_matches(':'));
             }
