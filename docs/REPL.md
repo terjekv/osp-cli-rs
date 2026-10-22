@@ -33,6 +33,11 @@ keep session state for the next prompt
 osp
 ```
 
+With terminal colour enabled, the intro starts on a clean screen after moving
+visible output into terminal scrollback. Ctrl-L clears the REPL the same way
+and keeps the current input. Clearing uses the terminal height when a cursor
+row is unavailable without a blocking query; it never purges scrollback.
+
 ## Intro and help documents
 
 The intro and root `help` compose ordered semantic document blocks. Configure

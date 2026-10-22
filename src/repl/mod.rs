@@ -24,6 +24,7 @@ pub(crate) mod notices;
 pub(crate) mod presentation;
 mod product;
 pub(crate) mod recording;
+mod screen;
 pub(crate) mod surface;
 
 #[cfg(test)]

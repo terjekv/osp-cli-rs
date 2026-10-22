@@ -69,6 +69,7 @@ use session::evaluate_repl_submission;
 pub(crate) use session::read_path;
 use session::{InteractiveLoopConfig, SubmissionContext, run_repl_basic, run_repl_interactive};
 
+const HOST_COMMAND_CLEAR_SCREEN: &str = "\0osp-repl-clear-screen";
 const COMPLETION_MENU_NAME: &str = "completion_menu";
 const HOST_COMMAND_LAST_ARGUMENT: &str = "\0osp-repl-last-argument";
 const HOST_COMMAND_PREVIOUS_ARGUMENT: &str = "\0osp-repl-previous-argument";

@@ -4,9 +4,9 @@ use super::editor::{AutoCompleteEmacs, OspPrompt, PaintedLine};
 use super::hint::ReplHinter;
 use super::overlay::{HistorySelection, build_completion_menu, launch_history_picker};
 use super::{
-    COMPLETION_MENU_NAME, HOST_COMMAND_HISTORY_PICKER, HOST_COMMAND_LAST_ARGUMENT,
-    HOST_COMMAND_PAGE_NEXT, HOST_COMMAND_PAGE_PREVIOUS, HOST_COMMAND_PREVIOUS_ARGUMENT,
-    SharedHistory,
+    COMPLETION_MENU_NAME, HOST_COMMAND_CLEAR_SCREEN, HOST_COMMAND_HISTORY_PICKER,
+    HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PAGE_NEXT, HOST_COMMAND_PAGE_PREVIOUS,
+    HOST_COMMAND_PREVIOUS_ARGUMENT, SharedHistory,
 };
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
@@ -340,6 +340,11 @@ fn build_repl_keybindings() -> reedline::Keybindings {
         KeyCode::Char('.'),
         ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_LAST_ARGUMENT.to_string()),
     );
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('l'),
+        ReedlineEvent::ExecuteHostCommand(HOST_COMMAND_CLEAR_SCREEN.to_string()),
+    );
     // Step through paginated results in both directions without retyping
     // `prev` / `next`, which any other command would otherwise reset.
     for (modifiers, previous, next) in [
@@ -428,6 +433,10 @@ where
     F: FnMut(crate::repl::ReplEvent<'_>, &SharedHistory) -> Result<ReplResult>,
 {
     match signal {
+        Signal::HostCommand(line) if line == HOST_COMMAND_CLEAR_SCREEN => {
+            clear_repl_screen(editor)?;
+            Ok(None)
+        }
         Signal::HostCommand(line) if line.starts_with("\0osp-action:") => {
             let draft = editor.current_buffer_contents().to_string();
             let cursor = editor.current_insertion_point();
@@ -533,6 +542,13 @@ where
     }
 }
 
+fn clear_repl_screen(editor: &mut Reedline) -> io::Result<()> {
+    io::stdout().write_all(crate::repl::screen::clear_sequence().as_bytes())?;
+    io::stdout().flush()?;
+    // Reedline resets its painter origin after clearing the now-blank display.
+    editor.clear_screen()
+}
+
 fn render_history_picker_failure(err: &anyhow::Error) -> String {
     format!(
         "History picker unavailable: {}. Continue typing normally or rerun the command directly.",
@@ -597,12 +613,15 @@ pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
         .with_menu(ReedlineMenu::EngineCompleter(Box::new(menu)))
         .with_partial_completions(true)
         .with_edit_mode(Box::new(mode));
-    match editor
-        .read_line(&OspPrompt::new(label.into(), String::new(), None))
-        .map_err(io::Error::other)?
-    {
-        Signal::Success(path) => Ok(Some(path)),
-        _ => Ok(None),
+    let prompt = OspPrompt::new(label.into(), String::new(), None);
+    loop {
+        match editor.read_line(&prompt)? {
+            Signal::HostCommand(command) if command == HOST_COMMAND_CLEAR_SCREEN => {
+                clear_repl_screen(&mut editor)?;
+            }
+            Signal::Success(path) => return Ok(Some(path)),
+            _ => return Ok(None),
+        }
     }
 }
 

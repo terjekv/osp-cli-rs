@@ -28,6 +28,8 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Preserve terminal scrollback when clearing the REPL for its intro or Ctrl-L.
+
 - Resolve unknown screen widths once at 100 columns instead of applying local
   card/list defaults to unlimited pager and export output. Classic card values
   wrap within the resolved screen width, including labels and indentation.
