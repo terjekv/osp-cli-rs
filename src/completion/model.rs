@@ -807,15 +807,6 @@ impl CommandLine {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 /// Parser output for the full line and the cursor-local prefix.
 pub(crate) struct ParsedLine {
-    /// Cursor offset clamped to a valid UTF-8 boundary.
-    #[cfg(test)]
-    pub safe_cursor: usize,
-    /// Tokens parsed from the full line.
-    #[cfg(test)]
-    pub full_tokens: Vec<String>,
-    /// Tokens parsed from the line prefix before the cursor.
-    #[cfg(test)]
-    pub cursor_tokens: Vec<String>,
     /// Parsed command-line structure for the full line.
     pub full_cmd: CommandLine,
     /// Parsed command-line structure for the prefix before the cursor.

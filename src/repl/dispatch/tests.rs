@@ -1,13 +1,22 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReplLinePlanKind {
+    Builtin,
+    Blank,
+    DslHelp,
+    Shortcut,
+    Help,
+    Invocation,
+}
+
 use insta::assert_snapshot;
 use std::path::PathBuf;
 
 use super::{
-    BangCommand, ReplLinePlanKind, classify_repl_line_kind, command_side_effects,
-    config_key_change_requires_intro, current_history_scope, execute_bang_command,
-    execute_repl_plugin_line, finalize_repl_command, handle_repl_exit_request,
-    is_repl_bang_request, leave_repl_shell, parse_bang_command, parse_clap_help,
-    parse_repl_builtin, render_repl_command_output, repl_command_spec, repl_help_for_scope,
-    run_repl_command,
+    BangCommand, classify_repl_line_kind, command_side_effects, config_key_change_requires_intro,
+    current_history_scope, execute_bang_command, execute_repl_plugin_line, finalize_repl_command,
+    handle_repl_exit_request, is_repl_bang_request, leave_repl_shell, parse_bang_command,
+    parse_clap_help, parse_repl_builtin, render_repl_command_output, repl_command_spec,
+    repl_help_for_scope, run_repl_command,
 };
 use crate::app::CommandOutput;
 use crate::app::{AppSession, AppState, LaunchContext, RuntimeContext, TerminalKind};

@@ -137,15 +137,7 @@ struct ReplExecutionContext<'a, 'sink> {
 }
 
 #[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReplLinePlanKind {
-    Builtin,
-    Blank,
-    DslHelp,
-    Shortcut,
-    Help,
-    Invocation,
-}
+pub(crate) use tests::ReplLinePlanKind;
 
 impl ReplLinePlan {
     #[cfg(test)]

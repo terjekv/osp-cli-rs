@@ -531,7 +531,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
         .with_plugin_dir("/tmp/osp-plugin-a")
         .with_config_root(Some(std::path::PathBuf::from("/tmp/osp-config")))
         .with_cache_root(Some(std::path::PathBuf::from("/tmp/osp-cache")));
-    let session = crate::app::AppSession::default().with_prompt_prefix("osp-dev");
+    let session = crate::app::AppSession::default().with_history_enabled(false);
     let plugins =
         crate::plugin::PluginManager::new(vec![std::path::PathBuf::from("/tmp/osp-plugin-a")])
             .with_roots(
@@ -554,7 +554,7 @@ fn state_and_client_builders_produce_coherent_embedder_state_unit() {
 
     assert_eq!(state.runtime.ui.verbosity, MessageLevel::Trace);
     assert_eq!(state.runtime.ui.debug_level, 2);
-    assert_eq!(state.session.prompt_prefix, "osp-dev");
+    assert!(!state.session.history_enabled);
     assert_eq!(
         state.clients.plugins().explicit_dirs(),
         &[std::path::PathBuf::from("/tmp/osp-plugin-a")]
@@ -645,11 +645,9 @@ fn app_session_helpers_cover_public_session_surface_unit() {
     let history_shell = HistoryShellContext::default();
 
     let built_session = crate::app::AppSession::default()
-        .with_prompt_prefix("builder")
         .with_history_enabled(false)
         .with_history_shell(history_shell.clone())
         .with_config_overrides(overrides.clone());
-    assert_eq!(built_session.prompt_prefix, "builder");
     assert!(!built_session.history_enabled);
     assert_eq!(
         built_session
@@ -662,11 +660,9 @@ fn app_session_helpers_cover_public_session_surface_unit() {
     );
 
     let mut session = crate::app::AppSession::default()
-        .with_prompt_prefix("demo")
         .with_history_enabled(false)
         .with_history_shell(history_shell)
         .with_config_overrides(overrides);
-    assert_eq!(session.prompt_prefix, "demo");
     assert!(!session.history_enabled);
 
     session.record_failure("   ", "ignored", "ignored");

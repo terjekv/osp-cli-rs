@@ -275,9 +275,6 @@ impl ReplScopeStack {
 #[must_use]
 #[derive(Clone)]
 pub(crate) struct AppSession {
-    /// Prompt prefix shown before any scope label.
-    #[cfg(test)]
-    pub prompt_prefix: String,
     /// Whether history capture is enabled for this session.
     pub history_enabled: bool,
     pub(crate) recording: crate::repl::recording::Recording,
@@ -309,19 +306,10 @@ pub(crate) struct LastFailure {
     pub command_line: String,
     /// Short failure summary suitable for prompts or status output.
     pub summary: String,
-    evidence: FailureEvidence,
+    report: std::sync::Arc<miette::Report>,
+    settings: Box<crate::ui::RenderSettings>,
+    backtrace: Option<std::sync::Arc<std::backtrace::Backtrace>>,
     pub(crate) command_evidence: String,
-}
-
-#[derive(Debug, Clone)]
-enum FailureEvidence {
-    #[cfg(test)]
-    Text(String),
-    Report {
-        report: std::sync::Arc<miette::Report>,
-        settings: Box<crate::ui::RenderSettings>,
-        backtrace: Option<std::sync::Arc<std::backtrace::Backtrace>>,
-    },
 }
 
 impl LastFailure {
@@ -331,7 +319,11 @@ impl LastFailure {
         Self {
             command_line,
             summary,
-            evidence: FailureEvidence::Text(detail),
+            report: std::sync::Arc::new(miette::miette!("{detail}")),
+            settings: Box::new(crate::ui::RenderSettings::test_plain(
+                crate::core::output::OutputFormat::Table,
+            )),
+            backtrace: None,
             command_evidence: String::new(),
         }
     }
@@ -372,39 +364,23 @@ impl LastFailure {
                 crate::core::MessageLevel::Evidence,
             )
             .0,
-            evidence: FailureEvidence::Report {
-                report,
-                settings: Box::new(settings),
-                backtrace,
-            },
+            report,
+            settings: Box::new(settings),
+            backtrace,
         }
     }
 
     /// Renders diagnostic detail with the terminal settings captured at failure time.
     pub fn detail(&self, level: crate::core::MessageLevel) -> String {
-        match &self.evidence {
-            #[cfg(test)]
-            FailureEvidence::Text(detail) => detail.clone(),
-            FailureEvidence::Report {
-                report, settings, ..
-            } => super::host::render_report_message(report, level, settings),
-        }
+        super::host::render_report_message(&self.report, level, &self.settings)
     }
     /// Renders the backtrace captured when the failure was recorded, if available.
     pub fn backtrace(&self) -> Option<String> {
-        match &self.evidence {
-            #[cfg(test)]
-            FailureEvidence::Text(_) => None,
-            FailureEvidence::Report {
-                report,
-                settings,
-                backtrace,
-            } => super::host::render_backtrace(report, settings).or_else(|| {
-                backtrace
-                    .as_ref()
-                    .map(|trace| format!("Stack backtrace:\n{trace}"))
-            }),
-        }
+        super::host::render_backtrace(&self.report, &self.settings).or_else(|| {
+            self.backtrace
+                .as_ref()
+                .map(|trace| format!("Stack backtrace:\n{trace}"))
+        })
     }
 }
 
@@ -422,13 +398,6 @@ pub(crate) enum ReplExitTransition {
 }
 
 impl AppSession {
-    /// Replaces the prompt prefix shown ahead of any scope label.
-    #[cfg(test)]
-    pub fn with_prompt_prefix(mut self, prompt_prefix: impl Into<String>) -> Self {
-        self.prompt_prefix = prompt_prefix.into();
-        self
-    }
-
     /// Enables or disables history capture for this session.
     #[cfg(test)]
     pub fn with_history_enabled(mut self, history_enabled: bool) -> Self {
@@ -597,8 +566,6 @@ impl AppSession {
 impl Default for AppSession {
     fn default() -> Self {
         Self {
-            #[cfg(test)]
-            prompt_prefix: "osp".to_string(),
             history_enabled: true,
             recording: Default::default(),
             history_shell: HistoryShellContext::default(),
@@ -674,11 +641,6 @@ impl AppState {
         AppStateBuilder::from_resolved_config(context, config).map(AppStateBuilder::build)
     }
 
-    /// Returns the prompt prefix configured for the current session.
-    pub fn prompt_prefix(&self) -> String {
-        self.session.prompt_prefix.clone()
-    }
-
     /// Synchronizes the history shell context with the current session scope.
     pub fn sync_history_shell_context(&self) {
         self.session.sync_history_shell_context();
@@ -728,10 +690,10 @@ impl AppState {
 ///     RuntimeContext::new(None, TerminalKind::Repl, None),
 ///     config,
 /// )?
-/// .with_session(AppSession::default().with_prompt_prefix("demo"))
+/// .with_session(AppSession::default().with_history_enabled(false))
 /// .build();
 ///
-/// assert_eq!(state.prompt_prefix(), "demo");
+/// assert!(!state.session.history_enabled);
 /// # Ok::<(), miette::Report>(())
 /// ```
 #[must_use]
@@ -849,9 +811,7 @@ impl AppStateBuilder {
     /// omitted pieces such as themes, plugin manager, and default session before
     /// returning the final value.
     pub fn build(self) -> AppState {
-        super::assembly::build_host(super::assembly::HostBuildRequest::State(Box::new(self)))
-            .unwrap_or_else(|_| unreachable!("resolved state builder inputs are infallible"))
-            .state()
+        super::assembly::assemble_state(self, false)
     }
 }
 
@@ -963,10 +923,10 @@ mod tests {
                 RuntimeContext::new(None, TerminalKind::Repl, None),
                 config,
             )?
-            .with_session(AppSession::default().with_prompt_prefix("demo"))
+            .with_session(AppSession::default().with_history_enabled(false))
             .build();
 
-            assert_eq!(state.prompt_prefix(), "demo");
+            assert!(!state.session.history_enabled);
             Ok::<(), miette::Report>(())
         })()
         .unwrap();
@@ -1030,9 +990,7 @@ mod tests {
 
     #[test]
     fn rebuild_state_round_trip_preserves_replay_and_scope_unit() {
-        let mut session = AppSession::default()
-            .with_prompt_prefix("osp-dev")
-            .with_history_enabled(false);
+        let mut session = AppSession::default().with_history_enabled(false);
         let mut overrides = ConfigLayer::default();
         overrides.set("ui.format", "json");
         session = session.with_config_overrides(overrides);
@@ -1049,7 +1007,6 @@ mod tests {
         let restored = session.clone();
         restored.sync_history_shell_context();
 
-        assert_eq!(restored.prompt_prefix, "osp-dev");
         assert!(!restored.history_enabled);
         assert_eq!(restored.scope.commands(), vec!["ldap".to_string()]);
         assert_eq!(restored.history_shell.prefix(), Some("ldap ".to_string()));

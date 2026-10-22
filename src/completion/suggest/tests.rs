@@ -466,9 +466,6 @@ fn internal_example_1() {
     };
     let analysis = CompletionAnalysis {
         parsed: ParsedLine {
-            safe_cursor: 2,
-            full_tokens: vec!["ld".to_string()],
-            cursor_tokens: vec!["ld".to_string()],
             full_cmd: CommandLine::default(),
             cursor_cmd: CommandLine::default(),
         },

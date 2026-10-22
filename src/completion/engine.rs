@@ -116,9 +116,6 @@ impl CompletionEngine {
     ) -> CompletionAnalysis {
         self.analyze_command_parts(
             ParsedLine {
-                safe_cursor: 0,
-                full_tokens: Vec::new(),
-                cursor_tokens: Vec::new(),
                 full_cmd,
                 cursor_cmd,
             },
@@ -834,7 +831,6 @@ mod tests {
             });
 
             let analysis = engine.analyze("exit ", 5);
-            assert_eq!(analysis.parsed.cursor_tokens, vec!["exit".to_string()]);
             assert_eq!(analysis.parsed.cursor_cmd.head(), &["exit".to_string()]);
             assert_eq!(analysis.context.matched_path, vec!["exit".to_string()]);
             assert_eq!(analysis.context.flag_scope_path, vec!["exit".to_string()]);
