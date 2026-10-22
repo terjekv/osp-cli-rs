@@ -400,26 +400,12 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
             line.truncate(line.trim_end().len());
         }
     }
-    // Never drop columns silently: name them and how to see them.
-    if widths.len() < table.headers.len() {
-        let hidden = table.headers[widths.len()..]
+    lines.extend(
+        block
+            .footer
             .iter()
-            .map(|cell| cell.raw.as_str())
-            .collect::<Vec<_>>();
-        let room = settings
-            .width
-            .map_or(usize::MAX, |width| width.saturating_sub(settings.margin));
-        let mut footer = format!("+{} hidden: {}", hidden.len(), hidden.join(", "));
-        let hint = " (| P to pick, or --json)";
-        if UnicodeWidthStr::width(footer.as_str()) + UnicodeWidthStr::width(hint) <= room {
-            footer.push_str(hint);
-        }
-        while UnicodeWidthStr::width(footer.as_str()) > room && footer.pop().is_some() {}
-        lines.push(indent_lines(
-            &styler.paint(&footer, StyleToken::Muted),
-            settings.margin,
-        ));
-    }
+            .map(|line| indent_lines(&styler.paint(line, StyleToken::Muted), settings.margin)),
+    );
     lines.join("\n")
 }
 

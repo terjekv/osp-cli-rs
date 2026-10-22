@@ -235,6 +235,8 @@ pub struct RenderSettings {
     pub format_explicit: bool,
     /// Render semantic documents as guides unless an explicit format is selected.
     pub guide_default_format: bool,
+    /// Show screen table fit summaries and recovery actions.
+    pub table_hints: bool,
     pub mode: RenderMode,
     pub color: ColorMode,
     pub unicode: UnicodeMode,
@@ -262,6 +264,7 @@ impl Default for RenderSettings {
             format: OutputFormat::Auto,
             format_explicit: false,
             guide_default_format: true,
+            table_hints: true,
             mode: RenderMode::Auto,
             color: ColorMode::Auto,
             unicode: UnicodeMode::Auto,
@@ -408,6 +411,11 @@ pub(crate) fn apply_render_config_overrides(
     {
         settings.format = parsed;
     }
+
+    settings.table_hints = config
+        .get_string("ui.help.level")
+        .and_then(crate::core::HelpLevel::parse)
+        != Some(crate::core::HelpLevel::None);
 
     if let Some(value) = config.get_string("ui.guide.default_format") {
         settings.guide_default_format = value == "guide";
@@ -604,6 +612,7 @@ pub struct ResolvedRenderSettings {
     /// Literal-only commands in the current help document.
     pub document_literal_commands: Vec<String>,
     pub display_limits: bool,
+    pub table_hints: bool,
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
@@ -699,6 +708,7 @@ impl RenderSettings {
             )),
             document_literal_commands: Vec::new(),
             display_limits: false,
+            table_hints: self.table_hints,
             backend,
             color: backend == RenderBackend::Rich && self.resolve_color_mode(),
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),

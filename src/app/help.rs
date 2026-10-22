@@ -169,6 +169,8 @@ pub(crate) fn render_settings_for_help_with_scan(
             overrides.invocation.quiet,
         );
     }
+    settings.table_hints =
+        overrides.invocation.quiet == 0 && effective_help_level != HelpLevel::None;
     if let Some(format) = overrides.invocation.format {
         settings.format = format;
         settings.format_explicit = true;

@@ -83,15 +83,16 @@ Format guide:
 - `auto`
   - let `osp` choose from the result shape
 
-Explicit invocation formats win over recommendations. For ordinary data, a
-command/plugin recommendation wins over configured `ui.format`; automatic
-inference comes last. Help/intro documents keep guide layout by default unless
+Explicit invocation formats win, followed by configured `ui.format`. One
+ordinary record then selects a classic MREG card before human command/plugin
+recommendations; remaining shape inference comes last. Machine recommendations
+retain their export format. Help/intro documents keep guide layout by default unless
 an invocation explicitly requests another format. This applies equally to
 JSON, CSV and TSV; machine exports bypass human display shaping.
 
 Automatic TTY tables become MREG cards only when planned cards show more values
 per rendered line than the fitted table; ties keep tables.
-`ui.table.too_wide=hide` keeps the fitted table and hidden-column footer.
+`ui.table.too_wide=hide` keeps the fitted table and combined hidden/shortened fit summary.
 Explicit `--table` and configured `ui.format=table` retain tables. See
 [UI.md](UI.md#tables-and-mreg-layout) for all fallback conditions.
 

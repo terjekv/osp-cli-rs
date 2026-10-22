@@ -384,7 +384,7 @@ These keys currently drive user-visible rendering and REPL presentation:
 - `ui.table.too_wide`
   - `mreg | hide`; defaults to `mreg` for all presentation presets
   - eligible automatic TTY tables become cards only at higher value-per-line
-    density; `hide` retains trailing-column removal and the `+N hidden` footer
+    density; `hide` retains trailing-column removal and the combined fit summary
   - explicit/configured tables keep their chosen format; see [UI.md](UI.md#tables-and-mreg-layout)
     for the width, row-count and output-shape guards
 - `ui.help.level`

@@ -102,6 +102,7 @@ mod tests {
     fn prepared_table_captures_shared_width_and_markdown_shape_unit() {
         let table = TableBlock {
             cell_lines: Vec::new(),
+            footer: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {

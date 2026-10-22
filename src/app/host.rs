@@ -789,6 +789,8 @@ pub(crate) fn resolve_invocation_ui(
         render_settings.unicode = unicode;
     }
 
+    let help_level = help_level(config, invocation.verbose, invocation.quiet);
+    render_settings.table_hints = invocation.quiet == 0 && help_level != HelpLevel::None;
     ResolvedInvocation {
         source: invocation.source,
         ui: UiState::new(
@@ -800,7 +802,7 @@ pub(crate) fn resolve_invocation_ui(
             ),
             ui.debug_level.saturating_add(invocation.debug).min(3),
         ),
-        help_level: help_level(config, invocation.verbose, invocation.quiet),
+        help_level,
     }
 }
 /// Maps a reported error to the CLI exit code family used by OSP.

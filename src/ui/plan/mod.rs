@@ -22,7 +22,6 @@ const MAX_NESTED_TABLE_COLUMNS: usize = 8;
 const MAX_FALLBACK_CARD_ROWS: usize = 20;
 const TABLE_HEADER_LINES: usize = 1;
 const TABLE_BORDER_LINES: usize = 3;
-const HIDDEN_COLUMNS_FOOTER_LINES: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MregLayout {
@@ -37,6 +36,7 @@ pub(super) struct PlannedTable {
     pub data: ProjectedTable,
     pub widths: Vec<usize>,
     pub cell_lines: Vec<Vec<Vec<String>>>,
+    pub footer: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +99,7 @@ fn plan_table(
     data: &ProjectedTable,
     settings: &ResolvedRenderSettings,
     indent: usize,
+    actions: Option<bool>,
 ) -> PlannedTable {
     let natural = data
         .headers
@@ -163,7 +164,9 @@ fn plan_table(
                 .collect()
         })
         .collect();
+    let footer = table::fit_footer(data, &widths, settings, indent, actions);
     PlannedTable {
+        footer,
         data: data.clone(),
         widths,
         cell_lines,
@@ -196,7 +199,7 @@ fn plan_record(
                 FieldLayout {
                     style: value.style.clone(),
                     kind: if let Some(table) = nested_table(value) {
-                        FieldKind::Table(plan_table(table, settings, (depth + 1) * 2))
+                        FieldKind::Table(plan_table(table, settings, (depth + 1) * 2, None))
                     } else if has_nested_table(&value.fields) {
                         FieldKind::Record(plan_record(&value.fields, settings, depth + 1))
                     } else {
@@ -209,10 +212,15 @@ fn plan_record(
 }
 
 pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
+    let card_alternative = !projection.output.meta.grouped
+        && !projection.output.meta.document_rows
+        && projection.source_row_count.is_some_and(|count| count > 1)
+        && matches!(&projection.output.items, OutputItems::Rows(rows) if rows.iter().all(cards::is_flat));
+    let actions = (!projection.output.meta.document_rows).then_some(card_alternative);
     plan.tables = projection
         .tables
         .iter()
-        .map(|table| plan_table(table, &plan.settings, 0))
+        .map(|table| plan_table(table, &plan.settings, 0, actions))
         .collect();
     plan.mreg_layout = if plan.provenance == FormatProvenance::Explicit
         || (matches!(projection.output.items, OutputItems::Rows(_))
@@ -323,7 +331,12 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .map(|(path, table)| {
             (
                 path.clone(),
-                plan_table(table, &plan.settings, path.len().saturating_sub(1) * 2),
+                plan_table(
+                    table,
+                    &plan.settings,
+                    path.len().saturating_sub(1) * 2,
+                    None,
+                ),
             )
         })
         .collect();
@@ -340,11 +353,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             } else {
                 TABLE_BORDER_LINES
             }
-            + if table.widths.len() < table.data.headers.len() {
-                HIDDEN_COLUMNS_FOOTER_LINES
-            } else {
-                0
-            };
+            + table.footer.len();
         let row_count = table.data.rows.len();
         let table_values = row_count * table.widths.len();
         let card_values = row_count

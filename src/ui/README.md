@@ -18,7 +18,7 @@ OutputResult / Document
    ▼ plan_format   choose format, provenance and resolved settings
    ├ JSON/CSV/TSV  dispatch to typed machine writers
    ▼ projection    project human values, labels, styles, limits; sanitize once
-   ▼ plan_layout   fit projected tables; choose grids, tables or cards
+   ▼ plan_layout   fit projected tables and footers; choose grids, tables or cards
    ▼ lower.rs      copy the plan and projected content into doc.rs
    ▼ emit/         render terminal or Markdown text
 ```
@@ -102,3 +102,7 @@ single-field object lists to value lists before table/card classification.
 Projected tables retain scalar list items. The planner fits whole-item list
 cells and stores their physical lines in the IR; terminal emission uses those
 lines directly. Wrap mode prints one complete item per line.
+
+The table planner owns screen fit summaries, shortened-cell counts and quoted
+DSL recovery actions. Lowering carries the wrapped footer in the IR; emitters
+only style it. Nested tables omit actions, and help/quiet policy gates hints.

@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Combine screen table hidden-column and shortened-cell summaries with concise
+  pager, card and quoted column-pick actions. Wrap the footer instead of cropping
+  it; nested card tables omit actions. Quiet/help-none output suppresses it.
+
 - Fit list table cells between items with a remaining `+N` count. Only an
   overwide first item is ellipsized; wrap mode prints whole items on separate
   lines. Lists shrink as prose instead of protecting the joined text as a token.

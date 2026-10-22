@@ -237,7 +237,7 @@ Table-oriented tuning lives here:
   - `none` explicitly permits tables wider than the terminal
 - `ui.table.too_wide`
   - `mreg | hide`; defaults to `mreg` in every presentation preset
-  - `hide` drops trailing columns and emits the existing `+N hidden` footer
+  - `hide` drops trailing columns and emits the fit summary below
   - `mreg` compares eligible planned tables and cards by visible-value density;
     hidden columns alone do not force cards
 
@@ -247,7 +247,7 @@ top-level data table, enabled fitting (`ui.table.overflow != none`), and
 one through 20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting).
 A width hint without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
 copy-safe output, documents/help and nested tables never fall back. Their fit
-path retains column order, first-column protection and the hidden-column footer.
+path retains column order, first-column protection and the combined fit footer.
 
 The shared top-level and nested table fitter treats a column as atomic when
 all its nonempty rendered cells contain no whitespace and measure at most 24
@@ -262,15 +262,15 @@ to right up to natural width. The first column may exceed the available width.
 
 Within those guards, the planner compares values per rendered line. Table
 lines include the header, physical row lines, three border lines when bordered,
-and one hidden-columns footer if needed. Table values are row count times
+and the physical fit-footer lines if needed. Table values are row count times
 visible columns. Card lines are measured from the planned compact (or classic
 nested) layout; card values are row count times all fields capable of nonempty
 display. Cards win only when their density is strictly greater; ties keep the
-table. `TABLE_HEADER_LINES`, `TABLE_BORDER_LINES` and
-`HIDDEN_COLUMNS_FOOTER_LINES` name the table geometry constants.
+table. `TABLE_HEADER_LINES` and `TABLE_BORDER_LINES` name the fixed table geometry.
 For example, eight rows with eleven populated fields and seven visible columns
-have table density `56 / (1 + 8 + 3 + 1) = 4.31`. If the complete cards need
-24 lines, their density is `88 / 24 = 3.67`, so the table stays. A single
+have 56 visible table values; the density denominator includes the header,
+eight rows, three border lines and any wrapped fit footer. If complete cards need
+24 lines, their density is `88 / 24 = 3.67`. A single
 ordinary row already infers MREG before this comparison.
 
 Table cells comma-join lists. Fitted list cells keep leading whole items and a
@@ -281,6 +281,26 @@ Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.
 Terminal fitting measures the exact escaped representation for `none`, `clip`
 and `ellipsis`, and the widest physical line for `wrap`.
+
+Screen tables combine hidden columns and shortened visible cells in one footer:
+
+```text
++2 hidden: Reserved host addresses, Unused addresses
+61 values shortened in Comment, Nameservers
+  full width: | LESS     all fields: --mreg     pick: | P Name,'Reserved host addresses'
+```
+
+Each summary appears only when applicable. Counts refer to cells shortened by
+ellipsis or list remaining counts; column names retain producer order. Lines
+wrap to terminal width with two-space continuations and are never cropped.
+These are at most three logical entries; wrapping may add physical lines.
+`| LESS` always re-renders at unlimited width. `all fields: --mreg` appears only
+for top-level flat lists where cards are an alternative. The pick suggestion
+uses the first column and the first hidden column, or the most-shortened column
+when none is hidden; whitespace and commas in literal names are quoted for DSL.
+Nested card tables show only the applicable summaries, without actions.
+`-q` or `ui.help.level=none` suppresses the footer. Pager, editor, clipboard and
+pipe targets preserve full widths and never show this footer.
 
 Human formats automatically localize RFC3339 strings at seconds precision,
 including nested data and document data blocks. `DisplayRule::Date` and
