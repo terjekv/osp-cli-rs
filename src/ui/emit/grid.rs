@@ -152,6 +152,7 @@ fn build_grid_rows(values: &[String], columns: usize, rows: usize) -> Vec<Vec<St
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{PreparedGridList, arrange_in_grid};
 

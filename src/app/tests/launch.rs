@@ -98,14 +98,10 @@ fn app_state_builder_tracks_session_public_helpers_from_resolved_config() {
         config,
     )
     .expect("app state builder should derive host inputs")
-    .with_session(
-        AppSession::default()
-            .with_prompt_prefix("demo")
-            .with_history_enabled(false),
-    )
+    .with_session(AppSession::default().with_history_enabled(false))
     .build();
 
-    assert_eq!(state.prompt_prefix(), "demo");
+    assert!(!state.session.history_enabled);
 
     state.record_repl_failure("ldap user missing", "boom", "boom detail");
     let failure = state

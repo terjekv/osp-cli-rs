@@ -143,6 +143,7 @@ fn finish_section(document: &mut Document, section: &mut Option<(String, Vec<Doc
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use serde_json::json;

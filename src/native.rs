@@ -1316,4 +1316,5 @@ fn normalize_name(value: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

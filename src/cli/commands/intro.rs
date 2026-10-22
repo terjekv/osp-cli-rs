@@ -43,6 +43,7 @@ pub(crate) fn run_intro_command(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::app::{AppState, LaunchContext, RuntimeContext, TerminalKind};

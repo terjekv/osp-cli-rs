@@ -402,6 +402,7 @@ fn resolve_intro_placeholder(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn render_repl_command_overview(
     view: ReplViewContext<'_>,
     surface: &ReplSurface,
@@ -690,6 +691,7 @@ pub(crate) fn build_repl_prompt_right_renderer(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn render_repl_prompt_right_for_test(
     resolved: &crate::ui::ResolvedRenderSettings,
     history_enabled: bool,
@@ -704,6 +706,7 @@ pub(crate) fn render_repl_prompt_right_for_test(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn render_repl_prompt_right_for_test_with_context(
     resolved: &crate::ui::ResolvedRenderSettings,
     history_enabled: bool,
@@ -809,6 +812,7 @@ fn build_shell_indicator(view: ReplViewContext<'_>) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn render_prompt_template(
     template: &str,
     user: &str,
@@ -910,4 +914,5 @@ fn prompt_placeholder_replacement<'a>(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

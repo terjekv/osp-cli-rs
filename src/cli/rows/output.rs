@@ -85,6 +85,7 @@ fn column_alignment_from_plugin(value: ColumnAlignmentV1) -> ColumnAlignment {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{plugin_data_to_output_result, rows_to_output_result};
     use crate::core::output::OutputFormat;

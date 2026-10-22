@@ -1,3 +1,4 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(
     not(test),
     warn(clippy::expect_used, clippy::panic, clippy::unwrap_used)
@@ -263,6 +264,7 @@ mod native;
 mod normalize;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 /// Declared entity selection shared by commands and plugins.

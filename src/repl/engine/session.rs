@@ -607,6 +607,7 @@ pub(crate) fn read_path(label: &str) -> io::Result<Option<String>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::repl::engine::{HistoryConfig, ReplReloadKind};

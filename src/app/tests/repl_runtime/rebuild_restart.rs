@@ -3,7 +3,6 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
     if crate::tests::isolated_test() { return; }
     with_test_xdg_env(|| {
         let (mut state, _state_root) = make_test_state(Vec::new());
-        state.session.prompt_prefix = "osp-dev".to_string();
         state.session.history_enabled = false;
         state
             .session
@@ -31,7 +30,6 @@ fn rebuild_repl_state_preserves_session_defaults_and_shell_context_unit() {
         assert_eq!(next.runtime.ui.debug_level, 2);
         assert_eq!(next.runtime.ui.render_settings.format, OutputFormat::Json);
         assert_eq!(next.runtime.ui.render_settings.theme_name, "dracula");
-        assert_eq!(next.session.prompt_prefix, "osp-dev");
         assert!(!next.session.history_enabled);
         assert_eq!(next.session.scope.commands(), vec!["orch".to_string()]);
         assert_eq!(

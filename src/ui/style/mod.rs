@@ -11,8 +11,6 @@ pub enum StyleToken {
     Error,
     Success,
     Border,
-    #[cfg(test)]
-    PanelBorder,
     PanelTitle,
     Key,
     TableHeader,
@@ -181,8 +179,6 @@ pub fn style_spec<'a>(
     }
 
     match token {
-        #[cfg(test)]
-        StyleToken::PanelBorder => theme.palette.border.as_str(),
         StyleToken::Trace | StyleToken::Border => theme.palette.border.as_str(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Null | StyleToken::Punctuation => {
             theme.palette.muted.as_str()
@@ -222,8 +218,6 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
             .as_deref()
             .or(overrides.panel_border.as_deref()),
         StyleToken::Success | StyleToken::MessageSuccess => overrides.message_success.as_deref(),
-        #[cfg(test)]
-        StyleToken::PanelBorder => overrides.panel_border.as_deref(),
         StyleToken::Border => overrides.panel_border.as_deref(),
         StyleToken::PanelTitle => overrides.panel_title.as_deref(),
         StyleToken::Key => overrides.key.as_deref(),
@@ -300,6 +294,7 @@ pub fn apply_style_spec(text: &str, spec: &str, enabled: bool) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::core::style::is_valid_style_spec;
     use crate::ui::theme::resolve_theme;

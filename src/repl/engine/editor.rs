@@ -148,6 +148,7 @@ impl AutoCompleteEmacs {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn opens_menu(&self, commands: &[EditCommand]) -> bool {
         self.opens_menu_at(commands, Some(self.painted.word_len_before_cursor().0))
     }

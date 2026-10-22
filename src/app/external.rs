@@ -1400,6 +1400,7 @@ fn run_external_plugin_command(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         ExternalParse, add_native_pagination_hint, cli_result_from_plugin_response,

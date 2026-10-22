@@ -137,18 +137,11 @@ struct ReplExecutionContext<'a, 'sink> {
 }
 
 #[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReplLinePlanKind {
-    Builtin,
-    Blank,
-    DslHelp,
-    Shortcut,
-    Help,
-    Invocation,
-}
+pub(crate) use tests::ReplLinePlanKind;
 
 impl ReplLinePlan {
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn kind(&self) -> ReplLinePlanKind {
         match self {
             ReplLinePlan::Builtin { .. } => ReplLinePlanKind::Builtin,
@@ -754,6 +747,7 @@ fn base_repl_invocation(runtime: &AppRuntime) -> ResolvedInvocation {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn classify_repl_line_kind(
     runtime: &AppRuntime,
     session: &AppSession,
@@ -769,4 +763,5 @@ pub(crate) fn classify_repl_line_kind(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

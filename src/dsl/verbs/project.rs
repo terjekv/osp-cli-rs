@@ -53,6 +53,7 @@ pub(crate) fn compile(spec: &str) -> Result<ProjectPlan> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Projects flat rows according to the keep/drop patterns in `spec`.
 ///
 /// Fanout selectors may expand one input row into multiple output rows.
@@ -62,6 +63,7 @@ pub fn apply(rows: Vec<Row>, spec: &str) -> Result<Vec<Row>> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Projects the rows inside each group while preserving group metadata.
 ///
 /// Empty member sets retain their group metadata.
@@ -79,6 +81,7 @@ pub(crate) fn apply_with_plan(rows: Vec<Row>, plan: &ProjectPlan) -> Result<Vec<
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn apply_groups_with_plan(groups: Vec<Group>, plan: &ProjectPlan) -> Result<Vec<Group>> {
     map_group_rows(groups, |rows| apply_with_plan(rows, plan))
 }
@@ -285,4 +288,5 @@ fn build_rows_from_dynamic(static_flat: Row, dynamic_columns: Vec<DynamicColumn>
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

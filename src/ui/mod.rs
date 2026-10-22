@@ -275,8 +275,10 @@ fn default_show_footer_rule(layout: HelpLayout) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod document_tests;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 pub mod interrupt;

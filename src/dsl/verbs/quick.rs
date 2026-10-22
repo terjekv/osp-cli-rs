@@ -142,6 +142,7 @@ pub(crate) fn apply_with_plan(mut rows: Vec<Row>, plan: &QuickPlan) -> Result<Ve
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn apply_groups_with_plan(groups: Vec<Group>, plan: &QuickPlan) -> Result<Vec<Group>> {
     map_group_rows(groups, |rows| apply_with_plan(rows, plan))
 }
@@ -334,6 +335,7 @@ fn value_matches_token(value: &Value, token: &str, exact: ExactMode, fuzzy: bool
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value(value: Value, spec: &str) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -342,6 +344,7 @@ fn apply_value(value: Value, spec: &str) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value_with_plan(value: Value, plan: &QuickPlan) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -350,4 +353,5 @@ fn apply_value_with_plan(value: Value, plan: &QuickPlan) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

@@ -536,6 +536,7 @@ pub(super) fn is_repl_bang_request(raw: &str) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{PaginationDirection, execute_repl_builtin, parse_repl_builtin};
     use crate::app::{AppState, CommandOutput, LaunchContext, RuntimeContext, TerminalKind};

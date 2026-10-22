@@ -141,6 +141,7 @@ fn classify_stage_kind(verb: &str) -> ParsedStageKind {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::dsl::model::ParsedStageKind;
 

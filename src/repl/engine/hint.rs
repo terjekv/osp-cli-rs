@@ -452,6 +452,7 @@ fn fit_terminal_width(text: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{ReplHinter, only_extension};
     use crate::completion::{ArgNode, CompletionNode, CompletionTree, FlagNode, SuggestionEntry};

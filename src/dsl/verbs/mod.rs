@@ -5,6 +5,8 @@ pub(crate) mod aggregate;
 pub(crate) mod collapse;
 pub(crate) mod common;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "copy_tests.rs"]
 pub(crate) mod copy;
 pub(crate) mod filter;
 pub(crate) mod group;

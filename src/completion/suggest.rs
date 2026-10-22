@@ -879,6 +879,7 @@ fn compact(text: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;
 
 /// Resolve a local overlay without changing the parser's static grammar.

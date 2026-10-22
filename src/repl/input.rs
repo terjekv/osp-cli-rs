@@ -313,6 +313,7 @@ pub(crate) fn is_repl_shellable_command(config: &ResolvedConfig, command: &str) 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         ReplParsedLine, build_repl_ui_line_projector, has_valid_help_alias_target,

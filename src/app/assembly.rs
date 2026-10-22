@@ -61,8 +61,6 @@ pub(crate) enum HostBuildRequest<'a> {
         definition: std::sync::Arc<super::AppDefinition>,
     },
     Rebuild(&'a super::AppState),
-    #[cfg(test)]
-    State(Box<super::AppStateBuilder>),
     Presentation {
         context: &'a RuntimeContext,
         config: Option<&'a ResolvedConfig>,
@@ -127,8 +125,6 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
                 themes,
             ))));
         }
-        #[cfg(test)]
-        HostBuildRequest::State(builder) => *builder,
         HostBuildRequest::Startup {
             cli,
             action,
@@ -240,6 +236,11 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
             }
         }
     };
+    Ok(HostBuild::State(Box::new(assemble_state(builder, startup))))
+}
+
+/// Assembles resolved inputs shared by startup, rebuilds and local fixtures.
+pub(super) fn assemble_state(builder: super::AppStateBuilder, startup: bool) -> super::AppState {
     let super::AppStateBuilder {
         context,
         config,
@@ -285,11 +286,11 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
             tracing::info_span!(target: "osp_startup", "auth policy context setup").entered();
         runtime.set_access_policy(runtime.definition.access_policy.clone());
     }
-    Ok(HostBuild::State(Box::new(super::AppState {
+    super::AppState {
         runtime,
         session: session.unwrap_or_default(),
         clients,
-    })))
+    }
 }
 
 /// Derives UI state from resolved config and a settings baseline.
@@ -311,6 +312,7 @@ pub(crate) fn derive_render_settings(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn derive_render_settings_or_fallback(
     context: &RuntimeContext,
     config: &ResolvedConfig,
@@ -433,6 +435,7 @@ pub(crate) fn rebuild_repl_state(current: &super::AppState) -> Result<super::App
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{RenderSettingsSeed, derive_render_settings_or_fallback, derive_ui_state};
     use crate::app::{LaunchContext, RuntimeContext, TerminalKind};

@@ -108,6 +108,7 @@ impl CompletionEngine {
     /// This is mainly useful for tests or callers that already have split
     /// command state for the full line and the cursor-local prefix.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn analyze_command(
         &self,
         full_cmd: CommandLine,
@@ -116,9 +117,6 @@ impl CompletionEngine {
     ) -> CompletionAnalysis {
         self.analyze_command_parts(
             ParsedLine {
-                safe_cursor: 0,
-                full_tokens: Vec::new(),
-                cursor_tokens: Vec::new(),
                 full_cmd,
                 cursor_cmd,
             },
@@ -153,6 +151,7 @@ impl CompletionEngine {
 
     /// Returns how many leading tokens resolve to a command path in the tree.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn matched_command_len_tokens(&self, tokens: &[String]) -> usize {
         TreeResolver::new(self.suggester.tree()).matched_command_len_tokens(tokens)
     }
@@ -609,6 +608,7 @@ fn collect_global_context_flags(root: &CompletionNode) -> BTreeSet<String> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -834,7 +834,6 @@ mod tests {
             });
 
             let analysis = engine.analyze("exit ", 5);
-            assert_eq!(analysis.parsed.cursor_tokens, vec!["exit".to_string()]);
             assert_eq!(analysis.parsed.cursor_cmd.head(), &["exit".to_string()]);
             assert_eq!(analysis.context.matched_path, vec!["exit".to_string()]);
             assert_eq!(analysis.context.flag_scope_path, vec!["exit".to_string()]);

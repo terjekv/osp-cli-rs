@@ -474,6 +474,7 @@ pub(crate) fn compute_key_index(rows: &[Row]) -> Vec<String> {
 /// assert_eq!(value["uid"], "alice");
 /// ```
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn output_items_to_value(items: &OutputItems) -> Value {
     match items {
         OutputItems::Rows(rows) => match rows.as_slice() {
@@ -529,6 +530,7 @@ pub(crate) fn output_items_to_value(items: &OutputItems) -> Value {
 /// );
 /// ```
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn output_items_from_value(value: Value) -> OutputItems {
     if let Value::Array(items) = &value
         && !items.is_empty()
@@ -564,11 +566,13 @@ fn row_with_value(value: Value) -> Row {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn groups_from_values(values: &[Value]) -> Option<Vec<Group>> {
     values.iter().map(group_from_value).collect()
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn group_from_value(value: &Value) -> Option<Group> {
     let Value::Object(map) = value else {
         return None;
@@ -596,6 +600,7 @@ fn group_from_value(value: &Value) -> Option<Group> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

@@ -20,6 +20,7 @@ pub(crate) fn run_history_repl_command(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::run_history_repl_command;
     use crate::app::AppSession;

@@ -128,6 +128,7 @@ pub(crate) fn launch_history_picker(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn history_picker_items(history: &SharedHistory) -> Vec<HistoryPickerItem> {
     let scope = history
         .with(|store| store.shell_prefix())
@@ -346,6 +347,7 @@ fn build_candidate_menu(appearance: &ReplAppearance, name: &str) -> OspCompletio
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::repl::engine::HistoryConfig;

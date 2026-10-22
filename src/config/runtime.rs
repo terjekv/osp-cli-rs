@@ -174,46 +174,8 @@ impl RuntimeLoadOptions {
     }
 }
 
-/// Minimal runtime-derived config that callers often need directly.
-///
-/// This is intentionally much smaller than [`ResolvedConfig`]. Keep the full
-/// [`ResolvedConfig`] when a caller needs arbitrary resolved keys, provenance,
-/// terminal selection, or explanation data. Use `RuntimeConfig` when the
-/// caller only needs the tiny runtime snapshot the host commonly carries
-/// around directly.
 #[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeConfig {
-    /// Active profile name selected for the current invocation.
-    pub active_profile: String,
-}
-
-#[cfg(test)]
-impl RuntimeConfig {
-    /// Extracts the small runtime snapshot most callers need from a resolved config.
-    ///
-    /// # Examples
-    ///
-    /// ```text
-    /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
-    ///
-    /// let mut defaults = ConfigLayer::default();
-    /// defaults.set("profile.default", "default");
-    /// defaults.set("theme.path", Vec::<String>::new());
-    ///
-    /// let mut resolver = ConfigResolver::default();
-    /// resolver.set_defaults(defaults);
-    /// let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
-    ///
-    /// let runtime = RuntimeConfig::from_resolved(&resolved);
-    /// assert_eq!(runtime.active_profile, "default");
-    /// ```
-    pub fn from_resolved(resolved: &ResolvedConfig) -> Self {
-        Self {
-            active_profile: resolved.active_profile().to_string(),
-        }
-    }
-}
+pub(crate) use tests::RuntimeConfig;
 
 /// Discovered filesystem paths for runtime config inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -528,6 +490,7 @@ impl RuntimeEnvironment {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) fn from_pairs<I, K, V>(vars: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -671,7 +634,47 @@ fn project_dirs() -> Option<ProjectDirs> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use super::ResolvedConfig;
+    /// Minimal runtime-derived config that callers often need directly.
+    ///
+    /// This is intentionally much smaller than [`ResolvedConfig`]. Keep the full
+    /// [`ResolvedConfig`] when a caller needs arbitrary resolved keys, provenance,
+    /// terminal selection, or explanation data. Use `RuntimeConfig` when the
+    /// caller only needs the tiny runtime snapshot the host commonly carries
+    /// around directly.
+    #[derive(Debug, Clone)]
+    pub(crate) struct RuntimeConfig {
+        /// Active profile name selected for the current invocation.
+        pub active_profile: String,
+    }
+
+    impl RuntimeConfig {
+        /// Extracts the small runtime snapshot most callers need from a resolved config.
+        ///
+        /// # Examples
+        ///
+        /// ```text
+        /// use osp_cli::config::{ConfigLayer, ConfigResolver, ResolveOptions, RuntimeConfig};
+        ///
+        /// let mut defaults = ConfigLayer::default();
+        /// defaults.set("profile.default", "default");
+        /// defaults.set("theme.path", Vec::<String>::new());
+        ///
+        /// let mut resolver = ConfigResolver::default();
+        /// resolver.set_defaults(defaults);
+        /// let resolved = resolver.resolve(ResolveOptions::default()).unwrap();
+        ///
+        /// let runtime = RuntimeConfig::from_resolved(&resolved);
+        /// assert_eq!(runtime.active_profile, "default");
+        /// ```
+        pub fn from_resolved(resolved: &ResolvedConfig) -> Self {
+            Self {
+                active_profile: resolved.active_profile().to_string(),
+            }
+        }
+    }
 
     #[test]
     fn config_internal_example_1() {

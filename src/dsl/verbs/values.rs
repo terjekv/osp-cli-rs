@@ -40,6 +40,7 @@ pub(crate) fn compile(spec: &str) -> Result<ValuesPlan> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 /// Extracts values from flat rows and emits `{value: ...}` rows.
 ///
 /// With an empty spec, values from every field are emitted in row order.
@@ -77,6 +78,7 @@ fn emit_value_rows(out: &mut Vec<Row>, value: Value) {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value_with_plan(value: Value, plan: &ValuesPlan) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -85,6 +87,7 @@ fn apply_value_with_plan(value: Value, plan: &ValuesPlan) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

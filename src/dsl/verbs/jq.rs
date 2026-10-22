@@ -86,11 +86,13 @@ pub(crate) fn apply_set(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_with_expr(items: OutputItems, expr: &str) -> Result<OutputItems> {
     apply_set(items.into(), expr).map(Into::into)
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply_value_with_expr(value: Value, expr: &str) -> Result<Value> {
     crate::dsl::value::apply_stage(
         value,
@@ -199,4 +201,5 @@ fn jaq_value_to_json(value: &Val) -> std::result::Result<Value, JqError> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

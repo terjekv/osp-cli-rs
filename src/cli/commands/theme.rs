@@ -264,6 +264,7 @@ fn theme_palette_row(entry: &crate::ui::theme_catalog::ThemeEntry) -> Row {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         augment_theme_completion, run_theme_command, theme_command, theme_list_rows,

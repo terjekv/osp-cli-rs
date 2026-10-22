@@ -171,21 +171,25 @@ impl PluginManager {
     }
     /// Returns the describe time limit.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn process_timeout(&self) -> Duration {
         self.process_timeout
     }
     /// Returns explicit launch roots.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn explicit_dirs(&self) -> &[PathBuf] {
         &self.explicit_dirs
     }
     /// Returns the configured user root override.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn config_root(&self) -> Option<&Path> {
         self.config_root.as_deref()
     }
     /// Returns the configured cache root override.
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn cache_root(&self) -> Option<&Path> {
         self.cache_root.as_deref()
     }
@@ -259,6 +263,7 @@ impl PluginManager {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     #[test]

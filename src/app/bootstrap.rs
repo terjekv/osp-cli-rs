@@ -234,6 +234,7 @@ pub(crate) fn resolve_runtime_config(request: RuntimeConfigRequest) -> Result<Re
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{build_logging_config, debug_level_from_config, verbosity_from_config};
     use crate::config::{ConfigLayer, ConfigResolver, ResolveOptions};

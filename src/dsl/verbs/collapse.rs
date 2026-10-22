@@ -16,6 +16,7 @@ pub(crate) fn apply_set(set: crate::dsl::model::RowSet) -> Result<crate::dsl::mo
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn apply(items: OutputItems) -> Result<OutputItems> {
     apply_set(items.into()).map(Into::into)
 }
@@ -28,6 +29,7 @@ fn collapse_group(group: Group) -> Row {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::core::output_model::{Group, OutputItems};
     use serde_json::json;

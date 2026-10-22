@@ -362,6 +362,7 @@ fn run_repl_debug_highlight(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
         run_repl_debug_command_for, should_show_repl_intro, start_native_completion_refreshes,

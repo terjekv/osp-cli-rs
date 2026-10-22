@@ -118,6 +118,7 @@ pub fn render(messages: &MessageBuffer, request: &MessageRequest) -> String {
 
 impl MessageBuffer {
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn new() -> Self {
         Self::default()
     }
