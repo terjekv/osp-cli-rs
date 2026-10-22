@@ -235,7 +235,7 @@ impl RuntimeConfigPaths {
     ///
     /// # Examples
     ///
-    /// ```text
+    /// ```no_run
     /// use osp_cli::config::RuntimeConfigPaths;
     ///
     /// let paths = RuntimeConfigPaths::discover();
@@ -390,7 +390,7 @@ impl RuntimeDefaults {
 ///
 /// # Examples
 ///
-/// ```text
+/// ```no_run
 /// use osp_cli::config::{
 ///     ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
 ///     build_runtime_pipeline,
@@ -687,51 +687,6 @@ mod tests {
 
         let runtime = RuntimeConfig::from_resolved(&resolved);
         assert_eq!(runtime.active_profile, "default");
-    }
-
-    #[test]
-    fn config_internal_example_2() {
-        let _example = || {
-            use crate::config::RuntimeConfigPaths;
-
-            let paths = RuntimeConfigPaths::discover();
-
-            let _config = paths.config_file.as_deref();
-            let _secrets = paths.secrets_file.as_deref();
-            let _keyring_index = paths.secrets_index_file.as_deref();
-        };
-    }
-
-    #[test]
-    fn config_internal_example_3() {
-        let _example = || {
-            (|| {
-                use crate::config::{
-                    ResolveOptions, RuntimeConfigPaths, RuntimeDefaults, RuntimeLoadOptions,
-                    build_runtime_pipeline,
-                };
-
-                let defaults = RuntimeDefaults::from_process_env("dracula", "osp> ").to_layer();
-                let paths = RuntimeConfigPaths::discover();
-                let presentation = None;
-                let cli = None;
-                let session = None;
-
-                let resolved = build_runtime_pipeline(
-                    defaults,
-                    presentation,
-                    &paths,
-                    RuntimeLoadOptions::default(),
-                    cli,
-                    session,
-                )
-                .resolve(ResolveOptions::new().with_terminal("cli"))?;
-
-                assert_eq!(resolved.terminal(), Some("cli"));
-                Ok::<(), crate::config::ConfigError>(())
-            })()
-            .unwrap();
-        };
     }
 
     use std::path::PathBuf;

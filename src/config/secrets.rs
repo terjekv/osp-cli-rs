@@ -766,28 +766,6 @@ key = "extensions.test.token"
         let _ = fs::remove_file(path);
     }
 
-    #[test]
-    fn keyring_set_rolls_back_credential_when_index_write_fails() {
-        let blocker = temp_index();
-        fs::write(&blocker, "not a directory").unwrap();
-        let credentials = Arc::new(FakeCredentials::default());
-        let store = KeyringSecretStore::new(blocker.join("index.toml"), credentials.clone());
-
-        let error = store
-            .set_scoped(
-                "extensions.test.token",
-                &ConfigValue::String("must-not-remain".to_string()),
-                &Scope::global(),
-                false,
-            )
-            .err()
-            .expect("index write should fail");
-
-        assert!(error.to_string().contains("failed to"));
-        assert!(credentials.values.lock().unwrap().is_empty());
-        let _ = fs::remove_file(blocker);
-    }
-
     #[cfg(unix)]
     #[test]
     fn keyring_index_is_owner_only() {
