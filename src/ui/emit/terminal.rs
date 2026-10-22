@@ -686,7 +686,7 @@ fn render_grid_rows(
             }
             first = false;
             line.push_str(&paint(cell));
-            if column_index + 1 != grid.column_widths.len() {
+            if row[column_index + 1..].iter().any(|cell| !cell.is_empty()) {
                 let pad = grid.column_widths[column_index]
                     .saturating_sub(UnicodeWidthStr::width(cell.as_str()));
                 line.push_str(&" ".repeat(pad));
