@@ -44,14 +44,18 @@ Supported formats:
 Selection order is:
 
 1. an explicit invocation format (`--format`, `--table`, `--mreg`, etc.)
-2. a command/plugin recommendation attached to the output
-3. a non-auto configured `ui.format`
-4. automatic inference from the output shape
+2. a non-auto configured `ui.format`
+3. one ordinary record selects a classic MREG card
+4. a command/plugin recommendation attached to the output
+5. automatic inference from the output shape
 
 `--format auto` permits recommendation and inference. An `auto` recommendation
 also defers selection; a document recommendation without document intent does
-not turn ordinary rows into a document. Recommendations beat configured defaults,
-but never an explicit non-auto invocation format. The plan retains whether the
+not turn ordinary rows into a document. Configured defaults beat recommendations. A single top-level object or a
+one-element record array becomes a classic card even with a table recommendation;
+`--table`, `--format table` or configured `ui.format=table` keeps a table.
+For example, `[{"Name":"example","Count":2}]` with a table hint is a card.
+Machine recommendations retain their export format. The plan retains whether the
 choice was explicit, configured, recommended or inferred.
 
 Help and intro documents keep their document layout when
@@ -65,7 +69,7 @@ When `format=auto`, the current rules are:
 - zero or one ordinary row renders as `mreg` (value-only rows use `value`)
 - larger row sets render as `table`
 
-A top-level list whose rows all contain exactly one scalar field with the same
+A top-level list of multiple rows that all contain exactly one scalar field with the same
 key renders as a titled `Key (N):` grid for inferred, recommended or configured
 human formats. The planner reuses the card grid-list geometry at the target's
 width, with its existing 100-column fallback for unlimited/unknown widths.

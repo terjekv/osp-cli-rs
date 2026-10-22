@@ -28,6 +28,9 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Prefer classic cards for one ordinary record, including table-recommended
+  results. Explicit and configured formats take precedence over recommendations.
+
 - Honour explicit colour and Unicode choices on screen, pager and pipe targets;
   automatic pipe rendering stays plain. Editor and clipboard suppress colour.
 

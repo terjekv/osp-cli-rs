@@ -216,7 +216,10 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
         &mut sink,
     )
     .expect("json pipeline should render");
-    assert_eq!(json_rendered.trim(), "beta");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json_rendered).unwrap(),
+        serde_json::json!([{"value": "beta"}])
+    );
 
     let text_result = CommandOutput {
         exit_code: 0,
@@ -235,7 +238,10 @@ fn render_repl_command_output_covers_json_and_text_pipeline_paths_unit() {
         &mut sink,
     )
     .expect("text pipeline should render");
-    assert_eq!(text_rendered.trim(), "beta");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text_rendered).unwrap(),
+        serde_json::json!([{"value": "beta"}])
+    );
 }
 
 #[test]

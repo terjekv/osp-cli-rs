@@ -190,6 +190,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         && !output.meta.document_rows
         && let OutputItems::Rows(rows) = &output.items
         && let Some(first) = rows.first()
+        && rows.len() > 1
         && first.len() == 1
         && let Some(key) = first.keys().next()
         && rows.iter().all(|row| {

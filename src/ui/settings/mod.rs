@@ -740,15 +740,10 @@ impl RenderSettings {
                 (self.format, Configured)
             };
         }
-        if let Some(RenderRecommendation::Format(format)) = output.meta.render_recommendation
-            && format != OutputFormat::Auto
-        {
-            return (format, Recommended);
-        }
         if self.format != OutputFormat::Auto {
             return (self.format, Configured);
         }
-        let format = match &output.items {
+        let inferred = match &output.items {
             OutputItems::Groups(_) => OutputFormat::Table,
             OutputItems::Rows(rows)
                 if rows
@@ -760,7 +755,29 @@ impl RenderSettings {
             OutputItems::Rows(rows) if rows.len() <= 1 => OutputFormat::Mreg,
             _ => OutputFormat::Table,
         };
-        (format, Inferred)
+        let recommendation = match output.meta.render_recommendation {
+            Some(RenderRecommendation::Format(format)) if format != OutputFormat::Auto => {
+                Some(format)
+            }
+            _ => None,
+        };
+        // Machine recommendations bypass human shape rules.
+        if let Some(
+            format @ (OutputFormat::Json
+            | OutputFormat::Csv
+            | OutputFormat::Tsv
+            | OutputFormat::Value),
+        ) = recommendation
+        {
+            return (format, Recommended);
+        }
+        if inferred == OutputFormat::Mreg {
+            return (OutputFormat::Mreg, Inferred);
+        }
+        if let Some(format) = recommendation {
+            return (format, Recommended);
+        }
+        (inferred, Inferred)
     }
 }
 
@@ -1048,7 +1065,7 @@ mod tests {
             Some(RenderRecommendation::Format(OutputFormat::Markdown));
         assert_eq!(
             plain_settings.resolve_output_format(&recommended).0,
-            OutputFormat::Markdown
+            OutputFormat::Mreg
         );
 
         let grouped = OutputResult {
