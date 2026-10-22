@@ -483,6 +483,7 @@ fn handle_clap_parse_error(
                                 && auth.is_external_command_visible(&entry.name)
                         })
                         .map(|entry| DocumentEntry {
+                            role: crate::core::document::EntryRole::Command,
                             name: entry.name,
                             description: entry.about,
                         })
@@ -1385,6 +1386,7 @@ fn add_native_command_help(
                 .is_some_and(|command| !command.command().is_hide_set())
         })
         .map(|entry| DocumentEntry {
+            role: crate::core::document::EntryRole::Command,
             name: entry.name,
             description: entry.about.trim().to_string(),
         })
@@ -1410,18 +1412,22 @@ fn add_native_command_help(
 
 fn add_product_option_help(view: &mut Document, options: &[(String, String)]) {
     if !options.is_empty() {
-        view.blocks.push(DocBlock::section(
-            "Product options",
-            vec![DocBlock::Entries {
-                entries: options
-                    .iter()
-                    .map(|(name, description)| DocumentEntry {
-                        name: name.clone(),
-                        description: description.clone(),
-                    })
-                    .collect(),
-            }],
-        ));
+        view.blocks.push(
+            DocBlock::section(
+                "Product options",
+                vec![DocBlock::Entries {
+                    entries: options
+                        .iter()
+                        .map(|(name, description)| DocumentEntry {
+                            role: crate::core::document::EntryRole::LongOption,
+                            name: name.clone(),
+                            description: description.clone(),
+                        })
+                        .collect(),
+                }],
+            )
+            .with_role(crate::core::document::SectionRole::CompactOptions),
+        );
     }
 }
 

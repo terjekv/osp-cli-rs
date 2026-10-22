@@ -424,7 +424,8 @@ pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> Documen
                 vec![DocBlock::Paragraph {
                     text: "[INVOCATION_OPTIONS] COMMAND [ARGS]...".into(),
                 }],
-            ),
+            )
+            .with_role(crate::core::document::SectionRole::Usage),
             DocBlock::section(
                 "Commands",
                 vec![DocBlock::Entries {
@@ -432,6 +433,7 @@ pub(crate) fn build_repl_command_overview_view(surface: &ReplSurface) -> Documen
                         .overview_entries
                         .iter()
                         .map(|entry| DocumentEntry {
+                            role: crate::core::document::EntryRole::Command,
                             name: entry.name.clone(),
                             description: entry.summary.clone(),
                         })

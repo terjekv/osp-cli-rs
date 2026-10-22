@@ -75,5 +75,12 @@ pub(crate) fn run_context_command(
         })
         .collect();
 
-    Ok(CommandOutput::output(rows_to_output_result(rows), None))
+    let mut output = rows_to_output_result(rows);
+    output
+        .meta
+        .display_rules
+        .push(crate::core::DisplayRule::Command {
+            field: "command".into(),
+        });
+    Ok(CommandOutput::output(output, None))
 }

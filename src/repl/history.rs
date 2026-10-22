@@ -186,6 +186,12 @@ pub(crate) fn run_history_repl_command(
             let rows = history_entries_rows(entries);
             let mut output = rows_to_output_result(rows);
             output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
+            output
+                .meta
+                .display_rules
+                .push(crate::core::DisplayRule::Command {
+                    field: "command".into(),
+                });
             Ok(CommandOutput::output(output, None))
         }
         HistoryCommands::Prune(HistoryPruneArgs { keep }) => {
@@ -234,6 +240,12 @@ pub(crate) fn run_history_repl_command(
             if args.preview {
                 let mut output = rows_to_output_result(history_entries_rows(entries));
                 output.meta.display_columns = Some(["id", "command"].map(str::to_string).to_vec());
+                output
+                    .meta
+                    .display_rules
+                    .push(crate::core::DisplayRule::Command {
+                        field: "command".into(),
+                    });
                 return Ok(CommandOutput::output(output, None));
             }
             if count > 100 && !args.force {

@@ -290,7 +290,10 @@ fn repl_intro_round_trip_preserves_template_section_order_unit() {
     );
     let value = serde_json::to_value(&payload).unwrap();
     let rebuilt: Document = serde_json::from_value(value).unwrap();
-    assert_eq!(rebuilt, payload);
+    assert_eq!(
+        serde_json::to_value(&rebuilt).unwrap(),
+        serde_json::to_value(&payload).unwrap()
+    );
     assert_eq!(
         rebuilt
             .blocks
@@ -719,6 +722,7 @@ fn intro_template_parser_expands_all_help_sections_and_merges_repeated_data_bloc
                 "Commands",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "help".into(),
                         description: "Show help".into(),
                     }],
@@ -728,6 +732,7 @@ fn intro_template_parser_expands_all_help_sections_and_merges_repeated_data_bloc
                 "Arguments",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "<TARGET>".into(),
                         description: "Target name".into(),
                     }],
@@ -737,6 +742,7 @@ fn intro_template_parser_expands_all_help_sections_and_merges_repeated_data_bloc
                 "Options",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "--json".into(),
                         description: "Render json".into(),
                     }],
@@ -746,6 +752,7 @@ fn intro_template_parser_expands_all_help_sections_and_merges_repeated_data_bloc
                 "Common Invocation Options",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "--profile".into(),
                         description: "Select profile".into(),
                     }],

@@ -101,6 +101,11 @@ pub enum DisplayRule {
         /// Emphasize the value in addition to its declared style.
         bold: bool,
     },
+    /// Mark a field as a command line for human styling.
+    Command {
+        /// Canonical command field selector.
+        field: String,
+    },
     /// Link an HTTP(S) URL value in rich terminal output only.
     Hyperlink {
         /// Canonical string field containing the URL and visible link text.
@@ -215,6 +220,8 @@ pub struct OutputMeta {
     pub grouped: bool,
     /// Rows explicitly produced by a semantic document, with section context.
     pub document_rows: bool,
+    /// Semantic row roles aligned with document rows; never inferred from keys.
+    pub document_row_roles: Vec<crate::core::document::DocumentRowRole>,
     /// Optional minimum gap after aligned document entry names.
     pub document_entry_gap: Option<usize>,
     /// Commands that require literal spelling in this help listing.
@@ -331,8 +338,15 @@ impl OutputResult {
             self.meta.render_recommendation = None;
         }
         self.items = OutputItems::Rows(match &document {
-            OutputDocument::Semantic(document) => document.rows(),
-            OutputDocument::Json(value) => rows_from_value(value.clone()),
+            OutputDocument::Semantic(document) => {
+                let (rows, roles) = document.rows_with_roles();
+                self.meta.document_row_roles = roles;
+                rows
+            }
+            OutputDocument::Json(value) => {
+                self.meta.document_row_roles.clear();
+                rows_from_value(value.clone())
+            }
         });
         self.meta.key_index = compute_key_index(self.as_rows().unwrap_or_default());
         self.document = Some(document);

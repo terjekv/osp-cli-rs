@@ -1031,6 +1031,7 @@ mod tests {
                 wants_editor: false,
                 grouped: true,
                 document_rows: false,
+                document_row_roles: Vec::new(),
                 document_entry_gap: None,
                 document_literal_commands: Vec::new(),
                 document_command_prefixes: false,

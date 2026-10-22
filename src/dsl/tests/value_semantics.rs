@@ -45,6 +45,7 @@ fn apply_guide_stage(
             .unwrap()
             .iter()
             .map(|entry| DocumentEntry {
+                role: Default::default(),
                 name: entry["name"].as_str().unwrap().into(),
                 description: entry["short_help"].as_str().unwrap_or("").into(),
             })

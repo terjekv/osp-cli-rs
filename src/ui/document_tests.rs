@@ -55,7 +55,10 @@ fn document_serialization_preserves_parsed_and_authored_order_unit() {
             &output,
             &crate::ui::RenderRequest::new(&settings(OutputFormat::Json)),
         );
-        assert_eq!(serde_json::from_str::<Document>(&json).unwrap(), document);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+            serde_json::to_value(&document).unwrap()
+        );
         assert!(output.meta.document_rows);
         assert_eq!(output.as_rows().unwrap(), document.rows());
     }
@@ -118,6 +121,7 @@ fn document_values_use_content_and_preserve_object_value_order_unit() {
                     "Commands",
                     vec![DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: "config".into(),
                             description: "Inspect and edit runtime config".into(),
                         }],

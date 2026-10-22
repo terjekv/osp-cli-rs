@@ -242,24 +242,28 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
                     },
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("site host show").into(),
                             description: ("Read the `canonical` host record").into(),
                         }],
                     },
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("site host apply").into(),
                             description: ("Apply an approved change").into(),
                         }],
                     },
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("site whoami").into(),
                             description: ("").into(),
                         }],
                     },
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("site host show | P uid").into(),
                             description: ("Copy the `uid` field").into(),
                         }],
@@ -270,6 +274,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
                 "Arguments",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: ("HOST").into(),
                         description: ("Canonical host name").into(),
                     }],
@@ -279,6 +284,7 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
                 "Options",
                 vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: ("--dry-run").into(),
                         description: ("Preview the approved change").into(),
                     }],
@@ -289,12 +295,14 @@ fn operational_guide_exports_keep_authored_entries_and_nested_policy_data() {
                 vec![
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("--profile").into(),
                             description: ("Select the service profile").into(),
                         }],
                     },
                     DocBlock::Entries {
                         entries: vec![DocumentEntry {
+                            role: Default::default(),
                             name: ("--json").into(),
                             description: ("Export typed results").into(),
                         }],

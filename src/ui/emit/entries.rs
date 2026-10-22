@@ -9,6 +9,7 @@ pub(super) struct PreparedEntriesBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PreparedEntryRow {
+    pub role: crate::core::document::EntryRole,
     pub key: String,
     pub value: String,
     pub indent: String,
@@ -51,6 +52,7 @@ impl PreparedEntryRow {
         let padding =
             " ".repeat(key_width.saturating_sub(UnicodeWidthStr::width(row.key.as_str())));
         Self {
+            role: row.role,
             key: row.key.clone(),
             value: row.value.clone(),
             indent: row
@@ -79,12 +81,14 @@ mod tests {
             default_gap: None,
             rows: vec![
                 EntryRow {
+                    role: Default::default(),
                     key: "list".to_string(),
                     value: "List history entries".to_string(),
                     indent_hint: Some("  ".to_string()),
                     gap_hint: Some("   ".to_string()),
                 },
                 EntryRow {
+                    role: Default::default(),
                     key: "clear".to_string(),
                     value: "Clear history entries".to_string(),
                     indent_hint: None,
@@ -98,6 +102,7 @@ mod tests {
         assert_eq!(
             prepared.rows[0],
             PreparedEntryRow {
+                role: Default::default(),
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),
@@ -107,6 +112,7 @@ mod tests {
         assert_eq!(
             prepared.rows[1],
             PreparedEntryRow {
+                role: Default::default(),
                 key: "clear".to_string(),
                 value: "Clear history entries".to_string(),
                 indent: String::new(),
@@ -122,6 +128,7 @@ mod tests {
             default_indent: "  ".to_string(),
             default_gap: None,
             rows: vec![EntryRow {
+                role: Default::default(),
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent_hint: None,
@@ -134,6 +141,7 @@ mod tests {
         assert_eq!(
             prepared.rows[0],
             PreparedEntryRow {
+                role: Default::default(),
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),
@@ -149,6 +157,7 @@ mod tests {
             default_indent: "  ".to_string(),
             default_gap: Some(" -> ".to_string()),
             rows: vec![EntryRow {
+                role: Default::default(),
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent_hint: None,
@@ -161,6 +170,7 @@ mod tests {
         assert_eq!(
             prepared.rows[0],
             PreparedEntryRow {
+                role: Default::default(),
                 key: "list".to_string(),
                 value: "List history entries".to_string(),
                 indent: "  ".to_string(),

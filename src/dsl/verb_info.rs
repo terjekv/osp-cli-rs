@@ -144,6 +144,7 @@ pub(crate) fn help_document(spec: &str) -> miette::Result<crate::core::document:
                 entries: verbs
                     .into_iter()
                     .map(|info| DocumentEntry {
+                        role: crate::core::document::EntryRole::Command,
                         name: info.verb.to_string(),
                         description: info.help.to_string(),
                     })

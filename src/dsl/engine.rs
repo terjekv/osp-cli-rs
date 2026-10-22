@@ -317,7 +317,24 @@ pub(crate) fn run_compiled(
                 stage.behavior().semantic_effect,
                 crate::dsl::compiled::SemanticEffect::Preserve
             );
-        rows = apply_stage(rows, stage)?;
+        if output.meta.document_rows && !rows.grouped {
+            let mut roles = std::mem::take(&mut output.meta.document_row_roles);
+            rows = rows.map_rows(|items| {
+                let annotated = items
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, row)| (row, roles.get(index).copied().unwrap_or_default()))
+                    .collect::<Vec<_>>();
+                let annotated = apply_document_stage(annotated, stage)?;
+                let (items, retained) = annotated.into_iter().unzip();
+                roles = retained;
+                Ok(items)
+            })?;
+            output.meta.document_row_roles = roles;
+        } else {
+            output.meta.document_row_roles.clear();
+            rows = apply_stage(rows, stage)?;
+        }
         match stage.synthesized_fields() {
             Some(created) => forget_formatting(&mut output.meta, &created),
             None => {
@@ -335,6 +352,28 @@ pub(crate) fn run_compiled(
         }
     };
     Ok(output)
+}
+
+fn apply_document_stage(
+    rows: Vec<(Row, crate::core::document::DocumentRowRole)>,
+    stage: &CompiledStage,
+) -> Result<Vec<(Row, crate::core::document::DocumentRowRole)>> {
+    if let Some(plan) = stage.quick_plan() {
+        return Ok(rows
+            .into_iter()
+            .filter(|(row, _)| plan.matches_row_filter_mode(row))
+            .collect());
+    }
+    match stage {
+        CompiledStage::Filter(plan) => Ok(rows
+            .into_iter()
+            .filter(|(row, _)| plan.matches(row))
+            .collect()),
+        CompiledStage::Sort(plan) => sort::apply_rows(rows, plan, |(row, _)| row),
+        CompiledStage::Limit(spec) => Ok(limit::apply_with_spec(rows, *spec)),
+        CompiledStage::Copy | CompiledStage::Page | CompiledStage::Editor => Ok(rows),
+        _ => unreachable!("only row-preserving stages retain document roles"),
+    }
 }
 
 pub(crate) fn apply_stage(items: RowSet, stage: &CompiledStage) -> Result<RowSet> {
@@ -394,6 +433,7 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         | DisplayRule::TextLimit { field, .. }
         | DisplayRule::Compose { field, .. }
         | DisplayRule::Notice { field }
+        | DisplayRule::Command { field }
         | DisplayRule::Hyperlink { field }
         | DisplayRule::Bytes { field }
         | DisplayRule::RelativeTimestamp { field }

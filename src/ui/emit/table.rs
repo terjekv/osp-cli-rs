@@ -38,14 +38,14 @@ impl PreparedTable {
             .enumerate()
             .map(|(index, row)| {
                 let mut cells = prepare_cells(row);
-                for (col, (cell, header)) in cells.iter_mut().zip(&block.headers).enumerate() {
+                for (col, cell) in cells.iter_mut().enumerate() {
                     cell.style = block
                         .cell_styles
                         .get(index)
                         .and_then(|row| row.get(col))
                         .cloned()
                         .flatten();
-                    cell.command = header == "command";
+                    cell.command = block.command_columns.get(col).copied().unwrap_or(false);
                 }
                 cells
             })
@@ -97,6 +97,7 @@ mod tests {
     #[test]
     fn prepared_table_captures_shared_width_and_markdown_shape_unit() {
         let table = TableBlock {
+            command_columns: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {

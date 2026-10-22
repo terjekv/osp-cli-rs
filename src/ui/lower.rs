@@ -23,7 +23,7 @@ use super::projection::{display_labels, display_path, display_value, ordered_key
 use super::settings::HelpLayout;
 use super::text::display_width;
 use super::visible_inline_text;
-use crate::core::document::{DocBlock, Document};
+use crate::core::document::{DocBlock, Document, DocumentRowRole, EntryRole, SectionRole};
 use crate::core::output::OutputFormat;
 use crate::core::output_model::{
     DisplayRule, Group, OutputDocument, OutputItems, OutputResult, output_items_to_rows,
@@ -66,7 +66,11 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
     {
         let doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
             Some(document) => lower_document(document, plan),
-            None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
+            None => lower_document_rows(
+                output.as_rows().unwrap_or_default(),
+                &output.meta.document_row_roles,
+                plan.format,
+            ),
         };
         return doc;
     }
@@ -76,9 +80,12 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
             .as_rows()
             .unwrap_or_default()
             .iter()
-            .flat_map(|row| {
-                if row.len() == 3
-                    && let Some(description) = row.get("description").and_then(Value::as_str)
+            .enumerate()
+            .flat_map(|(index, row)| {
+                if matches!(
+                    output.meta.document_row_roles.get(index),
+                    Some(DocumentRowRole::Entry(_))
+                ) && let Some(description) = row.get("description").and_then(Value::as_str)
                 {
                     return vec![if description.is_empty() {
                         row.get("name").map(display_value).unwrap_or_default()
@@ -150,7 +157,7 @@ pub(crate) fn lower_document(document: &Document, plan: &RenderPlan) -> Doc {
     }
 }
 
-fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
+fn lower_document_rows(rows: &[Row], roles: &[DocumentRowRole], format: OutputFormat) -> Doc {
     let mut blocks = Vec::new();
     let mut start = 0;
     while start < rows.len() {
@@ -166,12 +173,12 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
                 })
                 .count();
         let mut body = Vec::new();
-        for row in &rows[start..end] {
-            if row.len() == 3
-                && row.contains_key("description")
+        for (index, row) in rows[start..end].iter().enumerate() {
+            if let Some(DocumentRowRole::Entry(role)) = roles.get(start + index)
                 && let Some(name) = row.get("name").and_then(Value::as_str)
             {
                 let entry = EntryRow {
+                    role: *role,
                     key: name.into(),
                     value: row
                         .get("description")
@@ -191,7 +198,7 @@ fn lower_document_rows(rows: &[Row], format: OutputFormat) -> Doc {
                         rows: vec![entry],
                     }));
                 }
-            } else if row.len() == 2
+            } else if roles.get(start + index) == Some(&DocumentRowRole::Text)
                 && let Some(text) = row.get("text").and_then(Value::as_str)
             {
                 body.push(Block::Paragraph(ParagraphBlock {
@@ -253,10 +260,17 @@ fn lower_document_blocks(
     for (index, block) in blocks.iter().enumerate() {
         path.push(index);
         let next = match block {
-            DocBlock::Section { title, blocks, .. } => {
+            DocBlock::Section {
+                title,
+                role,
+                blocks,
+                ..
+            } => {
                 let suffix = match blocks.as_slice() {
                     [DocBlock::Paragraph { text }]
-                        if help.is_some() && title == "Usage" && text.lines().count() == 1 =>
+                        if help.is_some()
+                            && *role == SectionRole::Usage
+                            && text.lines().count() == 1 =>
                     {
                         Some(visible_inline_text(text))
                     }
@@ -269,11 +283,7 @@ fn lower_document_blocks(
                         blocks,
                         layout,
                         true,
-                        long_help
-                            && !matches!(
-                                title.as_str(),
-                                "Common Invocation Options" | "Product options"
-                            ),
+                        long_help && *role != SectionRole::CompactOptions,
                         path,
                     )
                 };
@@ -310,15 +320,19 @@ fn lower_document_blocks(
                 let mut block =
                     entries_block_with_defaults(entries, if inside { 0 } else { 2 }, None);
                 if let Some((plan, _)) = help {
-                    block.inline_markup =
-                        !long_help || !entries.iter().all(|entry| entry.name.starts_with('-'));
+                    block.inline_markup = !long_help
+                        || !entries.iter().all(|entry| {
+                            matches!(entry.role, EntryRole::ShortOption | EntryRole::LongOption)
+                        });
                     let width = entries
                         .iter()
                         .map(|entry| display_width(&entry.name))
                         .max()
                         .unwrap_or(0);
                     for row in &mut block.rows {
-                        if long_help && row.key.starts_with('-') {
+                        if long_help
+                            && matches!(row.role, EntryRole::ShortOption | EntryRole::LongOption)
+                        {
                             row.value = row
                                 .value
                                 .lines()
@@ -326,7 +340,11 @@ fn lower_document_blocks(
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             row.indent_hint =
-                                Some(" ".repeat(if row.key.starts_with("--") { 4 } else { 0 }));
+                                Some(" ".repeat(if row.role == EntryRole::LongOption {
+                                    4
+                                } else {
+                                    0
+                                }));
                             row.gap_hint = Some("\n        ".into());
                         } else {
                             row.gap_hint = plan.document_entry_gap.map(|gap| {
@@ -686,24 +704,6 @@ fn extend_with_blank_between(blocks: &mut Vec<Block>, mut extra: Vec<Block>) {
     blocks.append(&mut extra);
 }
 
-fn payload_entry_value_as_entry(value: &Value) -> Option<crate::core::document::DocumentEntry> {
-    let map = value.as_object()?;
-    if map
-        .keys()
-        .any(|key| !matches!(key.as_str(), "name" | "description"))
-    {
-        return None;
-    }
-    Some(crate::core::document::DocumentEntry {
-        name: map.get("name")?.as_str()?.to_string(),
-        description: map
-            .get("description")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-    })
-}
-
 fn help_layout_blocks_from_value(
     value: &Value,
     indent: usize,
@@ -718,15 +718,7 @@ fn help_layout_blocks_from_value(
         Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
         Value::Array(items) if items.is_empty() => Vec::new(),
         Value::Array(items) => {
-            if let Some(entries) = items
-                .iter()
-                .map(payload_entry_value_as_entry)
-                .collect::<Option<Vec<_>>>()
-            {
-                vec![Block::Entries(entries_block_with_defaults(
-                    &entries, indent, None,
-                ))]
-            } else if items.iter().all(is_scalar_like) {
+            if items.iter().all(is_scalar_like) {
                 vec![Block::List(ListBlock {
                     items: items.iter().map(display_value).collect(),
                     indent,
@@ -936,6 +928,7 @@ fn help_layout_title_chrome(layout: HelpLayout) -> SectionTitleChrome {
 
 fn entry_row(entry: &crate::core::document::DocumentEntry) -> EntryRow {
     EntryRow {
+        role: entry.role,
         key: entry.name.clone(),
         value: entry.description.clone(),
         indent_hint: None,
@@ -961,6 +954,7 @@ fn is_scalar_like(value: &Value) -> bool {
 
 fn table_from_plan(table: &PlannedTable) -> TableBlock {
     TableBlock {
+        command_columns: table.data.command_columns.clone(),
         widths: table.widths.clone(),
         headers: table.data.headers.clone(),
         rows: table.data.rows.clone(),

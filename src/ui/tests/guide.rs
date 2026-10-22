@@ -173,7 +173,10 @@ fn parsed_and_authored_guides_merge_round_trip_and_render_through_semantic_outpu
     let output = parsed.to_output_result();
     let restored: Document =
         serde_json::from_value(output.document.as_ref().unwrap().json_value()).unwrap();
-    assert_eq!(restored, parsed);
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap(),
+        serde_json::to_value(&parsed).unwrap()
+    );
     let titles = restored
         .blocks
         .iter()

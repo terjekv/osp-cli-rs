@@ -24,26 +24,26 @@ DocBlock::section("Commands", vec![DocBlock::Entries { entries: sample_commands(
 
 fn sample_commands() -> Vec<DocumentEntry> {
     vec![
-        DocumentEntry { name: "help".to_string(), description: "Show overview".to_string() },
-        DocumentEntry { name: "config".to_string(), description: "Show config values".to_string() },
-        DocumentEntry { name: "exit".to_string(), description: "Leave shell".to_string() },
+        DocumentEntry { role: Default::default(), name: "help".to_string(), description: "Show overview".to_string() },
+        DocumentEntry { role: Default::default(), name: "config".to_string(), description: "Show config values".to_string() },
+        DocumentEntry { role: Default::default(), name: "exit".to_string(), description: "Leave shell".to_string() },
     ]
 }
 
 fn guide_with_sections() -> Document
 /* result */ {
     Document { blocks: vec![DocBlock::section("Commands", vec![DocBlock::Entries { entries: vec![
-            DocumentEntry { name: "deploy".to_string(), description: "Deploy a VM".to_string() },
-            DocumentEntry { name: "list".to_string(), description: "List all VMs".to_string() },
-            DocumentEntry { name: "delete".to_string(), description: "Delete a VM".to_string() },
+            DocumentEntry { role: Default::default(), name: "deploy".to_string(), description: "Deploy a VM".to_string() },
+            DocumentEntry { role: Default::default(), name: "list".to_string(), description: "List all VMs".to_string() },
+            DocumentEntry { role: Default::default(), name: "delete".to_string(), description: "Delete a VM".to_string() },
         ] }]),
 DocBlock::section("Actions".to_string(), vec![DocBlock::Entries { entries: vec![
-                    DocumentEntry { name: "start".to_string(), description: "Start the VM".to_string() },
-                    DocumentEntry { name: "stop".to_string(), description: "Stop the VM".to_string() },
-                    DocumentEntry { name: "restart".to_string(), description: "Restart the VM".to_string() },
+                    DocumentEntry { role: Default::default(), name: "start".to_string(), description: "Start the VM".to_string() },
+                    DocumentEntry { role: Default::default(), name: "stop".to_string(), description: "Stop the VM".to_string() },
+                    DocumentEntry { role: Default::default(), name: "restart".to_string(), description: "Restart the VM".to_string() },
                 ] }]),
 DocBlock::section("Utilities".to_string(), vec![DocBlock::Entries { entries: vec![
-                    DocumentEntry { name: "version".to_string(), description: "Show version info".to_string() },
-                    DocumentEntry { name: "doctor".to_string(), description: "Run diagnostics".to_string() },
+                    DocumentEntry { role: Default::default(), name: "version".to_string(), description: "Show version info".to_string() },
+                    DocumentEntry { role: Default::default(), name: "doctor".to_string(), description: "Run diagnostics".to_string() },
                 ] }])] }
 }

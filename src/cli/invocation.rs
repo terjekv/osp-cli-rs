@@ -464,11 +464,17 @@ fn invocation_help_entries(level: HelpLevel) -> Vec<DocumentEntry> {
             _ => flag.long.to_string(),
         };
         entries.push(DocumentEntry {
+            role: if flag.short.is_some() {
+                crate::core::document::EntryRole::ShortOption
+            } else {
+                crate::core::document::EntryRole::LongOption
+            },
             name,
             description: flag.help.to_string(),
         });
         if !flag.aliases.is_empty() {
             entries.push(DocumentEntry {
+                role: crate::core::document::EntryRole::LongOption,
                 name: flag
                     .aliases
                     .iter()
@@ -494,7 +500,8 @@ pub(crate) fn invocation_help_view(level: HelpLevel) -> Document {
                 vec![DocBlock::Entries {
                     entries: invocation_help_entries(level),
                 }],
-            ),
+            )
+            .with_role(crate::core::document::SectionRole::CompactOptions),
             DocBlock::Paragraph {
                 text: INVOCATION_HELP_NOTE.to_string(),
             },

@@ -49,6 +49,44 @@ impl HelpLevel {
     }
 }
 
+/// Presentation role of a semantic section; titles never select layout.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SectionRole {
+    /// Ordinary authored content.
+    #[default]
+    Content,
+    /// A command synopsis, eligible for inline help layout.
+    Usage,
+    /// Options kept compact even in long help.
+    CompactOptions,
+}
+
+/// Presentation role of a named entry, supplied by its producer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EntryRole {
+    /// Ordinary named content.
+    #[default]
+    Text,
+    /// An executable command name.
+    Command,
+    /// An option label with a short spelling.
+    ShortOption,
+    /// An option label with only a long spelling.
+    LongOption,
+}
+
+/// Semantic identity of one document row, retained by row-preserving stages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DocumentRowRole {
+    /// Structured data, regardless of field names.
+    #[default]
+    Data,
+    /// Authored paragraph or list text.
+    Text,
+    /// A named entry with its declared presentation role.
+    Entry(EntryRole),
+}
+
 /// A semantic document whose blocks remain in authored order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -65,52 +103,60 @@ impl Document {
 
     /// Projects blocks into canonical rows in document order.
     pub fn rows(&self) -> Vec<crate::core::row::Row> {
-        fn append(blocks: &[DocBlock], section: &str, rows: &mut Vec<crate::core::row::Row>) {
+        self.rows_with_roles().0
+    }
+
+    pub(crate) fn rows_with_roles(&self) -> (Vec<crate::core::row::Row>, Vec<DocumentRowRole>) {
+        fn append(
+            blocks: &[DocBlock],
+            section: &str,
+            rows: &mut Vec<crate::core::row::Row>,
+            roles: &mut Vec<DocumentRowRole>,
+        ) {
             for block in blocks {
                 match block {
-                    DocBlock::Section { title, blocks, .. } => append(blocks, title, rows),
-                    DocBlock::Entries { entries } => rows.extend(entries.iter().map(|entry| {
-                        crate::row! { "section" => section, "name" => entry.name.as_str(),
-                        "description" => entry.description.as_str() }
-                    })),
-                    DocBlock::Paragraph { text } => rows.extend(text.lines().map(|text| {
-                        crate::row! { "section" => section, "text" => text }
-                    })),
+                    DocBlock::Section { title, blocks, .. } => append(blocks, title, rows, roles),
+                    DocBlock::Entries { entries } => {
+                        for entry in entries {
+                            rows.push(crate::row! { "section" => section, "name" => entry.name.as_str(), "description" => entry.description.as_str() });
+                            roles.push(DocumentRowRole::Entry(entry.role));
+                        }
+                    }
+                    DocBlock::Paragraph { text } => {
+                        for text in text.lines() {
+                            rows.push(crate::row! { "section" => section, "text" => text });
+                            roles.push(DocumentRowRole::Text);
+                        }
+                    }
                     DocBlock::List { items } => {
                         for item in items {
                             for text in format!("- {item}").lines() {
                                 rows.push(crate::row! { "section" => section, "text" => text });
+                                roles.push(DocumentRowRole::Text);
                             }
                         }
                     }
                     DocBlock::Data { value } => {
-                        rows.extend(
-                            crate::core::output_model::rows_from_value(value.clone())
-                                .into_iter()
-                                .map(|mut row| {
-                                    // The payload's own `section` field wins.
-                                    row.entry("section")
-                                        .or_insert_with(|| Value::String(section.into()));
-                                    row
-                                }),
-                        );
+                        for mut row in crate::core::output_model::rows_from_value(value.clone()) {
+                            row.entry("section")
+                                .or_insert_with(|| Value::String(section.into()));
+                            rows.push(row);
+                            roles.push(DocumentRowRole::Data);
+                        }
                     }
                 }
             }
         }
-        let mut rows = Vec::new();
-        append(&self.blocks, "", &mut rows);
-        rows
+        let (mut rows, mut roles) = (Vec::new(), Vec::new());
+        append(&self.blocks, "", &mut rows, &mut roles);
+        (rows, roles)
     }
 
     /// Keeps the unstaged document alongside its canonical row projection.
     pub fn to_output_result(&self) -> crate::core::output_model::OutputResult {
-        use crate::core::output_model::{OutputDocument, OutputResult, RenderRecommendation};
-        let mut output = OutputResult::from_rows(self.rows());
-        output.document = Some(OutputDocument::Semantic(self.clone()));
-        output.meta.document_rows = true;
-        output.meta.render_recommendation = Some(RenderRecommendation::Document);
-        output
+        crate::core::output_model::OutputResult::from_rows(Vec::new()).with_document(
+            crate::core::output_model::OutputDocument::Semantic(self.clone()),
+        )
     }
 
     /// Builds help content from a Clap command's declared metadata.
@@ -146,6 +192,7 @@ impl Document {
         let usage = usage.strip_prefix("Usage:").unwrap_or(&usage).trim();
         if !usage.is_empty() {
             blocks.push(DocBlock::Section {
+                role: SectionRole::Usage,
                 title: "Usage".to_string(),
                 level: HelpLevel::Tiny,
                 blocks: vec![DocBlock::Paragraph {
@@ -158,6 +205,7 @@ impl Document {
             .get_subcommands()
             .filter(|subcommand| !subcommand.is_hide_set())
             .map(|subcommand| DocumentEntry {
+                role: EntryRole::Command,
                 name: subcommand.get_name().to_string(),
                 description: command_description(subcommand, false),
             })
@@ -177,6 +225,13 @@ impl Document {
                 })
         }) {
             let entry = DocumentEntry {
+                role: if arg.is_positional() {
+                    EntryRole::Text
+                } else if arg.get_short().is_some() {
+                    EntryRole::ShortOption
+                } else {
+                    EntryRole::LongOption
+                },
                 name: clap_arg_label(arg),
                 description: arg_description(arg, long_help),
             };
@@ -306,7 +361,14 @@ impl Document {
                 entry_indent = Some(indent);
                 description_column = description_start(indent, content, &description);
                 paragraph_break = false;
-                push_help_entry(blocks, DocumentEntry { name, description });
+                push_help_entry(
+                    blocks,
+                    DocumentEntry {
+                        role: EntryRole::Text,
+                        name,
+                        description,
+                    },
+                );
             } else if let Some(base_indent) = entry_indent
                 && indent > base_indent
                 && append_help_continuation(blocks, content, std::mem::take(&mut paragraph_break))
@@ -319,7 +381,14 @@ impl Document {
                 entry_indent = Some(indent);
                 description_column = description_start(indent, content, &description);
                 paragraph_break = false;
-                push_help_entry(blocks, DocumentEntry { name, description });
+                push_help_entry(
+                    blocks,
+                    DocumentEntry {
+                        role: EntryRole::Text,
+                        name,
+                        description,
+                    },
+                );
             } else {
                 entry_indent = None;
                 description_column = None;
@@ -340,11 +409,13 @@ impl Document {
                 .filter_map(|block| match block {
                     DocBlock::Section {
                         title,
+                        role,
                         level: section_level,
                         blocks,
                     } if *section_level != HelpLevel::None && level >= *section_level => {
                         Some(DocBlock::Section {
                             title: title.clone(),
+                            role: *role,
                             level: *section_level,
                             blocks: filter_blocks(blocks, level),
                         })
@@ -363,6 +434,7 @@ impl Document {
 
 fn entries_section(title: &str, entries: Vec<DocumentEntry>) -> DocBlock {
     DocBlock::Section {
+        role: Default::default(),
         title: title.to_string(),
         level: HelpLevel::Normal,
         blocks: vec![DocBlock::Entries { entries }],
@@ -529,10 +601,30 @@ fn push_text_blocks(blocks: &mut Vec<DocBlock>, text: &str) {
 }
 
 fn finish_help_section(blocks: &mut Vec<DocBlock>, section: &mut Option<(String, Vec<DocBlock>)>) {
-    let Some((title, section_blocks)) = section.take() else {
+    let Some((title, mut section_blocks)) = section.take() else {
         return;
     };
+    for block in &mut section_blocks {
+        if let DocBlock::Entries { entries } = block {
+            for entry in entries {
+                entry.role = if title == "Commands" {
+                    EntryRole::Command
+                } else if entry.name.starts_with("--") {
+                    EntryRole::LongOption
+                } else if entry.name.starts_with('-') {
+                    EntryRole::ShortOption
+                } else {
+                    EntryRole::Text
+                };
+            }
+        }
+    }
     blocks.push(DocBlock::Section {
+        role: match title.as_str() {
+            "Usage" => SectionRole::Usage,
+            "Common Invocation Options" | "Product options" => SectionRole::CompactOptions,
+            _ => SectionRole::Content,
+        },
         title: title.clone(),
         level: match title.as_str() {
             "Usage" => HelpLevel::Tiny,
@@ -553,6 +645,9 @@ fn finish_help_section(blocks: &mut Vec<DocBlock>, section: &mut Option<(String,
 pub enum DocBlock {
     /// A titled block group.
     Section {
+        /// Authored presentation role; excluded from canonical data exports.
+        #[serde(skip)]
+        role: SectionRole,
         /// User-facing section title.
         #[serde(rename = "section")]
         title: String,
@@ -588,6 +683,9 @@ pub enum DocBlock {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentEntry {
+    /// Authored presentation role; excluded from canonical data exports.
+    #[serde(skip)]
+    pub role: EntryRole,
     /// Stable entry label.
     pub name: String,
     /// Description paired with the label.
@@ -595,17 +693,24 @@ pub struct DocumentEntry {
 }
 
 impl DocBlock {
+    /// Sets the presentation role of a section without interpreting its title.
+    pub fn with_role(mut self, value: SectionRole) -> Self {
+        if let Self::Section { role, level, .. } = &mut self {
+            *role = value;
+            if value == SectionRole::Usage {
+                *level = HelpLevel::Tiny;
+            }
+        }
+        self
+    }
+
     /// Groups content under a heading, with the conventional help detail level.
     pub fn section(title: impl Into<String>, blocks: Vec<DocBlock>) -> Self {
         let title = title.into();
-        let level = match title.as_str() {
-            "Usage" => HelpLevel::Tiny,
-            "Common Invocation Options" => HelpLevel::Normal,
-            _ => HelpLevel::Normal,
-        };
         Self::Section {
             title,
-            level,
+            role: SectionRole::Content,
+            level: HelpLevel::Normal,
             blocks,
         }
     }
@@ -624,10 +729,12 @@ mod tests {
     fn document_contract_covers_serde_and_help_sources_unit() {
         let document = Document {
             blocks: vec![DocBlock::Section {
+                role: Default::default(),
                 title: "Options".to_string(),
                 level: HelpLevel::Normal,
                 blocks: vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "--json".to_string(),
                         description: "Emit JSON".to_string(),
                     }],

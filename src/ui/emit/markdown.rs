@@ -302,6 +302,7 @@ mod tests {
                         default_indent: "  ".to_string(),
                         default_gap: None,
                         rows: vec![EntryRow {
+                            role: Default::default(),
                             key: "list".to_string(),
                             value: "List history entries".to_string(),
                             indent_hint: None,
@@ -322,6 +323,7 @@ mod tests {
     #[test]
     fn markdown_emitter_handles_empty_and_summary_tables_unit() {
         let empty = TableBlock {
+            command_columns: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: Vec::new(),
@@ -333,6 +335,7 @@ mod tests {
         assert_eq!(emit_table(&empty), "");
 
         let table = TableBlock {
+            command_columns: Vec::new(),
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {

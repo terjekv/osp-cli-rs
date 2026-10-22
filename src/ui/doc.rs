@@ -55,6 +55,7 @@ pub enum SectionTitleChrome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableBlock {
+    pub command_columns: Vec<bool>,
     pub widths: Vec<usize>,
     pub cell_styles: Vec<Vec<Option<String>>>,
     pub summary: Vec<KeyValueRow>,
@@ -79,6 +80,7 @@ pub struct EntriesBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryRow {
+    pub role: crate::core::document::EntryRole,
     pub key: String,
     pub value: String,
     pub indent_hint: Option<String>,

@@ -20,6 +20,7 @@ pub(super) struct HumanProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ProjectedTable {
+    pub command_columns: Vec<bool>,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
     pub column_align: Vec<ColumnAlignment>,
@@ -101,7 +102,7 @@ pub(super) fn project(
         None
     };
     sanitize_output(&mut display);
-    let tables = match &display.items {
+    let mut tables = match &display.items {
         OutputItems::Rows(rows) => vec![project_table(
             rows,
             &display.meta.key_index,
@@ -118,6 +119,36 @@ pub(super) fn project(
             })
             .collect(),
     };
+    let columns = source
+        .meta
+        .display_columns
+        .as_deref()
+        .unwrap_or(&source.meta.key_index);
+    let labels = display_labels(&source, columns);
+    let command_labels = source
+        .meta
+        .display_rules
+        .iter()
+        .filter_map(|rule| {
+            let crate::core::output_model::DisplayRule::Command { field } = rule else {
+                return None;
+            };
+            Some(
+                columns
+                    .iter()
+                    .position(|column| column == field)
+                    .and_then(|index| labels.get(index))
+                    .unwrap_or(field),
+            )
+        })
+        .collect::<Vec<_>>();
+    for table in &mut tables {
+        table.command_columns = table
+            .headers
+            .iter()
+            .map(|header| command_labels.contains(&header))
+            .collect();
+    }
     let records = display
         .as_rows()
         .unwrap_or_default()
@@ -522,6 +553,7 @@ fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResul
     if rows.len() > limit && !record_document {
         total = rows.len();
         limited_rows.truncate(limit);
+        limited.meta.document_row_roles.truncate(limit);
     } else if let [record] = limited_rows.as_mut_slice() {
         fn shorten(value: &mut Value, limit: usize, total: &mut usize) {
             match value {
@@ -592,6 +624,7 @@ pub(super) fn project_table(
     }
     let all_align = normalize_table_alignment(all_headers.len(), column_align);
     ProjectedTable {
+        command_columns: Vec::new(),
         headers: visible_columns
             .iter()
             .map(|index| all_headers[*index].clone())

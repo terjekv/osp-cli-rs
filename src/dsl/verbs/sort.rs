@@ -46,12 +46,18 @@ pub(crate) fn apply_set(
         set.partitions = sort_items(set.partitions, plan, resolve_group_value)?;
         Ok(set)
     } else {
-        set.map_rows(|rows| {
-            sort_items(rows, plan, |row, key| {
-                resolve_first_value(row, &key.key_spec.token, key.key_spec.exact)
-            })
-        })
+        set.map_rows(|rows| apply_rows(rows, plan, |row| row))
     }
+}
+
+pub(crate) fn apply_rows<T>(
+    items: Vec<T>,
+    plan: &SortPlan,
+    row: impl Fn(&T) -> &crate::core::row::Row,
+) -> Result<Vec<T>> {
+    sort_items(items, plan, |item, key| {
+        resolve_first_value(row(item), &key.key_spec.token, key.key_spec.exact)
+    })
 }
 
 #[cfg(test)]

@@ -28,14 +28,6 @@ pub(super) fn emit_doc(doc: &Doc, settings: &ResolvedRenderSettings) -> String {
 }
 
 fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
-    emit_blocks_in_section(blocks, settings, false)
-}
-
-fn emit_blocks_in_section(
-    blocks: &[Block],
-    settings: &ResolvedRenderSettings,
-    commands: bool,
-) -> String {
     let mut out = Vec::new();
     for block in blocks {
         match block {
@@ -48,7 +40,7 @@ fn emit_blocks_in_section(
             Block::Paragraph(block) => out.push(emit_paragraph(block, settings)),
             Block::Section(block) => out.push(emit_section(block, settings)),
             Block::Table(block) => out.push(emit_table(block, settings)),
-            Block::Entries(block) => out.push(emit_entries(block, settings, commands)),
+            Block::Entries(block) => out.push(emit_entries(block, settings)),
             Block::KeyValue(block) => out.push(emit_key_value(block, settings)),
             Block::List(block) => out.push(emit_list(block, settings)),
         }
@@ -77,11 +69,7 @@ fn emit_section(block: &SectionBlock, settings: &ResolvedRenderSettings) -> Stri
     let chrome = section_chrome(block.title_chrome);
     let mut body_settings = settings.clone();
     body_settings.margin += block.body_indent;
-    let body = emit_blocks_in_section(
-        &block.blocks,
-        &body_settings,
-        block.title.as_deref() == Some("Commands"),
-    );
+    let body = emit_blocks(&block.blocks, &body_settings);
     let mut parts = Vec::new();
     if let Some(title) = block.title.as_deref() {
         let mut title_line = style_title_line(
@@ -129,13 +117,12 @@ fn emit_key_value(block: &KeyValueBlock, settings: &ResolvedRenderSettings) -> S
     indent_lines(&rendered, settings.margin)
 }
 
-fn emit_entries(block: &EntriesBlock, settings: &ResolvedRenderSettings, commands: bool) -> String {
+fn emit_entries(block: &EntriesBlock, settings: &ResolvedRenderSettings) -> String {
     emit_prepared_entries(
         &PreparedEntriesBlock::from_block(block).rows,
         settings.margin,
         settings,
         block.inline_markup,
-        commands,
     )
 }
 
@@ -144,11 +131,11 @@ fn emit_prepared_entries(
     margin: usize,
     settings: &ResolvedRenderSettings,
     inline_markup: bool,
-    commands: bool,
 ) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     let names = rows
         .iter()
+        .filter(|row| row.role == crate::core::document::EntryRole::Command)
         .map(|row| row.key.as_str())
         .filter(|name| {
             !settings
@@ -159,7 +146,7 @@ fn emit_prepared_entries(
         .collect::<Vec<_>>();
     rows.iter()
         .map(|row| {
-            let key = if commands
+            let key = if row.role == crate::core::document::EntryRole::Command
                 && settings.color
                 && settings.command_prefixes_enabled
                 && names.contains(&row.key.as_str())

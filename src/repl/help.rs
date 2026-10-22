@@ -218,10 +218,12 @@ mod tests {
                     vec![DocBlock::Entries {
                         entries: vec![
                             DocumentEntry {
+                                role: Default::default(),
                                 name: "list".to_string(),
                                 description: "List history entries".to_string(),
                             },
                             DocumentEntry {
+                                role: Default::default(),
                                 name: "prune".to_string(),
                                 description: "Remove old history entries".to_string(),
                             },

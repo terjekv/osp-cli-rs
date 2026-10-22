@@ -48,10 +48,12 @@ fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
     let document = Document {
         blocks: vec![
             DocBlock::Section {
+                role: Default::default(),
                 title: "Options".to_string(),
                 level: HelpLevel::Normal,
                 blocks: vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "--json".to_string(),
                         description: "Emit JSON".to_string(),
                     }],
@@ -76,20 +78,24 @@ fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
     let document = Document {
         blocks: vec![
             DocBlock::Section {
+                role: Default::default(),
                 title: "First".into(),
                 level: HelpLevel::Normal,
                 blocks: vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "zebra".into(),
                         description: "same".into(),
                     }],
                 }],
             },
             DocBlock::Section {
+                role: Default::default(),
                 title: "Second".into(),
                 level: HelpLevel::Normal,
                 blocks: vec![DocBlock::Entries {
                     entries: vec![DocumentEntry {
+                        role: Default::default(),
                         name: "apple".into(),
                         description: "same".into(),
                     }],
@@ -470,6 +476,7 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
             wants_editor: false,
             grouped: false,
             document_rows: false,
+            document_row_roles: Vec::new(),
             document_entry_gap: None,
             document_literal_commands: Vec::new(),
             document_command_prefixes: false,
@@ -514,6 +521,7 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
             wants_editor: false,
             grouped: false,
             document_rows: false,
+            document_row_roles: Vec::new(),
             document_entry_gap: None,
             document_literal_commands: Vec::new(),
             document_command_prefixes: false,
@@ -862,6 +870,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
             wants_editor: false,
             grouped: true,
             document_rows: false,
+            document_row_roles: Vec::new(),
             document_entry_gap: None,
             document_literal_commands: Vec::new(),
             document_command_prefixes: false,
@@ -972,7 +981,7 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     let Block::Section(shortcuts) = &doc.blocks[4] else {
         panic!("expected shortcuts section");
     };
-    assert!(matches!(shortcuts.blocks[0], Block::Entries(_)));
+    assert!(matches!(shortcuts.blocks[0], Block::Table(_)));
     let Block::Section(matrix) = &doc.blocks[6] else {
         panic!("expected matrix section");
     };
