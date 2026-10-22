@@ -279,6 +279,7 @@ mod document_tests;
 #[cfg(test)]
 mod tests;
 
+pub mod interrupt;
 pub mod picker;
 pub mod prompt;
 

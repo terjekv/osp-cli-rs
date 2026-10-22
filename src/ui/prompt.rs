@@ -30,6 +30,32 @@ impl Drop for PromptOpen {
 /// user text remain intact. Returns zero on EOF, like `Stdin::read_line`.
 pub fn read_line(answer: &mut String) -> io::Result<usize> {
     let mut line = String::new();
+    #[cfg(unix)]
+    if io::stdin().is_terminal() {
+        // Canonical input becomes readable only once a line is complete. Poll
+        // first because std's buffered read retries EINTR indefinitely.
+        let mut fd = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        loop {
+            if super::interrupt::interrupted() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "input interrupted",
+                ));
+            }
+            // SAFETY: fd refers to one initialized pollfd for this call.
+            let ready = unsafe { libc::poll(&mut fd, 1, 50) };
+            if ready > 0 {
+                break;
+            }
+            if ready < 0 && io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return Err(io::Error::last_os_error());
+            }
+        }
+    }
     io::stdin().read_line(&mut line)?;
     let count = line.len();
     let mut rest = line.as_str();
@@ -108,13 +134,18 @@ fn require_interactive() -> io::Result<()> {
 /// Returns `None` on EOF and rejects replay or redirected input.
 pub fn read_text(question: &str) -> io::Result<Option<String>> {
     require_interactive()?;
-    ask_line(question)
+    super::interrupt::prepare()?;
+    match ask_line(question) {
+        Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(None),
+        result => result,
+    }
 }
 
 /// Asks a hidden question without echo or history. EOF and interruption cancel.
 /// Replay and redirected input are rejected before writing the question.
 pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
     require_interactive()?;
+    super::interrupt::prepare()?;
     let _open = PromptOpen::enter();
     match rpassword::prompt_password(super::sanitize_human_text(question)) {
         Ok(answer) => Ok(Some(answer)),
