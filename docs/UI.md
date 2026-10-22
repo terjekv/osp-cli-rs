@@ -54,7 +54,7 @@ When `format=auto`, the current rules are:
 
 - grouped output renders as `table`
 - rows where every row only has a `value` field render as `value`
-- one ordinary row renders as `mreg`
+- zero or one ordinary row renders as `mreg` (value-only rows use `value`)
 - larger row sets render as `table`
 
 An explicit `--mreg` or `--format mreg` always requests cards, including flat
@@ -83,9 +83,12 @@ runs without changing row order. Shape-changing stages return ordinary data.
 `guide` and `--guide` render human documents with the shared document renderer.
 
 Typed document producers declare `SectionRole` and `EntryRole`; row-preserving
-DSL stages carry `DocumentRowRole` alongside rows. English titles, option-like
-entry names, `name`/`description` data fields and columns named `command` never
-select document behavior. Use `DisplayRule::Command` to style a command field.
+DSL stages carry `DocumentRowRole` alongside rows. `Document::from_help_text`
+is the single adapter that parses English help text into roles: it recognizes
+Commands, Usage, Common Invocation Options and Product options sections, and
+option names beginning with `-` or `--`. The renderer itself never infers roles
+from titles, option-like names or `name`/`description` data fields. Columns named
+`command` have no implicit role; use `DisplayRule::Command` to style them.
 Presentation roles are omitted from canonical JSON: decoding that export
 restores content, while typed producers must declare presentation roles again.
 
