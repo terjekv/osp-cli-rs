@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Use title-styled colon headings for compact cards at the effective margin,
+  with fields and wrapped continuations indented four spaces. Include the
+  indent in width planning; inline compact cards and classic cards are unchanged.
+
 - Ignore paging keys when no paginated REPL result exists; typed `next` and
   `prev` retain their guidance.
 
@@ -53,9 +57,6 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Size each compact grid value column from its own rendered values across
   records, with two spaces after labels and three spaces between pairs.
-
-- Indent compact card fields and wrapped continuations two columns under
-  double-rule titles, including the indent in width planning.
 
 - Limit the singleton card override to Table recommendations; other recommended
   formats retain precedence for single records.
@@ -87,7 +88,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Choose eligible automatic table/card layouts by visible values per rendered
   line, keeping tables on ties. Hidden columns alone no longer force cards.
 
-- Use compact ruled cards for multi-row flat MREG results: shared short-field
+- Use compact cards for multi-row flat MREG results: shared short-field
   grids, wrapped long fields and no blank card separators. Single and nested
   records retain the classic layout; title-only records use labelled entries.
 

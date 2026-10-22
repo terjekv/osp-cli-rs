@@ -93,20 +93,34 @@ available width, the planner uses one line per record: `title  label value`
 with three spaces between subsequent pairs. Title, label and value columns
 are sized across all records; the whole list uses this layout or the titled
 layout together. Values use their projected, escaped display widths.
-Otherwise each card uses its first field's value in a styled `── title ──…`
-rule, followed by nonempty fields in producer order, without
-blank separators. Every body line is indented two columns under the title;
-body width budgets include that indent. Records with only a title value after
-omitting empty fields print `Label: value` entries instead.
+Otherwise each card uses its first field's value in a title-styled `value:`
+heading at the effective margin, followed by nonempty fields in producer order,
+without blank separators. Every body line is indented four spaces under the
+heading; body width budgets include that indent. Records with only a title value
+after omitting empty fields print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack
 row-major with one shared column count and label width for the whole result.
 Each grid column sizes its values from their rendered widths across records,
 including projected swatches. Labels and values have a two-space gap; grid
 pairs have a three-space gap. A long field breaks the run, shares the first
-grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
-list geometry; short arrays are comma-joined. Title rules and body geometry use
-the same resolved screen width. Single records and lists containing objects or arrays
+grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar
+arrays use the existing grid list geometry; short arrays are comma-joined.
+Body geometry uses the resolved
+screen width minus the margin and four-space indent. For example, at width 80
+and margin 0:
+
+```text
+engageinternal.uiocloud.no:
+    Comment      Vertkøy til bruk i engagelab/IPED/UV - Terje Kristian Lian
+                 Thoresen <t.k.l.thoresen@uv.uio.no>
+    Nameservers  ns1.nrec.no, ns2.nrec.no
+include.uiocloud.no:
+    Comment      Terje Kristian Lian Thoresen <t.k.l.thoresen@uv.uio.no>
+    Nameservers  ns1.nrec.no, ns2.nrec.no
+```
+
+Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
 separators. Classic card scalar values and scalar lists wrap within the same
 resolved screen budget, including their labels and indentation.

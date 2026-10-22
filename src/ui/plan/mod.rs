@@ -3,7 +3,7 @@
 mod cards;
 mod table;
 
-pub(super) use cards::CompactCard;
+pub(super) use cards::{COMPACT_CARD_BODY_INDENT, CompactCard};
 
 use super::doc::{GridBlock, GridCell};
 use super::emit::grid::PreparedGridList;

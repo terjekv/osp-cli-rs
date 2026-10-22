@@ -14,6 +14,7 @@ use crate::core::row::Row;
 const CARD_GRID_GAP: usize = 3;
 const CARD_FIELD_GAP: usize = 2;
 const SHORT_FIELD_WIDTH_DIVISOR: usize = 2;
+pub(in crate::ui) const COMPACT_CARD_BODY_INDENT: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) enum CompactCard {
@@ -66,6 +67,7 @@ pub(super) fn plan_compact_cards(
     if let Some(cards) = plan_inline_cards(&fields, available) {
         return cards;
     }
+    let available = available.saturating_sub(COMPACT_CARD_BODY_INDENT).max(1);
     let mut longest = BTreeMap::<&str, usize>::new();
     for field in fields.iter().flatten() {
         let width = UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());

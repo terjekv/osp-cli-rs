@@ -15,7 +15,8 @@ use super::doc::{
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::{
-    CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan,
+    COMPACT_CARD_BODY_INDENT, CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable,
+    RecordLayout, RenderPlan,
 };
 use super::projection::{display_value, ordered_keys};
 use super::settings::HelpLayout;
@@ -522,7 +523,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
                     title: Some(title.clone()),
                     title_chrome: SectionTitleChrome::Card,
-                    body_indent: 0,
+                    body_indent: COMPACT_CARD_BODY_INDENT,
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: body.iter().cloned().map(Block::Grid).collect(),
