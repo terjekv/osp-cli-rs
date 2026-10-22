@@ -153,9 +153,11 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
     let _phase = tracing::info_span!(target: "osp_startup", "REPL intro rendering").entered();
     let intro_style = intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
+    let decoration = intro_decoration(view);
     let mut rendered = render(
         &repl_document_output(&guide),
         &crate::ui::RenderRequest {
+            leading_decoration: Some(&decoration),
             layout: Some(crate::ui::help_layout_from_config(view.config)),
             ..crate::ui::RenderRequest::new(&view.ui.render_settings)
         },
@@ -165,6 +167,18 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
         rendered.push('\n');
     }
     rendered
+}
+
+pub(crate) fn intro_decoration(view: ReplViewContext<'_>) -> Vec<String> {
+    if matches!(
+        intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity),
+        ReplIntroStyle::Compact | ReplIntroStyle::Full
+    ) && let Some(render) = view.intro_decoration
+    {
+        render(&view.ui.render_settings.resolve_render_settings())
+    } else {
+        Vec::new()
+    }
 }
 
 pub(crate) fn repl_document_output(document: &Document) -> crate::core::output_model::OutputResult {

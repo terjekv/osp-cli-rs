@@ -66,6 +66,7 @@ pub(crate) struct CommandOutput {
     pub(crate) progress_replace: bool,
     /// Native display supplements, suppressed when the source is selected.
     pub(crate) display_details: String,
+    pub(crate) intro_decoration: Option<Vec<String>>,
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
@@ -86,6 +87,7 @@ impl CommandOutput {
             format_hint: None,
             progress_replace: false,
             display_details: String::new(),
+            intro_decoration: None,
             stderr_text: String::new(),
             failure_report: None,
             hint_command: None,
@@ -278,6 +280,7 @@ impl CommandOutput {
             &output,
             &RenderRequest {
                 target,
+                leading_decoration: self.intro_decoration.as_deref(),
                 layout: Some(crate::ui::help_layout_from_config(config)),
                 ..RenderRequest::new(&effective)
             },
