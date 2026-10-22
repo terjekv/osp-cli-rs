@@ -32,8 +32,6 @@
 //! - one emitter family renders terminal or markdown output
 //! - sidecar subsystems such as messages live in their own folders
 
-use std::borrow::Cow;
-
 pub(crate) mod clipboard;
 pub(crate) mod messages;
 pub(crate) mod section_chrome;
@@ -46,6 +44,7 @@ mod doc;
 mod emit;
 mod lower;
 mod plan;
+mod projection;
 pub(crate) mod settings;
 mod text;
 
@@ -194,8 +193,9 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
         OutputFormat::Json => return emit::json::emit_value(&json_value(output), &plan.settings),
         _ => {}
     }
-    let output = prepare_output_for_sink(output, request.settings, request.profile);
-    let mut doc = if matches!(
+    let projection = projection::project(output, plan.format, request.settings, request.profile);
+    let output = &projection.output;
+    let doc = if matches!(
         plan.format,
         OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
     ) && let Some(layout) = request.layout
@@ -211,7 +211,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
                 .iter_mut()
                 .find(|block| matches!(block, DocBlock::Section { .. }))
         {
-            *title = format!("{prefix} · {title}");
+            *title = format!("{} · {title}", sanitize_human_text(prefix));
         }
         if plan.format == OutputFormat::Markdown {
             lower::lower_document(&document, plan.format)
@@ -226,16 +226,15 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
             )
         }
     } else {
-        lower::lower_output(&output, &plan)
+        lower::lower_output(&projection, &plan)
     };
-    lower::sanitize_doc(&mut doc);
     let text = emit::emit_doc(&doc, plan.format, &plan.settings);
     if plan.settings.backend == RenderBackend::Rich
         && request.settings.runtime.stdout_is_tty
         && request.profile == RenderProfile::Normal
         && !matches!(plan.format, OutputFormat::Json | OutputFormat::Markdown)
     {
-        return link_urls(text, &output);
+        return link_urls(text, output);
     }
     text
 }
@@ -247,7 +246,7 @@ fn link_urls(text: String, output: &OutputResult) -> String {
         for rule in &output.meta.display_rules {
             if let DisplayRule::Hyperlink { field } = rule
                 && let Some(url) =
-                    lower::display_path(&row, field).and_then(serde_json::Value::as_str)
+                    projection::display_path(&row, field).and_then(serde_json::Value::as_str)
                 && (url.starts_with("https://") || url.starts_with("http://"))
                 && !url.chars().any(char::is_control)
             {
@@ -268,22 +267,6 @@ fn link_urls(text: String, output: &OutputResult) -> String {
     }
     rendered.push_str(remaining);
     rendered
-}
-
-fn prepare_output_for_sink<'a>(
-    output: &'a OutputResult,
-    settings: &RenderSettings,
-    profile: RenderProfile,
-) -> Cow<'a, OutputResult> {
-    if output.meta.display_limit.is_some()
-        && (!settings.runtime.stdout_is_tty || profile == RenderProfile::CopySafe)
-    {
-        let mut unlimited = output.clone();
-        unlimited.meta.display_limit = None;
-        Cow::Owned(unlimited)
-    } else {
-        Cow::Borrowed(output)
-    }
 }
 
 pub(crate) fn copy_output_to_clipboard(

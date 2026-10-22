@@ -551,16 +551,11 @@ fn app_host_keeps_orch_documents_pipeable_while_rendering_curated_rows() {
         .expect("human value output should retain columns omitted by a narrow table"),
         0,
     );
-    let local_created_at = chrono::DateTime::parse_from_rfc3339("2023-11-14T22:13:20+00:00")
-        .unwrap()
-        .with_timezone(&chrono::Local)
-        .format("%Y-%m-%d %H:%M:%S %:z")
-        .to_string();
     assert!(
         values
             .stdout
             .lines()
-            .any(|line| line.trim() == local_created_at),
+            .any(|line| line.trim() == "1700000000"),
         "{}",
         values.stdout,
     );

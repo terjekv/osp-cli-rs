@@ -12,8 +12,6 @@
 //! - emitters later decide spacing, borders, markdown markers, and terminal
 //!   chrome
 
-use std::collections::BTreeSet;
-
 use serde_json::{Map, Value};
 
 use super::doc::{
@@ -21,8 +19,9 @@ use super::doc::{
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::RenderPlan;
+use super::projection::{display_labels, display_path, display_value, ordered_keys};
 use super::settings::HelpLayout;
-use super::text::{display_width, sanitize_human_text};
+use super::text::display_width;
 use super::visible_inline_text;
 use crate::core::document::{DocBlock, Document};
 use crate::core::output::OutputFormat;
@@ -32,7 +31,8 @@ use crate::core::output_model::{
 };
 use crate::core::row::Row;
 
-pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
+pub fn lower_output(projection: &super::projection::HumanProjection, plan: &RenderPlan) -> Doc {
+    let output = &projection.output;
     let is_empty = match &output.items {
         OutputItems::Rows(rows) => rows.is_empty() || rows.iter().all(Row::is_empty),
         OutputItems::Groups(groups) => groups.is_empty(),
@@ -59,32 +59,16 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         };
     }
 
-    // Display limits shorten only what a person reads; JSON keeps every row.
-    let limited;
-    let (output, shortened) = match output.meta.display_limit {
-        Some(limit) if plan.format != OutputFormat::Json => {
-            match limit_for_display(output, limit) {
-                Some((result, total)) => {
-                    limited = result;
-                    (&limited, Some((limit, total)))
-                }
-                None => (output, None),
-            }
-        }
-        _ => (output, None),
-    };
-
     if output.meta.document_rows
         && matches!(
             plan.format,
             OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
         )
     {
-        let mut doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
+        let doc = match output.document.as_ref().and_then(OutputDocument::semantic) {
             Some(document) => lower_document(document, plan.format),
             None => lower_document_rows(output.as_rows().unwrap_or_default(), plan.format),
         };
-        sanitize_doc(&mut doc);
         return doc;
     }
 
@@ -112,30 +96,15 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
                     .collect()
             })
             .collect();
-        let mut doc = Doc {
+        let doc = Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
                 text: items.join("\n"),
                 indent: 0,
                 inline_markup: false,
             })],
         };
-        sanitize_doc(&mut doc);
         return doc;
     }
-
-    // Human projection is deliberately downstream of filtering and JSON output.
-    let style_source = output;
-    let display;
-    let output = if plan.format != OutputFormat::Json
-        && (output.meta.display_columns.is_some()
-            || !output.meta.unix_timestamp_columns.is_empty()
-            || !output.meta.display_rules.is_empty())
-    {
-        display = display_output(output);
-        &display
-    } else {
-        output
-    };
 
     let mut doc = match plan.format {
         OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output),
@@ -147,23 +116,20 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
         }
     };
     if plan.settings.color && plan.format != OutputFormat::Json {
-        apply_value_styles(&mut doc.blocks, style_source);
-        apply_warning_styles(&mut doc.blocks, style_source, &plan.settings);
-    }
-    if plan.format != OutputFormat::Json {
-        sanitize_doc(&mut doc);
+        apply_value_styles(&mut doc.blocks, &projection.source);
+        apply_warning_styles(&mut doc.blocks, &projection.source, &plan.settings);
     }
     if plan.format != OutputFormat::Json {
         doc.blocks
             .extend(output.meta.display_notes.iter().map(|text| {
                 Block::Paragraph(ParagraphBlock {
-                    text: sanitize_human_text(text),
+                    text: text.clone(),
                     indent: 0,
                     inline_markup: false,
                 })
             }));
     }
-    if let Some((shown, total)) = shortened {
+    if let Some((shown, total)) = projection.shortened {
         doc.blocks.push(Block::Paragraph(ParagraphBlock {
             text: format!("Showing {shown} of {total} rows. Pipes and --json see every row."),
             indent: 0,
@@ -399,69 +365,6 @@ fn lower_document_blocks(
     lowered
 }
 
-pub(crate) fn sanitize_doc(doc: &mut Doc) {
-    sanitize_blocks(&mut doc.blocks);
-}
-
-fn sanitize_blocks(blocks: &mut [Block]) {
-    for block in blocks {
-        match block {
-            Block::Blank | Block::Rule => {}
-            Block::Paragraph(paragraph) => {
-                paragraph.text = sanitize_human_text(&paragraph.text);
-            }
-            Block::Section(section) => {
-                if let Some(title) = &mut section.title {
-                    *title = sanitize_human_text(title);
-                }
-                if let Some(suffix) = &mut section.inline_title_suffix {
-                    *suffix = sanitize_human_text(suffix);
-                }
-                sanitize_blocks(&mut section.blocks);
-            }
-            Block::Table(table) => {
-                for row in &mut table.summary {
-                    sanitize_key_value_row(row);
-                }
-                for header in &mut table.headers {
-                    *header = sanitize_human_text(header);
-                }
-                for row in &mut table.rows {
-                    for cell in row {
-                        *cell = sanitize_human_text(cell);
-                    }
-                }
-            }
-            Block::Entries(entries) => {
-                entries.default_indent = sanitize_human_text(&entries.default_indent);
-                if let Some(gap) = &mut entries.default_gap {
-                    *gap = sanitize_human_text(gap);
-                }
-                for row in &mut entries.rows {
-                    row.key = sanitize_human_text(&row.key);
-                    row.value = sanitize_human_text(&row.value);
-                    if let Some(indent) = &mut row.indent_hint {
-                        *indent = sanitize_human_text(indent);
-                    }
-                    if let Some(gap) = &mut row.gap_hint {
-                        *gap = sanitize_human_text(gap);
-                    }
-                }
-            }
-            Block::KeyValue(key_value) => {
-                for row in &mut key_value.rows {
-                    sanitize_key_value_row(row);
-                }
-            }
-            Block::List(list) => {
-                for item in &mut list.items {
-                    *item = sanitize_human_text(item);
-                }
-            }
-        }
-    }
-}
-
 /// `key (N):` for several rows; a single row needs no count.
 fn section_title(key: &str, count: usize) -> String {
     if count == 1 {
@@ -469,260 +372,6 @@ fn section_title(key: &str, count: usize) -> String {
     } else {
         format!("{key} ({count}):")
     }
-}
-
-fn sanitize_key_value_row(row: &mut KeyValueRow) {
-    row.key = sanitize_human_text(&row.key);
-    if let Some(indent) = &mut row.indent {
-        *indent = sanitize_human_text(indent);
-    }
-    if let Some(gap) = &mut row.gap {
-        *gap = sanitize_human_text(gap);
-    }
-    sanitize_key_value(&mut row.value);
-}
-
-fn sanitize_key_value(value: &mut KeyValueValue) {
-    match value {
-        KeyValueValue::Empty => {}
-        KeyValueValue::Scalar(value) => *value = sanitize_human_text(value),
-        KeyValueValue::Array(values) => {
-            for value in values {
-                sanitize_key_value(value);
-            }
-        }
-        KeyValueValue::Object(rows) => {
-            for row in rows {
-                sanitize_key_value_row(row);
-            }
-        }
-    }
-}
-
-/// Keep a base-2^128 carry so even a full IPv6 range has an exact human total.
-fn address_range_total(ranges: &Value, start: &str, end: &str) -> Option<String> {
-    use std::net::IpAddr;
-    let (mut high, mut low) = (0u128, 0u128);
-    for range in ranges.as_array()? {
-        let first = display_path(range, start)?
-            .as_str()?
-            .parse::<IpAddr>()
-            .ok()?;
-        let last = display_path(range, end)?.as_str()?.parse::<IpAddr>().ok()?;
-        let (first, last) = match (first, last) {
-            (IpAddr::V4(first), IpAddr::V4(last)) => {
-                (u128::from(u32::from(first)), u128::from(u32::from(last)))
-            }
-            (IpAddr::V6(first), IpAddr::V6(last)) => (u128::from(first), u128::from(last)),
-            _ => return None,
-        };
-        let (sum, carry) = low.overflowing_add(last.checked_sub(first)?);
-        let (sum, inclusive_carry) = sum.overflowing_add(1);
-        high = high.checked_add(u128::from(carry) + u128::from(inclusive_carry))?;
-        low = sum;
-    }
-    Some(match (high, low) {
-        (0, count) => count.to_string(),
-        (1, 0) => "2^128".into(),
-        (1, count) => format!("2^128 + {count}"),
-        (multiple, 0) => format!("{multiple} × 2^128"),
-        (multiple, count) => format!("{multiple} × 2^128 + {count}"),
-    })
-}
-
-fn display_output(output: &OutputResult) -> OutputResult {
-    let mut display = output.clone();
-    if let OutputItems::Rows(rows) = &mut display.items {
-        for row in rows.iter_mut() {
-            let mut original = Value::Object(std::mem::take(row));
-            let raw = original.clone();
-            for rule in &output.meta.display_rules {
-                use crate::core::output_model::DisplayRule;
-                match rule {
-                    DisplayRule::AddressRangeTotal {
-                        ranges,
-                        start,
-                        end,
-                        field,
-                    } => {
-                        if let Some(total) = display_path(&raw, ranges)
-                            .and_then(|ranges| address_range_total(ranges, start, end))
-                            && let Some(map) = original.as_object_mut()
-                        {
-                            map.insert(field.clone(), Value::String(total));
-                        }
-                    }
-                    DisplayRule::AddressCountRemaining {
-                        network,
-                        used,
-                        field,
-                    } => {
-                        if let Some(text) = display_path(&raw, network).and_then(Value::as_str)
-                            && let Some((address, prefix)) = text.split_once('/')
-                            && let Ok(address) = address.parse::<std::net::IpAddr>()
-                            && let Ok(prefix) = prefix.parse::<u32>()
-                            && let Some(bits) =
-                                (if address.is_ipv4() { 32u32 } else { 128 }).checked_sub(prefix)
-                            && let Some(used) = display_path(&raw, used).and_then(Value::as_u64)
-                            && let Some(map) = original.as_object_mut()
-                        {
-                            let remaining = if bits > 64 {
-                                Some(format!("2^{bits} − {used}"))
-                            } else {
-                                (1u128 << bits)
-                                    .checked_sub(u128::from(used))
-                                    .map(|count| count.to_string())
-                            };
-                            if let Some(remaining) = remaining {
-                                map.insert(field.clone(), Value::String(remaining));
-                            }
-                        }
-                    }
-                    DisplayRule::NullText { field, text } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && value.is_null()
-                        {
-                            *value = Value::String(text.clone());
-                        }
-                    }
-                    DisplayRule::Date { field, pattern } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && let Some(text) = value.as_str()
-                            && let Some(formatted) = format_date(text, pattern)
-                        {
-                            *value = Value::String(formatted);
-                        }
-                    }
-                    DisplayRule::Decimal { field, precision } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && let Some(number) = value.as_f64()
-                        {
-                            *value =
-                                Value::String(format!("{:.*}", (*precision).min(4096), number));
-                        }
-                    }
-                    DisplayRule::TextLimit { field, length } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && !value.is_null()
-                        {
-                            *value =
-                                Value::String(display_value(value).chars().take(*length).collect());
-                        }
-                    }
-                    DisplayRule::Compose { field, parts } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && (value.is_object() || value.is_array())
-                        {
-                            use crate::core::output_model::DisplayPart;
-                            let text: Option<String> = parts
-                                .iter()
-                                .map(|part| match part {
-                                    DisplayPart::Literal { text } => Some(text.clone()),
-                                    DisplayPart::Field { field } => {
-                                        display_path(value, field).map(display_value)
-                                    }
-                                })
-                                .collect();
-                            if let Some(text) = text {
-                                *value = Value::String(text);
-                            }
-                        }
-                    }
-                    DisplayRule::HideArrayItemsWhenTrue { field, when } => {
-                        if let Some(Value::Array(items)) = display_path_mut(&mut original, field) {
-                            items.retain(|item| {
-                                display_path(item, when).and_then(Value::as_bool) != Some(true)
-                            });
-                        }
-                    }
-                    DisplayRule::SuffixWhenTrue {
-                        field,
-                        when,
-                        suffix,
-                    } if display_path(&raw, when).and_then(Value::as_bool) == Some(true) => {
-                        if let Some(Value::String(text)) = display_path_mut(&mut original, field) {
-                            text.push_str(suffix);
-                        }
-                    }
-                    DisplayRule::BlankWhenPresent { field, when }
-                        if display_path(&raw, when).is_some_and(|value| !value.is_null()) =>
-                    {
-                        if let Some(value) = display_path_mut(&mut original, field) {
-                            *value = Value::Null;
-                        }
-                    }
-                    DisplayRule::Bytes { field } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && let Some(bytes) = value.as_u64()
-                        {
-                            *value = Value::String(super::format_binary_bytes(bytes));
-                        }
-                    }
-                    DisplayRule::RelativeTimestamp { field } => {
-                        if let Some(value) = display_path_mut(&mut original, field) {
-                            let formatted = match value {
-                                Value::String(text) => super::format_relative_timestamp(text),
-                                Value::Number(number) => {
-                                    number.as_i64().map(super::format_relative_unix_timestamp)
-                                }
-                                _ => None,
-                            };
-                            if let Some(formatted) = formatted {
-                                *value = Value::String(formatted);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            for path in &output.meta.unix_timestamp_columns {
-                if let Some(value) = display_path_mut(&mut original, path)
-                    && let Some(seconds) = value.as_i64()
-                    && let Some(time) = super::format_local_unix_timestamp(seconds)
-                {
-                    *value = Value::String(time);
-                }
-            }
-            *row = if let Some(columns) = &output.meta.display_columns {
-                let labels = display_labels(output, columns);
-                columns
-                    .iter()
-                    .enumerate()
-                    .map(|(index, path)| {
-                        let value = display_path(&original, path);
-                        let label = &labels[index];
-                        (label.clone(), value.cloned().unwrap_or(Value::Null))
-                    })
-                    .collect()
-            } else {
-                original.as_object().cloned().unwrap_or_default()
-            };
-        }
-        if let Some(columns) = &output.meta.display_columns {
-            display.meta.key_index = display_labels(output, columns);
-        }
-    }
-    display
-}
-
-fn format_date(text: &str, pattern: &str) -> Option<String> {
-    use chrono::{NaiveDate, NaiveDateTime};
-    let date = NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S")
-        .ok()
-        .or_else(|| {
-            chrono::DateTime::parse_from_rfc3339(text)
-                .ok()
-                .map(|date| date.naive_local())
-        })
-        .or_else(|| {
-            NaiveDate::parse_from_str(text, "%Y-%m-%d")
-                .ok()?
-                .and_hms_opt(0, 0, 0)
-        })?;
-    let mut result = String::new();
-    use std::fmt::Write;
-    write!(&mut result, "{}", date.format(pattern)).ok()?;
-    Some(result)
 }
 
 fn apply_warning_styles(
@@ -828,55 +477,6 @@ fn apply_value_styles(blocks: &mut [Block], output: &OutputResult) {
     }
 }
 
-fn display_labels(output: &OutputResult, columns: &[String]) -> Vec<String> {
-    let labels = output
-        .meta
-        .display_column_labels
-        .as_deref()
-        .filter(|labels| labels.len() == columns.len())
-        .unwrap_or(columns);
-    let mut used = BTreeSet::new();
-    labels
-        .iter()
-        .zip(columns)
-        .map(|(label, path)| {
-            let mut heading = if labels.iter().filter(|other| *other == label).count() > 1 {
-                format!("{label} ({path})")
-            } else {
-                label.clone()
-            };
-            let base = heading.clone();
-            let mut count = 2;
-            while !used.insert(heading.clone()) {
-                heading = format!("{base} ({count})");
-                count += 1;
-            }
-            heading
-        })
-        .collect()
-}
-
-pub(super) fn display_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    value.get(path).or_else(|| {
-        if path.starts_with('/') {
-            value.pointer(path)
-        } else {
-            path.split('.').try_fold(value, |value, key| value.get(key))
-        }
-    })
-}
-
-fn display_path_mut<'a>(value: &'a mut Value, path: &str) -> Option<&'a mut Value> {
-    if value.get(path).is_some() {
-        value.get_mut(path)
-    } else if path.starts_with('/') {
-        value.pointer_mut(path)
-    } else {
-        path.split('.')
-            .try_fold(value, |value, key| value.get_mut(key))
-    }
-}
-
 fn lower_value_doc(output: &OutputResult) -> Doc {
     let values = output_items_to_rows(&output.items)
         .iter()
@@ -918,66 +518,6 @@ pub(crate) fn lower_document_help_layout(
     Doc { blocks }
 }
 
-/// Shortens a long row set, or the long lists inside a one-record document,
-/// to `limit` entries. Returns the shortened result and the longest original
-/// length, or `None` when nothing exceeds the limit.
-fn limit_for_display(output: &OutputResult, limit: usize) -> Option<(OutputResult, usize)> {
-    let OutputItems::Rows(rows) = &output.items else {
-        return None;
-    };
-    let mut limited = output.clone();
-    let OutputItems::Rows(limited_rows) = &mut limited.items else {
-        return None;
-    };
-    let mut total = 0;
-    let record_document = rows.len() == 1
-        && matches!(
-            output.document,
-            Some(OutputDocument::Json(Value::Object(_)))
-        );
-    if rows.len() > limit && !record_document {
-        total = rows.len();
-        limited_rows.truncate(limit);
-    } else if let [record] = limited_rows.as_mut_slice() {
-        fn shorten(value: &mut Value, limit: usize, total: &mut usize) {
-            match value {
-                Value::Array(items) => {
-                    if items.len() > limit {
-                        *total = (*total).max(items.len());
-                        items.truncate(limit);
-                    }
-                    for item in items {
-                        shorten(item, limit, total);
-                    }
-                }
-                Value::Object(fields) => {
-                    for value in fields.values_mut() {
-                        shorten(value, limit, total);
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let Some(columns) = &output.meta.display_columns {
-            // Hidden sections must not contribute to the visible row count.
-            let mut value = Value::Object(std::mem::take(record));
-            for column in columns {
-                if let Some(value) = display_path_mut(&mut value, column) {
-                    shorten(value, limit, &mut total);
-                }
-            }
-            if let Value::Object(fields) = value {
-                *record = fields;
-            }
-        } else {
-            for value in record.values_mut() {
-                shorten(value, limit, &mut total);
-            }
-        }
-    }
-    (total > 0).then_some((limited, total))
-}
-
 pub(crate) fn json_value(output: &OutputResult) -> Value {
     let data = if let Some(document) = &output.document
         && (output.meta.document_rows || matches!(document, OutputDocument::Json(_)))
@@ -1004,10 +544,12 @@ fn lower_table_doc(output: &OutputResult) -> Doc {
     match &output.items {
         OutputItems::Rows(rows) if rows.is_empty() => Doc::default(),
         OutputItems::Rows(rows) => Doc {
-            blocks: vec![Block::Table(table_from_rows(
-                rows,
-                &output.meta.key_index,
-                &output.meta.column_align,
+            blocks: vec![Block::Table(table_from_projection(
+                super::projection::project_table(
+                    rows,
+                    &output.meta.key_index,
+                    &output.meta.column_align,
+                ),
             ))],
         },
         OutputItems::Groups(groups) => {
@@ -1116,17 +658,6 @@ fn lower_value_blocks(value: &Value) -> Vec<Block> {
         }
         Value::Object(map) => vec![Block::KeyValue(key_value_from_map(map, &[]))],
     }
-}
-
-fn ordered_keys<'a>(
-    preferred_keys: &'a [String],
-    keys: impl IntoIterator<Item = &'a String>,
-) -> impl Iterator<Item = &'a String> {
-    let mut seen = BTreeSet::new();
-    preferred_keys
-        .iter()
-        .chain(keys)
-        .filter(move |key| seen.insert(*key))
 }
 
 fn row_value_displays(row: &Row, key_order: &[String]) -> Vec<String> {
@@ -1353,59 +884,6 @@ fn row_has_nested_values(row: &Row) -> bool {
         .any(|value| matches!(value, Value::Array(_) | Value::Object(_)))
 }
 
-fn table_from_rows(
-    rows: &[Row],
-    key_index: &[String],
-    column_align: &[ColumnAlignment],
-) -> TableBlock {
-    let all_headers = headers_for_rows(rows, key_index);
-    let all_rows = rows
-        .iter()
-        .map(|row| {
-            all_headers
-                .iter()
-                .map(|header| row.get(header).map(display_value).unwrap_or_default())
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let mut visible_columns = (0..all_headers.len())
-        .filter(|index| {
-            all_rows.is_empty()
-                || all_rows.iter().any(|row| {
-                    row.get(*index)
-                        .is_some_and(|value| !value.trim().is_empty())
-                })
-        })
-        .collect::<Vec<_>>();
-    if visible_columns.is_empty() && !all_headers.is_empty() {
-        // A nonempty row still represents a result even when every value is blank.
-        visible_columns.push(0);
-    }
-    let all_align = normalize_table_alignment(all_headers.len(), column_align);
-    TableBlock {
-        cell_styles: Vec::new(),
-        summary: Vec::new(),
-        headers: visible_columns
-            .iter()
-            .map(|index| all_headers[*index].clone())
-            .collect(),
-        rows: all_rows
-            .into_iter()
-            .map(|row| {
-                visible_columns
-                    .iter()
-                    .map(|index| row[*index].clone())
-                    .collect()
-            })
-            .collect(),
-        column_align: visible_columns
-            .iter()
-            .map(|index| all_align[*index])
-            .collect(),
-        nested: false,
-    }
-}
-
 fn table_from_group(
     group: &Group,
     preferred_keys: &[String],
@@ -1427,15 +905,13 @@ fn table_from_group(
             });
         }
     }
-    let mut table = table_from_rows(&merged_rows, preferred_keys, column_align);
+    let mut table = table_from_projection(super::projection::project_table(
+        &merged_rows,
+        preferred_keys,
+        column_align,
+    ));
     table.summary = summary;
     table
-}
-
-fn headers_for_rows(rows: &[Row], preferred_keys: &[String]) -> Vec<String> {
-    ordered_keys(preferred_keys, rows.iter().flat_map(Row::keys))
-        .cloned()
-        .collect()
 }
 
 fn table_from_value_array(items: &[Value]) -> Option<TableBlock> {
@@ -1446,7 +922,11 @@ fn table_from_value_array(items: &[Value]) -> Option<TableBlock> {
         };
         rows.push(map.clone());
     }
-    Some(table_from_rows(&rows, &[], &[]))
+    Some(table_from_projection(super::projection::project_table(
+        &rows,
+        &[],
+        &[],
+    )))
 }
 
 fn table_from_nonempty_object_array(items: &[Value]) -> Option<TableBlock> {
@@ -1455,32 +935,6 @@ fn table_from_nonempty_object_array(items: &[Value]) -> Option<TableBlock> {
     }
     let table = table_from_value_array(items)?;
     (table.headers.len() <= 8).then_some(table)
-}
-
-fn normalize_table_alignment(
-    header_count: usize,
-    column_align: &[ColumnAlignment],
-) -> Vec<ColumnAlignment> {
-    let mut normalized = vec![ColumnAlignment::Default; header_count];
-    for (index, alignment) in column_align.iter().copied().enumerate().take(header_count) {
-        normalized[index] = alignment;
-    }
-    normalized
-}
-
-fn display_value(value: &Value) -> String {
-    match value {
-        Value::Null => String::new(),
-        Value::Bool(flag) => flag.to_string(),
-        Value::Number(number) => number.to_string(),
-        Value::String(text) => super::format_local_timestamp(text).unwrap_or_else(|| text.clone()),
-        Value::Array(items) => items
-            .iter()
-            .map(display_value)
-            .collect::<Vec<_>>()
-            .join(", "),
-        Value::Object(_) => serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
-    }
 }
 
 fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> KeyValueBlock {
@@ -1541,4 +995,15 @@ fn is_scalar_like(value: &Value) -> bool {
         value,
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
     )
+}
+
+fn table_from_projection(table: super::projection::ProjectedTable) -> TableBlock {
+    TableBlock {
+        headers: table.headers,
+        rows: table.rows,
+        column_align: table.column_align,
+        cell_styles: Vec::new(),
+        summary: Vec::new(),
+        nested: false,
+    }
 }

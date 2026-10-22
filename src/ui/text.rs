@@ -237,6 +237,23 @@ fn split_display_width(raw: &str, width: usize) -> Vec<String> {
     parts
 }
 
+pub(super) fn escape_table_line_breaks(raw: &str) -> String {
+    raw.replace("\r\n", "\\n")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
+pub(super) fn table_cell_width(raw: &str, overflow: super::settings::TableOverflow) -> usize {
+    if overflow == super::settings::TableOverflow::Wrap {
+        raw.split('\n')
+            .map(UnicodeWidthStr::width)
+            .max()
+            .unwrap_or(0)
+    } else {
+        UnicodeWidthStr::width(escape_table_line_breaks(raw).as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{crop_display_width, display_width, visible_inline_text, wrap_display_width};

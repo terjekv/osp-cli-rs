@@ -22,8 +22,29 @@ pub(super) struct PreparedCell {
 }
 
 impl PreparedTable {
-    pub(super) fn for_terminal(block: &TableBlock) -> Self {
-        Self::prepare(block, 0)
+    pub(super) fn for_terminal(block: &TableBlock, overflow: crate::ui::TableOverflow) -> Self {
+        let mut table = Self::prepare(block, 0);
+        for cell in table
+            .headers
+            .iter_mut()
+            .chain(table.rows.iter_mut().flatten())
+        {
+            cell.width = crate::ui::text::table_cell_width(&cell.raw, overflow);
+        }
+        table.widths = table
+            .headers
+            .iter()
+            .enumerate()
+            .map(|(index, header)| {
+                table
+                    .rows
+                    .iter()
+                    .filter_map(|row| row.get(index))
+                    .map(|cell| cell.width)
+                    .fold(header.width, usize::max)
+            })
+            .collect();
+        table
     }
 
     pub(super) fn for_markdown(block: &TableBlock) -> Self {

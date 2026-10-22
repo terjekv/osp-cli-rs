@@ -771,7 +771,15 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
         &RenderSettings::test_plain(OutputFormat::Auto),
         RenderProfile::Normal,
     );
-    let guide_doc = super::lower::lower_output(&output, &guide_plan);
+    let guide_doc = super::lower::lower_output(
+        &super::projection::project(
+            &output,
+            guide_plan.format,
+            &RenderSettings::test_plain(OutputFormat::Auto),
+            RenderProfile::Normal,
+        ),
+        &guide_plan,
+    );
     let Block::Section(guide_section) = &guide_doc.blocks[0] else {
         panic!("expected direct guide section");
     };
@@ -787,7 +795,15 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
     let markdown_plan = plan_output(&output, &markdown_settings, RenderProfile::Normal);
-    let markdown_doc = super::lower::lower_output(&output, &markdown_plan);
+    let markdown_doc = super::lower::lower_output(
+        &super::projection::project(
+            &output,
+            markdown_plan.format,
+            &markdown_settings,
+            RenderProfile::Normal,
+        ),
+        &markdown_plan,
+    );
     let Block::Section(markdown_section) = &markdown_doc.blocks[0] else {
         panic!("expected markdown guide section");
     };
@@ -840,7 +856,15 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         &RenderSettings::test_plain(OutputFormat::Table),
         RenderProfile::Normal,
     );
-    let table_doc = super::lower::lower_output(&output, &table_plan);
+    let table_doc = super::lower::lower_output(
+        &super::projection::project(
+            &output,
+            table_plan.format,
+            &RenderSettings::test_plain(OutputFormat::Table),
+            RenderProfile::Normal,
+        ),
+        &table_plan,
+    );
     assert!(matches!(table_doc.blocks[0], Block::Table(_)));
     assert!(matches!(table_doc.blocks[1], Block::Blank));
     assert!(matches!(table_doc.blocks[2], Block::Table(_)));

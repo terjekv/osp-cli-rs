@@ -10,7 +10,7 @@ use crate::ui::doc::{
 };
 use crate::ui::settings::{RenderBackend, ResolvedRenderSettings, TableBorderStyle, TableOverflow};
 use crate::ui::style::{StyleToken, ThemeStyler};
-use crate::ui::text::{crop_display_width, wrap_display_width};
+use crate::ui::text::{crop_display_width, escape_table_line_breaks, wrap_display_width};
 
 use super::entries::{PreparedEntriesBlock, PreparedEntryRow};
 use super::grid::PreparedGridList;
@@ -265,7 +265,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
     }
 
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
-    let table = PreparedTable::for_terminal(block);
+    let table = PreparedTable::for_terminal(block, settings.table_overflow);
     let widths = fitted_table_widths(
         &table.widths,
         &table.headers,
@@ -545,12 +545,6 @@ fn table_cell_lines(raw: &str, width: usize, overflow: TableOverflow) -> Vec<Str
             .flat_map(|line| wrap_display_width(line, width))
             .collect(),
     }
-}
-
-fn escape_table_line_breaks(raw: &str) -> String {
-    raw.replace("\r\n", "\\n")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
 }
 
 fn format_summary(
