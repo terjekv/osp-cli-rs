@@ -4,11 +4,13 @@ Choose the smallest existing check that exercises the changed behavior.
 Run broader checks when the change affects several components or a focused
 check leaves an interaction unverified.
 
-Do not add regression tests, including for bug fixes, or remove existing tests
-unless explicitly requested. Verify with existing integration, contract,
-end-to-end and architecture checks, static checks, and focused manual execution.
-Adjust existing tests when the public contract changes. Avoid assertions about
-implementation details or behavior already covered by another test.
+Do not add per-bug regression tests. Strengthen the existing boundary scenario
+when a bug reveals a missing promise. Deleting duplicate, internal-detail or
+obsolete tests is routine and needs no separate authorization; name the retained
+owner in the commit body. Remove tests that pin removed features or absent
+options. Verify with existing integration, contract, end-to-end and architecture
+checks, static checks, and focused manual execution. Adjust existing tests when
+the public contract changes.
 
 ## Choose a test target
 
