@@ -2,7 +2,7 @@
 
 mod render;
 use crate::config::ResolvedConfig;
-use crate::ui::settings::{RenderProfile, RenderSettings, resolve_settings};
+use crate::ui::settings::{RenderSettings, RenderTarget, resolve_settings};
 use crate::ui::style::StyleToken;
 
 pub(crate) use crate::core::MessageLevel;
@@ -106,7 +106,7 @@ impl MessageRequest {
         Self {
             max_level,
             layout: MessageLayout::Grouped,
-            settings: resolve_settings(settings, RenderProfile::Normal),
+            settings: resolve_settings(settings, RenderTarget::screen(settings)),
         }
     }
 }

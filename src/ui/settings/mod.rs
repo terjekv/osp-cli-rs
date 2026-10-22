@@ -218,7 +218,7 @@ pub struct RenderRuntime {
 ///
 /// This is the main "what do I want?" settings surface. Auto decisions still
 /// happen later by combining these preferences with [`RenderRuntime`] and a
-/// [`RenderProfile`].
+/// [`RenderTarget`].
 ///
 /// Rule of thumb:
 ///
@@ -568,9 +568,33 @@ fn config_usize_override(config: &ResolvedConfig, key: &str) -> Option<usize> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderProfile {
-    Normal,
-    CopySafe,
+pub enum RenderTarget {
+    ReplScreen,
+    OneShotScreen,
+    Pager,
+    Editor,
+    Clipboard,
+    Pipe,
+}
+
+impl RenderTarget {
+    /// Selects the visible target from the caller's runtime facts.
+    pub fn screen(settings: &RenderSettings) -> Self {
+        if !settings.runtime.stdout_is_tty {
+            Self::Pipe
+        } else if matches!(
+            settings.runtime.command_scope,
+            crate::core::CommandScope::OneShot
+        ) {
+            Self::OneShotScreen
+        } else {
+            Self::ReplScreen
+        }
+    }
+
+    pub(crate) fn is_screen(self) -> bool {
+        matches!(self, Self::ReplScreen | Self::OneShotScreen)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -579,6 +603,7 @@ pub struct ResolvedRenderSettings {
     pub command_prefixes_enabled: bool,
     /// Literal-only commands in the current help document.
     pub document_literal_commands: Vec<String>,
+    pub display_limits: bool,
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
@@ -642,7 +667,7 @@ impl RenderSettings {
         })
     }
 
-    pub(crate) fn resolve_render_settings(&self) -> ResolvedRenderSettings {
+    fn resolve_preferences(&self) -> ResolvedRenderSettings {
         let backend = match self.mode {
             RenderMode::Plain => RenderBackend::Plain,
             RenderMode::Rich => RenderBackend::Rich,
@@ -673,6 +698,7 @@ impl RenderSettings {
                 crate::core::CommandScope::OneShot
             )),
             document_literal_commands: Vec::new(),
+            display_limits: false,
             backend,
             color: backend == RenderBackend::Rich && self.resolve_color_mode(),
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
@@ -690,19 +716,12 @@ impl RenderSettings {
         }
     }
 
+    pub(crate) fn resolve_render_settings(&self) -> ResolvedRenderSettings {
+        resolve_settings(self, RenderTarget::screen(self))
+    }
+
     pub(crate) fn plain_copy_settings(&self) -> Self {
-        Self {
-            mode: RenderMode::Plain,
-            color: ColorMode::Never,
-            unicode: UnicodeMode::Never,
-            width: None,
-            width_max: 0,
-            runtime: RenderRuntime {
-                width: None,
-                ..self.runtime.clone()
-            },
-            ..self.clone()
-        }
+        settings_for_target(self, RenderTarget::Clipboard)
     }
 
     pub(crate) fn resolve_output_format(
@@ -745,21 +764,48 @@ impl RenderSettings {
     }
 }
 
-pub fn resolve_settings(
-    settings: &RenderSettings,
-    profile: RenderProfile,
-) -> ResolvedRenderSettings {
-    if matches!(profile, RenderProfile::CopySafe) {
-        settings.plain_copy_settings().resolve_render_settings()
+/// Maps destination policy to render preferences in one place.
+fn settings_for_target(settings: &RenderSettings, target: RenderTarget) -> RenderSettings {
+    let target = if target.is_screen() && !settings.runtime.stdout_is_tty {
+        RenderTarget::Pipe
     } else {
-        settings.resolve_render_settings()
+        target
+    };
+    let mut effective = settings.clone();
+    if target != RenderTarget::ReplScreen {
+        effective.margin = 0;
     }
+    if !target.is_screen() {
+        effective.width = None;
+        effective.width_max = 0;
+        effective.runtime.width = None;
+        effective.table_overflow = TableOverflow::None;
+        effective.table_too_wide = TableTooWide::Hide;
+    }
+    if matches!(
+        target,
+        RenderTarget::Editor | RenderTarget::Clipboard | RenderTarget::Pipe
+    ) {
+        effective.color = ColorMode::Never;
+        effective.runtime.no_color = true;
+    }
+    if target == RenderTarget::Clipboard {
+        effective.mode = RenderMode::Plain;
+        effective.unicode = UnicodeMode::Never;
+    }
+    effective
+}
+
+pub fn resolve_settings(settings: &RenderSettings, target: RenderTarget) -> ResolvedRenderSettings {
+    let mut resolved = settings_for_target(settings, target).resolve_preferences();
+    resolved.display_limits = target.is_screen() && settings.runtime.stdout_is_tty;
+    resolved
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        HelpLayout, RenderBackend, RenderProfile, RenderRuntime, TableBorderOverride,
+        HelpLayout, RenderBackend, RenderRuntime, RenderTarget, TableBorderOverride,
         TableBorderStyle, TableOverflow, UiPresentation, apply_render_config_overrides, config_int,
         explain_presentation_effect, help_layout_from_config,
     };
@@ -975,7 +1021,7 @@ mod tests {
         assert_eq!(rich.width, Some(88));
 
         let copy = rich_settings.plain_copy_settings();
-        let resolved_copy = super::resolve_settings(&rich_settings, RenderProfile::CopySafe);
+        let resolved_copy = super::resolve_settings(&rich_settings, RenderTarget::Clipboard);
         assert_eq!(copy.mode, RenderMode::Plain);
         assert_eq!(copy.color, ColorMode::Never);
         assert_eq!(copy.unicode, UnicodeMode::Never);

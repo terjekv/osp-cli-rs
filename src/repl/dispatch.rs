@@ -169,17 +169,17 @@ pub(crate) fn execute_repl_plugin_line(
     line: &str,
     sink: Option<&mut dyn UiSink>,
 ) -> Result<ExecutedReplLine> {
-    let previous = state.session.last_rendered_output.take();
+    let previous = state.session.last_output.take();
     let result = execute_recorded_repl_line(state, history, line, sink);
-    if state.session.last_rendered_output.is_none() {
-        state.session.last_rendered_output = match &result {
+    if state.session.last_output.is_none() {
+        state.session.last_output = match &result {
             Ok(executed) => match &executed.result {
                 ReplResult::Print(text) | ReplResult::Restart { output: text, .. }
                     if !text.is_empty() =>
                 {
                     Some((
-                        crate::app::sink::plain_output(text),
-                        state.runtime.ui.render_settings.format,
+                        std::sync::Arc::new(crate::app::CommandOutput::text(text.clone())),
+                        state.runtime.ui.render_settings.clone(),
                     ))
                 }
                 _ => previous,

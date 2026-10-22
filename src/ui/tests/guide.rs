@@ -321,6 +321,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     styled.color = crate::core::ColorMode::Always;
     styled.unicode = crate::core::UnicodeMode::Always;
     styled.width = Some(60);
+    styled.runtime.stdout_is_tty = true;
     let rich = render(&output, &crate::ui::RenderRequest::new(&styled));
     assert!(
         rich.contains('\x1b'),
@@ -329,7 +330,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     let copied = crate::ui::render(
         &output,
         &crate::ui::RenderRequest {
-            profile: crate::ui::RenderProfile::CopySafe,
+            target: crate::ui::RenderTarget::Clipboard,
             ..crate::ui::RenderRequest::new(&styled)
         },
     );

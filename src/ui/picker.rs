@@ -17,7 +17,7 @@ use crossterm::{
 
 use super::settings::resolve_settings;
 use super::style::{StyleToken, ThemeStyler};
-use super::{RenderProfile, RenderSettings, crop_display_width, sanitize_human_text};
+use super::{RenderSettings, RenderTarget, crop_display_width, sanitize_human_text};
 
 /// Outcome of activating a picker button.
 pub enum PickerAction {
@@ -111,7 +111,7 @@ pub fn run(
             ));
         }
         let settings = model.settings(selected);
-        let resolved = resolve_settings(&settings, RenderProfile::Normal);
+        let resolved = resolve_settings(&settings, RenderTarget::screen(&settings));
         let styler = ThemeStyler::new(resolved.color, &resolved.theme, &resolved.style_overrides);
         let left = usize::from(cols / 3).min(42);
         let detail_width = usize::from(cols).saturating_sub(left + 4);

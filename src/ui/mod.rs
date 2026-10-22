@@ -51,8 +51,8 @@ pub(crate) use settings::RenderBackend;
 #[cfg(test)]
 use settings::resolve_settings;
 pub use settings::{
-    HelpLayout, RenderProfile, RenderRuntime, RenderSettings, TableBorderOverride,
-    TableBorderStyle, TableOverflow, TableTooWide, UiPresentation,
+    HelpLayout, RenderRuntime, RenderSettings, RenderTarget, TableBorderOverride, TableBorderStyle,
+    TableOverflow, TableTooWide, UiPresentation,
 };
 pub(crate) use settings::{
     ResolvedRenderSettings, build_presentation_defaults_layer, explain_presentation_effect,
@@ -139,8 +139,8 @@ pub(crate) fn format_relative_unix_timestamp(seconds: i64) -> String {
 pub struct RenderRequest<'a> {
     /// Effective output and terminal settings.
     pub settings: &'a RenderSettings,
-    /// Normal output or a copy-safe sink.
-    pub profile: RenderProfile,
+    /// Destination policy for width, colour, margin and display limits.
+    pub target: RenderTarget,
     /// Optional help layout for an unstaged semantic document.
     pub layout: Option<HelpLayout>,
     /// Prefix for the first semantic section title.
@@ -154,7 +154,7 @@ impl<'a> RenderRequest<'a> {
     pub fn new(settings: &'a RenderSettings) -> Self {
         Self {
             settings,
-            profile: RenderProfile::Normal,
+            target: RenderTarget::screen(settings),
             layout: None,
             title_prefix: None,
             show_footer_rule: None,
@@ -175,17 +175,26 @@ impl<'a> RenderRequest<'a> {
 /// assert!(rendered.contains("alice"));
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
+    let plan = plan_format(output, request.settings, request.target);
+    let margin = plan.settings.margin;
+    emit::shared::apply_margin(render_planned(output, request, plan), margin)
+}
+
+fn render_planned(
+    output: &OutputResult,
+    request: &RenderRequest<'_>,
+    mut plan: plan::RenderPlan,
+) -> String {
     let canonical = output;
-    let mut plan = plan_format(output, request.settings, request.profile);
     match plan.format {
         OutputFormat::Csv | OutputFormat::Tsv => {
             return emit::delimited::render(output, plan.format);
         }
-        OutputFormat::Json => return emit::json::emit_value(&json_value(output), &plan.settings),
+        OutputFormat::Json => return emit::json::emit_value(&json_value(output)),
         _ => {}
     }
-    let projection = projection::project(output, plan.format, request.settings, request.profile);
-    plan::plan_layout(&projection, &mut plan, request.settings, request.profile);
+    let projection = projection::project(output, plan.format, &plan.settings);
+    plan::plan_layout(&projection, &mut plan);
     let output = &projection.output;
     let doc = if matches!(
         plan.format,
@@ -223,7 +232,7 @@ pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
     let text = emit::emit_doc(&doc, plan.format, &plan.settings);
     if plan.settings.backend == RenderBackend::Rich
         && request.settings.runtime.stdout_is_tty
-        && request.profile == RenderProfile::Normal
+        && request.target.is_screen()
         && !matches!(plan.format, OutputFormat::Json | OutputFormat::Markdown)
     {
         return link_urls(text, canonical);
@@ -259,24 +268,6 @@ fn link_urls(text: String, output: &OutputResult) -> String {
     }
     rendered.push_str(remaining);
     rendered
-}
-
-pub(crate) fn copy_output_to_clipboard(
-    output: &OutputResult,
-    settings: &RenderSettings,
-    clipboard: &clipboard::ClipboardService,
-) -> Result<(), clipboard::ClipboardError> {
-    let settings = RenderSettings {
-        margin: 0,
-        ..settings.clone()
-    };
-    clipboard.copy_text(&render(
-        output,
-        &RenderRequest {
-            profile: RenderProfile::CopySafe,
-            ..RenderRequest::new(&settings)
-        },
-    ))
 }
 
 fn default_show_footer_rule(layout: HelpLayout) -> bool {

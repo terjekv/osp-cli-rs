@@ -1,6 +1,6 @@
 //! Pure human data projection, shared by layout planning and lowering.
 
-use super::settings::{RenderProfile, RenderSettings};
+use super::settings::ResolvedRenderSettings;
 use super::style::{CellStyle, StyleToken};
 use super::text::sanitize_human_text;
 use crate::core::document::{DocBlock, Document};
@@ -207,8 +207,7 @@ fn project_document_tables(
 pub(super) fn project(
     output: &OutputResult,
     format: OutputFormat,
-    settings: &RenderSettings,
-    profile: RenderProfile,
+    settings: &ResolvedRenderSettings,
 ) -> HumanProjection {
     let (mut display, mut styles) = if output.meta.document_rows {
         (output.clone(), Vec::new())
@@ -234,7 +233,7 @@ pub(super) fn project(
         _ => Vec::new(),
     };
     // Derived display values must see every row and nested item.
-    let shortened = if settings.runtime.stdout_is_tty && profile == RenderProfile::Normal {
+    let shortened = if settings.display_limits {
         display.meta.display_limit.and_then(|limit| {
             limit_for_display(&display, limit).map(|(limited, total)| {
                 display = limited;

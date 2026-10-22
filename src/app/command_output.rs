@@ -10,7 +10,7 @@ use crate::core::plugin::{ResponseErrorV1, ResponseMessageV1, ResponseMetaV1, Re
 use crate::dsl::apply_output_pipeline;
 use crate::ui::clipboard::ClipboardService;
 use crate::ui::messages::{MessageBuffer, MessageLevel};
-use crate::ui::{RenderRequest, RenderSettings, copy_output_to_clipboard};
+use crate::ui::{RenderRequest, RenderSettings, RenderTarget};
 use miette::{Result, WrapErr, miette};
 use serde_json::Value;
 use terminal_size::{Height, terminal_size};
@@ -242,10 +242,28 @@ impl CommandOutput {
     }
 
     pub(super) fn render(&self, config: &ResolvedConfig, settings: &RenderSettings) -> String {
+        self.render_for_target(config, settings, RenderTarget::screen(settings))
+    }
+
+    pub(crate) fn render_for_target(
+        &self,
+        config: &ResolvedConfig,
+        settings: &RenderSettings,
+        target: RenderTarget,
+    ) -> String {
         let mut effective = settings.clone();
         let output = match &self.body {
             CommandBody::None => return String::new(),
-            CommandBody::Text(text) => return text.clone(),
+            CommandBody::Text(text) => {
+                return if matches!(
+                    target,
+                    RenderTarget::Editor | RenderTarget::Clipboard | RenderTarget::Pipe
+                ) {
+                    super::sink::plain_output(text)
+                } else {
+                    text.clone()
+                };
+            }
             CommandBody::Output(output) => output_with_format_hint(output, self.format_hint),
             CommandBody::Json(payload) => {
                 effective.format = OutputFormat::Json;
@@ -259,6 +277,7 @@ impl CommandOutput {
         crate::ui::render(
             &output,
             &RenderRequest {
+                target,
                 layout: Some(crate::ui::help_layout_from_config(config)),
                 ..RenderRequest::new(&effective)
             },
@@ -465,7 +484,10 @@ pub(crate) fn run_cli_command(
             if !rendered.is_empty()
                 && let Some(pager) = pager_for_output(config, ui, result, &rendered)
             {
-                sink.write_stdout_paged(&rendered, &pager);
+                sink.write_stdout_paged(
+                    &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
+                    &pager,
+                );
             } else {
                 sink.write_stdout(&rendered);
             }
@@ -658,10 +680,13 @@ pub(crate) fn emit_messages_for_ui(
 fn maybe_copy_output(
     config: &ResolvedConfig,
     ui: &UiState,
-    output: &OutputResult,
+    result: &CommandOutput,
     edited: Option<&str>,
     sink: &mut dyn UiSink,
 ) {
+    let CommandBody::Output(output) = &result.body else {
+        return;
+    };
     if !output.meta.wants_copy {
         return;
     }
@@ -669,10 +694,14 @@ fn maybe_copy_output(
     let clipboard = ClipboardService::new();
     let copied = match edited {
         Some(text) => clipboard.copy_text(text),
-        None => copy_output_to_clipboard(output, &ui.render_settings, &clipboard),
+        None => clipboard.copy_text(&result.render_for_target(
+            config,
+            &ui.render_settings,
+            RenderTarget::Clipboard,
+        )),
     };
     match copied {
-        Ok(()) if ui.render_settings.format == OutputFormat::Json => return,
+        Ok(()) if result.output_format(&ui.render_settings) == OutputFormat::Json => return,
         Ok(()) if edited.is_some() => messages.success("Copied edited output."),
         Ok(()) => {
             let (count, noun) = match &output.items {
@@ -785,22 +814,30 @@ fn apply_output_sinks(
     let edited = output
         .filter(|output| output.meta.wants_editor)
         .map(|_| {
-            super::sink::edit_output(&rendered, result.output_format(&ui.render_settings), false)
+            super::sink::edit_output(
+                &result.render_for_target(config, &ui.render_settings, RenderTarget::Editor),
+                result.output_format(&ui.render_settings),
+                false,
+            )
         })
         .transpose()?;
-    if let Some(output) = output {
-        maybe_copy_output(config, ui, output, edited.as_deref(), sink);
-    }
-    // Paging shows the command's rendered document; editor changes only feed Y.
+    maybe_copy_output(config, ui, result, edited.as_deref(), sink);
+    // Editor changes only feed Y; paging renders the original structured result.
     let pager = if output.is_some_and(|output| output.meta.wants_page)
         && ui.render_settings.runtime.stdout_is_tty
-    {
+        && !matches!(
+            result.output_format(&ui.render_settings),
+            OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv
+        ) {
         Some(super::sink::pager_command())
     } else {
         None
     };
     if let Some(pager) = pager {
-        sink.write_stdout_paged(&rendered, &pager);
+        sink.write_stdout_paged(
+            &result.render_for_target(config, &ui.render_settings, RenderTarget::Pager),
+            &pager,
+        );
         Ok(String::new())
     } else {
         Ok(rendered)
@@ -817,7 +854,7 @@ fn pager_for_output(
         output.output_format(&ui.render_settings),
         OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv
     ) || config.get_string("ui.pager") != Some("auto")
-        || !ui.render_settings.runtime.stdout_is_tty
+        || RenderTarget::screen(&ui.render_settings) != RenderTarget::OneShotScreen
         || rendered.lines().count() <= terminal_height()?
     {
         return None;
@@ -844,7 +881,7 @@ pub(crate) fn render_saved_repl_output(
     stages: &[String],
     source: bool,
     sink: Option<&mut dyn UiSink>,
-) -> Result<(String, OutputFormat)> {
+) -> Result<(String, CommandOutput)> {
     let mut staged = output.saved();
     staged.use_source |= source;
     staged.select_source();
@@ -855,10 +892,7 @@ pub(crate) fn render_saved_repl_output(
         CommandBody::Text(_) | CommandBody::Json(_)
             if stages.is_empty() && !ui.render_settings.format_explicit =>
         {
-            return Ok((
-                staged.render(config, &ui.render_settings),
-                staged.output_format(&ui.render_settings),
-            ));
+            return Ok((staged.render(config, &ui.render_settings), staged));
         }
         CommandBody::Text(_) => "failed to replay staged textual output",
         CommandBody::Json(_) => "failed to replay staged JSON output",
@@ -874,7 +908,7 @@ pub(crate) fn render_saved_repl_output(
         Some(sink) => apply_output_sinks(config, ui, &staged, rendered, sink)?,
         None => rendered,
     };
-    Ok((rendered, staged.output_format(&ui.render_settings)))
+    Ok((rendered, staged))
 }
 
 pub(crate) fn render_repl_command(
@@ -928,9 +962,9 @@ pub(crate) fn render_repl_command(
     };
     result.apply_stages(stages).wrap_err(context)?;
     let rendered = result.render(config, &ui.render_settings);
-    session.last_rendered_output = Some((
-        super::sink::plain_output(&rendered),
-        result.output_format(&ui.render_settings),
+    session.last_output = Some((
+        std::sync::Arc::new(result.saved()),
+        ui.render_settings.clone(),
     ));
     let rendered = apply_output_sinks(config, ui, &result, rendered, sink)?;
     sink.write_stderr(&result.display_details);

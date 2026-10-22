@@ -9,7 +9,7 @@ use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use super::doc::{Block, SectionTitleChrome};
-use super::{HelpLayout, RenderProfile, RenderSettings, plan_format, render, resolve_settings};
+use super::{HelpLayout, RenderSettings, RenderTarget, plan_format, render, resolve_settings};
 
 #[test]
 fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
@@ -19,12 +19,12 @@ fn planner_prefers_semantic_guide_before_non_explicit_baseline_unit() {
 
     let mut inherited_json = RenderSettings::test_plain(OutputFormat::Json);
     inherited_json.format_explicit = false;
-    let inherited_plan = plan_format(&output, &inherited_json, super::RenderProfile::Normal);
+    let inherited_plan = plan_format(&output, &inherited_json, super::RenderTarget::OneShotScreen);
     assert_eq!(inherited_plan.format, OutputFormat::Auto);
 
     let mut explicit_json = RenderSettings::test_plain(OutputFormat::Json);
     explicit_json.format_explicit = true;
-    let explicit_plan = plan_format(&output, &explicit_json, super::RenderProfile::Normal);
+    let explicit_plan = plan_format(&output, &explicit_json, super::RenderTarget::OneShotScreen);
     assert_eq!(explicit_plan.format, OutputFormat::Json);
 }
 
@@ -143,6 +143,7 @@ fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
         let mut settings = RenderSettings::test_plain(OutputFormat::Table);
         settings.format_explicit = true;
         settings.width = Some(48);
+        settings.runtime.stdout_is_tty = true;
         settings.table_overflow = overflow;
 
         let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
@@ -548,7 +549,7 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
     let rendered = render(
         &output,
         &crate::ui::RenderRequest {
-            profile: crate::ui::RenderProfile::CopySafe,
+            target: crate::ui::RenderTarget::Clipboard,
             ..crate::ui::RenderRequest::new(&settings)
         },
     );
@@ -603,7 +604,7 @@ fn ui2_resolves_theme_catalog_from_caller_theme_name_unit() {
         ..RenderSettings::default()
     };
 
-    let resolved = resolve_settings(&settings, RenderProfile::Normal);
+    let resolved = resolve_settings(&settings, RenderTarget::OneShotScreen);
     assert_eq!(resolved.theme_name, "rose-pine-moon");
     assert_eq!(resolved.theme.display_name(), "Rose Pine Moon");
     assert_eq!(resolved.theme.palette.title, "#e8dff6");
@@ -615,6 +616,8 @@ fn ui2_full_help_layout_keeps_usage_inline_with_explicit_margin_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(60);
     settings.margin = 2;
+    settings.runtime.stdout_is_tty = true;
+    settings.runtime.command_scope = crate::core::CommandScope::ReplRoot;
 
     let rendered = render(
         &guide.to_output_result(),
@@ -704,10 +707,9 @@ fn ui2_help_layout_lowering_uses_plain_sections_and_inline_usage_suffix_unit() {
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
-    let projection =
-        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
-    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderTarget::OneShotScreen);
+    let projection = super::projection::project(&output, plan.format, &plan.settings);
+    super::plan::plan_layout(&projection, &mut plan);
 
     let compact =
         super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
@@ -740,10 +742,9 @@ fn ui2_help_layout_lowering_makes_footer_a_real_block_unit() {
     );
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
-    let projection =
-        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
-    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderTarget::OneShotScreen);
+    let projection = super::projection::project(&output, plan.format, &plan.settings);
+    super::plan::plan_layout(&projection, &mut plan);
 
     let full = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, true);
 
@@ -757,10 +758,9 @@ fn ui2_lowering_carries_help_entry_defaults_in_ir_unit() {
     let guide = Document::from_help_text("Commands:\n  list   List history entries\n");
     let settings = RenderSettings::test_plain(OutputFormat::Auto);
     let output = guide.to_output_result();
-    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
-    let projection =
-        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
-    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderTarget::OneShotScreen);
+    let projection = super::projection::project(&output, plan.format, &plan.settings);
+    super::plan::plan_layout(&projection, &mut plan);
     let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Compact, false);
 
     let Block::Section(block) = &doc.blocks[0] else {
@@ -789,20 +789,10 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
     let mut guide_plan = plan_format(
         &output,
         &RenderSettings::test_plain(OutputFormat::Auto),
-        RenderProfile::Normal,
+        RenderTarget::OneShotScreen,
     );
-    let projection = super::projection::project(
-        &output,
-        guide_plan.format,
-        &RenderSettings::test_plain(OutputFormat::Auto),
-        RenderProfile::Normal,
-    );
-    super::plan::plan_layout(
-        &projection,
-        &mut guide_plan,
-        &RenderSettings::test_plain(OutputFormat::Auto),
-        RenderProfile::Normal,
-    );
+    let projection = super::projection::project(&output, guide_plan.format, &guide_plan.settings);
+    super::plan::plan_layout(&projection, &mut guide_plan);
     let guide_doc = super::lower::lower_output(&projection, &guide_plan);
     let Block::Section(guide_section) = &guide_doc.blocks[0] else {
         panic!("expected direct guide section");
@@ -818,19 +808,10 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
 
     let mut markdown_settings = RenderSettings::test_plain(OutputFormat::Markdown);
     markdown_settings.format_explicit = true;
-    let mut markdown_plan = plan_format(&output, &markdown_settings, RenderProfile::Normal);
-    let projection = super::projection::project(
-        &output,
-        markdown_plan.format,
-        &markdown_settings,
-        RenderProfile::Normal,
-    );
-    super::plan::plan_layout(
-        &projection,
-        &mut markdown_plan,
-        &markdown_settings,
-        RenderProfile::Normal,
-    );
+    let mut markdown_plan = plan_format(&output, &markdown_settings, RenderTarget::OneShotScreen);
+    let projection =
+        super::projection::project(&output, markdown_plan.format, &markdown_plan.settings);
+    super::plan::plan_layout(&projection, &mut markdown_plan);
     let markdown_doc = super::lower::lower_output(&projection, &markdown_plan);
     let Block::Section(markdown_section) = &markdown_doc.blocks[0] else {
         panic!("expected markdown guide section");
@@ -883,20 +864,10 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
     let mut table_plan = plan_format(
         &output,
         &RenderSettings::test_plain(OutputFormat::Table),
-        RenderProfile::Normal,
+        RenderTarget::OneShotScreen,
     );
-    let projection = super::projection::project(
-        &output,
-        table_plan.format,
-        &RenderSettings::test_plain(OutputFormat::Table),
-        RenderProfile::Normal,
-    );
-    super::plan::plan_layout(
-        &projection,
-        &mut table_plan,
-        &RenderSettings::test_plain(OutputFormat::Table),
-        RenderProfile::Normal,
-    );
+    let projection = super::projection::project(&output, table_plan.format, &table_plan.settings);
+    super::plan::plan_layout(&projection, &mut table_plan);
     let table_doc = super::lower::lower_output(&projection, &table_plan);
     let Block::Table(first_group) = &table_doc.blocks[0] else {
         panic!("expected first grouped table");
@@ -960,11 +931,11 @@ fn ui_help_layout_lowers_mixed_structured_section_data_to_local_block_kinds_unit
     };
     let mut settings = RenderSettings::test_plain(OutputFormat::Auto);
     settings.width = Some(40);
+    settings.runtime.stdout_is_tty = true;
     let output = guide.to_output_result();
-    let mut plan = plan_format(&output, &settings, RenderProfile::Normal);
-    let projection =
-        super::projection::project(&output, plan.format, &settings, RenderProfile::Normal);
-    super::plan::plan_layout(&projection, &mut plan, &settings, RenderProfile::Normal);
+    let mut plan = plan_format(&output, &settings, RenderTarget::OneShotScreen);
+    let projection = super::projection::project(&output, plan.format, &plan.settings);
+    super::plan::plan_layout(&projection, &mut plan);
     let doc = super::lower::lower_document_help_layout(&guide, &plan, HelpLayout::Full, false);
 
     let Block::Section(session) = &doc.blocks[0] else {
@@ -1034,6 +1005,7 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
         ruled_section_policy: crate::ui::RuledSectionPolicy::PerSection,
         ..Default::default()
     };
+    settings.runtime.stdout_is_tty = true;
     let rendered = crate::ui::render_messages(
         &messages,
         &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),

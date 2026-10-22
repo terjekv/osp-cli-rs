@@ -362,6 +362,14 @@ These keys currently drive user-visible rendering and REPL presentation:
   - Maximum rendered width; defaults to `-1` (natural content width).
     A positive limit fits output to that limit or the narrower terminal.
     `0` also disables the maximum. An explicit `ui.width` still applies.
+- `ui.margin`
+  - Left margin for REPL screen output only, including JSON. One-shot output,
+    pipes/files, pagers, editors and clipboard output always have zero margin.
+- `ui.pager`
+  - `auto` (default) pages one-shot human output taller than the terminal;
+    the REPL never auto-pages and JSON/CSV/TSV never page. Pager renders keep
+    full values without width or display limits. `PAGER` is respected; when
+    unset, the command is `less -RS` for colour and horizontal scrolling.
 - `ui.chrome.frame`
   - `none | top | bottom | top-bottom | square | round`
 - `ui.chrome.rule_policy`

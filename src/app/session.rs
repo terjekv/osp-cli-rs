@@ -294,8 +294,8 @@ pub(crate) struct AppSession {
     pub scope: ReplScopeStack,
     /// Raw output plus pipeline stages from the most recent successful REPL command.
     pub(crate) last_success: Option<LastSuccess>,
-    /// Last rendered command document and its format, without running replay stages.
-    pub(crate) last_rendered_output: Option<(String, crate::core::output::OutputFormat)>,
+    /// Last staged command and invocation settings for target-specific rendering.
+    pub(crate) last_output: Option<(Arc<super::CommandOutput>, crate::ui::RenderSettings)>,
     /// Summary of the most recent failed REPL command.
     pub last_failure: Option<LastFailure>,
     /// Session-scoped config overrides layered above persisted config.
@@ -608,7 +608,7 @@ impl Default for AppSession {
             startup_prompt_timing_pending: true,
             scope: ReplScopeStack::default(),
             last_success: None,
-            last_rendered_output: None,
+            last_output: None,
             last_failure: None,
             config_overrides: ConfigLayer::default(),
         }

@@ -71,3 +71,9 @@ The renderer never infers document intent from ordinary row fields.
 rows. `ui.table.too_wide=mreg|hide` selects automatic cards or the retained hide
 path; explicit/configured tables, grouped output, documents, copy-safe sinks
 and nested tables never fall back. See `docs/UI.md` for the full contract.
+
+`RenderTarget` owns destination policy in `settings/`: only REPL screens retain
+margin; pager/editor/clipboard/pipe targets have no width or display limits.
+The host retains staged structured output for action re-renders, rather than
+reusing a fitted screen string. Emitters apply the resolved margin uniformly,
+including machine output on the REPL screen.

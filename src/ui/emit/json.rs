@@ -2,13 +2,9 @@ use crate::core::output_model::{Group, OutputDocument, OutputItems, OutputResult
 use crate::core::row::Row;
 use serde_json::Value;
 
-use crate::ui::settings::ResolvedRenderSettings;
-
-use super::shared::indent_lines;
-
-pub(crate) fn emit_value(value: &Value, settings: &ResolvedRenderSettings) -> String {
+pub(crate) fn emit_value(value: &Value) -> String {
     let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".into());
-    format!("{}\n", indent_lines(&rendered, settings.margin))
+    format!("{rendered}\n")
 }
 
 pub(crate) fn json_value(output: &OutputResult) -> Value {
@@ -59,9 +55,22 @@ mod tests {
     use serde_json::json;
 
     use crate::core::output::{ColorMode, OutputFormat, RenderMode, UnicodeMode};
-    use crate::ui::settings::{RenderProfile, RenderSettings, resolve_settings};
+    use crate::core::output_model::{OutputDocument, OutputResult};
+    use crate::ui::{RenderRequest, RenderSettings, RenderTarget};
 
-    use super::emit_value;
+    fn render_json(
+        value: serde_json::Value,
+        settings: &RenderSettings,
+        target: RenderTarget,
+    ) -> String {
+        crate::ui::render(
+            &OutputResult::from_rows(Vec::new()).with_document(OutputDocument::Json(value)),
+            &RenderRequest {
+                target,
+                ..RenderRequest::new(settings)
+            },
+        )
+    }
 
     #[test]
     fn json_emitter_keeps_keys_punctuation_and_scalars_plain_unit() {
@@ -72,14 +81,14 @@ mod tests {
         settings.runtime.stdout_is_tty = true;
         settings.theme_name = "dracula".to_string();
 
-        let resolved = resolve_settings(&settings, RenderProfile::Normal);
-        let rendered = emit_value(
-            &json!({
+        let rendered = render_json(
+            json!({
                 "count": 42,
                 "ok": true,
                 "missing": null,
             }),
-            &resolved,
+            &settings,
+            RenderTarget::OneShotScreen,
         );
 
         assert_eq!(
@@ -97,8 +106,7 @@ mod tests {
         settings.runtime.stdout_is_tty = true;
         settings.theme_name = "dracula".to_string();
 
-        let resolved = resolve_settings(&settings, RenderProfile::CopySafe);
-        let rendered = emit_value(&json!({"count": 42}), &resolved);
+        let rendered = render_json(json!({"count": 42}), &settings, RenderTarget::Clipboard);
 
         assert!(rendered.contains("\"count\": 42"));
         assert!(!rendered.contains("\x1b["));

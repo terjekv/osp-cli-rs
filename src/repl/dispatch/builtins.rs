@@ -516,7 +516,7 @@ fn execute_last_result_builtin(
         last.stages.clone()
     };
     stages.extend(parsed.stages);
-    let (rendered, format) = crate::app::render_saved_repl_output(
+    let (rendered, staged) = crate::app::render_saved_repl_output(
         runtime.config.resolved(),
         &invocation.ui,
         &last.output,
@@ -524,7 +524,10 @@ fn execute_last_result_builtin(
         invocation.source,
         Some(sink),
     )?;
-    session.last_rendered_output = Some((crate::app::sink::plain_output(&rendered), format));
+    session.last_output = Some((
+        std::sync::Arc::new(staged),
+        invocation.ui.render_settings.clone(),
+    ));
     Ok(ReplResult::Print(rendered))
 }
 

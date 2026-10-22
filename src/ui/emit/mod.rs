@@ -23,8 +23,13 @@ use super::doc::Doc;
 use super::settings::ResolvedRenderSettings;
 
 pub fn emit_doc(doc: &Doc, format: OutputFormat, settings: &ResolvedRenderSettings) -> String {
+    let mut settings = settings.clone();
+    settings.width = settings
+        .width
+        .map(|width| width.saturating_sub(settings.margin));
+    settings.margin = 0;
     match format {
         OutputFormat::Markdown => markdown::emit_doc(doc),
-        _ => terminal::emit_doc(doc, settings),
+        _ => terminal::emit_doc(doc, &settings),
     }
 }

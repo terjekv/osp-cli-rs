@@ -507,7 +507,7 @@ pub(crate) fn pager_command() -> String {
     std::env::var("PAGER")
         .ok()
         .filter(|pager| !pager.trim().is_empty())
-        .unwrap_or_else(|| "less -R".to_string())
+        .unwrap_or_else(|| "less -RS".to_string())
 }
 
 /// Removes terminal styling while retaining delimited output's tabs.

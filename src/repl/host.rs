@@ -167,22 +167,40 @@ fn run_repl_cycle(
             crate::repl::ReplEvent::Action(
                 id @ ("output.page" | "output.editor" | "output.copy"),
             ) => {
-                let Some((text, format)) = &state.session.last_rendered_output else {
+                let Some((output, settings)) = &state.session.last_output else {
                     return Ok(crate::repl::ReplResult::Print(
                         "No previous output.\n".into(),
                     ));
                 };
+                let target = match id {
+                    "output.page" => crate::ui::RenderTarget::Pager,
+                    "output.editor" => crate::ui::RenderTarget::Editor,
+                    _ => crate::ui::RenderTarget::Clipboard,
+                };
+                let text =
+                    output.render_for_target(state.runtime.config.resolved(), settings, target);
+                let format = output.output_format(settings);
                 match id {
+                    "output.page"
+                        if matches!(
+                            format,
+                            crate::core::OutputFormat::Json
+                                | crate::core::OutputFormat::Csv
+                                | crate::core::OutputFormat::Tsv
+                        ) =>
+                    {
+                        return Ok(crate::repl::ReplResult::Print(text));
+                    }
                     "output.page" => {
                         use crate::app::sink::UiSink;
                         crate::app::sink::StdIoUiSink
-                            .write_stdout_paged(text, &crate::app::sink::pager_command());
+                            .write_stdout_paged(&text, &crate::app::sink::pager_command());
                     }
                     "output.editor" => {
-                        crate::app::sink::edit_output(text, *format, true)
+                        crate::app::sink::edit_output(&text, format, true)
                             .map_err(|err| anyhow::anyhow!("{err}"))?;
                     }
-                    _ => crate::ui::clipboard::ClipboardService::new().copy_text(text)?,
+                    _ => crate::ui::clipboard::ClipboardService::new().copy_text(&text)?,
                 }
                 return Ok(crate::repl::ReplResult::Continue);
             }

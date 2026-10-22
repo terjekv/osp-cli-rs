@@ -40,8 +40,8 @@ fn startup_is_a_compact_console_overview_not_a_pipe_manual() {
     assert!(pipes.lines().count() <= 6, "{pipes}");
     assert!(pipes.contains("text search") && pipes.contains("| H <verb>"));
     assert!(plain.lines().count() <= 40, "{plain}");
-    assert!(rendered.contains("\x1b[38;2;189;147;249mOSP"));
-    assert!(rendered.contains("\x1b[38;2;104;121;173mShow this command overview."));
+    assert!(!rendered.contains("\x1b["));
+    assert!(plain.contains("Show this command overview."));
 }
 
 #[test]
@@ -52,6 +52,7 @@ fn address_colors_follow_theme_overrides_only_in_colored_output() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.color = ColorMode::Always;
     settings.mode = RenderMode::Rich;
+    settings.runtime.stdout_is_tty = true;
     settings.style_overrides.ipv4 = Some("red".into());
     settings.style_overrides.ipv6 = Some("green".into());
     let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
@@ -231,6 +232,7 @@ fn single_row_key_value_block_plain_snapshot_contract() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Mreg);
     settings.format_explicit = true;
     settings.width = Some(120);
+    settings.runtime.stdout_is_tty = true;
 
     let rendered = render(&output, &osp_cli::ui::RenderRequest::new(&settings));
 

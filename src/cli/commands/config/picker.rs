@@ -9,7 +9,7 @@ use super::*;
 use crate::config::SchemaValueType;
 use crate::ui::picker::{self, PickerModel};
 use crate::ui::style::{StyleToken, ThemeStyler};
-use crate::ui::{RenderProfile, RenderSettings, sanitize_human_text};
+use crate::ui::{RenderSettings, RenderTarget, sanitize_human_text};
 
 pub(super) fn run(
     runtime: &AppRuntime,
@@ -186,7 +186,10 @@ impl PickerModel for Config<'_> {
 
     fn detail(&self, selected: usize, width: usize) -> String {
         let entry = &self.entries[selected];
-        let settings = crate::ui::settings::resolve_settings(&self.settings, RenderProfile::Normal);
+        let settings = crate::ui::settings::resolve_settings(
+            &self.settings,
+            RenderTarget::screen(&self.settings),
+        );
         let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
         let value = if entry.secret {
             "<redacted>"

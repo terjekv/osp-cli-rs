@@ -359,9 +359,14 @@ shortcuts. See [EMBEDDING.md](EMBEDDING.md#repl-product-hooks) for the host API.
 
 The `last` result cache retains data stages, without repeating output sinks.
 
-Alt+L pages the last rendered command output, Alt+E opens a read-only temporary
-copy in `$VISUAL` / `$EDITOR` / `vi`, and Alt+Y copies it. These actions never
-execute the command or pipeline again; editor changes are discarded. Before
+Alt+L pages the last staged result, Alt+E opens a read-only temporary copy in
+`$VISUAL` / `$EDITOR` / `vi`, and Alt+Y copies it. Each action re-renders retained
+structured output without screen width, margin or display limits. The pager
+keeps configured colour; the editor has no colour, and clipboard output is also
+ASCII. Plain-text commands fall back to retained text. These actions never
+execute the command or pipeline again; editor changes are discarded. JSON,
+CSV and TSV are printed directly instead of paged. The REPL never auto-pages.
+Before
 any output is available they show a brief hint. Alt+L and Alt+Y replace the
 editor's downcase-word and yank-pop bindings.
 

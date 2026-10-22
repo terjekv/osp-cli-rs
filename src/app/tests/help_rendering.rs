@@ -147,6 +147,7 @@ fn compact_help_can_add_color_without_box_chrome_unit() {
     let mut resolved = help_settings();
     resolved.mode = RenderMode::Rich;
     resolved.color = ColorMode::Always;
+    resolved.runtime.stdout_is_tty = true;
 
     let rendered = render_help(&raw, &resolved, HelpLayout::Compact);
     assert!(rendered.contains("\u{1b}["));

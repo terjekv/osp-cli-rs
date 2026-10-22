@@ -28,6 +28,14 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Resolve width, colour, margin and display limits by render target. Margin is
+  REPL screen chrome only, including JSON. One-shot output and sinks have no
+  margin. Pager/editor/clipboard actions re-render retained structured results
+  without terminal truncation or display limits; editors suppress colour and
+  clipboard stays ASCII. Plain-text commands retain a text fallback.
+  One-shot automatic paging remains; the REPL and machine formats never
+  auto-page. Default to `less -RS` when `PAGER` is unset.
+
 - Plan every output format before dispatch. Configured CSV/TSV preserve help's
   guide layout by default, recommended exports emit records, and JSON writes
   canonical typed values directly as plain JSON. Auto recommendations defer

@@ -64,9 +64,11 @@ The unpublished UiO companion uses the sibling path dependency.
 | REPL engine, history and debug APIs | Internal; use `App` and the native-command REPL hooks |
 | `context::KINDS` | Internal; public context contracts, resolution and session APIs remain available |
 
-Rendering settings expose `HelpLayout`, `RenderProfile`, `RenderRuntime`,
+Rendering settings expose `HelpLayout`, `RenderTarget`, `RenderRuntime`,
 `TableBorderStyle`, `TableBorderOverride`, `TableOverflow` and `TableTooWide`
 through `ui`; embedders can set the public `RenderSettings` fields directly.
+`RenderRequest::target` replaces the former Normal/CopySafe profile and selects
+REPL screen, one-shot screen, pager, editor, clipboard or pipe policy.
 A width hint alone never enables automatic cards: normal stdout TTY output is
 also required. `UiPresentation` remains available for preset parsing.
 

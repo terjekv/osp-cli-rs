@@ -16,8 +16,9 @@ Rendering has one owner for each decision:
 7. terminal or Markdown emitters render that IR
 
 The UI does not reload configuration, rerun commands or invent data semantics.
-Machine exports bypass human projection and the document IR. JSON stays plain
-and retains canonical values, including every row and nested item.
+Machine exports bypass human projection and the document IR. JSON stays free
+of colour and retains canonical values, including every row and nested item.
+REPL screen chrome may indent it; other targets have no margin.
 
 ## Format Selection
 
@@ -137,6 +138,30 @@ narrower terminal. `0` also disables the additional cap. An explicit `ui.width`
 is an upper width preference for terminal output. Piped output keeps full values
 regardless of these terminal preferences.
 
+## Render Targets
+
+`RenderTarget` resolves destination policy once in `ui/settings`:
+
+| Target | Width | Colour | Margin | Display limits | Automatic cards |
+|---|---|---|---|---|---|
+| REPL screen | Terminal | Per settings | `ui.margin` | Yes | Yes |
+| One-shot screen | Terminal | Per settings | 0 | Yes | Yes |
+| Pager | Unlimited | Per settings | 0 | No | No |
+| Editor | Unlimited | Never | 0 | No | No |
+| Clipboard | Unlimited | Never; ASCII | 0 | No | No |
+| Pipe, file, non-TTY | Unlimited | Never | 0 | No | No |
+
+Margin is REPL screen chrome for every format, including JSON. It never enters
+one-shot output, pipes, files, pagers, editors or clipboard content.
+The pager, editor and clipboard re-render structured results for their target;
+they do not reuse fitted screen text. Plain-text command output is retained as
+text when no structured result is available.
+
+One-shot `ui.pager=auto` still pages when the screen render is taller than the
+terminal, then shows the unlimited Pager render. The REPL never auto-pages.
+JSON, CSV and TSV never page. When `PAGER` is unset, the default is `less -RS`
+(colour and horizontal scrolling); a user-set `PAGER` is respected unchanged.
+
 ## Tables and MREG Layout
 
 Table-oriented tuning lives here:
@@ -162,9 +187,9 @@ Table-oriented tuning lives here:
 
 Automatic card fallback requires **all** of the following: inferred or
 recommended Table format, normal TTY output, a known width, a single ungrouped
-top-level data table, enabled fitting (`ui.table.overflow != none`), and at most
-20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting). A width hint
-without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
+top-level data table, enabled fitting (`ui.table.overflow != none`), and
+one through 20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting).
+A width hint without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
 copy-safe output, documents/help and nested tables never fall back. Their fit
 path retains column order, first-column protection and the hidden-column footer.
 
@@ -243,8 +268,8 @@ command data.
 
 The full startup overview keeps a compact welcome and pipe cheat sheet; use
 `| H` for the detailed DSL reference. Inline code is highlighted, while command
-descriptions use the theme's muted text colour. `ui.margin` has the same default
-in the CLI and REPL, without an additional implicit REPL margin.
+descriptions use the theme's muted text colour. `ui.margin` applies only to
+REPL screen output, with no additional implicit REPL margin.
 
 Grouped and compact messages retain event order. Adjacent untitled messages of
 the same severity share a heading; a single message uses “Error” or “Warning”.
@@ -273,8 +298,9 @@ Clipboard copy is opt-in:
 
 `| LESS` explicitly pages output and `| EDITOR` opens a temporary document.
 These sinks stack with `| Y` in any order, after all data verbs. With EDITOR,
-copying uses the edited text. REPL Alt+L, Alt+E and Alt+Y act on the last rendered
-command output without running it again; see [REPL.md](REPL.md#shortcuts-and-terminal-bells).
+copying uses the edited text. REPL Alt+L, Alt+E and Alt+Y re-render the last
+staged result for their target without running commands or stages again; see
+[REPL.md](REPL.md#shortcuts-and-terminal-bells).
 
 Without EDITOR, copy rendering uses the plain-safe path even when visible output is
 rich. That is deliberate. Clipboard content should be stable, pasteable text,

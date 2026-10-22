@@ -4,7 +4,7 @@ mod table;
 
 use super::projection::{HumanProjection, ProjectedTable, RecordProjection, ValueProjection};
 use super::settings::{
-    FormatProvenance, RenderProfile, RenderSettings, ResolvedRenderSettings, TableOverflow,
+    FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableOverflow,
     TableTooWide, resolve_settings,
 };
 use super::text::table_cell_width;
@@ -60,10 +60,10 @@ pub struct RenderPlan {
 pub fn plan_format(
     output: &OutputResult,
     settings: &RenderSettings,
-    profile: RenderProfile,
+    target: RenderTarget,
 ) -> RenderPlan {
     let (format, provenance) = settings.resolve_output_format(output);
-    let mut resolved = resolve_settings(settings, profile);
+    let mut resolved = resolve_settings(settings, target);
     resolved.command_prefixes_enabled &= output.meta.document_command_prefixes;
     resolved.document_literal_commands = output.meta.document_literal_commands.clone();
     RenderPlan {
@@ -157,12 +157,7 @@ fn plan_record(
         .collect()
 }
 
-pub(super) fn plan_layout(
-    projection: &HumanProjection,
-    plan: &mut RenderPlan,
-    settings: &RenderSettings,
-    profile: RenderProfile,
-) {
+pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
     plan.tables = projection
         .tables
         .iter()
@@ -184,9 +179,8 @@ pub(super) fn plan_layout(
             plan.provenance,
             FormatProvenance::Inferred | FormatProvenance::Recommended
         )
-        && settings.table_too_wide == TableTooWide::Mreg
-        && settings.runtime.stdout_is_tty
-        && profile == RenderProfile::Normal
+        && plan.settings.table_too_wide == TableTooWide::Mreg
+        && plan.settings.display_limits
         && plan.settings.width.is_some()
         && plan.settings.table_overflow != TableOverflow::None
         && !output.meta.grouped
