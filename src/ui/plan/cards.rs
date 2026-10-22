@@ -66,7 +66,6 @@ pub(super) fn plan_compact_cards(
     if let Some(cards) = plan_inline_cards(&fields, available) {
         return cards;
     }
-    let available = available.saturating_sub(2).max(1);
     let mut longest = BTreeMap::<&str, usize>::new();
     for field in fields.iter().flatten() {
         let width = UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());

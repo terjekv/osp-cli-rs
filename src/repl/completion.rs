@@ -418,6 +418,7 @@ pub(crate) fn maybe_render_dsl_help(
 fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
     let resolved = view.ui.render_settings.resolve_render_settings();
     let theme = &resolved.theme;
+    let indent = " ".repeat(resolved.margin);
     let mut lines = Vec::new();
 
     let target = spec.split_whitespace().next().unwrap_or("").trim();
@@ -429,23 +430,23 @@ fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
                     continue;
                 };
                 if target.is_empty() {
-                    lines.push(format!("  {:<5} {}", name, info.summary));
+                    lines.push(format!("{indent}{:<5} {}", name, info.summary));
                 } else {
-                    lines.push(format!("  {}  {}", name, info.summary));
+                    lines.push(format!("{indent}{}  {}", name, info.summary));
                     lines.push(format!(
-                        "  {}",
+                        "{indent}{}",
                         row["description"].as_str().unwrap_or_default()
                     ));
                 }
             }
             if target.is_empty() {
                 lines.push(String::new());
-                lines.push("  Use | H <verb> for details.".to_string());
+                lines.push(format!("{indent}Use | H <verb> for details."));
             }
         }
         Err(_) => {
-            lines.push(format!("  Unknown DSL verb: {target}"));
-            lines.push("  Use | H to list available verbs.".to_string());
+            lines.push(format!("{indent}Unknown DSL verb: {target}"));
+            lines.push(format!("{indent}Use | H to list available verbs."));
         }
     }
 
@@ -456,6 +457,7 @@ fn render_dsl_help(view: ReplViewContext<'_>, spec: &str) -> String {
         resolved.unicode,
         resolved.width,
         SectionRenderContext {
+            margin: resolved.margin,
             color: resolved.color,
             theme,
             style_overrides: &resolved.style_overrides,

@@ -50,19 +50,19 @@ fn help_color_unicode_presentation_matrix_contract() {
                     );
                 } else if color == "always" && unicode == "never" {
                     assert!(
-                        output.contains("- "),
+                        output.contains(" -"),
                         "missing ascii border color for {presentation}: {output:?}"
                     );
                 }
 
                 if unicode == "always" {
                     assert!(
-                        plain.contains("─ Commands"),
+                        plain.contains("Commands ─"),
                         "missing unicode chrome for {presentation}/{color}: {plain:?}"
                     );
                 } else {
                     assert!(
-                        plain.contains("- Commands"),
+                        plain.contains("Commands -"),
                         "missing ascii chrome for {presentation}/{color}: {plain:?}"
                     );
                 }
@@ -73,7 +73,7 @@ fn help_color_unicode_presentation_matrix_contract() {
                     "{presentation} help should stay clap-like for {color}/{unicode}: {plain:?}"
                 );
                 assert!(
-                    !plain.contains("─ Usage") && !plain.contains("- Usage"),
+                    !plain.contains("Usage ─") && !plain.contains("Usage -"),
                     "{presentation} help should not render ruled section chrome for {color}/{unicode}: {plain:?}"
                 );
                 if color == "always" {

@@ -654,7 +654,7 @@ fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
         },
     );
 
-    assert!(rendered.contains("  Welcome Demo!\n\n  Logged in as"));
+    assert!(rendered.contains("Welcome Demo!\n\nLogged in as"));
     assert!(rendered.contains("Theme"));
 }
 
@@ -675,9 +675,9 @@ fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
         },
     );
 
-    assert!(rendered.contains("- Commands "));
-    assert!(rendered.contains("\n  list  List history entries\n"));
-    assert!(!rendered.contains("\nlist  List history entries\n"));
+    assert!(rendered.contains("Commands "));
+    assert!(rendered.contains("\nlist  List history entries\n"));
+    assert!(!rendered.contains("\n  list  List history entries\n"));
 }
 
 #[test]
@@ -693,7 +693,7 @@ fn ui2_structured_document_output_uses_presentation_metadata_unit() {
             ..crate::ui::RenderRequest::new(&settings)
         },
     );
-    assert!(rendered.contains("\n  list    List history entries\n"));
+    assert!(rendered.contains("\nlist    List history entries\n"));
 }
 
 #[test]
@@ -797,7 +797,7 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
         panic!("expected guide paragraph");
     };
 
-    assert_eq!(guide_section.body_indent, 2);
+    assert_eq!(guide_section.body_indent, 0);
     assert!(guide_section.trailing_newline);
     assert!(guide_paragraph.inline_markup);
     assert_eq!(guide_paragraph.indent, 0);
@@ -1011,7 +1011,7 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
     assert!(!plain.contains("Errors") && !plain.contains("Warnings"));
     assert!(rendered.contains("\x1b[38;2;241;250;140m"));
     assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242m  No matching host found."));
+    assert!(rendered.contains("\x1b[38;2;248;248;242mNo matching host found."));
     settings.color = ColorMode::Never;
     settings.unicode = UnicodeMode::Never;
     let uncolored = crate::ui::render_messages(

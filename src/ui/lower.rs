@@ -294,24 +294,25 @@ fn lower_document_blocks(
                         path,
                     )
                 };
+                let title_chrome = if suffix.is_some() {
+                    SectionTitleChrome::Plain
+                } else if let Some((_, layout)) = help {
+                    help_layout_title_chrome(layout)
+                } else if matches!(
+                    format,
+                    OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+                ) {
+                    SectionTitleChrome::Ruled
+                } else {
+                    SectionTitleChrome::Plain
+                };
                 vec![Block::Section(SectionBlock {
                     title: (help.is_none() || !title.is_empty()).then(|| title.clone()),
-                    title_chrome: if suffix.is_some() {
-                        SectionTitleChrome::Plain
-                    } else if let Some((_, layout)) = help {
-                        help_layout_title_chrome(layout)
-                    } else if matches!(
-                        format,
-                        OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
-                    ) {
-                        SectionTitleChrome::Ruled
-                    } else {
-                        SectionTitleChrome::Plain
-                    },
-                    body_indent: if format == OutputFormat::Markdown {
-                        0
-                    } else {
+                    title_chrome,
+                    body_indent: if title_chrome == SectionTitleChrome::Plain {
                         2
+                    } else {
+                        0
                     },
                     inline_title_suffix: suffix,
                     trailing_newline: help.is_none() && format != OutputFormat::Markdown,
@@ -521,7 +522,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
                     title: Some(title.clone()),
                     title_chrome: SectionTitleChrome::Card,
-                    body_indent: 2,
+                    body_indent: 0,
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: body.iter().cloned().map(Block::Grid).collect(),

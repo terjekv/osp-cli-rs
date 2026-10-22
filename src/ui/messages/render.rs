@@ -26,6 +26,7 @@ pub(crate) struct MessageChrome {
     pub ruled_policy: RuledSectionPolicy,
     pub unicode: bool,
     pub width: Option<usize>,
+    pub margin: usize,
 }
 
 impl Default for MessageChrome {
@@ -35,6 +36,7 @@ impl Default for MessageChrome {
             ruled_policy: RuledSectionPolicy::Shared,
             unicode: false,
             width: None,
+            margin: 0,
         }
     }
 }
@@ -47,6 +49,7 @@ pub(super) fn render_messages(buffer: &MessageBuffer, request: &super::MessageRe
         ruled_policy: settings.ruled_section_policy,
         unicode: settings.unicode,
         width: settings.width,
+        margin: settings.margin,
     };
     let buffer = sanitize_message_buffer(buffer);
     let rendered = match request.layout {
@@ -186,7 +189,7 @@ fn render_shared_full_sections(
     styler: &ThemeStyler<'_>,
     chrome: MessageChrome,
 ) -> String {
-    let render = section_render_context(styler);
+    let render = section_render_context(styler, chrome.margin);
     let width = chrome.width;
     let mut lines = Vec::new();
     for section in sections {
@@ -195,12 +198,16 @@ fn render_shared_full_sections(
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode: chrome.unicode,
                 width,
-                title_columns: 2,
                 render,
                 tokens: SectionStyleTokens::same(section.level.style_token()),
             },
         ));
-        lines.extend(message_body_lines(section, chrome.width, styler));
+        lines.extend(message_body_lines(
+            section,
+            chrome.width,
+            chrome.margin,
+            styler,
+        ));
     }
     if matches!(chrome.frame_style, SectionFrameStyle::TopBottom) {
         let token = sections
@@ -212,7 +219,6 @@ fn render_shared_full_sections(
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode: chrome.unicode,
                 width,
-                title_columns: 2,
                 render,
                 tokens: SectionStyleTokens::same(token),
             },
@@ -226,20 +232,21 @@ fn render_full_section(
     styler: &ThemeStyler<'_>,
     chrome: MessageChrome,
 ) -> String {
-    let body = message_body_lines(section, chrome.width, styler).join("\n");
+    let body = message_body_lines(section, chrome.width, chrome.margin, styler).join("\n");
     render_section_block_with_overrides(
         &section.title,
         &body,
         chrome.frame_style,
         chrome.unicode,
         chrome.width,
-        section_render_context(styler),
+        section_render_context(styler, chrome.margin),
         SectionStyleTokens::same(section.level.style_token()),
     )
 }
 
-fn section_render_context<'a>(styler: &ThemeStyler<'a>) -> SectionRenderContext<'a> {
+fn section_render_context<'a>(styler: &ThemeStyler<'a>, margin: usize) -> SectionRenderContext<'a> {
     SectionRenderContext {
+        margin,
         color: styler.enabled,
         theme: styler.theme,
         style_overrides: styler.overrides,
@@ -261,6 +268,7 @@ fn render_compact_section(section: &RenderedSection, styler: &ThemeStyler<'_>) -
 fn message_body_lines(
     section: &RenderedSection,
     width: Option<usize>,
+    margin: usize,
     styler: &ThemeStyler<'_>,
 ) -> Vec<String> {
     // Bootstrap errors can only supply the 12-column chrome fallback, which is
@@ -268,7 +276,7 @@ fn message_body_lines(
     // diagnostic identifiers unreadable; wait for a useful width measurement.
     let content_width = width
         .filter(|width| *width >= 40)
-        .map(|width| width.saturating_sub(2));
+        .map(|width| width.saturating_sub(margin));
     section
         .lines
         .iter()
@@ -278,7 +286,13 @@ fn message_body_lines(
                 None => vec![line.to_string()],
             })
         })
-        .map(|line| paint(styler, &format!("  {line}"), StyleToken::Text))
+        .map(|line| {
+            paint(
+                styler,
+                &format!("{}{line}", " ".repeat(margin)),
+                StyleToken::Text,
+            )
+        })
         .collect()
 }
 
@@ -356,6 +370,7 @@ mod tests {
         request.settings.ruled_section_policy = chrome.ruled_policy;
         request.settings.unicode = chrome.unicode;
         request.settings.width = chrome.width;
+        request.settings.margin = chrome.margin;
         if let Some(styler) = styler {
             request.settings.color = styler.enabled;
             request.settings.theme = styler.theme.clone();
@@ -396,11 +411,11 @@ mod tests {
             ),
         );
         assert!(rendered.contains("Error"));
-        assert!(rendered.contains("\n  bad"));
+        assert!(rendered.contains("\nbad"));
         assert!(rendered.contains("Warning"));
-        assert!(rendered.contains("\n  careful"));
+        assert!(rendered.contains("\ncareful"));
         assert!(rendered.contains("Success"));
-        assert!(rendered.contains("\n  done"));
+        assert!(rendered.contains("\ndone"));
         assert!(!rendered.contains("Info:"));
     }
 
@@ -462,12 +477,13 @@ mod tests {
                     ruled_policy: RuledSectionPolicy::Shared,
                     unicode: false,
                     width: Some(16),
+                    margin: 0,
                 },
             ),
         );
 
-        assert!(rendered.contains("- Error "));
-        assert!(rendered.contains("- Warning "));
+        assert!(rendered.contains("Error "));
+        assert!(rendered.contains("Warning "));
         assert!(rendered.ends_with("----------------\n"));
     }
 
@@ -488,16 +504,17 @@ mod tests {
                     ruled_policy: RuledSectionPolicy::Shared,
                     unicode: true,
                     width: Some(40),
+                    margin: 0,
                 },
             ),
         );
 
         assert!(
-            rendered.contains("\n  capabilities_request_failed: Failed to\n"),
+            rendered.contains("\ncapabilities_request_failed: Failed to\n"),
             "{rendered}"
         );
         assert!(
-            rendered.contains("\n  fetch capabilities for provider\n  'vmware'.\n"),
+            rendered.contains("\nfetch capabilities for provider\n'vmware'.\n"),
             "{rendered}"
         );
         assert!(
@@ -525,6 +542,7 @@ mod tests {
                     ruled_policy: RuledSectionPolicy::PerSection,
                     unicode: false,
                     width: Some(12),
+                    margin: 0,
                 },
             ),
         );
@@ -598,6 +616,7 @@ mod tests {
                     ruled_policy: RuledSectionPolicy::PerSection,
                     unicode: false,
                     width: Some(12),
+                    margin: 0,
                 },
             ),
         );
@@ -614,6 +633,7 @@ mod tests {
                     ruled_policy: RuledSectionPolicy::PerSection,
                     unicode: true,
                     width: Some(14),
+                    margin: 0,
                 },
             ),
         );
