@@ -28,6 +28,10 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Preserve complete atomic table values (tokens up to 24 columns) and the first
+  column. Shrink prose columns and drop trailing columns with a hidden footer
+  instead of truncating identifiers, colours or addresses.
+
 - Resolve width, colour, margin and display limits by render target. Margin is
   REPL screen chrome only, including JSON. One-shot output and sinks have no
   margin. Pager/editor/clipboard actions re-render retained structured results

@@ -41,7 +41,7 @@ OutputResult / Document
 - **Wrong human value, label or total:** start in `projection.rs`. Check `--json`
   for the canonical data; derived display values precede display limits.
 - **Wrong format, cards or hidden columns:** start in `plan/`. The fit function
-  measures projected cell text; `lower.rs` and emitters consume its decision.
+  measures projected cell text, preserves atomic values and drops trailing columns; `lower.rs` and emitters consume its decision.
 - **Wrong spacing, border or colour:** start in the emitter and `ThemeStyler`.
   The IR carries tokens; palette specimens alone retain validated raw specs.
 - **New style role:** add the token in `style/`, map it in each builtin theme

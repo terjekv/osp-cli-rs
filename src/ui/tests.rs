@@ -6,7 +6,6 @@ use crate::core::output_model::{
 
 use crate::row;
 use serde_json::json;
-use unicode_width::UnicodeWidthStr;
 
 use super::doc::{Block, SectionTitleChrome};
 use super::{HelpLayout, RenderSettings, RenderTarget, plan_format, render, resolve_settings};
@@ -128,17 +127,19 @@ fn semantic_document_blocks_use_shared_markdown_rendering_unit() {
 }
 
 #[test]
-fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
+fn ui2_terminal_tables_preserve_first_column_for_all_overflow_modes_unit() {
+    let message =
+        "Not authorized for vcenter vcsa-test03.uio.no; request access or choose another value";
     let output = OutputResult::from_rows(vec![row! {
-        "message" => "Not authorized for vcenter vcsa-test03.uio.no; request access or choose another value",
+        "message" => message,
         "provider" => "vmware",
         "next" => "Request access or choose another value",
     }]);
 
-    for (overflow, expected) in [
-        (super::TableOverflow::Clip, "Not authorized"),
-        (super::TableOverflow::Ellipsis, "…"),
-        (super::TableOverflow::Wrap, "another value"),
+    for overflow in [
+        super::TableOverflow::Clip,
+        super::TableOverflow::Ellipsis,
+        super::TableOverflow::Wrap,
     ] {
         let mut settings = RenderSettings::test_plain(OutputFormat::Table);
         settings.format_explicit = true;
@@ -148,13 +149,8 @@ fn ui2_terminal_tables_honor_width_for_clip_ellipsis_and_wrap_unit() {
 
         let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
-        assert!(rendered.contains(expected), "{overflow:?}: {rendered}");
-        assert!(
-            rendered
-                .lines()
-                .all(|line| UnicodeWidthStr::width(line) <= 48),
-            "{overflow:?} exceeded width:\n{rendered}"
-        );
+        assert!(rendered.contains(message), "{overflow:?}: {rendered}");
+        assert!(rendered.contains("+2 hidden: provider, next"));
     }
 }
 

@@ -15,6 +15,13 @@ Rendering has one owner for each decision:
 6. lowering copies the chosen structure and typed styles into `ui/doc.rs`
 7. terminal or Markdown emitters render that IR
 
+General renderer rules use only shape and value type: row/column counts,
+scalar versus nested values, measured width, and atomic tokens versus prose.
+They never depend on field names or value meaning. Command-specific presentation
+belongs to producer metadata (`column_labels`, `display_columns`, `DisplayRule`s),
+never to reshaping canonical data. If the renderer needs to know what a field
+means, the producer must declare the rule.
+
 The UI does not reload configuration, rerun commands or invent data semantics.
 Machine exports bypass human projection and the document IR. JSON stays free
 of colour and retains canonical values, including every row and nested item.
@@ -192,6 +199,17 @@ one through 20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting).
 A width hint without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
 copy-safe output, documents/help and nested tables never fall back. Their fit
 path retains column order, first-column protection and the hidden-column footer.
+
+The shared top-level and nested table fitter treats a column as atomic when
+all its nonempty rendered cells contain no whitespace and measure at most 24
+columns (`ATOMIC_MAX_WIDTH`). Atomic columns and the first column retain their
+natural widths. Prose columns shrink to the smaller of their natural width and
+the larger of 12 (`PROSE_MIN_WIDTH`) or their header width. Headers stay whole.
+If those minimum widths do not fit, columns drop from the right in producer
+order, with the `+N hidden: …` footer. Spare width grows prose columns from left
+to right up to natural width. The first column may exceed the available width.
+`clip`, `ellipsis` and `wrap` affect prose cells only; atomic values remain whole.
+`none` uses natural widths without fitting.
 
 Table cells comma-join lists. Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.
