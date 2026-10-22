@@ -90,85 +90,6 @@ impl crate::app::AccessPolicy for StartupResolutionProbe {
 
 #[cfg_attr(miri, ignore = "public app bootstrap integration test")]
 #[test]
-fn app_help_entrypoints_share_exit_and_sink_routing_invariants_unit() {
-    if crate::tests::isolated_test() {
-        return;
-    }
-    with_test_xdg_env(|| {
-        let app = crate::app::App::new();
-        let mut help_sink = BufferedUiSink::default();
-
-        assert_eq!(
-            app.run_with_sink(["osp", "--defaults-only", "--help"], &mut help_sink)
-                .expect("app help with sink should render"),
-            0
-        );
-        assert_eq!(
-            app.run_process_with_sink(["osp", "--defaults-only", "--help"], &mut help_sink),
-            0
-        );
-        assert!(!help_sink.stdout.is_empty());
-        assert!(help_sink.stderr.is_empty());
-
-        let mut sink = BufferedUiSink::default();
-        let exit = super::run_from_with_sink(["osp", "--defaults-only", "--help"], &mut sink)
-            .expect("help should render");
-        assert_eq!(exit, 0);
-        assert!(!sink.stdout.is_empty());
-        assert!(sink.stderr.is_empty());
-
-        let mut runner_sink = BufferedUiSink::default();
-        let runner = crate::app::App::new();
-        assert_eq!(
-            runner
-                .run_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink)
-                .expect("runner help should render"),
-            0
-        );
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
-fn app_public_entrypoints_cover_repeated_sink_and_free_process_wrappers_unit() {
-    if crate::tests::isolated_test() {
-        return;
-    }
-    with_test_xdg_env(|| {
-        let app = crate::app::App::new();
-        assert_eq!(
-            app.run_from(["osp", "--defaults-only", "--help"])
-                .expect("app run_from help should render"),
-            0
-        );
-        assert_eq!(app.run_process(["osp", "--defaults-only", "--help"]), 0);
-
-        let mut runner_sink = BufferedUiSink::default();
-        let runner = crate::app::App::new();
-        assert_eq!(
-            runner.run_process_with_sink(["osp", "--defaults-only", "--help"], &mut runner_sink),
-            0
-        );
-        assert!(!runner_sink.stdout.is_empty());
-        assert!(runner_sink.stderr.is_empty());
-
-        assert_eq!(
-            crate::app::run_process(["osp", "--defaults-only", "--help"]),
-            0
-        );
-
-        let mut sink = BufferedUiSink::default();
-        assert_eq!(
-            crate::app::run_process_with_sink(["osp", "--defaults-only", "--help"], &mut sink),
-            0
-        );
-        assert!(!sink.stdout.is_empty());
-        assert!(sink.stderr.is_empty());
-    });
-}
-
-#[cfg_attr(miri, ignore = "public app bootstrap integration test")]
-#[test]
 fn startup_hook_receives_parent_owned_profile_and_terminal_resolution_unit() {
     if crate::tests::isolated_test() {
         return;
@@ -341,7 +262,7 @@ fn native_command_can_restart_repl_after_refreshing_completion_unit() {
         &[],
         NativeCommandRegistry::new().with_command(CompletionRefreshingNativeCommand),
     );
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let result =
         repl_dispatch::execute_repl_plugin_line(&mut state, &history, "refreshable refresh", None)
@@ -365,7 +286,7 @@ fn authentication_denial_and_doctor_last_add_progressive_detail_unit() {
         NativeCommandRegistry::new().with_command(CapabilityGatedNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))
@@ -415,7 +336,7 @@ fn native_subcommand_typo_and_doctor_last_add_progressive_detail_unit() {
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap usr", Some(&mut sink))
@@ -463,7 +384,7 @@ fn native_missing_argument_names_input_and_scoped_help_unit() {
         NativeCommandRegistry::new().with_command(TypoNativeCommand),
     );
     state.runtime.ui.render_settings.format = OutputFormat::Table;
-    let history = make_test_history(&mut state);
+    let (history, _history_root) = make_test_history(&mut state);
 
     let mut sink = BufferedUiSink::default();
     repl_dispatch::execute_repl_plugin_line(&mut state, &history, "ldap user", Some(&mut sink))

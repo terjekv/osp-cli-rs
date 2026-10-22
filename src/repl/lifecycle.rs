@@ -334,7 +334,7 @@ pub(super) fn seed_native_context(
         let selected = session.native_context.for_service(name);
         for (kind, value) in command.context_seeds(runtime.config.resolved(), &identity) {
             if enabled.contains(&kind)
-                && crate::context::KINDS.contains(&kind.as_str())
+                && crate::core::context::KINDS.contains(&kind.as_str())
                 && crate::context::valid_value(&value)
                 && !session
                     .native_context

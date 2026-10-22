@@ -10,8 +10,8 @@ include!("repl_runtime/session_shell.rs");
 
 #[test]
 fn repl_flag_prefixed_help_records_prompt_timing_badge_unit() {
-    let mut state = make_test_state(Vec::new());
-    let history = make_test_history(&mut state);
+    let (mut state, _state_root) = make_test_state(Vec::new());
+    let (history, _history_root) = make_test_history(&mut state);
 
     let rendered =
         repl_dispatch::execute_repl_plugin_line(&mut state, &history, "-ddd help config", None)

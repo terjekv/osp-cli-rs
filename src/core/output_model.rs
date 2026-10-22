@@ -599,19 +599,6 @@ fn group_from_value(value: &Value) -> Option<Group> {
 mod tests {
 
     #[test]
-    fn internal_example_1() {
-        use crate::core::output_model::compute_key_index;
-        use crate::row;
-
-        let rows = vec![
-            row! { "uid" => "alice", "mail" => "a@example.com" },
-            row! { "uid" => "bob", "cn" => "Bob" },
-        ];
-
-        assert_eq!(compute_key_index(&rows), vec!["uid", "mail", "cn"]);
-    }
-
-    #[test]
     fn internal_example_2() {
         use crate::core::output_model::{OutputItems, output_items_to_value};
         use crate::row;

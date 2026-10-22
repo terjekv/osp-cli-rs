@@ -23,7 +23,7 @@ pub(crate) fn run_context_command(
                     "context value must be 1–256 printable characters"
                 ));
             }
-            if !crate::context::KINDS.contains(&args.kind.as_str()) {
+            if !crate::core::context::KINDS.contains(&args.kind.as_str()) {
                 return Err(miette::miette!("unknown context kind: {}", args.kind));
             }
             let service = session

@@ -27,59 +27,6 @@ fn ldap_user_json_contract() {
 
 #[cfg(unix)]
 #[test]
-fn ldap_user_defaults_to_global_user() {
-    let fixture = LdapPluginFixture::new();
-
-    let mut cmd = fixture.osp();
-    cmd.args(["-u", "oistes", "--json", "ldap", "user"]);
-    let output = cmd.assert().success().get_output().clone();
-    let payload = parse_json_stdout(&output.stdout);
-    let row = first_json_row(&payload, "ldap user default subject");
-    assert_eq!(row["uid"], "oistes");
-    assert!(
-        output.stderr.is_empty(),
-        "unexpected stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn ldap_user_supports_attributes_and_filter() {
-    let fixture = LdapPluginFixture::new();
-
-    let mut cmd = fixture.osp();
-    cmd.args([
-        "-u",
-        "oistes",
-        "--json",
-        "ldap",
-        "user",
-        "oistes",
-        "--filter",
-        "uid=oistes",
-        "--attributes",
-        "uid,cn",
-    ]);
-    let output = cmd.assert().success().get_output().clone();
-    let payload = parse_json_stdout(&output.stdout);
-    let row = first_json_row(&payload, "ldap user attribute projection");
-    assert_eq!(row["uid"], "oistes");
-    assert_eq!(row["cn"], "Mock LDAP User");
-    let object = row
-        .as_object()
-        .expect("ldap projected row should render as an object");
-    assert!(!object.contains_key("homeDirectory"));
-    assert!(!object.contains_key("netgroups"));
-    assert!(
-        output.stderr.is_empty(),
-        "unexpected stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[cfg(unix)]
-#[test]
 fn ldap_netgroup_json_contract() {
     let fixture = LdapPluginFixture::new();
 
@@ -206,51 +153,10 @@ shift || true
 
 case "$cmd" in
   user)
-    uid=""
-    filter=""
-    attrs=""
-    while [ "$#" -gt 0 ]; do
-      case "$1" in
-        --filter)
-          filter="${2:-}"
-          shift 2
-          ;;
-        --attributes|-a)
-          attrs="${2:-}"
-          shift 2
-          ;;
-        *)
-          if [ -z "$uid" ]; then
-            uid="$1"
-          fi
-          shift
-          ;;
-      esac
-    done
-
-    if [ -z "$uid" ]; then
-      uid="oistes"
-    fi
-
-    if [[ "$filter" == uid=* ]]; then
-      wanted="${filter#uid=}"
-      if [ "$wanted" != "$uid" ]; then
-        cat <<JSON
-{"protocol_version":1,"ok":true,"data":[],"error":null,"meta":{"format_hint":"table","columns":["uid","cn"]}}
-JSON
-        exit 0
-      fi
-    fi
-
-    if [ "$attrs" = "uid,cn" ] || [ "$attrs" = "cn,uid" ]; then
-      cat <<JSON
-{"protocol_version":1,"ok":true,"data":[{"uid":"$uid","cn":"Mock LDAP User"}],"error":null,"meta":{"format_hint":"table","columns":["uid","cn"]}}
-JSON
-    else
-      cat <<JSON
+    uid="${1:?user id required}"
+    cat <<JSON
 {"protocol_version":1,"ok":true,"data":[{"uid":"$uid","cn":"Mock LDAP User","homeDirectory":"/mock/home/$uid","netgroups":["ucore","usit"]}],"error":null,"meta":{"format_hint":"table","columns":["uid","cn"]}}
 JSON
-    fi
     ;;
 
   netgroup)

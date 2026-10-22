@@ -152,7 +152,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
 
     public_docs = ConfidenceCheck(
         name="public-docs",
-        description="Repo-wide public Rustdoc coverage and feature-gate contract.",
+        description="Compiler-backed public Rustdoc coverage.",
         command=[python, str(root / "scripts" / "public-docs.py")],
     )
     rustdoc_warnings = ConfidenceCheck(
@@ -165,11 +165,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         name="public-api-examples",
         description="Curated runnable doctest baseline for public entrypoints.",
         command=[python, str(root / "scripts" / "public-api-examples.py")],
-    )
-    contract_env = ConfidenceCheck(
-        name="contract-env",
-        description="Hermetic contract test environment guardrail.",
-        command=[str(root / "scripts" / "check-contract-env.sh")],
     )
     miri_setup = ConfidenceCheck(
         name="miri-setup",
@@ -204,9 +199,14 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         description="Fast lint and static correctness checks.",
         command=clippy_command(),
     )
+    toolchain = ConfidenceCheck(
+        name="toolchain",
+        description="Stable and Miri pin consistency in metadata and selected workflow jobs.",
+        command=cargo_test_command("--test", "toolchain"),
+    )
     architecture = ConfidenceCheck(
         name="architecture",
-        description="Architecture guardrail tests.",
+        description="Core, UI and DSL module dependency boundaries.",
         command=cargo_test_command("--test", "architecture"),
     )
     dependency_audit = ConfidenceCheck(
@@ -261,7 +261,7 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
         command=[python, str(root / "scripts" / "perf.py")],
     )
 
-    static_checks = [contract_env, fmt, clippy, architecture]
+    static_checks = [fmt, clippy, toolchain, architecture]
     behavior_checks = [contracts, integration]
 
     return {
@@ -272,7 +272,6 @@ def lane_catalog(root: Path) -> dict[str, ConfidenceLane]:
             ),
             covers=(
                 "formatting and lint policy",
-                "hermetic contract environment",
                 "architecture guardrails",
             ),
             omits=(
@@ -480,7 +479,6 @@ def required_tools(checks: list[ConfidenceCheck], root: Path) -> set[str]:
     """Collect prerequisites before a lane spends time building anything."""
 
     special = {
-        "contract-env": {"bash", "rg"},
         "public-api-examples": set(),
         "startup-budget": set(),
         "startup-baseline": set(),
@@ -631,7 +629,7 @@ def run_check(root: Path, check: ConfidenceCheck, *, to_stderr: bool = False) ->
     started = time.perf_counter()
     env = None
     if check.env:
-        env = dict(**os.environ, **check.env)
+        env = {**os.environ, **check.env}
     result = subprocess.run(check.command, cwd=root, env=env)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:

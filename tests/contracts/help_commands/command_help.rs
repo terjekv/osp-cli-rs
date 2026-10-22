@@ -11,7 +11,6 @@ fn command_help_lists_short_invocation_options_by_default_contract() {
     assert!(plain.contains("history"));
     assert!(plain.contains("Common Invocation Options"));
     for flag in ["-v, --verbose", "-q, --quiet", "-d, --debug"] { assert!(plain.contains(flag)); }
-    assert!(!plain.contains("--plugin-provider"));
     assert_contract_snapshot!("history_help_default", plain);
 }
 

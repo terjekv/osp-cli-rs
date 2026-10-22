@@ -16,6 +16,10 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 pub(crate) use crate::process_support::{osp_command, write_config, write_executable_script};
 
+// Ordinary waits detect hangs; explicit short waits keep their stated deadline.
+#[cfg(unix)]
+pub(crate) const HANG_TIMEOUT: Duration = Duration::from_secs(15);
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum ReplPtyColorMode {
@@ -290,17 +294,11 @@ impl ReplPtySession {
     }
 
     fn wait_deadline(&self, timeout: Duration) -> Instant {
-        // One-second waits belong to latency contracts; other waits detect hangs.
-        let timeout = if timeout > Duration::from_secs(1) {
-            timeout.max(Duration::from_secs(15))
-        } else {
-            timeout
-        };
         (Instant::now() + timeout).min(self.deadline)
     }
 
     pub(crate) fn write_bytes(&mut self, bytes: &[u8]) {
-        let deadline = self.wait_deadline(Duration::from_secs(15));
+        let deadline = self.wait_deadline(HANG_TIMEOUT);
         // A rendered prompt can still belong to the editor being rebuilt.
         while self
             .terminal
@@ -322,7 +320,7 @@ impl ReplPtySession {
     pub(crate) fn type_text(&mut self, text: &str) {
         let start = self.output_len();
         self.write_bytes(text.as_bytes());
-        let deadline = self.wait_deadline(Duration::from_secs(15));
+        let deadline = self.wait_deadline(HANG_TIMEOUT);
         loop {
             let output = self.output_since(start);
             // Cooked terminal echo can precede editor startup after a reload.

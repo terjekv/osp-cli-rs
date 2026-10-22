@@ -1,11 +1,8 @@
 #![allow(missing_docs)]
 
 #[cfg(unix)]
-use std::time::Duration;
-
-#[cfg(unix)]
 use crate::support::{
-    ReplPtyColorMode, ReplPtyConfig, ReplPtySession, strip_ansi_preserve_newlines,
+    HANG_TIMEOUT, ReplPtyColorMode, ReplPtyConfig, ReplPtySession, strip_ansi_preserve_newlines,
 };
 
 #[cfg(unix)]
@@ -53,7 +50,7 @@ Export selected fields with `P key,value`.
     );
 
     assert!(
-        session.wait_for_plain_output("default>", Duration::from_secs(3)),
+        session.wait_for_plain_output("default>", HANG_TIMEOUT),
         "expected REPL prompt after startup; output:\n{}",
         session.output_snapshot(4000),
     );
@@ -100,7 +97,7 @@ Export selected fields with `P key,value`.
     let changed = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_plain_output_since(changed, "Theme: Nord", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(changed, "Theme: Nord", HANG_TIMEOUT),
         "theme change should rebuild the authored intro; output:\n{}",
         session.output_snapshot(12_000),
     );
@@ -110,7 +107,7 @@ Export selected fields with `P key,value`.
             .find("Operator desk")
             .expect("the rebuilt intro should precede its theme");
     assert!(
-        session.wait_for_plain_output_since(rebuilt_start, "default>", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(rebuilt_start, "default>", HANG_TIMEOUT),
         "rebuilt intro should return to the editor; output:\n{}",
         session.output_snapshot(12_000),
     );
@@ -135,13 +132,13 @@ Export selected fields with `P key,value`.
     let closed = session.output_len();
     session.write_bytes(b"\x1b");
     assert!(
-        session.wait_for_output_since(closed, "\x1b[?25h", Duration::from_secs(3)),
+        session.wait_for_output_since(closed, "\x1b[?25h", HANG_TIMEOUT),
         "closing the flag menu should repaint the retained command",
     );
     let inspected = session.output_len();
     session.write_bytes(b"\r");
     assert!(
-        session.wait_for_plain_output_since(inspected, "} ]", Duration::from_secs(3)),
+        session.wait_for_plain_output_since(inspected, "} ]", HANG_TIMEOUT),
         "rebuilt editor should execute the config inspection; output:\n{}",
         session.output_snapshot(12_000),
     );
@@ -156,11 +153,11 @@ Export selected fields with `P key,value`.
     assert_eq!(document[0]["value"], "nord");
     assert_eq!(document[0]["source"], "session");
     assert_eq!(document[0]["scope_profile"], "default");
-    assert!(session.wait_for_plain_output_since(inspected, "default>", Duration::from_secs(3)));
+    assert!(session.wait_for_plain_output_since(inspected, "default>", HANG_TIMEOUT));
 
     session.write_bytes(b"exit\r");
     assert!(
-        session.wait_for_exit(Duration::from_secs(3)),
+        session.wait_for_exit(HANG_TIMEOUT),
         "expected REPL to exit after `exit`; output:\n{}",
         session.output_snapshot(4000),
     );

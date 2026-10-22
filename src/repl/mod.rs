@@ -55,31 +55,3 @@ pub(crate) use presentation::render_repl_prompt_right_for_test;
 
 #[cfg(test)]
 pub(crate) use crate::app::command_plan::repl_command_spec;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn repl_internal_example_1() {
-        let _example = || {
-            use crate::repl::{HistoryConfig, ReplPrompt, ReplResult, ReplRunConfig, run_repl};
-            use anyhow::Result;
-
-            let config =
-                ReplRunConfig::builder(ReplPrompt::simple("osp> "), HistoryConfig::default())
-                    .build();
-
-            let _result = run_repl(config, |line, _history| -> Result<ReplResult> {
-                match line {
-                    crate::repl::ReplEvent::Line(line) | crate::repl::ReplEvent::RootLine(line) => {
-                        match line.trim() {
-                            "exit" | "quit" => Ok(ReplResult::Exit(0)),
-                            _ => Ok(ReplResult::Continue),
-                        }
-                    }
-                    crate::repl::ReplEvent::Action(_) => Ok(ReplResult::Continue),
-                }
-            })?;
-            Ok::<(), anyhow::Error>(())
-        };
-    }
-}

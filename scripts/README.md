@@ -26,10 +26,7 @@ The folder is intentionally flat for now. The current rule is simple:
 - `public-api-examples.py`
   Checks selected public entrypoints for complete, nonempty runnable examples.
 - `public-docs.py`
-  Enforces public Rustdoc coverage and feature-gate wording in staged or
-  repo-wide mode.
-- `check-contract-env.sh`
-  Guards the contract-test environment assumptions.
+  Enforces compiler-backed public Rustdoc coverage in staged or repo-wide mode.
 
 ## Release
 
