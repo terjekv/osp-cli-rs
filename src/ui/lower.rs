@@ -15,8 +15,8 @@ use super::doc::{
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::{
-    COMPACT_CARD_BODY_INDENT, CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable,
-    RecordLayout, RenderPlan,
+    CARD_INDENT, CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout,
+    RenderPlan,
 };
 use super::projection::{display_value, key_value_value, ordered_keys};
 use super::settings::HelpLayout;
@@ -517,7 +517,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 CompactCard::Inline(grid) => blocks.push(Block::Grid(grid.clone())),
                 CompactCard::Entry(field) => blocks.push(Block::KeyValue(KeyValueBlock {
                     rows: vec![KeyValueRow {
-                        block_indent: None,
+                        list_grid: None,
                         key: field.label.clone(),
                         value: KeyValueValue::Scalar(field.value.clone()),
                         value_style: field.value_style.clone(),
@@ -528,7 +528,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
                     title: title.clone(),
                     title_chrome: SectionTitleChrome::Card,
-                    body_indent: COMPACT_CARD_BODY_INDENT,
+                    body_indent: CARD_INDENT,
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: body.iter().cloned().map(Block::Grid).collect(),
@@ -566,7 +566,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
             blocks.push(Block::Section(SectionBlock {
                 title: Some(title.clone()),
                 title_chrome: SectionTitleChrome::Card,
-                body_indent: COMPACT_CARD_BODY_INDENT,
+                body_indent: CARD_INDENT,
                 inline_title_suffix: None,
                 trailing_newline: false,
                 blocks: body,
@@ -680,7 +680,7 @@ fn key_value_from_map(map: &Map<String, Value>, preferred_keys: &[String]) -> Ke
         rows: ordered_keys(preferred_keys, map.keys())
             .filter_map(|key| {
                 map.get(key).map(|value| KeyValueRow {
-                    block_indent: None,
+                    list_grid: None,
                     value_style: None,
                     key: key.clone(),
                     value: key_value_value(value, false),
@@ -699,25 +699,18 @@ struct MregRecordBuilder {
 }
 
 impl MregRecordBuilder {
-    fn push_table(
-        &mut self,
-        key: &str,
-        item_count: usize,
-        mut table: TableBlock,
-        depth: usize,
-        block_indent: usize,
-    ) {
+    fn push_table(&mut self, key: &str, item_count: usize, mut table: TableBlock, depth: usize) {
         self.flush();
         table.nested = true;
         self.blocks.push(Block::Paragraph(ParagraphBlock {
             text: section_title(key, item_count),
-            indent: depth * 2,
+            indent: depth * CARD_INDENT,
             inline_markup: false,
         }));
         self.blocks.push(Block::Section(SectionBlock {
             title: None,
             title_chrome: SectionTitleChrome::Plain,
-            body_indent: block_indent,
+            body_indent: (depth + 1) * CARD_INDENT,
             inline_title_suffix: None,
             trailing_newline: false,
             blocks: vec![Block::Table(table)],
@@ -759,16 +752,12 @@ fn visit_mreg_record_field(
     layout: &FieldLayout,
 ) {
     match &layout.kind {
-        FieldKind::Table(table) => builder.push_table(
-            key,
-            table.data.rows.len(),
-            table_from_plan(table),
-            depth,
-            layout.block_indent,
-        ),
+        FieldKind::Table(table) => {
+            builder.push_table(key, table.data.rows.len(), table_from_plan(table), depth)
+        }
         FieldKind::Record(_) | FieldKind::Value => {
             let mut row = layout.row.clone();
-            row.indent = (depth > 0).then(|| " ".repeat(depth * 2));
+            row.indent = (depth > 0).then(|| " ".repeat(depth * CARD_INDENT));
             builder.pending_rows.push(row);
             if let FieldKind::Record(fields) = &layout.kind {
                 for (nested_key, layout) in fields {
@@ -789,7 +778,7 @@ fn summary_from_group(group: &Group, preferred_keys: &[String]) -> Vec<KeyValueR
     ) {
         if let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key)) {
             summary.push(KeyValueRow {
-                block_indent: None,
+                list_grid: None,
                 value_style: None,
                 key: key.clone(),
                 value: key_value_value(value, false),
@@ -806,7 +795,7 @@ fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> 
         rows: map
             .iter()
             .map(|(key, value)| KeyValueRow {
-                block_indent: None,
+                list_grid: None,
                 value_style: None,
                 key: key.clone(),
                 value: key_value_value(value, true),

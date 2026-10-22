@@ -3,11 +3,10 @@
 mod cards;
 mod table;
 
-pub(super) use cards::{COMPACT_CARD_BODY_INDENT, CompactCard};
+pub(super) use cards::{CARD_INDENT, CompactCard};
 
 use super::doc::{GridBlock, GridCell, KeyValueRow, KeyValueValue};
 use super::emit::grid::PreparedGridList;
-use super::emit::key_value::{aligned_display_key_width, scalar_text};
 use super::projection::{HumanProjection, ProjectedTable, RecordProjection, ValueProjection};
 use super::settings::{
     FormatProvenance, RenderSettings, RenderTarget, ResolvedRenderSettings, TableBorderStyle,
@@ -50,7 +49,6 @@ pub(super) enum FieldKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FieldLayout {
     pub row: KeyValueRow,
-    pub block_indent: usize,
     pub kind: FieldKind,
 }
 
@@ -196,71 +194,18 @@ fn has_nested_table(record: &RecordProjection) -> bool {
         .any(|(_, value)| nested_table(value).is_some() || has_nested_table(&value.fields))
 }
 
-fn plan_grid_indents(
-    rows: &mut [KeyValueRow],
-    settings: &ResolvedRenderSettings,
-    depth: usize,
-    value_indent: usize,
-) {
-    for row in rows {
-        match &mut row.value {
-            KeyValueValue::Array(items)
-                if items.len() > 5 && items.iter().all(|item| scalar_text(item).is_some()) =>
-            {
-                let room = settings
-                    .width
-                    .unwrap_or(usize::MAX)
-                    .saturating_sub(settings.margin + depth * 2 + value_indent)
-                    .max(1);
-                let values = items
-                    .iter()
-                    .filter_map(scalar_text)
-                    .flat_map(|value| value.split('\n').map(str::to_owned))
-                    .collect::<Vec<_>>();
-                let fallback_room = settings
-                    .width
-                    .unwrap_or(usize::MAX)
-                    .saturating_sub(settings.margin + depth * 2 + 2)
-                    .max(1);
-                let aligned = PreparedGridList::from_items(&values, room);
-                let fallback = PreparedGridList::from_items(&values, fallback_room);
-                if values
-                    .iter()
-                    .all(|value| super::text::display_width(value) <= room)
-                    && aligned.column_widths.len() >= fallback.column_widths.len()
-                {
-                    row.block_indent = Some(value_indent);
-                }
-            }
-            KeyValueValue::Object(rows) => {
-                let value_indent = aligned_display_key_width(rows.iter()) + 2;
-                plan_grid_indents(rows, settings, depth + 1, value_indent);
-            }
-            KeyValueValue::Array(items) => {
-                for item in items {
-                    if let KeyValueValue::Object(rows) = item {
-                        let value_indent = aligned_display_key_width(rows.iter()) + 2;
-                        plan_grid_indents(rows, settings, depth + 2, value_indent);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 fn plan_record(
     record: &RecordProjection,
     map: &serde_json::Map<String, serde_json::Value>,
     settings: &ResolvedRenderSettings,
     depth: usize,
 ) -> RecordLayout {
-    record
+    let mut layout: RecordLayout = record
         .iter()
         .filter(|(key, _)| settings.verbosity > 0 || !super::projection::empty_value(&map[key]))
         .map(|(key, value)| {
             let mut row = KeyValueRow {
-                block_indent: None,
+                list_grid: None,
                 key: key.clone(),
                 value: if nested_table(value).is_some() || has_nested_table(&value.fields) {
                     KeyValueValue::Empty
@@ -274,9 +219,9 @@ fn plan_record(
             if settings.verbosity == 0 {
                 omit_empty_fields(&mut row.value, &map[key]);
             }
-            let fallback = (depth + 1) * 2;
+            let block_indent = (depth + 1) * CARD_INDENT;
             let kind = if let Some(table) = nested_table(value) {
-                FieldKind::Table(plan_table(table, settings, fallback, None))
+                FieldKind::Table(plan_table(table, settings, block_indent, None))
             } else if let Some(map) = map[key]
                 .as_object()
                 .filter(|_| has_nested_table(&value.fields))
@@ -285,16 +230,18 @@ fn plan_record(
             } else {
                 FieldKind::Value
             };
-            (
-                key.clone(),
-                FieldLayout {
-                    row,
-                    block_indent: fallback,
-                    kind,
-                },
-            )
+            (key.clone(), FieldLayout { row, kind })
         })
-        .collect()
+        .collect();
+    let mut rows = layout
+        .iter()
+        .map(|(_, field)| field.row.clone())
+        .collect::<Vec<_>>();
+    cards::plan_classic_rows(&mut rows, settings, depth);
+    for ((_, field), row) in layout.iter_mut().zip(rows) {
+        field.row = row;
+    }
+    layout
 }
 
 fn omit_empty_fields(value: &mut KeyValueValue, source: &serde_json::Value) {
@@ -311,88 +258,6 @@ fn omit_empty_fields(value: &mut KeyValueValue, source: &serde_json::Value) {
             }
         }
         _ => {}
-    }
-}
-
-fn plan_classic_indents(layout: &mut RecordLayout, settings: &ResolvedRenderSettings) {
-    enum Field<'a> {
-        Row(&'a mut KeyValueRow, usize),
-        Table(&'a mut PlannedTable, &'a mut usize, usize),
-    }
-    fn flatten<'a>(layout: &'a mut RecordLayout, depth: usize, fields: &mut Vec<Field<'a>>) {
-        for (_, field) in layout {
-            match &mut field.kind {
-                FieldKind::Table(table) => {
-                    fields.push(Field::Table(table, &mut field.block_indent, depth))
-                }
-                FieldKind::Record(nested) => {
-                    fields.push(Field::Row(&mut field.row, depth));
-                    flatten(nested, depth + 1, fields);
-                }
-                FieldKind::Value => fields.push(Field::Row(&mut field.row, depth)),
-            }
-        }
-    }
-    fn aligned_width(fields: &[Field<'_>]) -> usize {
-        aligned_display_key_width(fields.iter().filter_map(|field| match field {
-            Field::Row(row, _) => Some(&**row),
-            _ => None,
-        }))
-    }
-    let mut fields = Vec::new();
-    flatten(layout, 0, &mut fields);
-    let first = fields
-        .iter()
-        .position(|field| matches!(field, Field::Row(..)))
-        .unwrap_or(fields.len());
-    let last = fields[first..]
-        .iter()
-        .position(|field| matches!(field, Field::Table(..)))
-        .map_or(fields.len(), |offset| first + offset);
-    let mut key_width = aligned_width(&fields[first..last]);
-    let mut start = 0;
-    while start < fields.len() {
-        let end = fields[start..]
-            .iter()
-            .position(|field| matches!(field, Field::Table(..)))
-            .map_or(fields.len(), |offset| start + offset);
-        if end > start {
-            let width = aligned_width(&fields[start..end]);
-            if width > 0 {
-                key_width = width;
-            }
-            for field in &mut fields[start..end] {
-                if let Field::Row(row, depth) = field {
-                    plan_grid_indents(std::slice::from_mut(*row), settings, *depth, key_width + 2);
-                }
-            }
-        }
-        if let Some(Field::Table(table, indent, depth)) = fields.get_mut(end) {
-            // Borderless tables have two columns before their first cell.
-            let value_indent = *depth * 2 + key_width;
-            let aligned = plan_table(&table.data, settings, value_indent, None);
-            let room = settings
-                .width
-                .unwrap_or(usize::MAX)
-                .saturating_sub(settings.margin + value_indent);
-            let fits = aligned.widths.len() == table.data.headers.len()
-                && aligned.widths.iter().sum::<usize>() + aligned.widths.len() * 3 < room
-                && table.data.rows.iter().all(|row| {
-                    row.iter().enumerate().all(|(column, cell)| {
-                        let width = table_cell_width(cell, settings.table_overflow);
-                        width <= aligned.widths[column]
-                            || table
-                                .widths
-                                .get(column)
-                                .is_some_and(|fallback| width > *fallback)
-                    })
-                });
-            if fits {
-                **indent = value_indent;
-                **table = aligned;
-            }
-        }
-        start = end + 1;
     }
 }
 
@@ -521,10 +386,9 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             record.retain(|(key, _)| Some(key) != title_field.as_ref());
             let mut settings = plan.settings.clone();
             if title.is_some() {
-                settings.margin += COMPACT_CARD_BODY_INDENT;
+                settings.margin += CARD_INDENT;
             }
-            let mut fields = plan_record(&record, &row, &settings, 0);
-            plan_classic_indents(&mut fields, &settings);
+            let fields = plan_record(&record, &row, &settings, 0);
             PlannedRecord { title, fields }
         })
         .collect();

@@ -2,7 +2,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::doc::{KeyValueRow, KeyValueValue};
 
-pub(super) fn display_key(row: &KeyValueRow) -> String {
+pub(in crate::ui) fn display_key(row: &KeyValueRow) -> String {
     let counted_label = row.key.rsplit_once('(').is_some_and(|(_, count)| {
         count.ends_with(')') && count.starts_with(|c: char| c.is_ascii_digit())
     });
@@ -46,7 +46,7 @@ mod tests {
     #[test]
     fn display_key_adds_counts_for_multiline_collection_values_unit() {
         let scalar = KeyValueRow {
-            block_indent: None,
+            list_grid: None,
             value_style: None,
             key: "uid".to_string(),
             value: KeyValueValue::Scalar("alice".to_string()),
@@ -54,7 +54,7 @@ mod tests {
             gap: None,
         };
         let scalar_array = KeyValueRow {
-            block_indent: None,
+            list_grid: None,
             value_style: None,
             key: "groups".to_string(),
             value: KeyValueValue::Array(vec![

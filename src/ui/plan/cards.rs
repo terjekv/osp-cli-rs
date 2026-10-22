@@ -1,11 +1,12 @@
-//! Compact card geometry for lists of flat records.
+//! Shared card indentation, label columns and list geometry.
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
 
-use super::super::doc::{GridBlock, GridCell};
+use super::super::doc::{GridBlock, GridCell, KeyValueRow, KeyValueValue};
+use super::super::emit::key_value::{display_key, scalar_text};
 use super::super::projection::{RecordProjection, display_value, ordered_keys};
 use super::super::settings::ResolvedRenderSettings;
 use super::super::text::{escape_table_line_breaks, wrap_display_width};
@@ -14,7 +15,121 @@ use crate::core::row::Row;
 const CARD_GRID_GAP: usize = 3;
 const CARD_FIELD_GAP: usize = 2;
 const SHORT_FIELD_WIDTH_DIVISOR: usize = 2;
-pub(in crate::ui) const COMPACT_CARD_BODY_INDENT: usize = 4;
+pub(in crate::ui) const CARD_INDENT: usize = 2;
+const CARD_LABEL_CAP: usize = 18;
+
+fn label_column(label: &str) -> usize {
+    let width = UnicodeWidthStr::width(label) + CARD_FIELD_GAP;
+    if width <= CARD_LABEL_CAP { width } else { 0 }
+}
+
+pub(super) fn plan_list_grid(
+    values: &[&str],
+    room: usize,
+    style: Option<crate::ui::style::CellStyle>,
+) -> GridBlock {
+    let values = values
+        .iter()
+        .flat_map(|value| {
+            value
+                .split('\n')
+                .flat_map(|line| wrap_display_width(line, room))
+        })
+        .collect::<Vec<_>>();
+    let grid = super::super::emit::grid::PreparedGridList::from_items(&values, room);
+    GridBlock {
+        rows: grid
+            .rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|value| GridCell {
+                        label: String::new(),
+                        value,
+                        value_style: style.clone(),
+                    })
+                    .collect()
+            })
+            .collect(),
+        column_widths: grid.column_widths,
+        label_widths: Vec::new(),
+        gap: grid.gap,
+    }
+}
+
+pub(super) fn plan_classic_rows(
+    rows: &mut [KeyValueRow],
+    settings: &ResolvedRenderSettings,
+    depth: usize,
+) {
+    let available = settings
+        .width
+        .unwrap_or(usize::MAX)
+        .saturating_sub(settings.margin + depth * CARD_INDENT)
+        .max(1);
+    let inline_value = |row: &KeyValueRow| match &row.value {
+        KeyValueValue::Scalar(value) if !value.is_empty() => Some(value.clone()),
+        KeyValueValue::Array(items) if !items.is_empty() => items
+            .iter()
+            .map(scalar_text)
+            .collect::<Option<Vec<_>>>()
+            .map(|values| values.join(", ")),
+        _ => None,
+    };
+    let column = rows
+        .iter()
+        .filter(|row| {
+            inline_value(row).is_some_and(|value| match &row.value {
+                KeyValueValue::Array(_) => {
+                    !value.contains('\n')
+                        && UnicodeWidthStr::width(value.as_str())
+                            + UnicodeWidthStr::width(display_key(row).as_str())
+                            + 2
+                            <= available
+                }
+                _ => true,
+            })
+        })
+        .map(|row| label_column(&display_key(row)))
+        .max()
+        .unwrap_or(0);
+    for row in rows {
+        let label = display_key(row);
+        let prefix = column.max(UnicodeWidthStr::width(label.as_str()) + 2);
+        row.gap = Some(" ".repeat(prefix - UnicodeWidthStr::width(label.as_str()) - 1));
+        if let KeyValueValue::Array(items) = &row.value
+            && let Some(values) = items.iter().map(scalar_text).collect::<Option<Vec<_>>>()
+            && !values.is_empty()
+        {
+            let joined = values.join(", ");
+            if !joined.contains('\n')
+                && UnicodeWidthStr::width(joined.as_str()) + prefix <= available
+            {
+                row.key = label;
+                row.value = KeyValueValue::Scalar(joined);
+            } else {
+                row.list_grid = Some(plan_list_grid(
+                    &values,
+                    available.saturating_sub(CARD_INDENT).max(1),
+                    row.value_style.clone(),
+                ));
+            }
+        }
+        plan_nested_rows(&mut row.value, settings, depth + 1);
+    }
+}
+
+fn plan_nested_rows(value: &mut KeyValueValue, settings: &ResolvedRenderSettings, depth: usize) {
+    match value {
+        KeyValueValue::Object(rows) => plan_classic_rows(rows, settings, depth),
+        KeyValueValue::Array(items) => {
+            for item in items {
+                plan_nested_rows(item, settings, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::ui) enum CompactCard {
@@ -89,7 +204,7 @@ pub(super) fn plan_compact_cards(
     {
         return cards.clone();
     }
-    let available = available.saturating_sub(COMPACT_CARD_BODY_INDENT).max(1);
+    let available = available.saturating_sub(CARD_INDENT).max(1);
     let mut longest = BTreeMap::<&str, usize>::new();
     for field in fields.iter().flatten() {
         let width = UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());
@@ -98,21 +213,26 @@ pub(super) fn plan_compact_cards(
             .and_modify(|longest| *longest = (*longest).max(width))
             .or_insert(width);
     }
-    let short = |field: &GridCell| {
-        UnicodeWidthStr::width(field.label.as_str())
-            + CARD_FIELD_GAP
-            + longest[field.label.as_str()]
-            <= available / SHORT_FIELD_WIDTH_DIVISOR
+    let key_width = fields
+        .iter()
+        .flat_map(|fields| fields.iter().skip(1))
+        .map(|field| label_column(&field.label))
+        .max()
+        .unwrap_or(0);
+    let field_prefix = |field: &GridCell| {
+        key_width.max(UnicodeWidthStr::width(field.label.as_str()) + CARD_FIELD_GAP)
     };
-    let (mut key_width, mut long_key_width) = (0, 0);
-    for field in fields.iter().flat_map(|fields| fields.iter().skip(1)) {
-        if short(field) {
-            key_width = key_width.max(UnicodeWidthStr::width(field.label.as_str()));
-        } else {
-            long_key_width = long_key_width.max(UnicodeWidthStr::width(field.label.as_str()));
-        }
-    }
-    key_width = key_width.max(long_key_width);
+    let short = |field: &GridCell| {
+        field_prefix(field) + longest[field.label.as_str()] <= available
+            && (!field.value.contains('\n')
+                || !rows
+                    .iter()
+                    .any(|row| row.get(&field.label).is_some_and(Value::is_array)))
+            && UnicodeWidthStr::width(field.label.as_str())
+                + CARD_FIELD_GAP
+                + longest[field.label.as_str()]
+                <= available / SHORT_FIELD_WIDTH_DIVISOR
+    };
     let grid_widths = |columns: usize| {
         let mut widths = vec![0; columns];
         for record in &fields {
@@ -122,7 +242,7 @@ pub(super) fn plan_compact_cards(
                     let width =
                         UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());
                     widths[index % columns] =
-                        widths[index % columns].max(key_width + CARD_FIELD_GAP + width);
+                        widths[index % columns].max(field_prefix(field) + width);
                     index += 1;
                 } else {
                     index = 0;
@@ -168,12 +288,14 @@ pub(super) fn plan_compact_cards(
             let mut run = Vec::new();
             let flush = |run: &mut Vec<GridCell>, body: &mut Vec<GridBlock>| {
                 if !run.is_empty() {
-                    body.push(GridBlock {
-                        rows: run.chunks(columns).map(<[GridCell]>::to_vec).collect(),
-                        column_widths: column_widths.clone(),
-                        label_widths: vec![key_width + CARD_FIELD_GAP; columns],
-                        gap: CARD_GRID_GAP,
-                    });
+                    for row in run.chunks(columns) {
+                        body.push(GridBlock {
+                            rows: vec![row.to_vec()],
+                            column_widths: column_widths.clone(),
+                            label_widths: row.iter().map(&field_prefix).collect(),
+                            gap: CARD_GRID_GAP,
+                        });
+                    }
                     run.clear();
                 }
             };
@@ -185,51 +307,33 @@ pub(super) fn plan_compact_cards(
                     continue;
                 }
                 flush(&mut run, &mut body);
-                let room = available.saturating_sub(key_width + CARD_FIELD_GAP).max(1);
+                let prefix = field_prefix(field);
+                let room = available.saturating_sub(prefix).max(1);
                 if let Some(Value::Array(items)) = source.get(&field.label)
                     && (field.value.contains('\n')
                         || UnicodeWidthStr::width(field.value.as_str()) > room)
                 {
-                    let values = items
-                        .iter()
-                        .flat_map(|item| {
-                            let value = display_value(item);
-                            value
-                                .split('\n')
-                                .flat_map(|line| wrap_display_width(line, room))
-                                .collect::<Vec<_>>()
-                        })
-                        .collect::<Vec<_>>();
-                    let grid =
-                        super::super::emit::grid::PreparedGridList::from_items(&values, room);
-                    let mut column_widths = grid.column_widths;
-                    if let Some(first) = column_widths.first_mut() {
-                        *first += key_width + CARD_FIELD_GAP;
-                    }
                     body.push(GridBlock {
-                        rows: grid
-                            .rows
-                            .iter()
-                            .enumerate()
-                            .map(|(row_index, row)| {
-                                row.iter()
-                                    .enumerate()
-                                    .map(|(column_index, value)| GridCell {
-                                        label: if row_index == 0 && column_index == 0 {
-                                            field.label.clone()
-                                        } else {
-                                            String::new()
-                                        },
-                                        value: value.clone(),
-                                        value_style: field.value_style.clone(),
-                                    })
-                                    .collect()
-                            })
-                            .collect(),
-                        column_widths,
-                        label_widths: vec![key_width + CARD_FIELD_GAP],
-                        gap: grid.gap,
+                        rows: vec![vec![GridCell {
+                            value: String::new(),
+                            ..field.clone()
+                        }]],
+                        column_widths: vec![available],
+                        label_widths: vec![prefix],
+                        gap: 0,
                     });
+                    let values = items.iter().map(display_value).collect::<Vec<_>>();
+                    let values = values.iter().map(String::as_str).collect::<Vec<_>>();
+                    let mut grid = plan_list_grid(
+                        &values,
+                        available.saturating_sub(CARD_INDENT).max(1),
+                        field.value_style.clone(),
+                    );
+                    grid.label_widths = vec![CARD_INDENT];
+                    if let Some(first) = grid.column_widths.first_mut() {
+                        *first += CARD_INDENT;
+                    }
+                    body.push(grid);
                 } else {
                     body.push(GridBlock {
                         rows: field
@@ -250,7 +354,7 @@ pub(super) fn plan_compact_cards(
                             })
                             .collect(),
                         column_widths: vec![available],
-                        label_widths: vec![key_width + CARD_FIELD_GAP],
+                        label_widths: vec![prefix],
                         gap: 0,
                     });
                 }

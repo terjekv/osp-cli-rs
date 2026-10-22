@@ -96,7 +96,7 @@ are sized across all records; the whole list uses this layout or the titled
 layout together. Values use their projected, escaped display widths.
 Otherwise each card uses its first field's value in a title-styled `value:`
 heading at the effective margin, followed by nonempty fields in producer order,
-without blank separators by default. Every body line is indented four spaces
+without blank separators by default. Every body line is indented two spaces
 under the heading; body width budgets include that indent. Records with only a
 title value after omitting empty fields print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
@@ -108,24 +108,24 @@ pairs have a three-space gap. A long field breaks the run, shares the first
 grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar
 arrays use the existing grid list geometry; short arrays are comma-joined.
 Body geometry uses the resolved
-screen width minus the margin and four-space indent. For example, at width 80
+screen width minus the margin and two-space indent. For example, at width 80
 and margin 0:
 
 ```text
 engageinternal.uiocloud.no:
-    Comment      Vertkøy til bruk i engagelab/IPED/UV - Terje Kristian Lian
-                 Thoresen <t.k.l.thoresen@uv.uio.no>
-    Nameservers  ns1.nrec.no, ns2.nrec.no
+  Comment      Vertkøy til bruk i engagelab/IPED/UV - Terje Kristian Lian
+               Thoresen <t.k.l.thoresen@uv.uio.no>
+  Nameservers  ns1.nrec.no, ns2.nrec.no
 include.uiocloud.no:
-    Comment      Terje Kristian Lian Thoresen <t.k.l.thoresen@uv.uio.no>
-    Nameservers  ns1.nrec.no, ns2.nrec.no
+  Comment      Terje Kristian Lian Thoresen <t.k.l.thoresen@uv.uio.no>
+  Nameservers  ns1.nrec.no, ns2.nrec.no
 ```
 
 Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
 separators. With two or more classic cards, each first field's value in producer
 order becomes a title-styled `value:` heading at the effective margin. The field
-is omitted from the body, which is indented four spaces and planned within that
+is omitted from the body, which is indented two spaces and planned within that
 width. A single classic record keeps its first field as a normal row, without a
 heading. Producers can set optional `title_field` metadata to a literal record
 field name. When that field is present, classic and compact cards always use
@@ -134,14 +134,13 @@ body. A missing title field falls back to the usual card behavior. Curated
 columns map the title field to its displayed label; an unselected field cannot
 become a heading. Empty implicit titles show their field label when
 retained. JSON, CSV/TSV and DSL values are unchanged.
-Classic card scalar values and scalar lists wrap within the same
-resolved screen budget, including their labels and indentation. Nested tables
-start at the card's scalar value column when the block fits there without
-hiding columns or shortening additional values compared with its usual indent.
-Grid lists align there only when every value fits and their planned grid column
-count is at least the count at the usual indent. Each block chooses
-independently; otherwise it keeps its usual indent. Planning includes the chosen indent, card depth and margin in
-the block's width budget. Compact cards retain their existing layout.
+**Indent = 2 columns per level, everywhere; never align across levels.**
+
+1. Card title (`<value>:` heading, classic or compact) at the effective margin m.
+2. The record's fields one level in (m+2 under a title; m when there is no title). Siblings at the same level share a value column; that column is sized to fit labels up to a cap of 18 display columns (label incl. its colon/separator). Labels longer than the cap do not widen the column: they render `label: value` (classic) / `label  value` (compact) with the normal single separator, unaligned. Compact cards' multi-column grid packing keeps working with this column rule.
+3. Anything nested under a field — nested tables, grid lists, multi-line lists, nested objects — is a hanging block one more level in (field indent + 2), on the lines after the label line. Never aligned to the level-0 value column.
+4. A list value that fits on ONE line within the width stays inline as a normal value (`Groups:  usit-gsd-clients`, `Nameservers  ns1.nrec.no, ns2.nrec.no`). Only lists that need more than one line become a hanging block (label line `Roles (7):` then items at +2, grid layout as today).
+5. Long scalar text values still wrap with continuation lines aligned to that field's value column (that is the same level, so allowed).
 
 `ui.mreg.gap` controls blank lines between consecutive cards, including automatic
 fallback and one-line compact entries. The default `auto` keeps compact cards

@@ -107,7 +107,7 @@ mod tests {
             widths: Vec::new(),
             cell_styles: Vec::new(),
             summary: vec![KeyValueRow {
-                block_indent: None,
+                list_grid: None,
                 value_style: None,
                 key: "count".to_string(),
                 value: KeyValueValue::Scalar("1".to_string()),

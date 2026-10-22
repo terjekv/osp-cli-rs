@@ -309,6 +309,14 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
     let border = table_border_chars(unicode, style);
     // Borderless tables keep only header and rows; whitespace rules would print blank lines.
     let ruled = !matches!(style, TableBorderStyle::None);
+    let indent_row = |line: String| {
+        let line = if block.nested && !ruled {
+            line.strip_prefix("  ").unwrap_or(&line)
+        } else {
+            &line
+        };
+        indent_lines(line, settings.margin)
+    };
     let rule = |lines: &mut Vec<String>, line: String| {
         if ruled {
             lines.push(line);
@@ -341,7 +349,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
             settings.table_overflow,
         )
         .into_iter()
-        .map(|line| indent_lines(&line, settings.margin)),
+        .map(&indent_row),
     );
     rule(
         &mut lines,
@@ -371,7 +379,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
                 settings.table_overflow,
             )
             .into_iter()
-            .map(|line| indent_lines(&line, settings.margin)),
+            .map(&indent_row),
         );
     }
     rule(
@@ -498,11 +506,13 @@ fn emit_plain_row_lines(
     let effective_indent = format!("{base_indent}{}", row.indent.as_deref().unwrap_or_default());
     let display_key = display_key(row);
     let display_key_width = UnicodeWidthStr::width(display_key.as_str());
-    let value_spacing = " ".repeat(
-        key_width
-            .saturating_sub(display_key_width)
-            .saturating_add(1),
-    );
+    let value_spacing = row.gap.clone().unwrap_or_else(|| {
+        " ".repeat(
+            key_width
+                .saturating_sub(display_key_width)
+                .saturating_add(1),
+        )
+    });
     let key = styler.paint(&display_key, StyleToken::Key);
     let label = format!(
         "{}{}{}",
@@ -515,10 +525,12 @@ fn emit_plain_row_lines(
         effective_indent,
         " ".repeat(display_key_width.saturating_add(1 + value_spacing.len()))
     );
-    let child_indent = format!(
-        "{effective_indent}{}",
-        " ".repeat(row.block_indent.unwrap_or(2))
-    );
+    let child_indent = format!("{effective_indent}  ");
+    if let Some(grid) = &row.list_grid {
+        let mut grid_settings = settings.clone();
+        grid_settings.margin = display_width(&child_indent);
+        return vec![label, emit_grid(grid, &grid_settings)];
+    }
 
     match &row.value {
         KeyValueValue::Empty => vec![label],

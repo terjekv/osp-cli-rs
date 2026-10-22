@@ -97,8 +97,8 @@ pub struct KeyValueBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyValueRow {
-    /// Planned grid-list indent, relative to this row.
-    pub block_indent: Option<usize>,
+    /// Planned hanging scalar list, relative to the child level.
+    pub list_grid: Option<GridBlock>,
     pub value_style: Option<crate::ui::style::CellStyle>,
     pub key: String,
     pub value: KeyValueValue,

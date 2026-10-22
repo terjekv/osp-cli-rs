@@ -28,25 +28,21 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
-- Keep classic card grid lists at their fallback indent when aligning them to
-  scalar values would reduce the number of grid columns at narrow widths.
+- Use two columns per card level: titles at the margin, fields one level in,
+  and nested tables, objects and multiline lists hanging one further level in.
+  Keep lists inline when they fit on one line; cap label columns at 18 display
+  columns and let longer labels use their normal separator without padding.
+  Scalar wrapping keeps its own field's value column; compact grids still pack
+  short fields across columns.
 
 - Honor recommended MREG for flat record cards; omit empty card fields and
   all-empty table columns unless `-v` requests detail. Multiple classic cards
-  consume their first field as a title and indent the body four spaces.
-  Optional plugin/output `title_field` selects an explicit heading, including
-  for single cards, without changing exported data or DSL values.
-
-- Align classic card nested tables and grid lists with scalar values when they
-  fit without hiding columns or shortening additional values. Each block keeps
-  its usual indent when it needs the extra width; compact cards are unchanged.
+  consume their first field as a title. Optional plugin/output `title_field`
+  selects an explicit heading, including for single cards, without changing
+  exported data or DSL values.
 
 - Configure blank lines between MREG cards with `ui.mreg.gap=auto|0..10`.
   The default preserves dense compact cards and spaced classic/nested cards.
-
-- Use title-styled colon headings for compact cards at the effective margin,
-  with fields and wrapped continuations indented four spaces. Include the
-  indent in width planning; inline compact cards and classic cards are unchanged.
 
 - Ignore paging keys when no paginated REPL result exists; typed `next` and
   `prev` retain their guidance.

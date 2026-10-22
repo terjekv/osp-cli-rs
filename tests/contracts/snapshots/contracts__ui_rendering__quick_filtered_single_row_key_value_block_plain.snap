@@ -1,10 +1,6 @@
 ---
 source: tests/contracts/ui_rendering.rs
+assertion_line: 268
 expression: sanitized
 ---
-netgroups (10):
-  vcs-cfengine     vcs-ops
-  vcs-dhcp         vcs-radius
-  vcs-it-org       vcs-ssd
-  vcs-it-osprov    vcs-usit
-  vcs-iti          vcs-virtprov-admins
+netgroups (10): vcs-cfengine, vcs-dhcp, vcs-it-org, vcs-it-osprov, vcs-iti, vcs-ops, vcs-radius, vcs-ssd, vcs-usit, vcs-virtprov-admins

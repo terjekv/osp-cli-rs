@@ -88,7 +88,7 @@ including machine output on the REPL screen.
 
 `plan/cards.rs` owns compact flat-list cards. When all records fit, it plans
 one aligned line per record; otherwise it uses colon headings and bodies
-indented by four spaces within the remaining width. Grid value widths use rendered
+indented by two spaces within the remaining width. Grid value widths use rendered
 values in each column across records. Single and nested records retain classic
 cards. Lowering copies planned grids into the data-only IR.
 

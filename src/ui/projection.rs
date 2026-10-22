@@ -1201,7 +1201,7 @@ pub(super) fn key_value_value(value: &Value, null_as_empty: bool) -> KeyValueVal
         Value::Object(map) => KeyValueValue::Object(
             map.iter()
                 .map(|(key, value)| KeyValueRow {
-                    block_indent: None,
+                    list_grid: None,
                     value_style: None,
                     key: key.clone(),
                     value: key_value_value(value, false),
