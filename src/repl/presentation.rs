@@ -199,8 +199,11 @@ pub(crate) fn build_repl_intro_payload(
     if matches!(intro_style, ReplIntroStyle::None) {
         return Document::default();
     }
-    let template = intro_template(view.config, intro_style);
-    let expanded = expand_intro_template(view, &surface.intro_commands, template);
+    let template = intro_template_text(
+        intro_template(view.config, intro_style),
+        view.ui.render_settings.resolve_render_settings().unicode,
+    );
+    let expanded = expand_intro_template(view, &surface.intro_commands, &template);
     parse_intro_template_payload(
         &expanded,
         &build_repl_command_overview_view(surface).filtered_for_help_level(help_level(
@@ -209,6 +212,21 @@ pub(crate) fn build_repl_intro_payload(
             0,
         )),
     )
+}
+
+/// Normalize authored punctuation before expanding identity placeholders.
+fn intro_template_text(template: &str, unicode: bool) -> Cow<'_, str> {
+    if unicode {
+        Cow::Borrowed(template)
+    } else {
+        Cow::Owned(
+            template
+                .replace('→', "->")
+                .replace('·', "/")
+                .replace(['‘', '’'], "'")
+                .replace(['“', '”'], "\""),
+        )
+    }
 }
 
 fn intro_template(config: &crate::config::ResolvedConfig, style: ReplIntroStyle) -> &str {
@@ -232,12 +250,16 @@ fn parse_intro_template_payload(template: &str, help: &Document) -> Document {
 
 /// Picks one entry from `repl.intro_tips`, the same one all day (UTC).
 fn tip_of_the_day(view: ReplViewContext<'_>, intro_commands: &[String]) -> String {
+    let unicode = view.ui.render_settings.resolve_render_settings().unicode;
     let tips = view
         .config
         .get_string_list("repl.intro_tips")
         .unwrap_or_default()
         .into_iter()
-        .map(|tip| expand_intro_template(view, intro_commands, &tip).into_owned())
+        .map(|tip| {
+            let tip = intro_template_text(&tip, unicode);
+            expand_intro_template(view, intro_commands, &tip).into_owned()
+        })
         .filter(|tip| !tip.trim().is_empty())
         .collect::<Vec<_>>();
     if tips.is_empty() {
