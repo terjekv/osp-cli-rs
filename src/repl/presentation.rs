@@ -153,9 +153,11 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
     let _phase = tracing::info_span!(target: "osp_startup", "REPL intro rendering").entered();
     let intro_style = intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity);
     let guide = build_repl_intro_payload(view, surface, Some(intro_style));
+    let decoration = intro_decoration(view);
     let mut rendered = render(
         &repl_document_output(&guide),
         &crate::ui::RenderRequest {
+            leading_decoration: Some(&decoration),
             layout: Some(crate::ui::help_layout_from_config(view.config)),
             ..crate::ui::RenderRequest::new(&view.ui.render_settings)
         },
@@ -165,6 +167,18 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
         rendered.push('\n');
     }
     rendered
+}
+
+pub(crate) fn intro_decoration(view: ReplViewContext<'_>) -> Vec<String> {
+    if matches!(
+        intro_style_with_verbosity(intro_style(view.config), view.ui.verbosity),
+        ReplIntroStyle::Compact | ReplIntroStyle::Full
+    ) && let Some(render) = view.intro_decoration
+    {
+        render(&view.ui.render_settings.resolve_render_settings())
+    } else {
+        Vec::new()
+    }
 }
 
 pub(crate) fn repl_document_output(document: &Document) -> crate::core::output_model::OutputResult {
@@ -185,8 +199,11 @@ pub(crate) fn build_repl_intro_payload(
     if matches!(intro_style, ReplIntroStyle::None) {
         return Document::default();
     }
-    let template = intro_template(view.config, intro_style);
-    let expanded = expand_intro_template(view, &surface.intro_commands, template);
+    let template = intro_template_text(
+        intro_template(view.config, intro_style),
+        view.ui.render_settings.resolve_render_settings().unicode,
+    );
+    let expanded = expand_intro_template(view, &surface.intro_commands, &template);
     parse_intro_template_payload(
         &expanded,
         &build_repl_command_overview_view(surface).filtered_for_help_level(help_level(
@@ -195,6 +212,21 @@ pub(crate) fn build_repl_intro_payload(
             0,
         )),
     )
+}
+
+/// Normalize authored punctuation before expanding identity placeholders.
+fn intro_template_text(template: &str, unicode: bool) -> Cow<'_, str> {
+    if unicode {
+        Cow::Borrowed(template)
+    } else {
+        Cow::Owned(
+            template
+                .replace('→', "->")
+                .replace('·', "/")
+                .replace(['‘', '’'], "'")
+                .replace(['“', '”'], "\""),
+        )
+    }
 }
 
 fn intro_template(config: &crate::config::ResolvedConfig, style: ReplIntroStyle) -> &str {
@@ -218,12 +250,16 @@ fn parse_intro_template_payload(template: &str, help: &Document) -> Document {
 
 /// Picks one entry from `repl.intro_tips`, the same one all day (UTC).
 fn tip_of_the_day(view: ReplViewContext<'_>, intro_commands: &[String]) -> String {
+    let unicode = view.ui.render_settings.resolve_render_settings().unicode;
     let tips = view
         .config
         .get_string_list("repl.intro_tips")
         .unwrap_or_default()
         .into_iter()
-        .map(|tip| expand_intro_template(view, intro_commands, &tip).into_owned())
+        .map(|tip| {
+            let tip = intro_template_text(&tip, unicode);
+            expand_intro_template(view, intro_commands, &tip).into_owned()
+        })
         .filter(|tip| !tip.trim().is_empty())
         .collect::<Vec<_>>();
     if tips.is_empty() {
@@ -309,7 +345,7 @@ fn resolve_intro_placeholder(
                         .map(|key| format!("`{key}` {}", action.label.to_ascii_lowercase()))
                 })
                 .collect::<Vec<_>>()
-                .join(" · ");
+                .join(" / ");
         }
         "help" => return "{{ help }}".to_string(),
         "overview" => return "{{ overview }}".to_string(),

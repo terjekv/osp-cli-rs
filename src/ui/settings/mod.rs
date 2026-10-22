@@ -286,6 +286,13 @@ impl Default for RenderSettings {
 }
 
 impl RenderSettings {
+    /// Applies resolved configuration while retaining the caller's terminal facts.
+    /// This uses the host's ordinary presentation preferences and overrides.
+    pub fn with_config(mut self, config: &ResolvedConfig) -> Self {
+        apply_render_config_overrides(&mut self, config);
+        self
+    }
+
     pub fn test_plain(format: OutputFormat) -> Self {
         Self {
             format,
