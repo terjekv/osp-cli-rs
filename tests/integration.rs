@@ -33,5 +33,10 @@ mod context_resolution;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "integration/snapshots.rs"]
+mod snapshots;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "integration/context_persistence.rs"]
 mod context_persistence;
