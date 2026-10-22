@@ -15,22 +15,31 @@ parallel implementations of verbs.
 - `core::Document` supplies flat rows once, before key validation.
   Entries carry `section`, `name`, and `description`; text carries `section` and
   `text`. Output metadata declares document intent. Preserve the current row
-  stream and never reconstruct sections by value equality. Existing stage
-  behavior flags clear the marker when row identity changes.
+  stream and never reconstruct sections by value equality. `DocumentRowRole`
+  travels with rows through preserving filters/sorts/limits; shape-changing
+  stages clear document intent and its roles. Producers set `SectionRole` and
+  `EntryRole` explicitly; titles and entry spellings carry no renderer policy.
 - `dsl/engine.rs` compiles and dispatches each stage once over `RowSet`.
 - Verbs own algorithms over rows/partitions. Group keys and aggregates are
   deliberately metadata, not duplicate fields inserted into members.
-- `ui/lower.rs` applies human-only producer field projection and timestamp
+- `ui/projection.rs` applies human-only producer field projection and timestamp
   hints. `unix_timestamp_columns` identifies Unix seconds without knowing
   product field names. `display_rules` supports literal string suffixes gated
   by a true boolean (`SuffixWhenTrue`) and blanking gated by another field's
   non-null presence (`BlankWhenPresent`), binary byte units for numeric fields
   (`Bytes`), and compact relative RFC3339 or Unix-second timestamps
-  (`RelativeTimestamp`). Product-authored detail lines can use the matching
-  `ui::format_binary_bytes`, `ui::format_local_timestamp`, and
-  `ui::format_relative_timestamp` helpers. Conditions always read the original
-  row; missing target fields are not synthesized. JSON rendering preserves raw
+  (`RelativeTimestamp`). Use producer display rules rather than UI formatting
+  helpers in product code. Timestamp formatting is opt-in; Value format skips
+  date, relative-time and Unix timestamp rewrites. Conditions always read the
+  original row; only explicitly derived display rules synthesize fields.
+  Derived totals see unlimited input before display limiting. JSON preserves raw
   values, and filters use canonical values before these display changes.
+
+`DisplayRule::Command { field }` explicitly marks a command field for styling;
+a column named `command` has no implicit role. Warning and command roles remain
+style tokens until emission. `ValueStyle` retains a validated raw palette spec
+for theme inspection; projected cells keep their own source styles across
+labels, grouping, array filtering and display limits.
 
 `DisplayRule::Hyperlink { field }` marks a string field whose value is an
 HTTP(S) URL. The renderer emits OSC 8 only for rich TTY output. Plain output,

@@ -64,6 +64,22 @@ The unpublished UiO companion uses the sibling path dependency.
 | REPL engine, history and debug APIs | Internal; use `App` and the native-command REPL hooks |
 | `context::KINDS` | Internal; public context contracts, resolution and session APIs remain available |
 
+Rendering settings expose `HelpLayout`, `RenderProfile`, `RenderRuntime`,
+`TableBorderStyle`, `TableBorderOverride`, `TableOverflow` and `TableTooWide`
+through `ui`; embedders can set the public `RenderSettings` fields directly.
+A width hint alone never enables automatic cards: normal stdout TTY output is
+also required. `UiPresentation` remains available for preset parsing.
+
+Typed document constructors now require explicit `SectionRole` and `EntryRole`
+fields (use their defaults for ordinary content); `DocBlock::with_role` marks
+usage or compact option sections. `OutputMeta::document_row_roles` carries
+`DocumentRowRole` alongside a document's rows. `Document::to_output_result` and
+`OutputResult::with_document` populate it. Canonical JSON omits presentation
+roles, so JSON round trips retain content rather than presentation intent.
+The unused `StyleOverrides::mreg_key` and `json_key` fields and public timestamp/
+byte-formatting helpers have been removed from the embedding surface. Use
+`DisplayRule` metadata for human presentation.
+
 Native command contexts retain `may_prompt()` and `can_present()`. Terminal
 confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.
 `AppRuntime::input_is_replay()` identifies sourced commands and redirected stdin; `NativeCommandContext::may_prompt()` rejects both.

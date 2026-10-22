@@ -1,8 +1,8 @@
 //! Final text emitters for the UI document IR.
 //!
-//! All emitters consume the shared [`crate::ui::doc::Doc`] shape. That keeps
-//! markdown, terminal, and JSON-ish rendering aligned on structure even when
-//! their concrete text output differs.
+//! Human emitters consume the shared [`crate::ui::doc::Doc`] shape. JSON and
+//! delimited machine writers consume typed canonical data directly and never
+//! use the human IR.
 //!
 //! This layer should stay about rendering only. Format selection and semantic
 //! lowering happen earlier in the UI pipeline.

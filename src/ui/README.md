@@ -12,34 +12,45 @@ wrong before it arrived.
 
 ```text
 OutputResult / Document
-   ▼ plan/     choose the effective format and settings
-   ▼ lower.rs  convert to one document IR (doc.rs)
-   ▼ emit/     write terminal, markdown or JSON text
+   ▼ plan_format   choose format, provenance and resolved settings
+   ├ JSON/CSV/TSV  dispatch to typed machine writers
+   ▼ projection    project human values, labels, styles, limits; sanitize once
+   ▼ plan_layout   fit projected tables; choose table/card layout
+   ▼ lower.rs      copy the plan and projected content into doc.rs
+   ▼ emit/         render terminal or Markdown text
 ```
 
 ## Layout
 
 | Path | Owns |
 |---|---|
-| `plan/` | Picking the format from the payload, flags and config |
-| `doc.rs`, `lower.rs` | The document IR and lowering into it |
-| `emit/` | One emitter per shape: `table`, `key_value`, `grid`, `markdown`, `json`, `terminal` |
+| `plan/` | Format provenance, MREG layout and table fitting/visibility |
+| `projection.rs` | Human field/value projection, style annotations, limits, sanitization and table candidates |
+| `doc.rs`, `lower.rs` | One human document IR and lowering according to the plan |
+| `emit/` | Terminal/Markdown IR emitters and separate typed JSON/delimited writers |
 | `settings/` | `RenderSettings` and resolving them from config |
 | `theme/`, `theme_catalog.rs` | Builtin themes; loading custom theme files |
 | `style/` | Style tokens mapped to theme colours |
 | `messages/` | Buffered success/warning/error messages and their layout |
-| `section_chrome.rs`, `chrome/` | Section rules and frames shared by help, documents and messages |
+| `chrome/`, `section_chrome.rs` | Shared title/rule geometry; styled message/completion dividers and frames |
 | `clipboard/` | Copy-to-clipboard transport |
 | `prompt.rs` | Plain line input for command prompts and the basic REPL |
 
 ## Common changes
 
-- **A column renders badly:** start in the emitter for that shape, then
-  `lower.rs`. Check with `--json` that the data itself is right.
+- **Wrong human value, label or total:** start in `projection.rs`. Check `--json`
+  for the canonical data; derived display values precede display limits.
+- **Wrong format, cards or hidden columns:** start in `plan/`. The fit function
+  measures projected cell text; `lower.rs` and emitters consume its decision.
+- **Wrong spacing, border or colour:** start in the emitter and `ThemeStyler`.
+  The IR carries tokens; palette specimens alone retain validated raw specs.
 - **New style role:** add the token in `style/`, map it in each builtin theme
   in `theme/`, document it in `docs/THEMES.md`.
-- **New output format:** a planner case, an emitter, and the `--format` value
-  in `core/output.rs`.
+- **New output format:** add format planning and `core/output.rs` vocabulary;
+  human formats use the IR, while machine formats dispatch typed data directly.
+- **New document behavior:** declare a producer role in `core::document` and
+  carry it through projection/lowering. Never infer intent from names or titles.
+- **New chrome:** reuse `chrome/` geometry. Callers own when chrome appears.
 
 ## Debugging
 
@@ -54,3 +65,9 @@ Direct and help layouts share the block traversal, with help spacing and entry
 hints applied before emission.
 Marked document rows render consecutive section runs in their current order.
 The renderer never infers document intent from ordinary row fields.
+
+`MAX_NESTED_TABLE_COLUMNS` names the eight-column nested comparison-table rule.
+`MAX_FALLBACK_CARD_ROWS` limits automatic table-to-card fallback to 20 source
+rows. `ui.table.too_wide=mreg|hide` selects automatic cards or the retained hide
+path; explicit/configured tables, grouped output, documents, copy-safe sinks
+and nested tables never fall back. See `docs/UI.md` for the full contract.

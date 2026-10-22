@@ -373,6 +373,12 @@ These keys currently drive user-visible rendering and REPL presentation:
     nested inside a record (`addresses (2):`); `inherit` follows `ui.table.border`
 - `ui.table.overflow`
   - `clip | ellipsis | wrap | none`; defaults to `ellipsis`
+- `ui.table.too_wide`
+  - `mreg | hide`; defaults to `mreg` for all presentation presets
+  - eligible automatic TTY tables become cards when fitting would hide a column;
+    `hide` retains trailing-column removal and the `+N hidden` footer
+  - explicit/configured tables keep their chosen format; see [UI.md](UI.md#tables-and-mreg-layout)
+    for the width, row-count and output-shape guards
 - `ui.help.level`
   - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `theme.name`

@@ -2,35 +2,26 @@
 
 //! Canonical UI pipeline.
 //!
-//! This module owns planning, lowering, and emission for human-facing output.
-//! The important split is:
-//!
-//! - commands, services, and the DSL produce structured output
-//! - `ui` decides how that output should be rendered for a human
-//! - `ui` does not re-resolve config, re-run commands, or invent new data
-//!   semantics
-//!
-//! Broad-strokes flow:
+//! Commands, services and the DSL produce canonical data. The UI does not
+//! re-resolve config, re-run commands or invent data semantics.
 //!
 //! ```text
 //! OutputResult / Document
-//!        │
-//!        ▼ [ plan ]   choose effective format and render settings
-//!        ▼ [ lower ]  convert semantic output into one document IR
-//!        ▼ [ emit ]   render terminal/markdown/json text
+//!    ▼ plan_format   effective format, provenance, resolved settings
+//!    ├ JSON/CSV/TSV   typed machine writers, without human projection or IR
+//!    ▼ project       human data, labels, styles, limits, sanitization
+//!    ▼ plan_layout   table fitting and table/card decisions
+//!    ▼ lower         obey the plan; construct one doc.rs IR
+//!    ▼ emit          render terminal or Markdown text
 //! ```
 //!
-//! [`crate::ui::render`] takes canonical output and a
-//! [`crate::ui::RenderRequest`]. The layout IR
-//! remains private to this module; semantic content stays in `core`.
-//!
-//! Internal ownership stays intentionally boring:
-//!
-//! - one planner decides the effective output format
-//! - one human-facing document IR carries structure
-//! - one lowering pass turns payloads into that IR
-//! - one emitter family renders terminal or markdown output
-//! - sidecar subsystems such as messages live in their own folders
+//! [`crate::ui::render`] takes canonical output and a [`crate::ui::RenderRequest`]. One planner
+//! decides format and layout, one human projection supplies content, and one
+//! lowering pass creates the private `doc.rs` IR. Emitters stay about rendering
+//! only: semantic tokens defer palette resolution to `ThemeStyler`.
+//! Producer document roles carry intent; ordinary fields and English titles
+//! never select it. Shared chrome geometry decides how, while callers decide
+//! when headings and rules appear. Messages retain their event/severity model.
 
 pub(crate) mod clipboard;
 pub(crate) mod messages;

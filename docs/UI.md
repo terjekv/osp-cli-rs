@@ -5,13 +5,19 @@ its presentation. For the implementation, start with `src/ui/mod.rs`.
 
 ## What the UI layer does
 
-At a high level, rendering happens in this order:
+Rendering has one owner for each decision:
 
-1. a command produces structured output
-2. an optional DSL pipeline rewrites that output
-3. `osp` chooses an output format
-4. `osp` chooses a plain or rich backend
-5. the final text is rendered to stdout
+1. commands produce structured output; the DSL transforms canonical data
+2. `plan_format` chooses the effective format and records its provenance
+3. JSON, CSV and TSV dispatch directly to typed machine writers
+4. human projection applies producer display rules, labels, limits and sanitization
+5. `plan_layout` fits projected tables and chooses tables or MREG cards
+6. lowering copies the chosen structure and typed styles into `ui/doc.rs`
+7. terminal or Markdown emitters render that IR
+
+The UI does not reload configuration, rerun commands or invent data semantics.
+Machine exports bypass human projection and the document IR. JSON stays plain
+and retains canonical values, including every row and nested item.
 
 ## Format Selection
 
@@ -29,9 +35,16 @@ Supported formats:
 
 Selection order is:
 
-1. an explicit `--format` or `ui.format`
+1. an explicit invocation format (`--format`, `--table`, `--mreg`, etc.)
 2. a command/plugin recommendation attached to the output
-3. automatic inference from the output shape
+3. a non-auto configured `ui.format`
+4. automatic inference from the output shape
+
+`--format auto` permits recommendation and inference. An `auto` recommendation
+also defers selection; a document recommendation without document intent does
+not turn ordinary rows into a document. Recommendations beat configured defaults,
+but never an explicit non-auto invocation format. The plan retains whether the
+choice was explicit, configured, recommended or inferred.
 
 Help and intro documents keep their document layout when
 `ui.guide.default_format=guide`, unless `--format` is given for that invocation.
@@ -41,15 +54,21 @@ When `format=auto`, the current rules are:
 
 - grouped output renders as `table`
 - rows where every row only has a `value` field render as `value`
-- zero or one ordinary row renders as `mreg`
+- one ordinary row renders as `mreg`
 - larger row sets render as `table`
 
-In `mreg` format, preserved JSON arrays of documents and results recommended
-as `mreg` render each record as a card, separated by one blank line. Ordinary
-multi-row results retain tables. Producers can compose a field's human value
-with `DisplayRule::Compose` and mark its literal top-level name with
-`DisplayRule::Notice` to show an unlabelled line above its card. JSON retains
-the original structured field.
+An explicit `--mreg` or `--format mreg` always requests cards, including flat
+multi-row and grouped output. Grouped cards carry each member's group keys and
+aggregates; an empty group still has its context card. Other MREG sources use
+cards for one row, or for several rows only when every row contains a nested
+comparison table. Flat lists and non-explicit grouped MREG remain tables.
+A nested comparison table is a nonempty array of objects with at most eight
+nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
+This cutoff also determines whether a record counts as a nested document.
+
+Producers can compose a field's human value with `DisplayRule::Compose` and
+mark its literal top-level name with `DisplayRule::Notice` to show an unlabelled
+line above its card. JSON retains the original structured field.
 
 Help and intro producers build `core::Document`: ordered sections,
 paragraphs, named entries, lists, and data blocks. `auto` renders these as human
@@ -62,6 +81,13 @@ With any pipe stage, JSON emits the resulting flat rows instead. Document rows
 carry their section in a column; human rendering emits headings for consecutive
 runs without changing row order. Shape-changing stages return ordinary data.
 `guide` and `--guide` render human documents with the shared document renderer.
+
+Typed document producers declare `SectionRole` and `EntryRole`; row-preserving
+DSL stages carry `DocumentRowRole` alongside rows. English titles, option-like
+entry names, `name`/`description` data fields and columns named `command` never
+select document behavior. Use `DisplayRule::Command` to style a command field.
+Presentation roles are omitted from canonical JSON: decoding that export
+restores content, while typed producers must declare presentation roles again.
 
 ## Render Modes
 
@@ -125,9 +151,31 @@ Table-oriented tuning lives here:
   - explicit `wrap` preserves complete values and embedded line breaks across
     as many lines as needed
   - `none` explicitly permits tables wider than the terminal
+- `ui.table.too_wide`
+  - `mreg | hide`; defaults to `mreg` in every presentation preset
+  - `hide` drops trailing columns and emits the existing `+N hidden` footer
+  - `mreg` switches an eligible automatic table to cards only when the shared
+    fit rule would actually hide a column; natural width alone is insufficient
+
+Automatic card fallback requires **all** of the following: inferred or
+recommended Table format, normal TTY output, a known width, a single ungrouped
+top-level data table, enabled fitting (`ui.table.overflow != none`), and at most
+20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting). A width hint
+without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
+copy-safe output, documents/help and nested tables never fall back. Their fit
+path retains column order, first-column protection and the hidden-column footer.
 
 Table cells comma-join lists. Markdown keeps complete cell values and escapes
 embedded newlines as `<br>`; JSON preserves the original typed values.
+Terminal fitting measures the exact escaped representation for `none`, `clip`
+and `ellipsis`, and the widest physical line for `wrap`.
+
+Human timestamp formatting is opt-in through `DisplayRule::Date`,
+`DisplayRule::RelativeTimestamp` or `unix_timestamp_columns`; ordinary RFC3339
+strings retain their text. Pipe-oriented `value` output skips these timestamp
+rewrites, including explicitly annotated numeric timestamps. Other declared
+human display rules still apply. Derived totals see unlimited data before a
+terminal display limit is applied; JSON/CSV/TSV always receive canonical data.
 
 `table` is the dense grid view for many rows.
 
@@ -177,6 +225,12 @@ What these do:
   document headings follow the selected help layout.
 - `ui.chrome.rule_policy` controls whether grouped message rules are rendered
   independently or shared across sibling message sections
+
+Documents, messages and completion share title/rule geometry: unknown width
+uses 24 columns, the minimum is 12, surrounding whitespace and trailing colons
+are normalized, and a full-width title adds no trailing space. Callers decide
+when headings and closing rules appear; messages keep their own event/severity
+model. Style colours resolve during emission through semantic tokens.
 
 These settings change presentation only. They do not change the underlying
 command data.

@@ -74,14 +74,25 @@ Format guide:
 - `table`
   - compare many rows
 - `mreg`
-  - scan one object in key/value style
+  - explicit selection renders records as key/value cards, including flat lists
 - `value`
-  - extract values, one entry per line
+  - extract values, one entry per line, preserving original timestamp values
 - `md`
   - markdown-friendly output
   - semantic help/intro/reference output
 - `auto`
   - let `osp` choose from the result shape
+
+Explicit invocation formats win over recommendations. For ordinary data, a
+command/plugin recommendation wins over configured `ui.format`; automatic
+inference comes last. Help/intro documents keep guide layout by default unless
+an invocation explicitly requests another format. This applies equally to
+JSON, CSV and TSV; machine exports bypass human display shaping.
+
+Automatic TTY tables can become MREG cards when fitting would hide columns.
+`ui.table.too_wide=hide` keeps the fitted table and hidden-column footer.
+Explicit `--table` and configured `ui.format=table` retain tables. See
+[UI.md](UI.md#tables-and-mreg-layout) for all fallback conditions.
 
 If you are unsure, start with `auto` and only force a format when the default
 shape is not what you need.

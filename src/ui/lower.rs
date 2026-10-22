@@ -1,16 +1,12 @@
-//! Lower structured output into the UI document IR.
+//! Lower projected human content according to the render plan into `doc.rs`.
 //!
-//! This module is the semantic bridge between `crate::core::output_model`
-//! and [`crate::ui::doc`]. It owns the answer to "what kind of document should
-//! a given output payload become?" while deliberately staying ignorant of
-//! terminal-specific rendering details.
-//!
-//! Keep the split here:
-//!
-//! - output semantics and document blocks come in from upstream modules
-//! - this module chooses document structure
-//! - emitters later decide spacing, borders, markdown markers, and terminal
-//!   chrome
+//! Canonical data and producer roles arrive through human projection. The
+//! planner has already chosen the effective format, card/table layouts,
+//! projected table widths and visible columns. This pass copies those choices
+//! into one human IR; it does not resolve config, format dates, apply display
+//! limits, fit tables, select palettes or infer document intent from names.
+//! Emitters render the IR and resolve its semantic style tokens. Typed machine
+//! exports bypass this module entirely.
 
 use serde_json::{Map, Value};
 

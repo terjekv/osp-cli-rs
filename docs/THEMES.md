@@ -19,6 +19,12 @@ Themes feed:
 - table/help/guide chrome tokens
 - interactive selection/completion styling
 
+Human output carries semantic style roles, which resolve against the selected
+theme when text is emitted. Producers declare command and warning roles; column
+names and section titles do not select them. Theme inspection can paint a
+validated palette specification using its own colour. JSON, CSV and TSV remain
+uncoloured machine output.
+
 Themes do not change:
 
 - which format is chosen

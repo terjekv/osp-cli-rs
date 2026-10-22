@@ -1,12 +1,12 @@
 //! Human-facing document IR used between UI lowering and emitters.
 //!
-//! `ui` does not render directly from rows or semantic payloads. Lowering first
-//! converts semantic output into this smaller document model so terminal and
-//! markdown emitters can share one structural contract.
+//! Human projection supplies content and the planner chooses layout. Lowering
+//! copies both into this model so terminal and Markdown emitters share one
+//! structural contract. Typed machine exports bypass this IR.
 //!
 //! In practice:
 //!
-//! - lowering owns how rows, documents, and key/value output become blocks
+//! - lowering copies projected content and planned layout into blocks
 //! - emitters own how those blocks become final text in a concrete format
 //! - this module should stay dumb data, not a second rendering engine
 

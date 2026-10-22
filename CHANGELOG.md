@@ -28,6 +28,34 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Plan every output format before dispatch. Configured CSV/TSV preserve help's
+  guide layout by default, recommended exports emit records, and JSON writes
+  canonical typed values directly as plain JSON. Auto recommendations defer
+  to data inference; machine exports never auto-page.
+
+- Add `ui.table.too_wide=mreg|hide` (default `mreg` in every preset). Eligible
+  automatic TTY tables become cards only when fitting would hide columns;
+  explicit/configured tables retain the hide path. See `docs/UI.md` for guards.
+  Explicit MREG always requests cards, including flat lists and grouped rows.
+
+- Project human data once before layout. Derived totals use unlimited input;
+  newline cells are measured as rendered. Empty declared tables retain headings.
+  RFC3339 formatting is opt-in, and Value output preserves timestamp values.
+
+- Require producer roles for usage/options, command styling and document rows.
+  Entry-shaped data remains data; JSON retains its existing content schema and
+  omits presentation roles. Carry token/spec styles on the actual projected
+  cells, fixing nested/grouped palette-source mixups and styling MREG values.
+
+- Share title/rule geometry across documents, messages and completion: default
+  width 24, minimum 12, normalized whitespace/colons and no trailing title space.
+  Remove the test-only help shim; existing checks use the production help path.
+
+- Narrow the alpha rendering API: remove unused `StyleOverrides::mreg_key` and
+  `json_key`, make byte/relative-time formatting internal, and remove the dead
+  local-timestamp helper. Export document roles and `ui::TableTooWide` for typed
+  producers and embedders.
+
 - Cycle distinct inline history suggestions with Ctrl-Right at the end of
   input while the menu is closed. Editing or moving the cursor resets cycling;
   Right/End still accept the full suggestion and Alt-Right accepts one word.
