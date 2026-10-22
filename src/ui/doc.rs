@@ -27,7 +27,6 @@ pub enum Block {
     Entries(EntriesBlock),
     KeyValue(KeyValueBlock),
     List(ListBlock),
-    Json(JsonBlock),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,9 +112,4 @@ pub struct ListBlock {
     pub indent: usize,
     pub inline_markup: bool,
     pub auto_grid: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JsonBlock {
-    pub text: String,
 }

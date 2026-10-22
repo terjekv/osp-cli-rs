@@ -549,7 +549,7 @@ fn ui2_copy_safe_json_output_keeps_trailing_newline_unit() {
 }
 
 #[test]
-fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
+fn ui2_json_export_preserves_semantic_document_unit() {
     let output = OutputResult::from_rows(vec![row! { "uid" => "alice" }]).with_document(
         OutputDocument::Semantic(
             serde_json::from_value(json!({"blocks": [{"text": "osp history"}]}))
@@ -559,20 +559,15 @@ fn ui2_json_block_uses_row_payload_shape_even_with_semantic_document_unit() {
     let mut settings = RenderSettings::test_plain(OutputFormat::Json);
     settings.format_explicit = true;
 
-    let plan = plan_output(&output, &settings, super::RenderProfile::Normal);
-    let doc = super::lower::lower_output(&output, &plan);
-
-    let Some(Block::Json(json)) = doc.blocks.first() else {
-        panic!("expected json block");
-    };
+    let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&json.text).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&rendered).unwrap(),
         json!({"blocks": [{"text": "osp history"}]})
     );
 }
 
 #[test]
-fn ui2_json_block_preserves_an_explicit_json_document_unit() {
+fn ui2_json_export_preserves_an_explicit_json_document_unit() {
     let value = json!({
         "mreg": {"name": "db01.uio.no"},
         "ldap": {"host": "db01.uio.no"}

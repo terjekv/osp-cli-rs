@@ -11,13 +11,7 @@ pub(crate) fn apply_stage(value: Value, stage: &CompiledStage) -> Result<Value> 
             stages: vec![stage.clone()],
         },
     )?;
-    let mut settings =
-        crate::ui::RenderSettings::test_plain(crate::core::output::OutputFormat::Json);
-    settings.format_explicit = true;
-    Ok(serde_json::from_str(&crate::ui::render(
-        &output,
-        &crate::ui::RenderRequest::new(&settings),
-    ))?)
+    Ok(crate::ui::json_value(&output))
 }
 
 #[path = "tests/value_semantics.rs"]

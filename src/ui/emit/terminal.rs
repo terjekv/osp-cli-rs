@@ -51,7 +51,6 @@ fn emit_blocks_in_section(
             Block::Entries(block) => out.push(emit_entries(block, settings, commands)),
             Block::KeyValue(block) => out.push(emit_key_value(block, settings)),
             Block::List(block) => out.push(emit_list(block, settings)),
-            Block::Json(block) => out.push(indent_lines(&block.text, settings.margin)),
         }
     }
     out.join("\n")

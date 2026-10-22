@@ -17,8 +17,8 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use super::doc::{
-    Block, Doc, EntriesBlock, EntryRow, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue,
-    ListBlock, ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, EntryRow, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
+    ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::RenderPlan;
 use super::settings::HelpLayout;
@@ -138,17 +138,13 @@ pub fn lower_output(output: &OutputResult, plan: &RenderPlan) -> Doc {
     };
 
     let mut doc = match plan.format {
-        OutputFormat::Json => Doc {
-            blocks: vec![Block::Json(JsonBlock {
-                text: serde_json::to_string_pretty(&json_value(output))
-                    .unwrap_or_else(|_| "null".to_string()),
-            })],
-        },
         OutputFormat::Guide | OutputFormat::Table => lower_table_doc(output),
         OutputFormat::Markdown => lower_markdown_doc(output),
         OutputFormat::Value => lower_value_doc(output),
         OutputFormat::Mreg => lower_mreg_doc(output),
-        OutputFormat::Auto | OutputFormat::Csv | OutputFormat::Tsv => Doc::default(),
+        OutputFormat::Auto | OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv => {
+            Doc::default()
+        }
     };
     if plan.settings.color && plan.format != OutputFormat::Json {
         apply_value_styles(&mut doc.blocks, style_source);
@@ -410,7 +406,7 @@ pub(crate) fn sanitize_doc(doc: &mut Doc) {
 fn sanitize_blocks(blocks: &mut [Block]) {
     for block in blocks {
         match block {
-            Block::Blank | Block::Rule | Block::Json(_) => {}
+            Block::Blank | Block::Rule => {}
             Block::Paragraph(paragraph) => {
                 paragraph.text = sanitize_human_text(&paragraph.text);
             }

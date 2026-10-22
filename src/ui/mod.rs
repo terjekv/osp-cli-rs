@@ -186,14 +186,15 @@ impl<'a> RenderRequest<'a> {
 /// assert!(rendered.contains("alice"));
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
-    if matches!(
-        request.settings.format,
-        OutputFormat::Csv | OutputFormat::Tsv
-    ) {
-        return emit::delimited::render(output, request.settings.format);
+    let plan = plan_output(output, request.settings, request.profile);
+    match plan.format {
+        OutputFormat::Csv | OutputFormat::Tsv => {
+            return emit::delimited::render(output, plan.format);
+        }
+        OutputFormat::Json => return emit::json::emit_value(&json_value(output), &plan.settings),
+        _ => {}
     }
     let output = prepare_output_for_sink(output, request.settings, request.profile);
-    let plan = plan_output(&output, request.settings, request.profile);
     let mut doc = if matches!(
         plan.format,
         OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown

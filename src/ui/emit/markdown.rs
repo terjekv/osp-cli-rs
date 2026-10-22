@@ -1,7 +1,7 @@
 use crate::core::output_model::ColumnAlignment;
 use crate::ui::doc::{
-    Block, Doc, EntriesBlock, JsonBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock,
-    ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
+    Block, Doc, EntriesBlock, KeyValueBlock, KeyValueRow, KeyValueValue, ListBlock, ParagraphBlock,
+    SectionBlock, SectionTitleChrome, TableBlock,
 };
 
 use super::key_value::{display_key, scalar_text};
@@ -29,7 +29,6 @@ fn emit_blocks(blocks: &[Block]) -> String {
             Block::Entries(block) => out.push(emit_entries(block)),
             Block::KeyValue(block) => out.push(emit_key_value(block)),
             Block::List(block) => out.push(emit_list(block)),
-            Block::Json(JsonBlock { text }) => out.push(format!("```json\n{text}\n```")),
         }
     }
     out.join("\n")

@@ -16,7 +16,6 @@ pub enum StyleToken {
     PanelTitle,
     Key,
     TableHeader,
-    JsonKey,
     Text,
     Muted,
     TextMuted,
@@ -165,9 +164,7 @@ pub fn style_spec<'a>(
         }
         StyleToken::PanelTitle => theme.palette.title.as_str(),
         StyleToken::Code => theme.palette.accent.as_str(),
-        StyleToken::Key | StyleToken::TableHeader | StyleToken::JsonKey => {
-            theme.palette.accent.as_str()
-        }
+        StyleToken::Key | StyleToken::TableHeader => theme.palette.accent.as_str(),
         StyleToken::Text | StyleToken::PromptText | StyleToken::Value => {
             theme.palette.text.as_str()
         }
@@ -203,7 +200,6 @@ fn override_spec(overrides: &StyleOverrides, token: StyleToken) -> Option<&str> 
             .table_header
             .as_deref()
             .or(overrides.key.as_deref()),
-        StyleToken::JsonKey => overrides.json_key.as_deref().or(overrides.key.as_deref()),
         StyleToken::Text => overrides.text.as_deref(),
         StyleToken::Muted | StyleToken::TextMuted | StyleToken::Punctuation => {
             overrides.muted.as_deref()
