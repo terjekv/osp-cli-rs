@@ -237,6 +237,8 @@ pub struct RenderSettings {
     pub guide_default_format: bool,
     /// Show screen table fit summaries and recovery actions.
     pub table_hints: bool,
+    /// Command detail level; positive values retain empty human fields.
+    pub verbosity: u8,
     pub mode: RenderMode,
     pub color: ColorMode,
     pub unicode: UnicodeMode,
@@ -267,6 +269,7 @@ impl Default for RenderSettings {
             format_explicit: false,
             guide_default_format: true,
             table_hints: true,
+            verbosity: 0,
             mode: RenderMode::Auto,
             color: ColorMode::Auto,
             unicode: UnicodeMode::Auto,
@@ -627,6 +630,8 @@ pub struct ResolvedRenderSettings {
     pub document_literal_commands: Vec<String>,
     pub display_limits: bool,
     pub table_hints: bool,
+    /// Command detail level; positive values retain empty human fields.
+    pub verbosity: u8,
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
@@ -726,6 +731,7 @@ impl RenderSettings {
             document_literal_commands: Vec::new(),
             display_limits: false,
             table_hints: self.table_hints,
+            verbosity: self.verbosity,
             backend,
             color: backend == RenderBackend::Rich && self.resolve_color_mode(),
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),

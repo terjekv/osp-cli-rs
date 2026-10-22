@@ -139,8 +139,12 @@ blocks are unchanged; presentation presets leave the setting at `auto`.
 
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
+By default, cards omit empty fields after human projection and reduction, and
+tables drop columns empty in every row. At UI verbosity 1 or higher (`-v`),
+empty card fields and all-empty table columns remain visible. Verbosity leaves
+the fitting, density comparison and footer policies unchanged.
 Before human layout, object arrays drop fields that are empty (`null`, `""`,
-`[]`, `{}`) in every item. If exactly one field remains, the array becomes a
+`[]`, `{}`) in every item, unless `-v` keeps them. If exactly one field remains, the array becomes a
 list of its values. For example, `[{"hostname":"ns1.nrec.no","TTL":null},
 {"hostname":"ns2.nrec.no","TTL":null}]` displays as `ns1.nrec.no, ns2.nrec.no`
 in table cells and as a list in cards, without a nested hostname header.

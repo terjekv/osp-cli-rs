@@ -383,7 +383,7 @@ mod tests {
         assert!(rendered.contains("1855"));
         assert!(rendered.contains("Target:"));
         assert!(rendered.contains("db02.uio.no"));
-        assert!(rendered.contains("Approval:"));
+        assert!(!rendered.contains("Approval:"));
         assert!(!rendered.contains("task_id:"));
         assert!(!rendered.contains("force"));
     }

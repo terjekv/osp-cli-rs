@@ -297,7 +297,12 @@ impl UiState {
     /// assert_eq!(ui.verbosity, MessageLevel::Success);
     /// assert_eq!(ui.debug_level, 2);
     /// ```
-    pub fn new(render_settings: RenderSettings, verbosity: MessageLevel, debug_level: u8) -> Self {
+    pub fn new(
+        mut render_settings: RenderSettings,
+        verbosity: MessageLevel,
+        debug_level: u8,
+    ) -> Self {
+        render_settings.verbosity = verbosity.command_verbosity();
         Self {
             render_settings,
             verbosity,

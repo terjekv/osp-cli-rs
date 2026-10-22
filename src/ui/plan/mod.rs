@@ -239,19 +239,23 @@ fn plan_record(
 ) -> RecordLayout {
     record
         .iter()
+        .filter(|(key, _)| settings.verbosity > 0 || !super::projection::empty_value(&map[key]))
         .map(|(key, value)| {
-            let row = KeyValueRow {
+            let mut row = KeyValueRow {
                 block_indent: None,
                 key: key.clone(),
                 value: if nested_table(value).is_some() || has_nested_table(&value.fields) {
                     KeyValueValue::Empty
                 } else {
-                    super::projection::key_value_value(&map[key], false)
+                    super::projection::key_value_value(&map[key], true)
                 },
                 value_style: value.style.clone(),
                 indent: None,
                 gap: None,
             };
+            if settings.verbosity == 0 {
+                omit_empty_fields(&mut row.value, &map[key]);
+            }
             let fallback = (depth + 1) * 2;
             let kind = if let Some(table) = nested_table(value) {
                 FieldKind::Table(plan_table(table, settings, fallback, None))
@@ -273,6 +277,23 @@ fn plan_record(
             )
         })
         .collect()
+}
+
+fn omit_empty_fields(value: &mut KeyValueValue, source: &serde_json::Value) {
+    match value {
+        KeyValueValue::Object(rows) => {
+            rows.retain(|row| !super::projection::empty_value(&source[&row.key]));
+            for row in rows {
+                omit_empty_fields(&mut row.value, &source[&row.key]);
+            }
+        }
+        KeyValueValue::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                omit_empty_fields(item, &source[index]);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn plan_classic_indents(layout: &mut RecordLayout, settings: &ResolvedRenderSettings) {

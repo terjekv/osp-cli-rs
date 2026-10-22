@@ -20,7 +20,10 @@ pub(in crate::ui) const COMPACT_CARD_BODY_INDENT: usize = 4;
 pub(in crate::ui) enum CompactCard {
     Entry(GridCell),
     Inline(GridBlock),
-    Titled { title: String, body: Vec<GridBlock> },
+    Titled {
+        title: Option<String>,
+        body: Vec<GridBlock>,
+    },
 }
 
 pub(super) fn is_flat(row: &Row) -> bool {
@@ -52,7 +55,9 @@ pub(super) fn plan_compact_cards(
             ordered_keys(key_order, row.keys())
                 .filter(|key| !rules.iter().any(|rule| matches!(rule, crate::core::DisplayRule::Notice { field } if field == *key)))
                 .filter_map(|key| {
-                    row.get(key).map(|value| GridCell {
+                    row.get(key)
+                        .filter(|value| settings.verbosity > 0 || !super::super::projection::empty_value(value))
+                        .map(|value| GridCell {
                         label: key.clone(),
                         value: display_value(value),
                         value_style: record
@@ -83,11 +88,7 @@ pub(super) fn plan_compact_cards(
             <= available / SHORT_FIELD_WIDTH_DIVISOR
     };
     let (mut key_width, mut long_key_width) = (0, 0);
-    for field in fields
-        .iter()
-        .flat_map(|fields| fields.iter().skip(1))
-        .filter(|field| !field.value.trim().is_empty())
-    {
+    for field in fields.iter().flat_map(|fields| fields.iter().skip(1)) {
         if short(field) {
             key_width = key_width.max(UnicodeWidthStr::width(field.label.as_str()));
         } else {
@@ -99,11 +100,7 @@ pub(super) fn plan_compact_cards(
         let mut widths = vec![0; columns];
         for record in &fields {
             let mut index = 0;
-            for field in record
-                .iter()
-                .skip(1)
-                .filter(|field| !field.value.trim().is_empty())
-            {
+            for field in record.iter().skip(1) {
                 if short(field) {
                     let width =
                         UnicodeWidthStr::width(escape_table_line_breaks(&field.value).as_str());
@@ -137,15 +134,11 @@ pub(super) fn plan_compact_cards(
         .map(|(fields, source)| {
             let Some(title) = fields.first() else {
                 return CompactCard::Titled {
-                    title: String::new(),
+                    title: None,
                     body: Vec::new(),
                 };
             };
-            if fields
-                .iter()
-                .skip(1)
-                .all(|field| field.value.trim().is_empty())
-            {
+            if fields.len() == 1 {
                 return CompactCard::Entry(title.clone());
             }
             let mut body = Vec::new();
@@ -161,11 +154,7 @@ pub(super) fn plan_compact_cards(
                     run.clear();
                 }
             };
-            for field in fields
-                .iter()
-                .skip(1)
-                .filter(|field| !field.value.trim().is_empty())
-            {
+            for field in fields.iter().skip(1) {
                 if short(field) {
                     let mut field = field.clone();
                     field.value = escape_table_line_breaks(&field.value);
@@ -245,7 +234,7 @@ pub(super) fn plan_compact_cards(
             }
             flush(&mut run, &mut body);
             CompactCard::Titled {
-                title: title.value.clone(),
+                title: Some(title.value.clone()),
                 body,
             }
         })
@@ -255,7 +244,7 @@ pub(super) fn plan_compact_cards(
 fn plan_inline_cards(fields: &[Vec<GridCell>], available: usize) -> Option<Vec<CompactCard>> {
     let mut labels = Vec::new();
     for field in fields.iter().flat_map(|record| record.iter().skip(1)) {
-        if !field.value.trim().is_empty() && !labels.contains(&field.label) {
+        if !labels.contains(&field.label) {
             labels.push(field.label.clone());
         }
     }
@@ -277,7 +266,7 @@ fn plan_inline_cards(fields: &[Vec<GridCell>], available: usize) -> Option<Vec<C
                     record
                         .iter()
                         .skip(1)
-                        .find(|field| &field.label == label && !field.value.trim().is_empty())
+                        .find(|field| &field.label == label)
                         .map(|field| GridCell {
                             value: escape_table_line_breaks(&field.value),
                             ..field.clone()
