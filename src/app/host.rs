@@ -412,7 +412,14 @@ fn handle_clap_parse_error(
                 .collect::<Vec<_>>();
             let product_overrides = crate::cli::passive_command(command.clone())
                 .try_get_matches_from(crate::cli::help_parse_tokens(&tokens))
-                .map(|matches| product_config_overrides(app, &matches))
+                .map(|matches| {
+                    let mut overrides = product_config_overrides(app, &matches);
+                    if let Ok(mut cli) = Cli::from_arg_matches(&matches) {
+                        cli.product_overrides = overrides;
+                        overrides = super::build_cli_session_layer(&cli).unwrap_or_default();
+                    }
+                    overrides
+                })
                 .unwrap_or_default();
             let help_context = help::render_settings_for_help_with_scan(
                 scanned,
