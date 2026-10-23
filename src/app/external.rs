@@ -220,6 +220,7 @@ fn dispatch_external_invocation(
         &state.runtime.auth,
         &state.clients,
         &command,
+        args,
         &invocation.ui.render_settings.runtime.command_scope,
     )? {
         ExternalCommandSource::Native => {

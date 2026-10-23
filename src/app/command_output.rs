@@ -449,9 +449,9 @@ pub(crate) fn run_cli_command(
         {
             sink.write_stderr(&format!("{backtrace}\n"));
         }
-        sink.write_stderr(&result.display_details);
+        super::sink::write_diagnostics(sink, &result.display_details, &ui.render_settings);
         if !result.stderr_text.is_empty() {
-            sink.write_stderr(&result.stderr_text);
+            super::sink::write_diagnostics(sink, &result.stderr_text, &ui.render_settings);
         }
         super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
         return Ok(result.exit_code);
@@ -501,9 +501,9 @@ pub(crate) fn run_cli_command(
     {
         sink.write_stderr(&format!("{backtrace}\n"));
     }
-    sink.write_stderr(&result.display_details);
+    super::sink::write_diagnostics(sink, &result.display_details, &ui.render_settings);
     if !result.stderr_text.is_empty() {
-        sink.write_stderr(&result.stderr_text);
+        super::sink::write_diagnostics(sink, &result.stderr_text, &ui.render_settings);
     }
     super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
     Ok(result.exit_code)
@@ -942,14 +942,12 @@ pub(crate) fn render_repl_command(
         session.repl_feedback.remember_hints(hints);
     }
 
+    let mut ui = ui.clone();
+    ui.render_settings.runtime.hint_action =
+        crate::repl::lifecycle::hint_action(config, ui.render_settings.format, hint_count);
+    let ui = &ui;
     if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
-        crate::repl::lifecycle::write_hint_action(
-            config,
-            ui.render_settings.format,
-            hint_count,
-            sink,
-        );
         if let Some(report) = result.failure_report.take() {
             session.record_failure_report(
                 line,
@@ -980,15 +978,14 @@ pub(crate) fn render_repl_command(
         ui.render_settings.clone(),
     ));
     let rendered = apply_output_sinks(config, ui, &result, rendered, sink)?;
-    sink.write_stderr(&result.display_details);
+    super::sink::write_diagnostics(sink, &result.display_details, &ui.render_settings);
     if !result.stderr_text.is_empty() {
-        sink.write_stderr(&result.stderr_text);
+        super::sink::write_diagnostics(sink, &result.stderr_text, &ui.render_settings);
     }
     if !matches!(saved.body, CommandBody::None) {
         session.record_success_output(line, saved, stages);
     }
     super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
-    crate::repl::lifecycle::write_hint_action(config, ui.render_settings.format, hint_count, sink);
     Ok(rendered)
 }
 

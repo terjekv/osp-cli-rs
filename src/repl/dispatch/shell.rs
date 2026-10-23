@@ -234,6 +234,7 @@ pub(super) fn enter_repl_shell(
         &state.runtime.auth,
         &state.clients,
         command,
+        &[],
         &invocation.ui.render_settings.runtime.command_scope,
     )?;
     ensure_shell_entry_dispatchable(

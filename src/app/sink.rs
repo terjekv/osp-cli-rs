@@ -484,6 +484,26 @@ pub(crate) fn write_diagnostics(
     text: &str,
     settings: &crate::ui::RenderSettings,
 ) {
+    let hinted;
+    let text = if let Some(action) = &settings.runtime.hint_action {
+        hinted = text
+            .split_inclusive('\n')
+            .map(|line| {
+                if line.starts_with("hint: ") {
+                    format!(
+                        "{}{action}{}",
+                        line.trim_end_matches('\n'),
+                        if line.ends_with('\n') { "\n" } else { "" }
+                    )
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<String>();
+        &hinted
+    } else {
+        text
+    };
     if !sink.stderr_is_terminal() || !settings.resolve_render_settings().color {
         sink.write_stderr(text);
         return;
