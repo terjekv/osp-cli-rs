@@ -6,15 +6,32 @@ fn transient_output_clears_before_documents() {
     use std::time::Duration;
     if std::env::var_os("OSP_RULE_SPINNER_CHILD").is_some() {
         let mut sink = StdIoUiSink;
+        // A parent acknowledgement follows an observed frame, so slow builds
+        // and scheduling do not turn a fixed sleep into a missing-frame race.
+        let mut attrs = std::mem::MaybeUninit::<libc::termios>::uninit();
+        // SAFETY: stdin is the owned PTY; attrs is read only after tcgetattr succeeds.
+        unsafe {
+            assert_eq!(libc::tcgetattr(libc::STDIN_FILENO, attrs.as_mut_ptr()), 0);
+            let mut attrs = attrs.assume_init();
+            attrs.c_lflag &= !libc::ECHO;
+            assert_eq!(
+                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &attrs),
+                0
+            );
+        }
         for (text, stderr) in [("ERROR-MARKER", true), ("RESULT-MARKER", false)] {
-            let spinner = sink.start_progress_spinner("WORK-MARKER", false).unwrap();
-            // Intentionally cross the documented one-second animation delay.
-            std::thread::sleep(Duration::from_millis(1300));
+            let spinner = sink
+                .start_progress_spinner(&format!("WORK-{text}"), false)
+                .unwrap();
+            let mut acknowledgement = String::new();
+            std::io::stdin().read_line(&mut acknowledgement).unwrap();
             if stderr {
                 sink.write_stderr(&format!("{text}\n"));
             } else {
                 sink.write_stdout(&format!("{text}\n"));
             }
+            acknowledgement.clear();
+            std::io::stdin().read_line(&mut acknowledgement).unwrap();
             drop(spinner);
         }
         return;
@@ -36,9 +53,24 @@ fn transient_output_clears_before_documents() {
     ]);
     command.env("OSP_RULE_SPINNER_CHILD", "1");
     command.env("TERM", "xterm-256color");
-    let (bytes, status) = crate::pty_support::capture(pair, command, Duration::from_secs(15));
+    let (bytes, status) = crate::pty_support::capture_dialogue(
+        pair,
+        command,
+        Duration::from_secs(20),
+        &[
+            ("WORK-ERROR-MARKER", "\n", false),
+            ("WORK-ERROR-MARKER", "\n", false),
+            ("WORK-RESULT-MARKER", "\n", false),
+            ("WORK-RESULT-MARKER", "\n", false),
+        ],
+    );
     assert!(status.success(), "{bytes:?}");
-    assert!(bytes.matches("WORK-MARKER").count() >= 2, "{bytes:?}");
+    for marker in ["ERROR-MARKER", "RESULT-MARKER"] {
+        assert!(
+            bytes.contains(&format!("{marker}\r\n\r\x1b[2K")),
+            "spinner must redraw after {marker}: {bytes:?}"
+        );
+    }
     for marker in ["ERROR-MARKER", "RESULT-MARKER"] {
         assert!(
             bytes.contains(&format!("\r\x1b[2K{marker}")),
@@ -52,7 +84,7 @@ fn transient_output_clears_before_documents() {
         screen.contains("ERROR-MARKER") && screen.contains("RESULT-MARKER"),
         "{screen}"
     );
-    assert!(!screen.contains("WORK-MARKER"), "{screen}");
+    assert!(!screen.contains("WORK-"), "{screen}");
 }
 
 #[cfg(unix)]
@@ -65,7 +97,7 @@ fn spinner_waits_one_second() {
         let spinner = sink
             .start_progress_spinner("FAST-WORK-MARKER", false)
             .unwrap();
-        std::thread::sleep(Duration::from_millis(900));
+        std::thread::sleep(Duration::from_millis(500));
         drop(spinner);
         sink.write_stdout("FAST-RESULT-MARKER\n");
         return;

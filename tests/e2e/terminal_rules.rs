@@ -53,6 +53,14 @@ repl.intro_template.full = "INTRO-MARKER"
             .unwrap()
             .contains("default>")
     );
+    assert!(
+        (1..=1000).any(|offset| {
+            terminal.screen_mut().set_scrollback(offset);
+            terminal.screen().contents().contains("INTRO-MARKER")
+        }),
+        "Ctrl-L must preserve the intro in scrollback"
+    );
+    terminal.screen_mut().set_scrollback(0);
     let mark = session.output_len();
     session.write_bytes(b"exit\r");
     assert!(session.wait_for_exit(HANG_TIMEOUT));
@@ -98,12 +106,20 @@ fn recovery_key_inserts_editable_scoped_command() {
         return;
     }
     let plugins = service_plugin();
+    let history = plugins.join("history.jsonl");
     let mut session = ReplPtySession::spawn(
         ReplPtyConfig::default()
             .with_plugins_dir(&plugins)
-            .with_config("[default]\nrepl.shellable_commands = [\"orch\"]\n"),
+            .with_config(&format!(
+                "[default]\nrepl.shellable_commands = [\"orch\"]\nrepl.history.path = {history:?}\n"
+            )),
     );
     assert!(session.wait_for_plain_output("default>", HANG_TIMEOUT));
+    session.type_text("config set --session repl.history.enabled true");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "for this session only", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     session.type_text("orch");
     let mark = session.output_len();
     session.write_bytes(b"\r");
@@ -123,15 +139,16 @@ fn recovery_key_inserts_editable_scoped_command() {
         "{}",
         session.output_since(mark)
     );
+    let failure = session.output_since(mark);
+    assert!(
+        failure.find("Plugin orch crashed").unwrap() < failure.find("Alt+Enter").unwrap(),
+        "{failure}"
+    );
     let mark = session.output_len();
     session.write_bytes(b"\x1b\r");
     assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     let inserted = session.output_since(mark);
     assert!(inserted.contains("doctor plugins"), "{inserted}");
-    assert!(
-        !session.output_since(mark).contains("source"),
-        "hint executed without Enter"
-    );
     let mark = session.output_len();
     session.write_bytes(b"\x1b[200~ | C\x1b[201~");
     assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
@@ -140,6 +157,23 @@ fn recovery_key_inserts_editable_scoped_command() {
     assert!(session.wait_for_plain_output_since(mark, "count", HANG_TIMEOUT));
     session.write_bytes(b"\x04");
     assert!(session.wait_for_exit(HANG_TIMEOUT));
+    // Finalized history is an execution barrier: only the edited recovery
+    // command may have run, regardless of how the editor batches its paints.
+    let records = std::fs::read_to_string(history).unwrap();
+    let commands: Vec<_> = records
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["command_line"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        commands,
+        ["orch", "orch recover", "orch doctor plugins | C"],
+        "{records}"
+    );
 }
 
 #[cfg(unix)]
@@ -161,6 +195,7 @@ fn eof_exits_from_root_and_service_shell() {
             session.type_text("orch");
             let mark = session.output_len();
             session.write_bytes(b"\r");
+            assert!(session.wait_for_plain_output_since(mark, "default [orch]>", HANG_TIMEOUT));
             assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
         }
         session.write_bytes(b"\x04");

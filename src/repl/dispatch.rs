@@ -463,9 +463,12 @@ fn execute_repl_line_inner(
             } else {
                 crate::app::sink::write_diagnostics(sink, &rendered, &ui.render_settings);
             }
-            if hint.is_some() && ui.render_settings.format != crate::core::OutputFormat::Json {
-                crate::repl::lifecycle::write_hint_action(state.runtime.config.resolved(), sink);
-            }
+            crate::repl::lifecycle::write_hint_action(
+                state.runtime.config.resolved(),
+                ui.render_settings.format,
+                hint.is_some(),
+                sink,
+            );
             crate::app::sink::write_diagnostics(sink, &evidence.1, &ui.render_settings);
             if ui.debug_level >= 2
                 && let Some(backtrace) =

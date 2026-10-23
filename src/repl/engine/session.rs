@@ -8,6 +8,7 @@ use super::{
     HOST_COMMAND_LAST_ARGUMENT, HOST_COMMAND_PAGE_NEXT, HOST_COMMAND_PAGE_PREVIOUS,
     HOST_COMMAND_PREVIOUS_ARGUMENT, SharedHistory,
 };
+use crate::app::{StdIoUiSink, UiSink};
 use crate::completion::CompletionTree;
 use crate::repl::highlight::ReplHighlighter;
 use crate::repl::menu::SharedCompletionMenu;
@@ -56,13 +57,13 @@ where
     if std::io::IsTerminal::is_terminal(&std::io::stdin())
         && let Err(error) = crate::ui::interrupt::prepare()
     {
-        eprintln!("{error}");
+        StdIoUiSink.write_stderr(&format!("{error}\n"));
         return ReplResult::Continue;
     }
     match (ctx.execute)(event, ctx.history_store) {
         Ok(result) => result,
         Err(err) => {
-            eprintln!("{err}");
+            StdIoUiSink.write_stderr(&format!("{err}\n"));
             ReplResult::Continue
         }
     }
@@ -255,7 +256,7 @@ where
         }
         let read = match crate::ui::prompt::read_line(&mut line) {
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                eprintln!();
+                StdIoUiSink.write_stderr("\n");
                 if submission.exit_on_interrupt {
                     return Ok(ReplResult::Exit(0));
                 }
@@ -461,7 +462,7 @@ where
                     Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
                     Ok(result) => Some(result),
                     Err(error) => {
-                        eprintln!("{error}");
+                        StdIoUiSink.write_stderr(&format!("{error}\n"));
                         None
                     }
                 };
@@ -482,14 +483,14 @@ where
             let selected = match launch_history_picker(history_store, appearance, &current_line) {
                 Ok(selected) => selected,
                 Err(err) => {
-                    eprintln!("{}", render_history_picker_failure(&err));
+                    StdIoUiSink.write_stderr(&format!("{}\n", render_history_picker_failure(&err)));
                     return Ok(None);
                 }
             };
             match selected {
                 Some(HistorySelection::Run { command, root }) => {
                     submission.root_input = root;
-                    eprintln!("{command}");
+                    StdIoUiSink.write_stderr(&format!("{command}\n"));
                     history_store
                         .with(|store| store.stage_command_line(&command))
                         .map_err(anyhow::Error::msg)??;
@@ -533,7 +534,7 @@ where
             };
             let result = (submission.execute)(crate::repl::ReplEvent::Action(id), history_store)
                 .unwrap_or_else(|err| {
-                    eprintln!("{err}");
+                    StdIoUiSink.write_stderr(&format!("{err}\n"));
                     ReplResult::Continue
                 });
             Ok(apply_submission(result, Some(editor)))
