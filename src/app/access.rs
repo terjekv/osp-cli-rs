@@ -20,6 +20,7 @@ pub trait AccessPolicy: Send + Sync {
     ///
     /// Called only by the shared `AuthState` policy-attachment path, before
     /// visibility is read in root help, runtime startup or REPL rebuilds.
+    /// Root help applies the same CLI session overrides as command execution.
     /// Root help has resolved config but no runtime: it cannot call `startup`,
     /// which may acquire credentials, and `visibility` has no config argument.
     /// Implementations must not acquire credentials or perform network I/O.
