@@ -205,7 +205,7 @@ fn render_planned(
     let projection = projection::project(output, plan.format, &plan.settings);
     plan::plan_layout(&projection, &mut plan);
     let output = &projection.output;
-    let doc = if matches!(
+    let mut doc = if matches!(
         plan.format,
         OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
     ) && let Some(layout) = request.layout
@@ -238,6 +238,9 @@ fn render_planned(
     } else {
         lower::lower_output(&projection, &plan)
     };
+    if request.target == RenderTarget::Clipboard && plan.format != OutputFormat::Markdown {
+        remove_terminal_chrome(&mut doc.blocks);
+    }
     let text = if matches!(plan.format, OutputFormat::Auto | OutputFormat::Guide)
         && request.target.is_screen()
         && request.settings.runtime.stdout_is_tty
@@ -260,6 +263,18 @@ fn render_planned(
         return link_urls(text, canonical);
     }
     text
+}
+
+fn remove_terminal_chrome(blocks: &mut Vec<doc::Block>) {
+    blocks.retain(|block| !matches!(block, doc::Block::Rule));
+    for block in blocks {
+        if let doc::Block::Section(section) = block {
+            if section.title_chrome == doc::SectionTitleChrome::Ruled {
+                section.title_chrome = doc::SectionTitleChrome::Plain;
+            }
+            remove_terminal_chrome(&mut section.blocks);
+        }
+    }
 }
 
 fn link_urls(text: String, output: &OutputResult) -> String {

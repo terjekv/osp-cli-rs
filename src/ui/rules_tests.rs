@@ -26,7 +26,15 @@ fn section_rules_start_at_column_zero() {
             }],
         )],
     };
-    let output = render(&document.to_output_result(), &RenderRequest::new(&settings));
+    let mut request = RenderRequest::new(&settings);
+    request.layout = Some(crate::ui::HelpLayout::Full);
+    request.show_footer_rule = Some(true);
+    let output = render(&document.to_output_result(), &request);
+    let closing = output.lines().last().unwrap();
+    assert!(
+        closing.starts_with('-') && closing.chars().all(|ch| ch == '-'),
+        "{output:?}"
+    );
     assert!(
         output
             .lines()
@@ -69,16 +77,48 @@ fn section_rules_start_at_column_zero() {
 fn nested_blocks_use_one_indent() {
     let mut settings = settings(OutputFormat::Mreg);
     settings.format_explicit = true;
-    let output = OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(json!({
+    let mut output = OutputResult::from_rows(vec![]).with_document(OutputDocument::Json(json!({
         "Name": "host.example.org",
+        "LongParentLabel": "parent-value",
+        "Nested": {"X": "child-value", "Inner": {"Y": "grandchild-value"}},
         "Records": [{"Address":"192.0.2.1", "TTL":300}, {"Address":"192.0.2.2", "TTL":300}],
         "Roles": ["first-long-role-name", "second-long-role-name", "third-long-role-name", "fourth-long-role-name"]
     })));
     let mut request = RenderRequest::new(&settings);
     request.target = RenderTarget::ReplScreen;
+    output.meta.title_field = Some("Name".into());
     let output = render(&output, &request);
     let lines: Vec<_> = output.lines().collect();
     let indent = |line: &str| line.len() - line.trim_start().len();
+    let title = lines
+        .iter()
+        .find(|line| line.contains("host.example.org"))
+        .unwrap();
+    let parent = lines
+        .iter()
+        .find(|line| line.contains("parent-value"))
+        .unwrap();
+    let child = lines
+        .iter()
+        .find(|line| line.contains("child-value"))
+        .unwrap();
+    let grandchild = lines
+        .iter()
+        .find(|line| line.contains("grandchild-value"))
+        .unwrap();
+    assert_eq!(indent(parent) - indent(title), 2, "{output}");
+    assert_eq!(indent(child) - indent(parent), 2, "{output}");
+    assert_eq!(indent(grandchild) - indent(child), 2, "{output}");
+    assert_eq!(
+        child.find("child-value").unwrap() - indent(child),
+        3,
+        "{output}"
+    );
+    assert_eq!(
+        grandchild.find("grandchild-value").unwrap() - indent(grandchild),
+        3,
+        "{output}"
+    );
     let table = lines
         .iter()
         .position(|line| line.trim_start().starts_with("Records"))
@@ -119,6 +159,13 @@ fn repl_margin_applies_once_and_exports_have_none() {
         let mut request = RenderRequest::new(&settings);
         request.target = target;
         let rendered = render(&output, &request);
+        if target == RenderTarget::Clipboard {
+            assert_eq!(
+                rendered.trim_end(),
+                "Margin marker:\nBody marker",
+                "{rendered:?}"
+            );
+        }
         assert!(
             rendered
                 .lines()
