@@ -111,6 +111,7 @@ impl osp_cli::NativeCommand for RecoveryService {
                 .arg(Arg::new("detail").long("detail").action(ArgAction::SetTrue))
         };
         Command::new("orch")
+            .subcommand(Command::new("recover"))
             .subcommand(Command::new("show").arg(Arg::new("name").required(true)))
             .subcommand(Command::new("host").subcommand(info()))
             .subcommand(Command::new("hosts").subcommand(info()))
@@ -121,6 +122,22 @@ impl osp_cli::NativeCommand for RecoveryService {
         args: &[String],
         _: &osp_cli::NativeCommandContext<'_>,
     ) -> anyhow::Result<osp_cli::NativeCommandOutcome> {
+        if args == ["recover"] {
+            return Ok(osp_cli::NativeCommandOutcome::Response(Box::new(
+                serde_json::from_value(serde_json::json!({
+                    "protocol_version": 1,
+                    "ok": false,
+                    "data": null,
+                    "error": {
+                        "code": "recovery_required",
+                        "message": "Choose a recovery command.",
+                        "details": {"action": "Did you mean orch show?", "command": "orch show"}
+                    },
+                    "messages": [{"level": "info", "text": "hint: Read the fixture notes."}],
+                    "meta": {}
+                }))?,
+            )));
+        }
         let path = std::path::PathBuf::from(std::env::var_os("OSP_PLUGIN_PATH").unwrap());
         std::fs::write(path.join("executed"), format!("{}\n", args.join("\n")))?;
         Ok(osp_cli::NativeCommandOutcome::Help(
@@ -152,6 +169,39 @@ fn recovery_key_inserts_editable_scoped_command() {
             )),
     );
     assert!(session.wait_for_plain_output("default>", HANG_TIMEOUT));
+    session.type_text("zzzzzzzzzz");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "Run help to list commands.", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let generic = session.output_since(mark);
+    assert!(!generic.contains("Alt+Enter"), "{generic}");
+    session.type_text("exi");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(
+        session.wait_for_plain_output_since(
+            mark,
+            "Did you mean exit? (Alt+Enter inserts)",
+            HANG_TIMEOUT
+        ),
+        "{}",
+        session.output_since(mark)
+    );
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let hint = session.output_since(mark);
+    assert_eq!(hint.matches("Alt+Enter").count(), 1, "{hint}");
+    let mark = session.output_len();
+    session.write_bytes(b"\x1b\r");
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let mut terminal = vt100::Parser::new(24, 80, 0);
+    terminal.process(session.output_since(mark).as_bytes());
+    let screen = terminal.screen().contents();
+    assert!(screen.contains("default> exit"), "{screen}");
+    // Insertion leaves the REPL alive and editable; discard it to continue.
+    let mark = session.output_len();
+    session.write_bytes(b"\x15");
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     session.type_text("config set --session repl.history.enabled true");
     let mark = session.output_len();
     session.write_bytes(b"\r");
@@ -227,8 +277,10 @@ fn recovery_key_inserts_editable_scoped_command() {
     assert!(session.wait_for_plain_output_since(mark, "Alt+Enter", HANG_TIMEOUT));
     assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     let hint = session.output_since(mark);
-    assert!(hint.contains("Did you mean orch show?"), "{hint}");
-    assert!(hint.contains("Alt+Enter"), "{hint}");
+    assert!(
+        hint.contains("Did you mean orch show? (Alt+Enter inserts)"),
+        "{hint}"
+    );
     let mark = session.output_len();
     session.write_bytes(b"\x1b\r");
     assert!(
@@ -252,6 +304,23 @@ fn recovery_key_inserts_editable_scoped_command() {
     );
     std::fs::remove_file(native.join("executed")).unwrap();
 
+    session.type_text("orch recover --verbose");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "Choose a recovery command.", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let failure = session.output_since(mark);
+    assert!(
+        failure.contains("hint: Read the fixture notes.\r\n")
+            || failure.contains("hint: Read the fixture notes.\n"),
+        "{failure}"
+    );
+    assert!(
+        failure.contains("hint: Did you mean orch show? (Alt+Enter inserts)"),
+        "{failure}"
+    );
+    assert_eq!(failure.matches("Alt+Enter").count(), 1, "{failure}");
+
     session.type_text("orch");
     let mark = session.output_len();
     session.write_bytes(b"\r");
@@ -264,7 +333,7 @@ fn recovery_key_inserts_editable_scoped_command() {
     assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     let hint = session.output_since(mark);
     assert!(
-        hint.contains("Alt+Enter") && hint.contains("again to cycle"),
+        hint.contains("? (Alt+Enter inserts, again to cycle)"),
         "{hint}"
     );
     assert!(hint.contains("host info team\\ x --detail"), "{hint}");

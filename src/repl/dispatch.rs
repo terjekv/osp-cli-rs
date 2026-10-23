@@ -437,8 +437,6 @@ fn execute_repl_line_inner(
             let plain_settings = ui.render_settings.plain_copy_settings();
             let remember = !is_repl_bang_request(&resolved)
                 && !is_doctor_request(&resolved, state.runtime.config.resolved());
-            let more = remember
-                && crate::app::host::has_report_detail(&err, ui.verbosity, &plain_settings);
             if remember {
                 state
                     .session
@@ -451,8 +449,17 @@ fn execute_repl_line_inner(
             if let Some(hints) = hints {
                 state.session.repl_feedback.remember_hints(hints);
             }
-            let rendered =
-                crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
+            let hint_action = crate::repl::lifecycle::hint_action(
+                state.runtime.config.resolved(),
+                ui.render_settings.format,
+                hint_count,
+            );
+            let rendered = crate::app::render_process_error(
+                &err,
+                &ui.render_settings,
+                ui.verbosity,
+                hint_action.as_deref(),
+            );
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&rendered);
                 if ui.debug_level >= 2 {
@@ -464,12 +471,6 @@ fn execute_repl_line_inner(
             } else {
                 crate::app::sink::write_diagnostics(sink, &rendered, &ui.render_settings);
             }
-            crate::repl::lifecycle::write_hint_action(
-                state.runtime.config.resolved(),
-                ui.render_settings.format,
-                hint_count,
-                sink,
-            );
             crate::app::sink::write_diagnostics(sink, &evidence.1, &ui.render_settings);
             if ui.debug_level >= 2
                 && let Some(backtrace) =

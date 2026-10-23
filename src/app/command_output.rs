@@ -70,7 +70,6 @@ pub(crate) struct CommandOutput {
     /// Passthrough stderr emitted alongside the body, without UI formatting.
     pub(crate) stderr_text: String,
     pub(crate) failure_report: Option<miette::Report>,
-    pub(crate) hint_command: Option<String>,
 }
 
 impl CommandOutput {
@@ -90,7 +89,6 @@ impl CommandOutput {
             intro_decoration: None,
             stderr_text: String::new(),
             failure_report: None,
-            hint_command: None,
         }
     }
 
@@ -456,25 +454,41 @@ pub(crate) fn run_cli_command(
         super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
         return Ok(result.exit_code);
     }
-    if !result.messages.is_empty() {
-        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+    let report_message = result.failure_report.as_ref().map(|report| {
+        super::host::report_error_details(report, ui.verbosity, &ui.render_settings).render()
+    });
+    let mut messages = MessageBuffer::default();
+    for entry in result.messages.entries() {
+        if !(entry.level == MessageLevel::Error && Some(&entry.text) == report_message.as_ref()) {
+            messages.push_message(entry.clone());
+        }
     }
-    if let Some(report) = &result.failure_report
-        && !result.messages.entries().iter().any(|entry| {
-            entry.level == MessageLevel::Error
-                && entry.text
-                    == super::host::report_error_details(report, ui.verbosity, &ui.render_settings)
-                        .render()
-        })
-    {
+    emit_messages_for_ui(config, ui, &messages, ui.verbosity, sink);
+    if let Some(report) = &result.failure_report {
+        let choices = super::host::report_hint_commands(report, ui.verbosity)
+            .as_ref()
+            .map_or(0, Vec::len);
+        let hint_action = if matches!(
+            ui.render_settings.runtime.command_scope,
+            crate::core::CommandScope::OneShot
+        ) {
+            None
+        } else {
+            crate::repl::lifecycle::hint_action(config, ui.render_settings.format, choices)
+        };
         super::sink::write_diagnostics(
             sink,
-            &super::render_process_error(report, &ui.render_settings, ui.verbosity, false),
+            &super::render_process_error(
+                report,
+                &ui.render_settings,
+                ui.verbosity,
+                hint_action.as_deref(),
+            ),
             &ui.render_settings,
         );
     }
     let rendered = result.render(config, &ui.render_settings);
-    if result.failure_report.is_some()
+    if (result.failure_report.is_some() && !result.preserve_process_output)
         || result
             .messages
             .entries()
@@ -927,29 +941,16 @@ pub(crate) fn render_repl_command(
     if let Some(recording) = crate::repl::recording::current() {
         recording.observe(&result.body.json_value());
     }
-    let hints = result
-        .hint_command
+    if let Some(hints) = result
+        .failure_report
         .as_ref()
-        .map(|command| vec![command.clone()])
-        .or_else(|| {
-            result
-                .failure_report
-                .as_ref()
-                .and_then(|report| super::host::report_hint_commands(report, ui.verbosity))
-        });
-    let hint_count = hints.as_ref().map_or(0, Vec::len);
-    if let Some(hints) = hints {
+        .and_then(|report| super::host::report_hint_commands(report, ui.verbosity))
+    {
         session.repl_feedback.remember_hints(hints);
     }
 
     if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
-        crate::repl::lifecycle::write_hint_action(
-            config,
-            ui.render_settings.format,
-            hint_count,
-            sink,
-        );
         if let Some(report) = result.failure_report.take() {
             session.record_failure_report(
                 line,
@@ -988,7 +989,6 @@ pub(crate) fn render_repl_command(
         session.record_success_output(line, saved, stages);
     }
     super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
-    crate::repl::lifecycle::write_hint_action(config, ui.render_settings.format, hint_count, sink);
     Ok(rendered)
 }
 

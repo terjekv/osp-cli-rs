@@ -32,14 +32,17 @@ pub(crate) fn config_explain_result(
     if explain.final_entry.is_none() && explain.layers.is_empty() {
         let mut messages = MessageBuffer::default();
         let error = push_missing_config_key_messages(&mut messages, config, &args.key);
-        let hint_command = error.action.as_ref().map(|_| "config list".into());
+        let report = if error.action.is_some() {
+            miette::Report::new(crate::core::CommandHint::new("config list", error))
+        } else {
+            miette::Report::new(error)
+        };
         return Ok(CommandOutput {
             exit_code: 1,
             messages,
-            hint_command,
             body: crate::app::CommandBody::None,
             stderr_text: String::new(),
-            failure_report: Some(miette::Report::new(error)),
+            failure_report: Some(report),
             ..CommandOutput::exit(0)
         });
     }

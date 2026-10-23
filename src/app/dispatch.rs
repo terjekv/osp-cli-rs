@@ -222,6 +222,7 @@ pub(crate) fn resolve_external_command_source(
     auth: &AuthState,
     clients: &AppClients,
     command: &str,
+    args: &[String],
     scope: &crate::core::CommandScope,
 ) -> Result<ExternalCommandSource> {
     check_access(
@@ -238,6 +239,18 @@ pub(crate) fn resolve_external_command_source(
     let has_native = matching.iter().any(|entry| is_native_command_entry(entry));
 
     if matching.is_empty() {
+        if !matches!(scope, crate::core::CommandScope::OneShot) {
+            use clap::CommandFactory;
+            let names = crate::cli::Cli::command()
+                .get_subcommands()
+                .map(|child| child.get_name().to_owned())
+                .chain(crate::repl::dispatch::builtins::command_names())
+                .chain(catalog.iter().map(|entry| entry.name.clone()))
+                .collect::<std::collections::BTreeSet<_>>();
+            return Err(super::host::report_unknown_repl_command(
+                command, args, names, scope,
+            ));
+        }
         return Err(match closest_external_command(&catalog, command) {
             Some(suggestion) => miette::Report::new(
                 crate::core::CommandError::new(format!("Unknown command '{command}'."))

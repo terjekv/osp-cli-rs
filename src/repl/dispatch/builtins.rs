@@ -30,6 +30,22 @@ pub(super) enum PaginationDirection {
     Next,
 }
 
+impl PaginationDirection {
+    const COMMANDS: [(&'static str, Self); 2] = [("next", Self::Next), ("prev", Self::Previous)];
+}
+
+pub(crate) fn command_names() -> Vec<String> {
+    crate::cli::repl_only_commands()
+        .iter()
+        .map(|command| command.get_name().to_owned())
+        .chain(
+            PaginationDirection::COMMANDS
+                .iter()
+                .map(|(name, _)| (*name).to_owned()),
+        )
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SourceCommand {
     paths: Vec<PathBuf>,
@@ -109,11 +125,11 @@ pub(super) fn parse_repl_builtin(raw: &str) -> Result<Option<ReplBuiltin>> {
     if raw == "exit" || raw == "quit" {
         return Ok(Some(ReplBuiltin::Exit));
     }
-    if raw == "next" {
-        return Ok(Some(ReplBuiltin::Pagination(PaginationDirection::Next)));
-    }
-    if raw == "prev" {
-        return Ok(Some(ReplBuiltin::Pagination(PaginationDirection::Previous)));
+    if let Some((_, direction)) = PaginationDirection::COMMANDS
+        .iter()
+        .find(|(name, _)| *name == raw)
+    {
+        return Ok(Some(ReplBuiltin::Pagination(*direction)));
     }
     if raw.split_whitespace().next() == Some("last") {
         return Ok(Some(ReplBuiltin::Last));

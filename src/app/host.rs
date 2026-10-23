@@ -909,19 +909,6 @@ pub fn render_report_message(
     rendered
 }
 
-pub(crate) fn has_report_detail(
-    err: &miette::Report,
-    level: crate::core::MessageLevel,
-    settings: &RenderSettings,
-) -> bool {
-    if level >= crate::core::MessageLevel::Info {
-        return false;
-    }
-    let summary = render_report_message(err, crate::core::MessageLevel::Success, settings);
-    let detail = render_report_message(err, crate::core::MessageLevel::Info, settings);
-    detail.trim() != summary.trim()
-}
-
 pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
     report_backtrace(err)
         .is_none()
@@ -1020,32 +1007,38 @@ fn known_error_hint(
         });
     }
 
+    if let Some(context) = known.boxed_context
+        && !context.command_corrections.is_empty()
+    {
+        let more = if context.command_corrections.len() > 3 {
+            format!(
+                " Run {}.",
+                scope.command(
+                    format!(
+                        "{} --help",
+                        context.command_path.as_deref().unwrap_or_default()
+                    )
+                    .trim_start()
+                )
+            )
+        } else {
+            String::new()
+        };
+        return Some(format!(
+            "Did you mean {}?{more}",
+            context
+                .command_corrections
+                .iter()
+                .take(3)
+                .map(|command| scope.command(command))
+                .collect::<Vec<_>>()
+                .join(" or ")
+        ));
+    }
     if let Some(clap) = known.clap {
         let path = known
             .boxed_context
             .and_then(|context| context.command_path.as_deref());
-        if let Some(context) = known.boxed_context
-            && !context.command_corrections.is_empty()
-        {
-            let more = if context.command_corrections.len() > 3 {
-                format!(
-                    " Run {}.",
-                    scope.command(format!("{} --help", path.unwrap_or_default()).trim_start())
-                )
-            } else {
-                String::new()
-            };
-            return Some(format!(
-                "Did you mean {}?{more}",
-                context
-                    .command_corrections
-                    .iter()
-                    .take(3)
-                    .map(|command| scope.command(command))
-                    .collect::<Vec<_>>()
-                    .join(" or ")
-            ));
-        }
         return Some(clap_error_action(clap, path, scope));
     }
 
@@ -1083,11 +1076,21 @@ pub(crate) fn report_hint_commands(
     if verbosity >= crate::core::MessageLevel::Info {
         return None;
     }
+    if known.clap.is_none()
+        && known
+            .boxed_context
+            .is_some_and(|context| context.command_path.is_some())
+    {
+        return Some(Vec::new());
+    }
     let error = known.clap?;
     if error
         .get(clap::error::ContextKind::SuggestedSubcommand)
         .is_some()
     {
+        return Some(Vec::new());
+    }
+    if error.kind() == clap::error::ErrorKind::InvalidSubcommand {
         return Some(Vec::new());
     }
     let path = known
@@ -1218,6 +1221,55 @@ fn base_error_message(
         // message levels users usually need the concrete actionable cause.
         Some(source) if find_error_in_chain::<ReportContextError>(err).is_some() => source,
         _ => outer,
+    })
+}
+
+/// Use Clap's ranked candidates without changing unknown-command error semantics.
+pub(crate) fn report_unknown_repl_command(
+    command: &str,
+    args: &[String],
+    names: std::collections::BTreeSet<String>,
+    scope: &crate::core::CommandScope,
+) -> miette::Report {
+    // The registry owns help too; do not synthesize a second help subcommand.
+    let grammar = clap::Command::new("osp")
+        .disable_help_subcommand(true)
+        .subcommands(names.into_iter().map(clap::Command::new));
+    let words = std::iter::once(OsString::from("osp"))
+        .chain(std::iter::once(OsString::from(command)))
+        .chain(args.iter().map(OsString::from))
+        .collect::<Vec<_>>();
+    let corrections = grammar
+        .clone()
+        .try_get_matches_from(&words)
+        .err()
+        .map(|mut error| {
+            use clap::error::{ContextKind, ContextValue};
+            // Root recovery has always offered the closest command. Clap ranks
+            // its candidates from least to most similar.
+            if let Some(ContextValue::Strings(choices)) =
+                error.get(ContextKind::SuggestedSubcommand)
+                && let Some(best) = choices.last().cloned()
+            {
+                error.insert(
+                    ContextKind::SuggestedSubcommand,
+                    ContextValue::Strings(vec![best]),
+                );
+            }
+            corrected_subcommands(&error, &grammar, &words, &[])
+        })
+        .unwrap_or_default();
+    let mut error = crate::core::CommandError::new(format!("Unknown command '{command}'."));
+    if corrections.is_empty() {
+        error.action = Some(format!("Run {} to list commands.", scope.command("help")));
+    }
+    miette::Report::new(BoxedContextError {
+        context: ErrorContext::Operation("unknown REPL command"),
+        source: Box::new(error),
+        backtrace: Backtrace::force_capture(),
+        command_path: Some(String::new()),
+        command_corrections: corrections,
+        structured: None,
     })
 }
 

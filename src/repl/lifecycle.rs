@@ -153,19 +153,20 @@ fn hint_insert_action(config: &crate::config::ResolvedConfig) -> Result<crate::r
     Ok(hint)
 }
 
-pub(crate) fn write_hint_action(
+pub(crate) fn hint_action(
     config: &crate::config::ResolvedConfig,
     format: crate::core::OutputFormat,
     choices: usize,
-    sink: &mut dyn crate::app::UiSink,
-) {
-    if choices > 0
+) -> Option<String> {
+    if (1..=3).contains(&choices)
         && format != crate::core::OutputFormat::Json
         && let Ok(action) = hint_insert_action(config)
         && let Some(key) = action.key
     {
         let cycle = if choices > 1 { ", again to cycle" } else { "" };
-        sink.write_stderr(&format!("hint: {key} inserts for editing{cycle}.\n"));
+        Some(format!(" ({key} inserts{cycle})"))
+    } else {
+        None
     }
 }
 
