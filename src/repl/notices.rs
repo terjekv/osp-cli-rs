@@ -7,6 +7,7 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use crate::app::{StdIoUiSink, UiSink};
 use reedline::ExternalPrinter;
 
 #[derive(Default)]
@@ -14,6 +15,7 @@ struct Notices {
     printer: Option<SyncSender<String>>,
     pending: Vec<String>,
     basic: bool,
+    overflow: usize,
     owner: Option<ReplSession>,
 }
 
@@ -21,9 +23,15 @@ impl Notices {
     fn post(&mut self, line: String) {
         let line = inline(&line);
         if self.basic {
-            eprintln!("\n{line}");
+            StdIoUiSink.write_stderr(&format!("\n{line}\n"));
+        } else if self.overflow > 0 {
+            self.overflow = self.overflow.saturating_add(1);
+            *self.pending.last_mut().unwrap() = format!("+{} more notices", self.overflow);
         } else if self.pending.len() < 8 {
             self.pending.push(line);
+        } else {
+            self.overflow = 2;
+            self.pending[7] = format!("+{} more notices", self.overflow);
         }
     }
 
@@ -31,13 +39,29 @@ impl Notices {
         if let Some(printer) = &self.printer
             && !self.pending.is_empty()
         {
-            let mut batch = self.pending.join("\n");
-            self.pending.clear();
-            // Reedline counts buffer rows, but misses the multiline prompt header.
+            // Reedline prints each message followed by CRLF in raw mode.
+            // Clear the multiline prompt header only before the first notice.
+            let mut prefix = String::new();
             if prompt_rows > 0 {
-                batch = format!("\x1b[{prompt_rows}A\r\x1b[2K{batch}");
+                prefix = format!("\x1b[{prompt_rows}A");
+                for row in 0..prompt_rows {
+                    prefix.push_str("\r\x1b[2K");
+                    if row + 1 < prompt_rows {
+                        prefix.push_str("\x1b[1B");
+                    }
+                }
+                if prompt_rows > 1 {
+                    prefix.push_str(&format!("\x1b[{}A", prompt_rows - 1));
+                }
             }
-            let _ = printer.try_send(batch);
+            while let Some(line) = self.pending.first() {
+                if printer.try_send(format!("{prefix}{line}")).is_err() {
+                    return;
+                }
+                self.pending.remove(0);
+                prefix.clear();
+            }
+            self.overflow = 0;
         }
     }
 
@@ -51,6 +75,7 @@ static NOTICES: Mutex<Notices> = Mutex::new(Notices {
     printer: None,
     pending: Vec::new(),
     basic: false,
+    overflow: 0,
     owner: None,
 });
 
@@ -101,8 +126,8 @@ impl ReplSession {
 
     /// Posts a sanitized line of at most 512 characters without blocking.
     ///
-    /// Cancelled and superseded sessions cannot publish. A full printer drops
-    /// delivery; Reedline retains queued lines until the next input read.
+    /// Cancelled and superseded sessions cannot publish. Overflow is summarized;
+    /// a full printer retains pending lines until the next input read.
     pub fn post_notice(&self, line: impl AsRef<str>) {
         let mut notices = NOTICES.lock().unwrap_or_else(|e| e.into_inner());
         if !self.is_cancelled() && self.is_current(&notices) {
@@ -155,6 +180,7 @@ impl Drop for SessionOwner {
             notices.owner = None;
             notices.printer = None;
             notices.pending.clear();
+            notices.overflow = 0;
         }
     }
 }
@@ -198,8 +224,9 @@ pub(crate) fn attach_basic() {
     }
     notices.printer = None;
     for line in notices.pending.drain(..) {
-        eprintln!("{line}");
+        StdIoUiSink.write_stderr(&format!("{line}\n"));
     }
+    notices.overflow = 0;
     notices.basic = true;
 }
 
@@ -242,10 +269,21 @@ mod tests {
         notices.post("late".into());
         assert_eq!(printer.get_line(), None);
         notices.flush(1);
+        assert_eq!(printer.get_line().as_deref(), Some("\x1b[1A\r\x1b[2Kearly"));
+        assert_eq!(printer.get_line().as_deref(), Some("late"));
+        assert_eq!(printer.get_line(), None);
+        for number in 0..11 {
+            notices.post(format!("notice {number}"));
+        }
+        notices.flush(2);
         assert_eq!(
             printer.get_line().as_deref(),
-            Some("\x1b[1A\r\x1b[2Kearly\nlate")
+            Some("\x1b[2A\r\x1b[2K\x1b[1B\r\x1b[2K\x1b[1Anotice 0")
         );
+        for number in 1..7 {
+            assert_eq!(printer.get_line(), Some(format!("notice {number}")));
+        }
+        assert_eq!(printer.get_line().as_deref(), Some("+4 more notices"));
         assert_eq!(printer.get_line(), None);
     }
 }
