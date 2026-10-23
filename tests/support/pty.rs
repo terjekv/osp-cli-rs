@@ -42,6 +42,7 @@ pub(crate) fn capture_dialogue(
     let fd = pair.master.as_raw_fd();
     let mut writer = pair.master.take_writer().expect("terminal writer");
     let mut answered = 0;
+    let mut observed = 0;
     let child = pair
         .slave
         .spawn_command(command)
@@ -66,7 +67,10 @@ pub(crate) fn capture_dialogue(
     let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some((prompt, answer, hidden)) = answers.get(answered) {
-            let seen = String::from_utf8_lossy(&bytes.lock().unwrap()).contains(prompt);
+            let snapshot = bytes.lock().unwrap();
+            let seen = String::from_utf8_lossy(&snapshot[observed..]).contains(prompt);
+            let next_observed = snapshot.len();
+            drop(snapshot);
             let secret_ready = !hidden
                 || fd.is_some_and(|fd| {
                     let mut attrs = std::mem::MaybeUninit::<libc::termios>::uninit();
@@ -82,6 +86,7 @@ pub(crate) fn capture_dialogue(
                     .expect("dialogue answer");
                 writer.flush().unwrap();
                 answered += 1;
+                observed = next_observed;
             }
         }
         if let Some(status) = capture.child.try_wait().expect("terminal status") {

@@ -115,12 +115,11 @@ pub struct StdIoUiSink;
 
 // Process stdout is global, so its failure state is too.
 static STDOUT_WRITE_FAILED: AtomicBool = AtomicBool::new(false);
-static SPINNER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SPINNER_DRAWN: AtomicBool = AtomicBool::new(false);
 
-fn clear_stderr_progress() {
-    let mut stderr = io::stderr().lock();
-    SPINNER_ACTIVE.store(false, Ordering::SeqCst);
+// Hold the stderr lock through clearing and durable output so a worker cannot
+// draw between them. Clearing a frame leaves its worker free to redraw later.
+fn clear_stderr_progress(stderr: &mut impl Write) {
     if SPINNER_DRAWN.swap(false, Ordering::SeqCst) {
         let _ = write!(stderr, "\r\x1b[2K").and_then(|()| stderr.flush());
     }
@@ -134,7 +133,8 @@ pub(crate) fn take_stdout_write_failure() -> bool {
 impl UiSink for StdIoUiSink {
     fn write_stdout(&mut self, text: &str) {
         if !text.is_empty() {
-            clear_stderr_progress();
+            let mut stderr = io::stderr().lock();
+            clear_stderr_progress(&mut stderr);
             let mut stdout = io::stdout().lock();
             if let Err(err) = stdout
                 .write_all(text.as_bytes())
@@ -142,15 +142,15 @@ impl UiSink for StdIoUiSink {
                 && err.kind() != io::ErrorKind::BrokenPipe
             {
                 STDOUT_WRITE_FAILED.store(true, Ordering::Relaxed);
-                let _ = writeln!(io::stderr(), "failed to write command output: {err}");
+                let _ = writeln!(stderr, "failed to write command output: {err}");
             }
         }
     }
 
     fn write_stderr(&mut self, text: &str) {
         if !text.is_empty() {
-            clear_stderr_progress();
             let mut stderr = io::stderr().lock();
+            clear_stderr_progress(&mut stderr);
             let _ = stderr
                 .write_all(text.as_bytes())
                 .and_then(|()| stderr.flush());
@@ -191,6 +191,7 @@ impl UiSink for StdIoUiSink {
     }
 
     fn write_stdout_paged(&mut self, text: &str, pager: &str) {
+        clear_stderr_progress(&mut io::stderr().lock());
         let Ok(mut child) = Command::new("sh")
             .args(["-c", pager])
             .stdin(Stdio::piped())
@@ -223,7 +224,6 @@ impl StderrSpinner {
         } else {
             &['|', '/', '-', '\\'][..]
         };
-        SPINNER_ACTIVE.store(true, Ordering::SeqCst);
         let (stop, stopped) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("osp-progress".into())
@@ -265,9 +265,7 @@ impl StderrSpinner {
             .saturating_sub(1);
         let line = crate::ui::crop_display_width(&format!("{frame} {text}"), width);
         let mut stderr = io::stderr().lock();
-        if !SPINNER_ACTIVE.load(Ordering::SeqCst)
-            || crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst)
-        {
+        if crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst) {
             return;
         }
         SPINNER_DRAWN.store(true, Ordering::SeqCst);
@@ -281,7 +279,7 @@ impl Drop for StderrSpinner {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        clear_stderr_progress();
+        clear_stderr_progress(&mut io::stderr().lock());
     }
 }
 
