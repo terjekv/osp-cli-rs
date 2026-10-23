@@ -28,6 +28,7 @@ impl NativeCommand for ServiceProbe {
             diagnostics::emit(Event::CatalogGap { service: "Inventory", operations: vec!["GET /new-hosts".into()] });
             diagnostics::emit(Event::Cache { name: "hosts", hit: true, age_seconds: Some(4000), ttl_seconds: Some(3600) });
             diagnostics::emit(Event::Exchange { method: "GET", url: "https://inventory.example/hosts?token=query-secret".into(), status: Some(401), failure: None, elapsed_ms: 12, request_id: Some("req-1\nforged".into()), bytes: Some(64), content_type: Some("application/json") });
+            diagnostics::emit(Event::ResponseDetail { detail: "Session revoked\nforged".into() });
             diagnostics::emit(Event::Recovery { retry_available: true });
             diagnostics::emit(Event::RequestFacts { deadline_seconds: Some(30), projection: Some("detail"), cursor_page: true });
             diagnostics::emit(Event::Exchange { method: "GET", url: "https://inventory.example/hosts".into(), status: Some(200), failure: None, elapsed_ms: 8, request_id: Some("req-2".into()), bytes: Some(128), content_type: Some("application/json") });
@@ -65,6 +66,11 @@ fn adapter_evidence_obeys_verbosity_and_keeps_json_stdout_clean() {
             level >= 2,
             "{}",
             sink.stderr
+        );
+        assert_eq!(
+            sink.stderr
+                .contains("response detail: Session revoked\\nforged"),
+            level >= 2
         );
         assert_eq!(
             sink.stderr.contains("Retrying after session renewal."),

@@ -47,6 +47,11 @@ pub enum DiagnosticEvent {
         /// Allowlisted response media type.
         content_type: Option<&'static str>,
     },
+    /// A reviewed error reason, with request credentials redacted by the adapter.
+    ResponseDetail {
+        /// Bounded server reason; never a raw response body.
+        detail: String,
+    },
     /// One completed directory search; filter and bind values are excluded.
     DirectorySearch {
         /// Directory search base, without the bind identity.
@@ -242,6 +247,7 @@ impl DiagnosticSink {
             DiagnosticEvent::Context { .. } => "service.context",
             DiagnosticEvent::CatalogGap { .. } => "service.catalog_gap",
             DiagnosticEvent::Exchange { .. } => "service.exchange",
+            DiagnosticEvent::ResponseDetail { .. } => "response.detail",
             DiagnosticEvent::DirectorySearch { .. } => "directory.search",
             DiagnosticEvent::PluginOutcome { .. } => "plugin.outcome",
             DiagnosticEvent::Cache { .. } => "cache.lookup",
@@ -354,6 +360,10 @@ impl DiagnosticSink {
                     );
                 }
             }
+            DiagnosticEvent::ResponseDetail { detail } => insert(
+                MessageLevel::Trace,
+                format!("response detail: {}\n", safe_text(&detail)),
+            ),
             DiagnosticEvent::DirectorySearch {
                 base,
                 outcome,
