@@ -115,6 +115,16 @@ pub struct StdIoUiSink;
 
 // Process stdout is global, so its failure state is too.
 static STDOUT_WRITE_FAILED: AtomicBool = AtomicBool::new(false);
+static SPINNER_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SPINNER_DRAWN: AtomicBool = AtomicBool::new(false);
+
+fn clear_stderr_progress() {
+    let mut stderr = io::stderr().lock();
+    SPINNER_ACTIVE.store(false, Ordering::SeqCst);
+    if SPINNER_DRAWN.swap(false, Ordering::SeqCst) {
+        let _ = write!(stderr, "\r\x1b[2K").and_then(|()| stderr.flush());
+    }
+}
 
 /// Returns and clears whether process stdout lost command output.
 pub(crate) fn take_stdout_write_failure() -> bool {
@@ -124,6 +134,7 @@ pub(crate) fn take_stdout_write_failure() -> bool {
 impl UiSink for StdIoUiSink {
     fn write_stdout(&mut self, text: &str) {
         if !text.is_empty() {
+            clear_stderr_progress();
             let mut stdout = io::stdout().lock();
             if let Err(err) = stdout
                 .write_all(text.as_bytes())
@@ -138,6 +149,7 @@ impl UiSink for StdIoUiSink {
 
     fn write_stderr(&mut self, text: &str) {
         if !text.is_empty() {
+            clear_stderr_progress();
             let mut stderr = io::stderr().lock();
             let _ = stderr
                 .write_all(text.as_bytes())
@@ -200,7 +212,7 @@ impl UiSink for StdIoUiSink {
 /// Owns one stderr animation; dropping it stops the worker and clears the line.
 pub struct StderrSpinner {
     stop: mpsc::Sender<Option<String>>,
-    worker: Option<thread::JoinHandle<bool>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 impl StderrSpinner {
@@ -211,6 +223,7 @@ impl StderrSpinner {
         } else {
             &['|', '/', '-', '\\'][..]
         };
+        SPINNER_ACTIVE.store(true, Ordering::SeqCst);
         let (stop, stopped) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("osp-progress".into())
@@ -218,7 +231,6 @@ impl StderrSpinner {
                 let mut next_draw = Instant::now() + PROGRESS_DELAY;
                 let mut text = text;
                 let mut frame = 0;
-                let mut drawn = false;
                 loop {
                     let delay = next_draw.saturating_duration_since(Instant::now());
                     match stopped.recv_timeout(delay) {
@@ -227,12 +239,11 @@ impl StderrSpinner {
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                     }
                     if Instant::now() >= next_draw {
-                        drawn |= Self::draw(frames[frame % frames.len()], &text);
+                        Self::draw(frames[frame % frames.len()], &text);
                         frame += 1;
                         next_draw = Instant::now() + Duration::from_millis(80);
                     }
                 }
-                drawn
             })
             .ok()?;
         Some(Self {
@@ -246,7 +257,7 @@ impl StderrSpinner {
         let _ = self.stop.send(Some(text));
     }
 
-    fn draw(frame: char, text: &str) -> bool {
+    fn draw(frame: char, text: &str) {
         // Leave the final cell free so terminal autowrap never moves the cursor.
         let width = terminal_size_of(io::stderr())
             .map(|(Width(width), _)| usize::from(width))
@@ -254,26 +265,23 @@ impl StderrSpinner {
             .saturating_sub(1);
         let line = crate::ui::crop_display_width(&format!("{frame} {text}"), width);
         let mut stderr = io::stderr().lock();
-        if crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst) {
-            return false;
+        if !SPINNER_ACTIVE.load(Ordering::SeqCst)
+            || crate::ui::prompt::PROMPT_OPEN.load(Ordering::SeqCst)
+        {
+            return;
         }
+        SPINNER_DRAWN.store(true, Ordering::SeqCst);
         let _ = write!(stderr, "\r\x1b[2K{line}").and_then(|()| stderr.flush());
-        true
     }
 }
 
 impl Drop for StderrSpinner {
     fn drop(&mut self) {
         let _ = self.stop.send(None);
-        let drawn = self
-            .worker
-            .take()
-            .is_some_and(|worker| worker.join().unwrap_or(false));
-        if !drawn {
-            return;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
-        let mut stderr = io::stderr().lock();
-        let _ = write!(stderr, "\r\x1b[2K").and_then(|()| stderr.flush());
+        clear_stderr_progress();
     }
 }
 
@@ -372,6 +380,7 @@ impl UiSink for ProgressUiSink<'_> {
     }
 
     fn write_stdout(&mut self, text: &str) {
+        self.clear_progress();
         self.inner.write_stdout(text);
     }
 
