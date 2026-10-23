@@ -321,3 +321,27 @@ fn layout_and_render_helpers_cover_empty_narrow_and_ansi_paths() {
     );
     assert_eq!(core.selected_index(), Some(0));
 }
+
+#[test]
+fn completion_values_and_inline_descriptions_keep_distinct_styles() {
+    let mut core = MenuCore::default();
+    core.set_columns(1);
+    core.set_values(vec![described_suggestion(
+        "alpha-value",
+        "description marker",
+    )]);
+    core.update_layout(80, 0);
+    let colors = MenuTextStyle {
+        text_style: Style::new().fg(Color::Cyan),
+        selected_text_style: Style::new().fg(Color::Cyan),
+        description_style: Style::new().fg(Color::Yellow),
+        ..MenuTextStyle::default()
+    };
+    let rendered = core.menu_string(10, true, &colors);
+    assert!(rendered.contains("alpha-value"), "{rendered:?}");
+    assert!(rendered.contains("description marker"), "{rendered:?}");
+    assert!(
+        rendered.contains("\x1b[36m") && rendered.contains("\x1b[33m"),
+        "{rendered:?}"
+    );
+}

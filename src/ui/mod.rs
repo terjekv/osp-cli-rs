@@ -331,3 +331,7 @@ pub fn render_message(
     request.layout = messages::MessageLayout::Plain;
     render_messages(&messages, &request)
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod rules_tests;

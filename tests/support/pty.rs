@@ -1,7 +1,7 @@
 //! Capture terminal commands with an owned reader and a scenario deadline.
 #![cfg(unix)]
 use portable_pty::{CommandBuilder, ExitStatus, PtyPair};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +30,18 @@ pub(crate) fn capture(
     command: CommandBuilder,
     timeout: Duration,
 ) -> (String, ExitStatus) {
+    capture_dialogue(pair, command, timeout, &[])
+}
+
+pub(crate) fn capture_dialogue(
+    pair: PtyPair,
+    command: CommandBuilder,
+    timeout: Duration,
+    answers: &[(&str, &str, bool)],
+) -> (String, ExitStatus) {
+    let fd = pair.master.as_raw_fd();
+    let mut writer = pair.master.take_writer().expect("terminal writer");
+    let mut answered = 0;
     let child = pair
         .slave
         .spawn_command(command)
@@ -53,6 +65,25 @@ pub(crate) fn capture(
     }));
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if let Some((prompt, answer, hidden)) = answers.get(answered) {
+            let seen = String::from_utf8_lossy(&bytes.lock().unwrap()).contains(prompt);
+            let secret_ready = !hidden
+                || fd.is_some_and(|fd| {
+                    let mut attrs = std::mem::MaybeUninit::<libc::termios>::uninit();
+                    // SAFETY: tcgetattr initializes attrs on success for this owned PTY.
+                    unsafe {
+                        libc::tcgetattr(fd, attrs.as_mut_ptr()) == 0
+                            && attrs.assume_init().c_lflag & libc::ECHO == 0
+                    }
+                });
+            if seen && secret_ready {
+                writer
+                    .write_all(answer.as_bytes())
+                    .expect("dialogue answer");
+                writer.flush().unwrap();
+                answered += 1;
+            }
+        }
         if let Some(status) = capture.child.try_wait().expect("terminal status") {
             break status;
         }
@@ -64,6 +95,7 @@ pub(crate) fn capture(
         std::thread::sleep(Duration::from_millis(10));
     };
     drop(capture);
+    assert_eq!(answered, answers.len(), "unanswered terminal dialogue");
     let output = String::from_utf8(bytes.lock().unwrap().clone()).expect("terminal UTF-8");
     (output, status)
 }

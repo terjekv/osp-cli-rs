@@ -226,12 +226,14 @@ impl ReplPtySession {
             let mut buf = [0u8; 4096];
             let cpr_request = [0x1b, 0x5b, 0x36, 0x6e];
             let mut cpr_prefix = 0;
+            let mut terminal = vt100::Parser::new(24, 80, 0);
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
                         // Requests may share a read or cross its boundary.
                         for byte in &buf[..n] {
+                            terminal.process(&[*byte]);
                             cpr_prefix = if *byte == cpr_request[cpr_prefix] {
                                 cpr_prefix + 1
                             } else {
@@ -239,10 +241,12 @@ impl ReplPtySession {
                             };
                             if cpr_prefix == cpr_request.len() {
                                 let writer = Arc::clone(&writer_clone);
+                                let (row, column) = terminal.screen().cursor_position();
+                                let report = format!("\x1b[{};{}R", row + 1, column + 1);
                                 let reply = move || {
                                     std::thread::sleep(cursor_report_delay);
                                     let mut writer = writer.lock().expect("writer lock");
-                                    let _ = writer.write_all(b"\x1b[1;1R");
+                                    let _ = writer.write_all(report.as_bytes());
                                     let _ = writer.flush();
                                 };
                                 if cursor_report_delay.is_zero() {
