@@ -314,13 +314,13 @@ Table-oriented tuning lives here:
   - `mreg` compares eligible planned tables and cards by visible-value density;
     hidden columns alone do not force cards
 
-Automatic card fallback requires **all** of the following: inferred or
-recommended Table format, normal TTY output, a known width, a single ungrouped
+Automatic card fallback requires **all** of the following: inferred Table
+format, normal TTY output, a known width, a single ungrouped
 top-level data table, enabled fitting (`ui.table.overflow != none`), and
 one through 20 source rows (`MAX_FALLBACK_CARD_ROWS`, before display limiting).
 A width hint without a TTY is insufficient. Explicit `--table`, configured `ui.format=table`,
-copy-safe output, documents/help and nested tables never fall back. Their fit
-path retains column order, first-column protection and the combined fit footer.
+producer-recommended tables, copy-safe output, documents/help and nested tables
+never fall back. Their fit path retains column order, first-column protection and the combined fit footer.
 
 The shared top-level and nested table fitter treats a column as atomic when
 all its nonempty rendered cells contain no whitespace and measure at most 24

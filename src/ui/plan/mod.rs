@@ -487,10 +487,7 @@ fn can_compare_cards(projection: &HumanProjection, plan: &RenderPlan) -> bool {
     let output = &projection.output;
     plan.grid_list.is_none()
         && plan.format == OutputFormat::Table
-        && matches!(
-            plan.provenance,
-            FormatProvenance::Inferred | FormatProvenance::Recommended
-        )
+        && plan.provenance == FormatProvenance::Inferred
         && plan.settings.table_too_wide == TableTooWide::Mreg
         && plan.settings.display_limits
         && plan.settings.width.is_some()
