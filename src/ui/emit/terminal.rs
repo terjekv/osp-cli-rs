@@ -62,7 +62,13 @@ fn emit_paragraph(block: &ParagraphBlock, settings: &ResolvedRenderSettings) -> 
         })
         .collect::<Vec<_>>()
         .join("\n");
-    indent_lines(&styled, settings.margin)
+    let fitted = match settings.width {
+        Some(width) => {
+            super::shared::fit_prose(&styled, width.saturating_sub(settings.margin).max(1))
+        }
+        None => styled,
+    };
+    indent_lines(&fitted, settings.margin)
 }
 
 fn emit_section(block: &SectionBlock, settings: &ResolvedRenderSettings) -> String {
