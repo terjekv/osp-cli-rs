@@ -83,7 +83,12 @@ formatting helper have been removed from the embedding surface. Public
 `ui::format_local_timestamp` and `ui::format_relative_timestamp` remain available.
 Use `DisplayRule` metadata for producer-specific human presentation.
 
-Native command contexts retain `may_prompt()` and `can_present()`. Terminal
+Native command contexts retain `may_prompt()` and `can_present()`.
+`client_gate(required)` is the single invocation policy decision: explicit
+elevation bypasses client consent and advisory-policy gates and disables
+`may_prompt()`. Credential acquisition remains product-owned. Metadata
+preparation receives the same invocation context, so products preserve the
+elevated credential during discovery as well as execution. Terminal
 confirmation helpers remain at `ui::prompt::{confirm, confirm_phrase}`.
 `AppRuntime::input_is_replay()` identifies sourced commands and redirected stdin; `NativeCommandContext::may_prompt()` rejects both.
 `ui::prompt::read_path(label)` opens a history-free REPL file editor; its `completion::path_candidates` lookup also serves `source` and `--from-file`, with tilde paths and explicit dotfile prefixes.

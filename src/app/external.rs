@@ -343,16 +343,15 @@ fn refresh_native_parse(
     command: &dyn crate::native::NativeCommand,
     session_context: &crate::native::NativeSessionContext,
     args: &[String],
-    config: &crate::config::ResolvedConfig,
+    context: &NativeCommandContext<'_>,
     parsed: NativeParse,
     intent: &NativeIntent,
-    scope: &crate::core::CommandScope,
 ) -> Result<NativeParse> {
     if !intent.refresh_metadata {
         return Ok(parsed);
     }
     let name = parsed.grammar.get_name().to_string();
-    let refreshed = command.prepare_invocation_metadata(args, config, scope);
+    let refreshed = command.prepare_invocation_metadata(args, context);
     if matches!(refreshed, Ok(true)) {
         session_context.request_completion_refresh();
     }
@@ -425,10 +424,14 @@ fn run_native_invocation(
             command,
             &state.session.native_context,
             args,
-            state.runtime.config.resolved(),
+            &NativeCommandContext::new(
+                state.runtime.config.resolved(),
+                runtime_hints_for_invocation(&state.runtime, invocation),
+            )
+            .with_invocation_elevation(input.elevation)
+            .with_command_scope(invocation.ui.render_settings.runtime.command_scope.clone()),
             parsed,
             &intent,
-            &invocation.ui.render_settings.runtime.command_scope,
         )?;
         state.runtime.auth.refresh_native_auth(&command.describe());
         ensure_external_access(&state.runtime, &parsed.path, intent.requirement, "command")?;
