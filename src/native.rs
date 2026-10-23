@@ -157,11 +157,22 @@ impl<'a> NativeCommandContext<'a> {
         self.output_pipeline
     }
 
+    /// Whether a product's client-side policy gate applies to this invocation.
+    ///
+    /// Explicit elevation is the user's final confirmation. Products still
+    /// validate request syntax and acquire their elevated credential, then send
+    /// the requested operation rather than enforcing local consent or advisory
+    /// policy. The service owns the end-to-end override.
+    pub fn client_gate(&self, required: bool) -> bool {
+        required && !self.invocation_elevation.is_elevated()
+    }
+
     /// Whether this invocation may read a confirmation from its terminal.
     /// Requires stdin and stderr terminals, non-JSON output and no output pipeline.
     /// Credential acquisition owns any additional command-scope restrictions.
     pub fn may_prompt(&self) -> bool {
-        self.human_output()
+        self.client_gate(true)
+            && self.human_output()
             && !crate::ui::prompt::input_is_replay()
             && std::io::stderr().is_terminal()
     }
@@ -879,7 +890,9 @@ pub trait NativeCommand: Send + Sync {
     /// remains available offline and without acquiring credentials. Arguments
     /// are the original supplied arguments, without the registered command name
     /// or DSL pipeline. Remote discovery is permitted, but this must not execute
-    /// the requested action. Use the supplied command scope for recovery hints.
+    /// the requested action. The context carries the invocation's elevation;
+    /// preserve it when selecting request credentials. Use its command scope
+    /// for recovery hints.
     /// Return `true` only when the grammar changed: the host then normalizes,
     /// describes, and strictly parses the invocation once more, and authorizes
     /// its full path against refreshed native declarations and product visibility
@@ -887,8 +900,7 @@ pub trait NativeCommand: Send + Sync {
     fn prepare_invocation_metadata(
         &self,
         _args: &[String],
-        _config: &ResolvedConfig,
-        _command_scope: &crate::core::CommandScope,
+        _context: &NativeCommandContext<'_>,
     ) -> Result<bool> {
         Ok(false)
     }

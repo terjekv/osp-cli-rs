@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use clap::Command;
 use osp_cli::app::{AccessPolicy, AppRuntime, BufferedUiSink, UiSink};
-use osp_cli::config::{ConfigLayer, ResolvedConfig};
+use osp_cli::config::ConfigLayer;
 use osp_cli::core::MessageLevel;
 use osp_cli::core::command_policy::{CredentialState, SessionFacts};
 use osp_cli::core::plugin::{
@@ -33,8 +33,7 @@ impl NativeCommand for CredentialProbe {
     fn prepare_invocation_metadata(
         &self,
         args: &[String],
-        _config: &ResolvedConfig,
-        _command_scope: &osp_cli::core::CommandScope,
+        _context: &osp_cli::NativeCommandContext<'_>,
     ) -> Result<bool> {
         assert!(args == ["get"] || args == ["--help"]);
         Ok(!self.0.swap(true, Ordering::SeqCst))
