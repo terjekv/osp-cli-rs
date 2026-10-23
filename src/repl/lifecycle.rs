@@ -138,8 +138,31 @@ impl ReplCycle {
         Ok(Self {
             run_config: build_repl_cycle_run_config(runtime, session, clients, prepared, actions)?,
             help_text: intro_text,
-            clear_screen_on_intro: runtime.ui.render_settings.resolve_render_settings().color,
+            clear_screen_on_intro: runtime.ui.render_settings.runtime.stdout_is_tty,
         })
+    }
+}
+
+fn hint_insert_action(config: &crate::config::ResolvedConfig) -> Result<crate::repl::ReplAction> {
+    let mut hint =
+        crate::repl::ReplAction::resolve("hint.insert", "Insert suggested command", 2, config)
+            .map_err(|e| miette::miette!("{e:#}"))?;
+    if config.get_string("repl.bindings.hint.insert").is_none() {
+        hint.key = Some(crate::repl::ReplActionKey::AltEnter);
+    }
+    Ok(hint)
+}
+
+pub(crate) fn write_hint_action(
+    config: &crate::config::ResolvedConfig,
+    sink: &mut dyn crate::app::UiSink,
+) {
+    if let Ok(action) = hint_insert_action(config)
+        && let Some(key) = action.key
+    {
+        sink.write_stderr(&format!(
+            "hint: {key} inserts the suggested command for editing.\n"
+        ));
     }
 }
 
@@ -155,22 +178,7 @@ pub(crate) fn resolved_product_actions(
     {
         return Ok(actions);
     }
-    let mut hint = crate::repl::ReplAction::resolve(
-        "hint.insert",
-        "Insert suggested command",
-        2,
-        runtime.config.resolved(),
-    )
-    .map_err(|e| miette::miette!("{e:#}"))?;
-    if runtime
-        .config
-        .resolved()
-        .get_string("repl.bindings.hint.insert")
-        .is_none()
-    {
-        hint.key = Some(crate::repl::ReplActionKey::AltEnter);
-    }
-    actions.push(hint);
+    actions.push(hint_insert_action(runtime.config.resolved())?);
     for (id, label, key) in [
         ("output.page", "Page last output", 'l'),
         ("output.editor", "View last output in editor", 'e'),

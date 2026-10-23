@@ -927,17 +927,19 @@ pub(crate) fn render_repl_command(
     if let Some(recording) = crate::repl::recording::current() {
         recording.observe(&result.body.json_value());
     }
-    if let Some(command) = &result.hint_command {
-        session.repl_feedback.remember_hint(command.clone());
-    }
-    if result.failure_report.is_some() {
-        if let Some(command) = result
+    let hint = result.hint_command.clone().or_else(|| {
+        result
             .failure_report
             .as_ref()
             .and_then(|report| super::host::report_hint_command(report, ui.verbosity))
-        {
-            session.repl_feedback.remember_hint(command);
+    });
+    if let Some(command) = hint {
+        session.repl_feedback.remember_hint(command);
+        if ui.render_settings.format != OutputFormat::Json {
+            crate::repl::lifecycle::write_hint_action(config, sink);
         }
+    }
+    if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
         if let Some(report) = result.failure_report.take() {
             session.record_failure_report(
