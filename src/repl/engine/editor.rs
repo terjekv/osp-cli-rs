@@ -126,6 +126,7 @@ pub(crate) struct AutoCompleteEmacs {
     painted_revision: u64,
     pending_word_len: Option<usize>,
     last_argument: bool,
+    hint_edited: bool,
 }
 
 impl AutoCompleteEmacs {
@@ -144,6 +145,7 @@ impl AutoCompleteEmacs {
             painted_revision,
             pending_word_len: Some(pending_word_len),
             last_argument: false,
+            hint_edited: true,
         }
     }
 
@@ -183,6 +185,15 @@ impl AutoCompleteEmacs {
     }
 
     fn track_edit(&mut self, commands: &[EditCommand], word_len: Option<usize>) {
+        // Reedline exposes the classifier but does not re-export EditType.
+        let text_edit = EditCommand::InsertChar(' ').edit_type();
+        let undo_redo = EditCommand::Undo.edit_type();
+        if commands
+            .iter()
+            .any(|command| command.edit_type() == text_edit || command.edit_type() == undo_redo)
+        {
+            self.hint_edited = true;
+        }
         self.pending_word_len = match commands {
             [EditCommand::InsertChar(ch)] if ch.is_whitespace() => Some(0),
             [EditCommand::InsertChar(_)] => word_len.map(|len| len + 1),
@@ -252,6 +263,34 @@ impl EditMode for AutoCompleteEmacs {
             return ReedlineEvent::None;
         };
         let parsed = self.inner.parse_event(event);
+        if matches!(&parsed, ReedlineEvent::ExecuteHostCommand(name) if name == "\0osp-action:hint.insert")
+        {
+            // Buffer equality alone misses an edit followed by undo/backspace.
+            let edited = std::mem::replace(&mut self.hint_edited, false);
+            self.last_argument = false;
+            self.painted.clear_history_suggestions();
+            return if edited {
+                ReedlineEvent::ExecuteHostCommand("\0osp-action:hint.insert:edited".into())
+            } else {
+                parsed
+            };
+        }
+        if matches!(
+            parsed,
+            ReedlineEvent::HistoryHintComplete
+                | ReedlineEvent::HistoryHintWordComplete
+                | ReedlineEvent::PreviousHistory
+                | ReedlineEvent::NextHistory
+                | ReedlineEvent::Up
+                | ReedlineEvent::Down
+                | ReedlineEvent::SearchHistory
+                | ReedlineEvent::Submit
+                | ReedlineEvent::Enter
+                | ReedlineEvent::CtrlC
+                | ReedlineEvent::CtrlD
+        ) {
+            self.hint_edited = true;
+        }
         // Keys can arrive before the next paint; never cycle a stale prefix.
         if !matches!(parsed, ReedlineEvent::Resize(..) | ReedlineEvent::Repaint) {
             self.painted.clear_history_suggestions();
@@ -264,6 +303,7 @@ impl EditMode for AutoCompleteEmacs {
                 HOST_COMMAND_LAST_ARGUMENT
             };
             self.last_argument = true;
+            self.hint_edited = true;
             self.pending_word_len = None;
             return ReedlineEvent::Multiple(vec![
                 ReedlineEvent::Esc,
@@ -278,6 +318,7 @@ impl EditMode for AutoCompleteEmacs {
         if let Some(commands) =
             menu_navigation(&parsed).and_then(|nav| self.menu.navigate_painted_line(nav))
         {
+            self.track_edit(&commands, word_len);
             self.pending_word_len = None;
             return ReedlineEvent::Edit(commands);
         }

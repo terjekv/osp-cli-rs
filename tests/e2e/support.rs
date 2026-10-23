@@ -38,6 +38,7 @@ pub(crate) struct ReplPtyConfig<'a> {
     config: Option<&'a str>,
     plugins_dir: Option<&'a Path>,
     intro_override: Option<&'a str>,
+    host_test: Option<&'a str>,
 }
 
 #[cfg(unix)]
@@ -50,12 +51,19 @@ impl Default for ReplPtyConfig<'_> {
             config: None,
             plugins_dir: None,
             intro_override: Some("none"),
+            host_test: None,
         }
     }
 }
 
 #[cfg(unix)]
 impl<'a> ReplPtyConfig<'a> {
+    /// Run an assembled native app in this exact test as the PTY child.
+    pub(crate) fn with_test_host(mut self, test: &'a str) -> Self {
+        self.host_test = Some(test);
+        self
+    }
+
     pub(crate) fn with_color_mode(mut self, color_mode: ReplPtyColorMode) -> Self {
         self.color_mode = color_mode;
         self
@@ -188,6 +196,11 @@ impl ReplPtySession {
         };
 
         let mut cmd = osp_pty_command_builder(&home, &plugins_path, config.color_mode);
+        if let Some(test) = config.host_test {
+            *cmd.get_argv_mut() = vec![std::env::current_exe().unwrap().into_os_string()];
+            cmd.args(["--exact", test, "--nocapture", "--test-threads=1"]);
+            cmd.env("OSP_PTY_TEST_HOST", "1");
+        }
         if let Some(intro) = config.intro_override {
             cmd.env("OSP__REPL__INTRO", intro);
         }
