@@ -398,7 +398,8 @@ fn make_test_state(
             PluginManager::new(plugin_dirs)
                 .with_roots(config_root, cache_root)
                 .with_bundled_roots(!cfg!(miri))
-                .with_default_roots(!cfg!(miri)),
+                .with_default_roots(!cfg!(miri))
+                .with_path_discovery(false),
         ),
         themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
         session: None,
