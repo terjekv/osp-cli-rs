@@ -927,22 +927,27 @@ pub(crate) fn render_repl_command(
     if let Some(recording) = crate::repl::recording::current() {
         recording.observe(&result.body.json_value());
     }
-    let hint = result.hint_command.clone().or_else(|| {
-        result
-            .failure_report
-            .as_ref()
-            .and_then(|report| super::host::report_hint_command(report, ui.verbosity))
-    });
-    let has_hint = hint.is_some();
-    if let Some(command) = hint {
-        session.repl_feedback.remember_hint(command);
+    let hints = result
+        .hint_command
+        .as_ref()
+        .map(|command| vec![command.clone()])
+        .or_else(|| {
+            result
+                .failure_report
+                .as_ref()
+                .and_then(|report| super::host::report_hint_commands(report, ui.verbosity))
+        });
+    let hint_count = hints.as_ref().map_or(0, Vec::len);
+    if let Some(hints) = hints {
+        session.repl_feedback.remember_hints(hints);
     }
+
     if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
         crate::repl::lifecycle::write_hint_action(
             config,
             ui.render_settings.format,
-            has_hint,
+            hint_count,
             sink,
         );
         if let Some(report) = result.failure_report.take() {
@@ -983,7 +988,7 @@ pub(crate) fn render_repl_command(
         session.record_success_output(line, saved, stages);
     }
     super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
-    crate::repl::lifecycle::write_hint_action(config, ui.render_settings.format, has_hint, sink);
+    crate::repl::lifecycle::write_hint_action(config, ui.render_settings.format, hint_count, sink);
     Ok(rendered)
 }
 

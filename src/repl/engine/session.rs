@@ -446,26 +446,35 @@ where
             let draft = editor.current_buffer_contents().to_string();
             let cursor = editor.current_insertion_point();
             let id = line.trim_start_matches("\0osp-action:");
-            let result =
-                match (submission.execute)(crate::repl::ReplEvent::Action(id), history_store) {
-                    Ok(ReplResult::Print(output)) => {
-                        print!("{output}");
-                        None
-                    }
-                    Ok(ReplResult::ReplaceInput(command)) if id == "hint.insert" => {
-                        editor.run_edit_commands(&[
-                            EditCommand::Clear,
-                            EditCommand::InsertString(command),
-                        ]);
-                        return Ok(None);
-                    }
-                    Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
-                    Ok(result) => Some(result),
-                    Err(error) => {
-                        StdIoUiSink.write_stderr(&format!("{error}\n"));
-                        None
-                    }
-                };
+            let edited = id == "hint.insert:edited";
+            let id = if edited { "hint.insert" } else { id };
+            let event = if id == "hint.insert" {
+                crate::repl::ReplEvent::InsertHint {
+                    draft: &draft,
+                    edited,
+                }
+            } else {
+                crate::repl::ReplEvent::Action(id)
+            };
+            let result = match (submission.execute)(event, history_store) {
+                Ok(ReplResult::Print(output)) => {
+                    print!("{output}");
+                    None
+                }
+                Ok(ReplResult::ReplaceInput(command)) if id == "hint.insert" => {
+                    editor.run_edit_commands(&[
+                        EditCommand::Clear,
+                        EditCommand::InsertString(command),
+                    ]);
+                    return Ok(None);
+                }
+                Ok(ReplResult::Continue | ReplResult::ReplaceInput(_)) => None,
+                Ok(result) => Some(result),
+                Err(error) => {
+                    StdIoUiSink.write_stderr(&format!("{error}\n"));
+                    None
+                }
+            };
             if editor.current_buffer_contents() != draft {
                 editor.run_edit_commands(&[EditCommand::Clear, EditCommand::InsertString(draft)]);
             }

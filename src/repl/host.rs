@@ -149,22 +149,20 @@ fn run_repl_cycle(
                 state.session.sync_history_shell_context();
                 return result;
             }
-            crate::repl::ReplEvent::Action("hint.insert") => {
+            crate::repl::ReplEvent::InsertHint { draft, edited } => {
                 crate::app::facts::set_command_scope(&mut state.runtime, &state.session.scope);
-                return Ok(state.session.repl_feedback.hint().map_or(
-                    crate::repl::ReplResult::Continue,
-                    |command| {
-                        crate::repl::ReplResult::ReplaceInput(
-                            state
-                                .runtime
-                                .ui
-                                .render_settings
-                                .runtime
-                                .command_scope
-                                .command(&command),
-                        )
-                    },
-                ));
+                return Ok(state
+                    .session
+                    .repl_feedback
+                    .next_hint(
+                        draft,
+                        edited,
+                        &state.runtime.ui.render_settings.runtime.command_scope,
+                    )
+                    .map_or(
+                        crate::repl::ReplResult::Continue,
+                        crate::repl::ReplResult::ReplaceInput,
+                    ));
             }
             crate::repl::ReplEvent::Action(id @ ("pagination.prev" | "pagination.next")) => {
                 if state.session.native_context.pagination().is_none() {

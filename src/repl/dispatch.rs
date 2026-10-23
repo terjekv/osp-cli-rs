@@ -446,9 +446,10 @@ fn execute_repl_line_inner(
             }
             let evidence = crate::app::host::report_evidence(&err, ui.verbosity);
             crate::app::sink::write_diagnostics(sink, &evidence.0, &ui.render_settings);
-            let hint = crate::app::host::report_hint_command(&err, ui.verbosity);
-            if let Some(command) = &hint {
-                state.session.repl_feedback.remember_hint(command.clone());
+            let hints = crate::app::host::report_hint_commands(&err, ui.verbosity);
+            let hint_count = hints.as_ref().map_or(0, Vec::len);
+            if let Some(hints) = hints {
+                state.session.repl_feedback.remember_hints(hints);
             }
             let rendered =
                 crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
@@ -466,7 +467,7 @@ fn execute_repl_line_inner(
             crate::repl::lifecycle::write_hint_action(
                 state.runtime.config.resolved(),
                 ui.render_settings.format,
-                hint.is_some(),
+                hint_count,
                 sink,
             );
             crate::app::sink::write_diagnostics(sink, &evidence.1, &ui.render_settings);

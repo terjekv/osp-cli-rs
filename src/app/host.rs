@@ -113,7 +113,7 @@ struct BoxedContextError {
     source: Box<dyn std::error::Error + Send + Sync + 'static>,
     backtrace: Backtrace,
     command_path: Option<String>,
-    command_suffix: Option<String>,
+    command_corrections: Vec<String>,
     structured: Option<crate::core::CommandError>,
 }
 
@@ -833,11 +833,8 @@ pub(crate) fn report_error_details(
         error.clone()
     } else if let Some(clap) = known.clap {
         crate::core::CommandError::new(
-            if let Some(name) = clap
-                .to_string()
-                .split("unrecognized subcommand '")
-                .nth(1)
-                .and_then(|s| s.split("'").next())
+            if let Some(clap::error::ContextValue::String(name)) =
+                clap.get(clap::error::ContextKind::InvalidSubcommand)
             {
                 let path = known
                     .boxed_context
@@ -1027,30 +1024,41 @@ fn known_error_hint(
         let path = known
             .boxed_context
             .and_then(|context| context.command_path.as_deref());
-        let mut action = clap_error_action(clap, path, scope);
-        if action.starts_with("Did you mean ") {
-            action.pop();
-            if let Some(suffix) = known
-                .boxed_context
-                .and_then(|c| c.command_suffix.as_deref())
-            {
-                action.push(' ');
-                action.push_str(suffix);
-            }
-            action.push('?');
+        if let Some(context) = known.boxed_context
+            && !context.command_corrections.is_empty()
+        {
+            let more = if context.command_corrections.len() > 3 {
+                format!(
+                    " Run {}.",
+                    scope.command(format!("{} --help", path.unwrap_or_default()).trim_start())
+                )
+            } else {
+                String::new()
+            };
+            return Some(format!(
+                "Did you mean {}?{more}",
+                context
+                    .command_corrections
+                    .iter()
+                    .take(3)
+                    .map(|command| scope.command(command))
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            ));
         }
-        return Some(action);
+        return Some(clap_error_action(clap, path, scope));
     }
 
     None
 }
 
-pub(crate) fn report_hint_command(
+/// None preserves prior hints; Some(empty) suppresses insertion; Some(list) replaces choices.
+pub(crate) fn report_hint_commands(
     err: &miette::Report,
     verbosity: crate::core::MessageLevel,
-) -> Option<String> {
+) -> Option<Vec<String>> {
     if let Some(hint) = find_error_in_chain::<crate::core::CommandHint>(err) {
-        return Some(hint.command.clone());
+        return Some(vec![hint.command.clone()]);
     }
     if let Some(backend) = find_error_in_chain::<super::command_output::CommandBackendDetails>(err)
     {
@@ -1060,24 +1068,33 @@ pub(crate) fn report_hint_command(
             .get("command")
             .and_then(serde_json::Value::as_str)
             .filter(|command| !command.chars().any(char::is_control))
-            .map(str::to_string);
+            .map(|command| vec![command.to_string()]);
+    }
+    let known = KnownErrorChain::inspect(err);
+    if let Some(context) = known.boxed_context
+        && !context.command_corrections.is_empty()
+    {
+        return Some(if context.command_corrections.len() <= 3 {
+            context.command_corrections.clone()
+        } else {
+            Vec::new()
+        });
     }
     if verbosity >= crate::core::MessageLevel::Info {
         return None;
     }
-    let known = KnownErrorChain::inspect(err);
     let error = known.clap?;
     if error
         .get(clap::error::ContextKind::SuggestedSubcommand)
         .is_some()
     {
-        return None;
+        return Some(Vec::new());
     }
     let path = known
         .boxed_context
         .and_then(|context| context.command_path.as_deref())
         .unwrap_or("");
-    Some(format!("{path} --help").trim_start().to_string())
+    Some(vec![format!("{path} --help").trim_start().to_string()])
 }
 
 fn terse_clap_error(error: &clap::Error) -> String {
@@ -1124,30 +1141,9 @@ fn clap_error_action(
             return format!("Use {}.", values.join(" or "));
         }
     }
-    let suggestions = match error.get(clap::error::ContextKind::SuggestedSubcommand) {
-        Some(clap::error::ContextValue::Strings(suggestions)) => suggestions.as_slice(),
-        _ => &[],
-    };
-    let prefix = command_path.filter(|path| !path.is_empty());
-    match (prefix, suggestions) {
-        (Some(prefix), [suggestion]) => {
-            format!(
-                "Did you mean {}?",
-                scope.command(&format!("{prefix} {suggestion}"))
-            )
-        }
-        (Some(prefix), suggestions) if !suggestions.is_empty() => format!(
-            "use one of {}; run `{}` to see every subcommand",
-            suggestions
-                .iter()
-                .map(|suggestion| format!("`{}`", scope.command(&format!("{prefix} {suggestion}"))))
-                .collect::<Vec<_>>()
-                .join(" or "),
-            scope.command(&format!("{prefix} --help"))
-        ),
-        (None, [suggestion]) => format!("use subcommand `{suggestion}`"),
-        (Some(prefix), _) => format!("Run {}.", scope.command(&format!("{prefix} --help"))),
-        _ => format!("Run {}.", scope.command("--help")),
+    match command_path.filter(|path| !path.is_empty()) {
+        Some(prefix) => format!("Run {}.", scope.command(&format!("{prefix} --help"))),
+        None => format!("Run {}.", scope.command("--help")),
     }
 }
 
@@ -1237,31 +1233,93 @@ where
     T: Into<OsString> + Clone,
 {
     let args = args.into_iter().map(Into::into).collect::<Vec<OsString>>();
-    let command_suffix = args
-        .last()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-        .map(str::to_owned);
+    let path = resolved_command_path(&command, &args);
+    let command_corrections = corrected_subcommands(&err, &command, &args, &path);
+    miette::Report::new(BoxedContextError {
+        context,
+        source: Box::new(err),
+        backtrace: Backtrace::force_capture(),
+        command_path: Some(path.join(" ")),
+        command_corrections,
+        structured,
+    })
+}
+
+// Passive parsing keeps the resolved path even when later arguments are missing.
+fn resolved_command_path(command: &clap::Command, args: &[OsString]) -> Vec<String> {
     let mut path = if command.get_name() == "osp" {
         Vec::new()
     } else {
         vec![command.get_name().to_string()]
     };
-    if let Ok(matches) = crate::cli::passive_command(command).try_get_matches_from(args) {
+    if let Ok(matches) = crate::cli::passive_command(command.clone()).try_get_matches_from(args) {
         let mut current = &matches;
         while let Some((name, child)) = current.subcommand() {
             path.push(name.to_string());
             current = child;
         }
     }
-    miette::Report::new(BoxedContextError {
-        context,
-        source: Box::new(err),
-        backtrace: Backtrace::force_capture(),
-        command_path: Some(path.join(" ")),
-        command_suffix,
-        structured,
-    })
+    path
+}
+
+fn corrected_subcommands(
+    error: &clap::Error,
+    command: &clap::Command,
+    args: &[OsString],
+    path: &[String],
+) -> Vec<String> {
+    use clap::error::{ContextKind, ContextValue, ErrorKind};
+    if error.kind() != ErrorKind::InvalidSubcommand {
+        return Vec::new();
+    }
+    let (Some(ContextValue::String(invalid)), Some(ContextValue::Strings(suggestions))) = (
+        error.get(ContextKind::InvalidSubcommand),
+        error.get(ContextKind::SuggestedSubcommand),
+    ) else {
+        return Vec::new();
+    };
+    let Some(first) = suggestions.first() else {
+        return Vec::new();
+    };
+    let mut expected = path.to_vec();
+    expected.push(first.clone());
+    // A matching word may also be an earlier option value. Only replace the
+    // occurrence that the grammar accepts as a child of the resolved command.
+    let argument_start = usize::from(!command.is_no_binary_name_set());
+    let Some(index) = (argument_start..args.len()).find(|&index| {
+        if args[index].to_str() != Some(invalid) {
+            return false;
+        }
+        let mut prefix = args[..=index].to_vec();
+        prefix[index] = first.into();
+        resolved_command_path(command, &prefix) == expected
+    }) else {
+        return Vec::new();
+    };
+    let start = if command.get_name() == "osp" {
+        argument_start
+    } else {
+        0
+    };
+    suggestions
+        .iter()
+        .map(|suggestion| {
+            args.iter()
+                .enumerate()
+                .skip(start)
+                .map(|(position, argument)| {
+                    let word = if position == index {
+                        suggestion.as_str()
+                    } else {
+                        argument.to_str()?
+                    };
+                    Some(crate::core::shell_words::escape_for_shell(word))
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|words| words.join(" "))
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
 }
 
 pub(crate) fn report_std_error_with_context<E>(err: E, context: ErrorContext) -> miette::Report
@@ -1273,7 +1331,7 @@ where
         source: Box::new(err),
         backtrace: Backtrace::force_capture(),
         command_path: None,
-        command_suffix: None,
+        command_corrections: Vec::new(),
         structured: None,
     })
 }
@@ -1288,7 +1346,7 @@ pub(crate) fn report_anyhow_with_context(
         source: err.reallocate_into_boxed_dyn_error_without_backtrace(),
         backtrace: Backtrace::force_capture(),
         command_path: None,
-        command_suffix: None,
+        command_corrections: Vec::new(),
         structured,
     })
 }

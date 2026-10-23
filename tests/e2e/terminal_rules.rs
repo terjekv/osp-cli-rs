@@ -99,9 +99,46 @@ fi
 }
 
 #[cfg(unix)]
+struct RecoveryService;
+
+#[cfg(unix)]
+impl osp_cli::NativeCommand for RecoveryService {
+    fn command(&self) -> clap::Command {
+        use clap::{Arg, ArgAction, Command};
+        let info = || {
+            Command::new("info")
+                .arg(Arg::new("name").required(true))
+                .arg(Arg::new("detail").long("detail").action(ArgAction::SetTrue))
+        };
+        Command::new("orch")
+            .subcommand(Command::new("show").arg(Arg::new("name").required(true)))
+            .subcommand(Command::new("host").subcommand(info()))
+            .subcommand(Command::new("hosts").subcommand(info()))
+    }
+
+    fn execute(
+        &self,
+        args: &[String],
+        _: &osp_cli::NativeCommandContext<'_>,
+    ) -> anyhow::Result<osp_cli::NativeCommandOutcome> {
+        let path = std::path::PathBuf::from(std::env::var_os("OSP_PLUGIN_PATH").unwrap());
+        std::fs::write(path.join("executed"), format!("{}\n", args.join("\n")))?;
+        Ok(osp_cli::NativeCommandOutcome::Help(
+            "EXECUTED-MARKER".into(),
+        ))
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn recovery_key_inserts_editable_scoped_command() {
     use crate::support::{HANG_TIMEOUT, ReplPtyConfig, ReplPtySession};
+    if std::env::var_os("OSP_PTY_TEST_HOST").is_some() {
+        let app = osp_cli::App::new().with_native_commands(
+            osp_cli::NativeCommandRegistry::new().with_command(RecoveryService),
+        );
+        std::process::exit(app.run_process(["osp"]));
+    }
     if crate::isolation::isolated_test() {
         return;
     }
@@ -174,6 +211,109 @@ fn recovery_key_inserts_editable_scoped_command() {
         ["orch", "orch recover", "orch doctor plugins | C"],
         "{records}"
     );
+
+    let native = crate::temp_support::make_temp_dir("osp-recovery-native");
+    let mut session = ReplPtySession::spawn(
+        ReplPtyConfig::default()
+            .with_plugins_dir(&native)
+            .with_test_host("terminal_rules::recovery_key_inserts_editable_scoped_command")
+            .with_config("[default]\nrepl.shellable_commands = [\"orch\"]\n"),
+    );
+    assert!(session.wait_for_plain_output("default>", HANG_TIMEOUT));
+    // A corrected command remains editable even with a required argument absent.
+    session.type_text("orch shwo");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "Alt+Enter", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let hint = session.output_since(mark);
+    assert!(hint.contains("Did you mean orch show?"), "{hint}");
+    assert!(hint.contains("Alt+Enter"), "{hint}");
+    let mark = session.output_len();
+    session.write_bytes(b"\x1b\r");
+    assert!(
+        session.wait_for_plain_output_since(mark, "orch show", HANG_TIMEOUT),
+        "{}",
+        session.output_since(mark)
+    );
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    assert!(
+        !native.join("executed").exists(),
+        "hint executed without Enter"
+    );
+    session.type_text(" target");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "EXECUTED-MARKER", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    assert_eq!(
+        std::fs::read_to_string(native.join("executed")).unwrap(),
+        "show\ntarget\n"
+    );
+    std::fs::remove_file(native.join("executed")).unwrap();
+
+    session.type_text("orch");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "default [orch]>", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    session.type_text("hots info 'team x' --detail");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "Alt+Enter", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let hint = session.output_since(mark);
+    assert!(
+        hint.contains("Alt+Enter") && hint.contains("again to cycle"),
+        "{hint}"
+    );
+    assert!(hint.contains("host info team\\ x --detail"), "{hint}");
+    assert!(hint.contains("hosts info team\\ x --detail"), "{hint}");
+    for expected in ["hosts", "host", "hosts"] {
+        let mark = session.output_len();
+        session.write_bytes(b"\x1b\r");
+        let command = format!("{expected} info team\\ x --detail");
+        assert!(
+            session.wait_for_plain_output_since(mark, &command, HANG_TIMEOUT),
+            "{}",
+            session.output_since(mark)
+        );
+        assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+        let mut terminal = vt100::Parser::new(24, 80, 0);
+        terminal.process(session.output_since(mark).as_bytes());
+        let screen = terminal.screen().contents();
+        assert!(
+            screen.contains(&format!("default [orch]> {command}")),
+            "{screen}"
+        );
+        assert!(
+            !native.join("executed").exists(),
+            "hint executed without Enter"
+        );
+    }
+    // An edit resets cycling even when backspace restores the inserted text.
+    session.type_text(" ");
+    let mark = session.output_len();
+    session.write_bytes(b"\x7f");
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let mark = session.output_len();
+    session.write_bytes(b"\x1b\r");
+    assert!(session.wait_for_plain_output_since(
+        mark,
+        "hosts info team\\ x --detail",
+        HANG_TIMEOUT
+    ));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "EXECUTED-MARKER", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    assert_eq!(
+        std::fs::read_to_string(native.join("executed")).unwrap(),
+        "hosts\ninfo\nteam x\n--detail\n"
+    );
+    session.write_bytes(b"\x04");
+    assert!(session.wait_for_exit(HANG_TIMEOUT));
 }
 
 #[cfg(unix)]

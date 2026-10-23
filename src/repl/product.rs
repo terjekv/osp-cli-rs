@@ -9,9 +9,15 @@ pub enum ReplEvent<'a> {
     RootLine(&'a str),
     /// A registered action, outside user history and the current shell scope.
     ///
-    /// Print/continue resumes the draft. The built-in hint action may replace
-    /// the draft; exit/restart ends the editor run.
+    /// Print/continue resumes the draft; exit/restart ends the editor run.
     Action(&'a str),
+    /// Requests a recovery insertion using the live editable draft.
+    InsertHint {
+        /// The editor's current input, before replacement.
+        draft: &'a str,
+        /// Whether a text edit occurred since the preceding insertion key.
+        edited: bool,
+    },
 }
 
 /// Supported editor action keys.
@@ -97,17 +103,24 @@ pub struct ReplFeedback(std::sync::Arc<std::sync::Mutex<Feedback>>);
 
 #[derive(Debug, Default)]
 struct Feedback {
-    hint: Option<String>,
+    hints: Vec<String>,
+    inserted_hint: Option<(usize, String)>,
     history: Vec<String>,
 }
 
 impl ReplFeedback {
     /// Remembers a root-form suggested command when its hint is produced.
     pub fn remember_hint(&self, command: impl Into<String>) {
-        self.0
+        self.remember_hints(vec![command.into()]);
+    }
+
+    pub(crate) fn remember_hints(&self, commands: Vec<String>) {
+        let mut feedback = self
+            .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .hint = Some(command.into());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        feedback.hints = commands;
+        feedback.inserted_hint = None;
     }
 
     /// Queues a root-form command for the host's ordinary history policy.
@@ -120,12 +133,27 @@ impl ReplFeedback {
             .push(command.into());
     }
 
-    pub(crate) fn hint(&self) -> Option<String> {
-        self.0
+    pub(crate) fn next_hint(
+        &self,
+        draft: &str,
+        edited: bool,
+        scope: &crate::core::CommandScope,
+    ) -> Option<String> {
+        let mut feedback = self
+            .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .hint
-            .clone()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if feedback.hints.is_empty() {
+            return None;
+        }
+        let index = feedback
+            .inserted_hint
+            .as_ref()
+            .filter(|(_, inserted)| !edited && inserted == draft)
+            .map_or(0, |(index, _)| (index + 1) % feedback.hints.len());
+        let command = scope.command(&feedback.hints[index]);
+        feedback.inserted_hint = Some((index, command.clone()));
+        Some(command)
     }
 
     pub(crate) fn take_history(&self) -> Vec<String> {
