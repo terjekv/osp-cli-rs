@@ -23,14 +23,10 @@ repl.intro_template.full = "INTRO-MARKER"
     terminal.process(b"PRE-OSP-SHELL-OUTPUT\r\nlast shell line\r\n");
     let startup = session.output_since(0);
     terminal.process(startup.as_bytes());
+    let top = terminal.screen().rows(0, 80).take(2).collect::<Vec<_>>();
     assert!(
-        terminal
-            .screen()
-            .rows(0, 80)
-            .next()
-            .unwrap()
-            .contains("INTRO-MARKER"),
-        "intro must start on row one: {}",
+        top[0].trim().is_empty() && top[1].contains("INTRO-MARKER"),
+        "intro must start at the top after one blank row: {}",
         terminal.screen().contents()
     );
     terminal.screen_mut().set_scrollback(usize::MAX);
