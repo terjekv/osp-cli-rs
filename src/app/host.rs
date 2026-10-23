@@ -810,7 +810,9 @@ pub(crate) fn resolve_invocation_ui(
 /// Maps a reported error to the CLI exit code family used by OSP.
 pub fn classify_exit_code(err: &miette::Report) -> i32 {
     let known = KnownErrorChain::inspect(err);
-    if known.clap.is_some() {
+    if find_error_in_chain::<crate::ui::interrupt::PromptCancelled>(err).is_some() {
+        130
+    } else if known.clap.is_some() {
         EXIT_CODE_USAGE
     } else {
         EXIT_CODE_ERROR
