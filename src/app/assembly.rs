@@ -148,6 +148,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
                 Some(context.terminal_kind().as_config_terminal()),
             )
             .with_runtime_load(launch.runtime_load)
+            .with_config_root(launch.config_root.clone())
             .with_product_defaults(definition.product_defaults.clone())
             .with_session_layer(session_layer.clone());
             let config = if action.uses_raw_config() {
@@ -205,6 +206,7 @@ pub(crate) fn build_host(request: HostBuildRequest<'_>) -> Result<HostBuild> {
                     Some(runtime.context.terminal_kind().as_config_terminal()),
                 )
                 .with_runtime_load(runtime.launch.runtime_load)
+                .with_config_root(runtime.launch.config_root.clone())
                 .with_product_defaults(runtime.product_defaults().clone())
                 .with_session_layer(session_layer),
             )

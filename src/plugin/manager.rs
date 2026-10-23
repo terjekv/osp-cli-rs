@@ -5,9 +5,7 @@ use crate::core::command_policy::CommandPath;
 use crate::core::plugin::{DescribeCommandAuthV1, DescribeCommandV1, PluginDescribe};
 use crate::core::runtime::RuntimeHints;
 use std::collections::{BTreeMap, HashMap, HashSet};
-#[cfg(test)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -182,8 +180,6 @@ impl PluginManager {
         &self.explicit_dirs
     }
     /// Returns the configured user root override.
-    #[cfg(test)]
-    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn config_root(&self) -> Option<&Path> {
         self.config_root.as_deref()
     }
