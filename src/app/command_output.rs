@@ -933,14 +933,18 @@ pub(crate) fn render_repl_command(
             .as_ref()
             .and_then(|report| super::host::report_hint_command(report, ui.verbosity))
     });
+    let has_hint = hint.is_some();
     if let Some(command) = hint {
         session.repl_feedback.remember_hint(command);
-        if ui.render_settings.format != OutputFormat::Json {
-            crate::repl::lifecycle::write_hint_action(config, sink);
-        }
     }
     if result.failure_report.is_some() {
         run_cli_command(config, ui, &result, sink)?;
+        crate::repl::lifecycle::write_hint_action(
+            config,
+            ui.render_settings.format,
+            has_hint,
+            sink,
+        );
         if let Some(report) = result.failure_report.take() {
             session.record_failure_report(
                 line,
@@ -979,6 +983,7 @@ pub(crate) fn render_repl_command(
         session.record_success_output(line, saved, stages);
     }
     super::sink::write_diagnostics(sink, &result.diagnostics.1, &ui.render_settings);
+    crate::repl::lifecycle::write_hint_action(config, ui.render_settings.format, has_hint, sink);
     Ok(rendered)
 }
 

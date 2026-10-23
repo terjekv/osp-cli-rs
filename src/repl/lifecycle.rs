@@ -155,9 +155,13 @@ fn hint_insert_action(config: &crate::config::ResolvedConfig) -> Result<crate::r
 
 pub(crate) fn write_hint_action(
     config: &crate::config::ResolvedConfig,
+    format: crate::core::OutputFormat,
+    has_hint: bool,
     sink: &mut dyn crate::app::UiSink,
 ) {
-    if let Ok(action) = hint_insert_action(config)
+    if has_hint
+        && format != crate::core::OutputFormat::Json
+        && let Ok(action) = hint_insert_action(config)
         && let Some(key) = action.key
     {
         sink.write_stderr(&format!(
