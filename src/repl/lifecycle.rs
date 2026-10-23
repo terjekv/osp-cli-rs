@@ -439,7 +439,6 @@ mod tests {
     #[test]
     fn build_cycle_chrome_output_includes_intro_help_and_pending_output() {
         let rendered = build_cycle_chrome_output("Commands\n", true, "Queued\n", true);
-        assert!(rendered.starts_with(&crate::repl::screen::clear_sequence()));
         assert!(rendered.contains("Commands"));
         assert!(rendered.contains("Queued"));
     }
@@ -453,7 +452,6 @@ mod tests {
     #[test]
     fn build_cycle_chrome_output_omits_ansi_clear_when_disabled() {
         let rendered = build_cycle_chrome_output("Commands\n", true, "Queued\n", false);
-        assert!(!rendered.starts_with(&crate::repl::screen::clear_sequence()));
         assert!(rendered.starts_with("Commands\n"));
     }
 

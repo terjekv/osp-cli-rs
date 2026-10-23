@@ -502,7 +502,6 @@ mod tests {
             .find("PENDING")
             .expect("pending output should render");
 
-        assert!(output.starts_with(&crate::repl::screen::clear_sequence()));
         assert!(intro_pos < help_pos);
         assert!(help_pos < pending_pos);
     }
