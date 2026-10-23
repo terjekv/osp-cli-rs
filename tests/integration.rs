@@ -45,3 +45,6 @@ mod diagnostic_output;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "integration/context_persistence.rs"]
 mod context_persistence;
+
+#[path = "integration/transient_output.rs"]
+mod transient_output;

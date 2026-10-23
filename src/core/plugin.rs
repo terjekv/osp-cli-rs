@@ -483,6 +483,9 @@ pub struct ResponseMetaV1 {
     pub context: BTreeMap<String, String>,
     /// Preferred output format for rendering the payload.
     pub format_hint: Option<String>,
+    /// Literal record field used as the human card heading, including single records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_field: Option<String>,
     /// Preferred field paths for row or curated record projections.
     /// Paths accept dotted keys or JSON Pointers for literal field segments.
     pub columns: Option<Vec<String>>,

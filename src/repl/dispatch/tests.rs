@@ -480,6 +480,7 @@ fn empty_plugins() -> crate::plugin::PluginManager {
     crate::plugin::PluginManager::new(Vec::new())
         .with_bundled_roots(false)
         .with_default_roots(false)
+        .with_path_discovery(false)
 }
 
 fn test_history() -> SharedHistory {

@@ -97,6 +97,8 @@ pub struct KeyValueBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyValueRow {
+    /// Planned hanging list or scalar text, relative to the child level.
+    pub list_grid: Option<GridBlock>,
     pub value_style: Option<crate::ui::style::CellStyle>,
     pub key: String,
     pub value: KeyValueValue,

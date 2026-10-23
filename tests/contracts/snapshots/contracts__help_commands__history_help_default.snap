@@ -6,36 +6,36 @@ Inspect or prune REPL history
 
 Usage: osp history [OPTIONS] <COMMAND>
 
-- Commands -------------
-  list   List recent history
-  prune  Keep last N entries
-  clear  Delete history lines matching a prefix or glob
-  help   Print this message or the help of the given subcommand(s)
+Commands ---------------
+list   List recent history
+prune  Keep last N entries
+clear  Delete history lines matching a prefix or glob
+help   Print this message or the help of the given subcommand(s)
 
-- Options --------------
-      --incognito
-          Disable persistent REPL history and other identity-linked behavior
-      --profile <PROFILE>
-          Select the active config profile for the invocation
-      --no-env
-          Skip environment-derived config sources
-      --no-config-file
-          Skip config-file-derived sources
-      --defaults-only
-          Use only built-in defaults and explicit in-memory overrides.
-          This is stricter than combining `--no-env` and `--no-config-file`: it also disables env/path bootstrap discovery through `HOME`, `XDG_*`, `OSP_CONFIG_FILE`, and `OSP_SECRETS_FILE`.
-      --plugin-dir <PLUGIN_DIRS>
-          Add one or more plugin discovery directories
-      --theme <THEME>
-          Override the selected output theme
-      --presentation <PRESENTATION>
-          [possible values: expressive, compact, austere]
-      --gammel-og-bitter
-          Disable colors and pleasantries (equivalent to `--presentation austere`)
-  -h, --help
-          Print help (see a summary with '-h')
+Options ----------------
+    --incognito
+        Disable persistent REPL history and other identity-linked behavior
+    --profile <PROFILE>
+        Select the active config profile for the invocation
+    --no-env
+        Skip environment-derived config sources
+    --no-config-file
+        Skip config-file-derived sources
+    --defaults-only
+        Use only built-in defaults and explicit in-memory overrides.
+        This is stricter than combining `--no-env` and `--no-config-file`: it also disables env/path bootstrap discovery through `HOME`, `XDG_*`, `OSP_CONFIG_FILE`, and `OSP_SECRETS_FILE`.
+    --plugin-dir <PLUGIN_DIRS>
+        Add one or more plugin discovery directories
+    --theme <THEME>
+        Override the selected output theme
+    --presentation <PRESENTATION>
+        [possible values: expressive, compact, austere]
+    --gammel-og-bitter
+        Disable colors and pleasantries (equivalent to `--presentation austere`)
+-h, --help
+        Print help (see a summary with '-h')
 
-- Common Invocation Options
-  -v, --verbose  Increase message verbosity
-  -q, --quiet    Decrease message verbosity
-  -d, --debug    Increase developer log verbosity
+Common Invocation Options
+-v, --verbose  Increase message verbosity
+-q, --quiet    Decrease message verbosity
+-d, --debug    Increase developer log verbosity

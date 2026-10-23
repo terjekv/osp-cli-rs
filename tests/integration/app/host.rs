@@ -320,6 +320,7 @@ impl NativeCommand for NativeProbeCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),
@@ -414,6 +415,7 @@ impl NativeCommand for CuratedOrchRowsCommand {
             ],
             context: None,
             meta: ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),
@@ -480,6 +482,7 @@ impl NativeCommand for SiteStatusCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),

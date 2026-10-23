@@ -178,8 +178,15 @@ impl<'a> RenderRequest<'a> {
 /// ```
 pub fn render(output: &OutputResult, request: &RenderRequest<'_>) -> String {
     let plan = plan_format(output, request.settings, request.target);
-    let margin = plan.settings.margin;
-    emit::shared::apply_margin(render_planned(output, request, plan), margin)
+    if matches!(
+        plan.format,
+        OutputFormat::Markdown | OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv
+    ) {
+        let margin = plan.settings.margin;
+        emit::shared::apply_margin(render_planned(output, request, plan), margin)
+    } else {
+        render_planned(output, request, plan)
+    }
 }
 
 fn render_planned(
@@ -324,3 +331,7 @@ pub fn render_message(
     request.layout = messages::MessageLayout::Plain;
     render_messages(&messages, &request)
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod rules_tests;

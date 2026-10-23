@@ -3,9 +3,9 @@
 mod cards;
 mod table;
 
-pub(super) use cards::CompactCard;
+pub(super) use cards::{CARD_INDENT, CompactCard};
 
-use super::doc::{GridBlock, GridCell};
+use super::doc::{GridBlock, GridCell, KeyValueRow, KeyValueValue};
 use super::emit::grid::PreparedGridList;
 use super::projection::{HumanProjection, ProjectedTable, RecordProjection, ValueProjection};
 use super::settings::{
@@ -48,11 +48,17 @@ pub(super) enum FieldKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FieldLayout {
-    pub style: Option<super::style::CellStyle>,
+    pub row: KeyValueRow,
     pub kind: FieldKind,
 }
 
 pub(super) type RecordLayout = Vec<(String, FieldLayout)>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PlannedRecord {
+    pub title: Option<String>,
+    pub fields: RecordLayout,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderPlan {
@@ -63,8 +69,9 @@ pub struct RenderPlan {
     pub(super) grid_list: Option<(String, GridBlock)>,
     pub(super) markdown_record: bool,
     pub(super) mreg_layout: MregLayout,
+    pub(super) mreg_gap: usize,
     pub(super) tables: Vec<PlannedTable>,
-    pub(super) records: Vec<RecordLayout>,
+    pub(super) records: Vec<PlannedRecord>,
     pub(super) document_tables: BTreeMap<Vec<usize>, PlannedTable>,
     pub document_long_help: bool,
     pub document_entry_gap: Option<usize>,
@@ -87,6 +94,7 @@ pub fn plan_format(
         grid_list: None,
         markdown_record: false,
         mreg_layout: MregLayout::Table,
+        mreg_gap: 0,
         tables: Vec::new(),
         records: Vec::new(),
         document_tables: BTreeMap::new(),
@@ -188,27 +196,69 @@ fn has_nested_table(record: &RecordProjection) -> bool {
 
 fn plan_record(
     record: &RecordProjection,
+    map: &serde_json::Map<String, serde_json::Value>,
     settings: &ResolvedRenderSettings,
     depth: usize,
 ) -> RecordLayout {
-    record
+    let mut layout: RecordLayout = record
         .iter()
+        .filter(|(key, _)| settings.verbosity > 0 || !super::projection::empty_value(&map[key]))
         .map(|(key, value)| {
-            (
-                key.clone(),
-                FieldLayout {
-                    style: value.style.clone(),
-                    kind: if let Some(table) = nested_table(value) {
-                        FieldKind::Table(plan_table(table, settings, (depth + 1) * 2, None))
-                    } else if has_nested_table(&value.fields) {
-                        FieldKind::Record(plan_record(&value.fields, settings, depth + 1))
-                    } else {
-                        FieldKind::Value
-                    },
+            let mut row = KeyValueRow {
+                list_grid: None,
+                key: key.clone(),
+                value: if nested_table(value).is_some() || has_nested_table(&value.fields) {
+                    KeyValueValue::Empty
+                } else {
+                    super::projection::key_value_value(&map[key], true)
                 },
-            )
+                value_style: value.style.clone(),
+                indent: None,
+                gap: None,
+            };
+            if settings.verbosity == 0 {
+                omit_empty_fields(&mut row.value, &map[key]);
+            }
+            let block_indent = (depth + 1) * CARD_INDENT;
+            let kind = if let Some(table) = nested_table(value) {
+                FieldKind::Table(plan_table(table, settings, block_indent, None))
+            } else if let Some(map) = map[key]
+                .as_object()
+                .filter(|_| has_nested_table(&value.fields))
+            {
+                FieldKind::Record(plan_record(&value.fields, map, settings, depth + 1))
+            } else {
+                FieldKind::Value
+            };
+            (key.clone(), FieldLayout { row, kind })
         })
-        .collect()
+        .collect();
+    let mut rows = layout
+        .iter()
+        .map(|(_, field)| field.row.clone())
+        .collect::<Vec<_>>();
+    cards::plan_classic_rows(&mut rows, settings, depth);
+    for ((_, field), row) in layout.iter_mut().zip(rows) {
+        field.row = row;
+    }
+    layout
+}
+
+fn omit_empty_fields(value: &mut KeyValueValue, source: &serde_json::Value) {
+    match value {
+        KeyValueValue::Object(rows) => {
+            rows.retain(|row| !super::projection::empty_value(&source[&row.key]));
+            for row in rows {
+                omit_empty_fields(&mut row.value, &source[&row.key]);
+            }
+        }
+        KeyValueValue::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                omit_empty_fields(item, &source[index]);
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
@@ -221,9 +271,11 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         .iter()
         .map(|table| plan_table(table, &plan.settings, 0, actions))
         .collect();
-    plan.mreg_layout = if plan.provenance == FormatProvenance::Explicit
-        || (matches!(projection.output.items, OutputItems::Rows(_))
-            && (projection.records.len() <= 1 || projection.records.iter().all(has_nested_table)))
+    plan.mreg_layout = if matches!(
+        plan.provenance,
+        FormatProvenance::Explicit | FormatProvenance::Recommended
+    ) || (matches!(projection.output.items, OutputItems::Rows(_))
+        && (projection.records.len() <= 1 || projection.records.iter().all(has_nested_table)))
     {
         MregLayout::Cards
     } else {
@@ -244,12 +296,21 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                     .is_some_and(|value| !value.is_array() && !value.is_object())
         })
     {
-        if plan.format == OutputFormat::Mreg && plan.provenance == FormatProvenance::Explicit {
+        if plan.format == OutputFormat::Mreg
+            && plan.provenance == FormatProvenance::Explicit
+            && !output
+                .meta
+                .title_field
+                .as_ref()
+                .is_some_and(|field| rows.iter().any(|row| row.contains_key(field)))
+        {
             plan.mreg_layout = MregLayout::Entries;
         } else if matches!(
             plan.format,
             OutputFormat::Table | OutputFormat::Mreg | OutputFormat::Guide
         ) && plan.provenance != FormatProvenance::Explicit
+            && !(plan.format == OutputFormat::Mreg
+                && plan.provenance == FormatProvenance::Recommended)
         {
             let values = rows
                 .iter()
@@ -305,7 +366,31 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
     plan.records = projection
         .records
         .iter()
-        .map(|record| plan_record(record, &plan.settings, 0))
+        .zip(crate::core::output_model::output_items_to_rows(
+            &output.items,
+        ))
+        .map(|(record, row)| {
+            let mut record: RecordProjection = super::projection::ordered_keys(&output.meta.key_index, row.keys())
+                .filter(|key| !output.meta.display_rules.iter().any(|rule| matches!(rule, crate::core::DisplayRule::Notice { field } if field == *key)))
+                .filter_map(|key| record.iter().find(|(name, _)| name == key).cloned())
+                .collect();
+            let title_field = output.meta.title_field.as_ref()
+                .filter(|field| record.iter().any(|(key, _)| key == *field))
+                .cloned()
+                .or_else(|| (projection.records.len() > 1 && plan.mreg_layout != MregLayout::Entries)
+                    .then(|| record.first()
+                        .filter(|(key, _)| !super::projection::empty_value(&row[key]))
+                        .map(|(key, _)| key.clone()))
+                    .flatten());
+            let title = title_field.as_ref().map(|key| super::projection::display_value(&row[key]));
+            record.retain(|(key, _)| Some(key) != title_field.as_ref());
+            let mut settings = plan.settings.clone();
+            if title.is_some() {
+                settings.margin += CARD_INDENT;
+            }
+            let fields = plan_record(&record, &row, &settings, 0);
+            PlannedRecord { title, fields }
+        })
         .collect();
     let compare_cards = can_compare_cards(projection, plan);
     if compare_cards || (plan.format == OutputFormat::Mreg && plan.mreg_layout == MregLayout::Cards)
@@ -317,6 +402,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
                 &projection.records,
                 &output.meta.key_index,
                 &output.meta.display_rules,
+                output.meta.title_field.as_deref(),
                 &plan.settings,
             );
             if plan.mreg_layout == MregLayout::Cards {
@@ -324,6 +410,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
             }
         }
     }
+    plan.mreg_gap = planned_card_gap(plan);
     plan.document_tables = projection
         .document_tables
         .iter()
@@ -375,6 +462,7 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         } else {
             MregLayout::Compact
         };
+        cards.mreg_gap = planned_card_gap(&cards);
         // Measure the actual candidate, including classic nested tables/lists,
         // rather than duplicating their line geometry in a density estimate.
         let card_doc = super::lower::lower_mreg_doc(output, &cards);
@@ -384,8 +472,15 @@ pub(super) fn plan_layout(projection: &HumanProjection, plan: &mut RenderPlan) {
         if card_values * table_lines > table_values * card_lines {
             plan.format = cards.format;
             plan.mreg_layout = cards.mreg_layout;
+            plan.mreg_gap = cards.mreg_gap;
         }
     }
+}
+
+fn planned_card_gap(plan: &RenderPlan) -> usize {
+    plan.settings
+        .mreg_gap
+        .unwrap_or(usize::from(plan.mreg_layout == MregLayout::Cards))
 }
 
 fn can_compare_cards(projection: &HumanProjection, plan: &RenderPlan) -> bool {

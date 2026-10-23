@@ -1,5 +1,6 @@
 ---
 source: tests/contracts/ui_rendering.rs
+assertion_line: 268
 expression: sanitized
 ---
 netgroups (10):

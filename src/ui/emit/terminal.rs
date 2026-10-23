@@ -62,28 +62,30 @@ fn emit_paragraph(block: &ParagraphBlock, settings: &ResolvedRenderSettings) -> 
         })
         .collect::<Vec<_>>()
         .join("\n");
-    indent_lines(&styled, settings.margin)
+    let fitted = match settings.width {
+        Some(width) => {
+            super::shared::fit_prose(&styled, width.saturating_sub(settings.margin).max(1))
+        }
+        None => styled,
+    };
+    indent_lines(&fitted, settings.margin)
 }
 
 fn emit_section(block: &SectionBlock, settings: &ResolvedRenderSettings) -> String {
     let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
     let chrome = section_chrome(block.title_chrome);
-    let title_width = if block.title_chrome == SectionTitleChrome::Card {
-        settings
-            .width
-            .map(|width| width.saturating_sub(settings.margin))
-    } else {
-        settings.width
-    };
     let mut body_settings = settings.clone();
     body_settings.margin += block.body_indent;
     let body = emit_blocks(&block.blocks, &body_settings);
     let mut parts = Vec::new();
     if let Some(title) = block.title.as_deref() {
-        let mut title_line = style_title_line(
-            &chrome.render_title_line(title, title_width, settings.unicode),
-            &styler,
-        );
+        let title_line =
+            chrome.render_title_line(title, settings.width, settings.unicode, settings.margin);
+        let mut title_line = if block.title_chrome == SectionTitleChrome::Card {
+            styler.paint(&title_line.plain_text(), StyleToken::PanelTitle)
+        } else {
+            style_title_line(&title_line, &styler)
+        };
         if let Some(suffix) = block.inline_title_suffix.as_deref() {
             title_line.push(' ');
             title_line.push_str(&styler.paint(suffix, StyleToken::Text));
@@ -114,9 +116,8 @@ fn emit_rule(settings: &ResolvedRenderSettings) -> Option<String> {
 
 fn section_chrome(title_chrome: SectionTitleChrome) -> crate::ui::chrome::SectionChrome {
     match title_chrome {
-        SectionTitleChrome::Plain => PLAIN_SECTION_CHROME,
+        SectionTitleChrome::Plain | SectionTitleChrome::Card => PLAIN_SECTION_CHROME,
         SectionTitleChrome::Ruled => GUIDE_SECTION_CHROME,
-        SectionTitleChrome::Card => crate::ui::chrome::CARD_SECTION_CHROME,
     }
 }
 
@@ -314,6 +315,14 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
     let border = table_border_chars(unicode, style);
     // Borderless tables keep only header and rows; whitespace rules would print blank lines.
     let ruled = !matches!(style, TableBorderStyle::None);
+    let indent_row = |line: String| {
+        let line = if block.nested && !ruled {
+            line.strip_prefix("  ").unwrap_or(&line)
+        } else {
+            &line
+        };
+        indent_lines(line, settings.margin)
+    };
     let rule = |lines: &mut Vec<String>, line: String| {
         if ruled {
             lines.push(line);
@@ -346,7 +355,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
             settings.table_overflow,
         )
         .into_iter()
-        .map(|line| indent_lines(&line, settings.margin)),
+        .map(&indent_row),
     );
     rule(
         &mut lines,
@@ -376,7 +385,7 @@ fn emit_table(block: &TableBlock, settings: &ResolvedRenderSettings) -> String {
                 settings.table_overflow,
             )
             .into_iter()
-            .map(|line| indent_lines(&line, settings.margin)),
+            .map(&indent_row),
         );
     }
     rule(
@@ -503,11 +512,13 @@ fn emit_plain_row_lines(
     let effective_indent = format!("{base_indent}{}", row.indent.as_deref().unwrap_or_default());
     let display_key = display_key(row);
     let display_key_width = UnicodeWidthStr::width(display_key.as_str());
-    let value_spacing = " ".repeat(
-        key_width
-            .saturating_sub(display_key_width)
-            .saturating_add(1),
-    );
+    let value_spacing = row.gap.clone().unwrap_or_else(|| {
+        " ".repeat(
+            key_width
+                .saturating_sub(display_key_width)
+                .saturating_add(1),
+        )
+    });
     let key = styler.paint(&display_key, StyleToken::Key);
     let label = format!(
         "{}{}{}",
@@ -520,11 +531,31 @@ fn emit_plain_row_lines(
         effective_indent,
         " ".repeat(display_key_width.saturating_add(1 + value_spacing.len()))
     );
-    let child_indent = format!("{effective_indent}{}", " ".repeat(2));
+    let child_indent = format!("{effective_indent}  ");
+    if let Some(grid) = &row.list_grid {
+        let mut grid_settings = settings.clone();
+        grid_settings.margin = display_width(&child_indent);
+        return vec![label, emit_grid(grid, &grid_settings)];
+    }
 
     match &row.value {
         KeyValueValue::Empty => vec![label],
         KeyValueValue::Scalar(text) if text.is_empty() => vec![label],
+        KeyValueValue::Scalar(text) if row.gap.is_some() => text
+            .split('\n')
+            .enumerate()
+            .map(|(index, line)| {
+                format!(
+                    "{}{}",
+                    if index == 0 {
+                        format!("{label}{value_spacing}")
+                    } else {
+                        continuation_indent.clone()
+                    },
+                    styler.paint_value(line)
+                )
+            })
+            .collect(),
         KeyValueValue::Scalar(text) => render_terminal_scalar_lines(
             text,
             &format!("{label}{value_spacing}"),

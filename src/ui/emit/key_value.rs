@@ -2,7 +2,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::doc::{KeyValueRow, KeyValueValue};
 
-pub(super) fn display_key(row: &KeyValueRow) -> String {
+pub(in crate::ui) fn display_key(row: &KeyValueRow) -> String {
     let counted_label = row.key.rsplit_once('(').is_some_and(|(_, count)| {
         count.ends_with(')') && count.starts_with(|c: char| c.is_ascii_digit())
     });
@@ -14,8 +14,10 @@ pub(super) fn display_key(row: &KeyValueRow) -> String {
     }
 }
 
-pub(super) fn aligned_display_key_width(rows: &[KeyValueRow]) -> usize {
-    rows.iter()
+pub(in crate::ui) fn aligned_display_key_width<'a>(
+    rows: impl IntoIterator<Item = &'a KeyValueRow>,
+) -> usize {
+    rows.into_iter()
         .filter(|row| !matches!(&row.value, KeyValueValue::Array(items) if items.len() > 5 && items.iter().all(|item| scalar_text(item).is_some())))
         .map(|row| UnicodeWidthStr::width(display_key(row).as_str()))
         .max()
@@ -24,10 +26,10 @@ pub(super) fn aligned_display_key_width(rows: &[KeyValueRow]) -> usize {
 
 /// A count is shown only when it says something: never for a single row.
 fn should_include_count(items: &[KeyValueValue]) -> bool {
-    items.len() != 1
+    items.len() > 1
 }
 
-pub(super) fn scalar_text(value: &KeyValueValue) -> Option<&str> {
+pub(in crate::ui) fn scalar_text(value: &KeyValueValue) -> Option<&str> {
     match value {
         KeyValueValue::Empty => Some(""),
         KeyValueValue::Scalar(text) => Some(text),
@@ -44,6 +46,7 @@ mod tests {
     #[test]
     fn display_key_adds_counts_for_multiline_collection_values_unit() {
         let scalar = KeyValueRow {
+            list_grid: None,
             value_style: None,
             key: "uid".to_string(),
             value: KeyValueValue::Scalar("alice".to_string()),
@@ -51,6 +54,7 @@ mod tests {
             gap: None,
         };
         let scalar_array = KeyValueRow {
+            list_grid: None,
             value_style: None,
             key: "groups".to_string(),
             value: KeyValueValue::Array(vec![

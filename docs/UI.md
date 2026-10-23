@@ -72,7 +72,7 @@ When `format=auto`, the current rules are:
 
 A top-level list of multiple rows that all contain exactly one scalar field with the same
 key renders as a titled `Key (N):` grid for inferred, recommended or configured
-human formats. The planner reuses the card grid-list geometry at the target's
+human formats, except when MREG requests cards. The planner reuses the card grid-list geometry at the target's
 width. An unmeasured screen uses a single 100-column fallback resolved in
 settings; pager, editor, clipboard and pipe targets use natural, unlimited width.
 Explicit `--table` and Markdown keep a table; explicit `--mreg` prints consecutive
@@ -81,11 +81,12 @@ line breaks as literal escapes. JSON, CSV, TSV and Value are unchanged.
 
 An explicit `--mreg` or `--format mreg` always requests cards, including flat
 multi-row and grouped output. Grouped cards carry each member's group keys and
-aggregates; an empty group still has its context card. Other MREG sources use
-cards for one row, or for several rows only when every row contains a nested
-comparison table. Flat lists and non-explicit grouped MREG remain tables unless
-the eligible density comparison below selects cards.
-When several flat records render as cards (explicit MREG or automatic table
+aggregates; an empty group still has its context card. A producer recommendation
+of MREG also requests cards. Inferred and configured MREG use cards for one row,
+or for several rows only when every row contains a nested comparison table.
+Their flat lists and grouped output remain tables unless the eligible density
+comparison below selects cards.
+When several flat records render as cards (explicit or recommended MREG, or automatic table
 fallback), the planner selects compact cards. Flat means every value is a
 scalar or an array of scalars, including reduced single-field object lists.
 When every record's title and remaining nonempty fields fit together at the
@@ -93,28 +94,84 @@ available width, the planner uses one line per record: `title  label value`
 with three spaces between subsequent pairs. Title, label and value columns
 are sized across all records; the whole list uses this layout or the titled
 layout together. Values use their projected, escaped display widths.
-Otherwise each card uses its first field's value in a styled `── title ──…`
-rule, followed by nonempty fields in producer order, without
-blank separators. Every body line is indented two columns under the title;
-body width budgets include that indent. Records with only a title value after
-omitting empty fields print `Label: value` entries instead.
+Otherwise each card uses its first field's value in a title-styled `value:`
+heading at the effective margin, followed by nonempty fields in producer order,
+without blank separators by default. Every body line is indented two spaces
+under the heading; body width budgets include that indent. Records with only a
+title value after omitting empty fields print `Label: value` entries instead.
 A field is short when its label width plus two spaces plus its longest value
 across all records fits half the available width. Consecutive short runs pack
 row-major with one shared column count and label width for the whole result.
 Each grid column sizes its values from their rendered widths across records,
 including projected swatches. Labels and values have a two-space gap; grid
 pairs have a three-space gap. A long field breaks the run, shares the first
-grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar arrays use the existing grid
-list geometry; short arrays are comma-joined. Title rules and body geometry use
-the same resolved screen width. Single records and lists containing objects or arrays
+grid column's label width and wraps at spaces (hard-wrapping tokens). Long scalar
+arrays use the existing grid list geometry; short arrays are comma-joined.
+Body geometry uses the resolved
+screen width minus the margin and two-space indent. For example, at width 80
+and margin 0:
+
+```text
+engageinternal.uiocloud.no:
+  Comment      Vertkøy til bruk i engagelab/IPED/UV - Terje Kristian Lian
+               Thoresen <t.k.l.thoresen@uv.uio.no>
+  Nameservers  ns1.nrec.no, ns2.nrec.no
+include.uiocloud.no:
+  Comment      Terje Kristian Lian Thoresen <t.k.l.thoresen@uv.uio.no>
+  Nameservers  ns1.nrec.no, ns2.nrec.no
+```
+
+Single records and lists containing objects or arrays
 of objects retain the classic aligned cards, nested tables, lists and blank
-separators. Classic card scalar values and scalar lists wrap within the same
-resolved screen budget, including their labels and indentation.
+separators. With two or more classic cards, each first field's value in producer
+order becomes a title-styled `value:` heading at the effective margin. The field
+is omitted from the body, which is indented two spaces and planned within that
+width. A single classic record keeps its first field as a normal row, without a
+heading. Producers can set optional `title_field` metadata to a literal record
+field name. When that field is present, classic and compact cards always use
+its value as a `value:` heading, including for one record, and omit it from the
+body. A missing title field falls back to the usual card behavior. Curated
+columns map the title field to its displayed label; an unselected field cannot
+become a heading. Empty implicit titles show their field label when
+retained. JSON, CSV/TSV and DSL values are unchanged.
+**Indent = 2 columns per level, everywhere; never align across levels.**
+
+1. Card title (`<value>:` heading, classic or compact) at the effective margin m.
+2. The record's fields one level in (m+2 under a title; m when there is no title). Siblings at the same level share a value column; that column is sized to fit labels up to `ui.mreg.label_max` (default 18) display columns (label incl. its colon/separator). Labels longer than the cap do not widen the column: they render `label: value` (classic) / `label  value` (compact) with the normal single separator, unaligned. Compact cards' multi-column grid packing keeps working with this column rule.
+3. Anything nested under a field — nested tables, grid lists, multi-line lists, nested objects — is a hanging block one more level in (field indent + 2), on the lines after the label line. Never aligned to the level-0 value column.
+4. A list value that fits on ONE line within the card width stays inline as a normal value (`Groups:  usit-gsd-clients`, `Nameservers  ns1.nrec.no, ns2.nrec.no`). Only lists that need more than one line become a hanging block (label line `Roles (7):` then items at +2, grid layout as today).
+5. Long scalar text values still wrap with continuation lines aligned to that field's value column (that is the same level, so allowed).
+
+A single record always uses classic cards, including with a declared title and
+an MREG recommendation. Fields use colons, one field per line, and list counts
+appear only for multiple items. Compact packing is reserved for multiple records.
+
+For each card, the widest scalar field line (including its indentation,
+label and separator, excluding lists) determines the card width. Clamp it between
+`ui.mreg.min_width` (default 40) and `ui.mreg.max_width` (default 80), then to the
+available terminal width. The maximum wins when configured below the minimum.
+These settings accept positive integers.
+Lists stay inline only when their complete line fits that width; otherwise they
+hang two spaces deeper using the shared grid geometry. Lists never widen a card.
+Long scalar strings wrap at the maximum, with continuations under their own
+value column. If a label exceeds the alignment cap and its value needs wrapping,
+the value hangs two spaces deeper instead. Terminals wider than the maximum do
+not alter card layout. These card limits also apply to unlimited targets.
+
+`ui.mreg.gap` controls blank lines between consecutive cards, including automatic
+fallback and one-line compact entries. The default `auto` keeps compact cards
+dense and inserts one blank line between classic/nested cards. An integer from
+0 to 10 overrides both styles. Single records, tables, card interiors and nested
+blocks are unchanged; presentation presets leave the setting at `auto`.
 
 A nested comparison table is a nonempty array of objects with at most eight
 nonblank columns (`MAX_NESTED_TABLE_COLUMNS`); wider object arrays remain lists.
+By default, cards omit empty fields after human projection and reduction, and
+tables drop columns empty in every row. At UI verbosity 1 or higher (`-v`),
+empty card fields and all-empty table columns remain visible. Verbosity leaves
+the fitting, density comparison and footer policies unchanged.
 Before human layout, object arrays drop fields that are empty (`null`, `""`,
-`[]`, `{}`) in every item. If exactly one field remains, the array becomes a
+`[]`, `{}`) in every item, unless `-v` keeps them. If exactly one field remains, the array becomes a
 list of its values. For example, `[{"hostname":"ns1.nrec.no","TTL":null},
 {"hostname":"ns2.nrec.no","TTL":null}]` displays as `ns1.nrec.no, ns2.nrec.no`
 in table cells and as a list in cards, without a nested hostname header.

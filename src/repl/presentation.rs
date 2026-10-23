@@ -163,7 +163,6 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
         },
     );
     if !rendered.is_empty() {
-        rendered.insert(0, '\n');
         rendered.push('\n');
     }
     rendered

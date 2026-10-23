@@ -15,9 +15,10 @@ use super::doc::{
     ParagraphBlock, SectionBlock, SectionTitleChrome, TableBlock,
 };
 use super::plan::{
-    CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout, RenderPlan,
+    CARD_INDENT, CompactCard, FieldKind, FieldLayout, MregLayout, PlannedTable, RecordLayout,
+    RenderPlan,
 };
-use super::projection::{display_value, ordered_keys};
+use super::projection::{display_value, key_value_value, ordered_keys};
 use super::settings::HelpLayout;
 use super::text::display_width;
 use super::visible_inline_text;
@@ -294,24 +295,25 @@ fn lower_document_blocks(
                         path,
                     )
                 };
+                let title_chrome = if suffix.is_some() {
+                    SectionTitleChrome::Plain
+                } else if let Some((_, layout)) = help {
+                    help_layout_title_chrome(layout)
+                } else if matches!(
+                    format,
+                    OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
+                ) {
+                    SectionTitleChrome::Ruled
+                } else {
+                    SectionTitleChrome::Plain
+                };
                 vec![Block::Section(SectionBlock {
                     title: (help.is_none() || !title.is_empty()).then(|| title.clone()),
-                    title_chrome: if suffix.is_some() {
-                        SectionTitleChrome::Plain
-                    } else if let Some((_, layout)) = help {
-                        help_layout_title_chrome(layout)
-                    } else if matches!(
-                        format,
-                        OutputFormat::Auto | OutputFormat::Guide | OutputFormat::Markdown
-                    ) {
-                        SectionTitleChrome::Ruled
-                    } else {
-                        SectionTitleChrome::Plain
-                    },
-                    body_indent: if format == OutputFormat::Markdown {
-                        0
-                    } else {
+                    title_chrome,
+                    body_indent: if title_chrome == SectionTitleChrome::Plain {
                         2
+                    } else {
+                        0
                     },
                     inline_title_suffix: suffix,
                     trailing_newline: help.is_none() && format != OutputFormat::Markdown,
@@ -491,11 +493,15 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
     }
     if plan.mreg_layout == MregLayout::Compact {
         let mut blocks = Vec::new();
-        for (card, record) in plan
+        for (index, (card, record)) in plan
             .compact_cards
             .iter()
             .zip(output_items_to_rows(&output.items))
+            .enumerate()
         {
+            if index > 0 {
+                push_blank_lines(&mut blocks, plan.mreg_gap);
+            }
             for rule in &output.meta.display_rules {
                 if let DisplayRule::Notice { field } = rule
                     && let Some(value) = record.get(field)
@@ -511,6 +517,7 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 CompactCard::Inline(grid) => blocks.push(Block::Grid(grid.clone())),
                 CompactCard::Entry(field) => blocks.push(Block::KeyValue(KeyValueBlock {
                     rows: vec![KeyValueRow {
+                        list_grid: None,
                         key: field.label.clone(),
                         value: KeyValueValue::Scalar(field.value.clone()),
                         value_style: field.value_style.clone(),
@@ -519,9 +526,9 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                     }],
                 })),
                 CompactCard::Titled { title, body } => blocks.push(Block::Section(SectionBlock {
-                    title: Some(title.clone()),
+                    title: title.clone(),
                     title_chrome: SectionTitleChrome::Card,
-                    body_indent: 2,
+                    body_indent: CARD_INDENT,
                     inline_title_suffix: None,
                     trailing_newline: false,
                     blocks: body.iter().cloned().map(Block::Grid).collect(),
@@ -539,8 +546,8 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }
             }
         }
-        if index > 0 && plan.mreg_layout != MregLayout::Entries {
-            push_blank_lines(&mut blocks, 1);
+        if index > 0 {
+            push_blank_lines(&mut blocks, plan.mreg_gap);
         }
         for rule in &output.meta.display_rules {
             if let DisplayRule::Notice { field } = rule
@@ -553,11 +560,20 @@ pub(super) fn lower_mreg_doc(output: &OutputResult, plan: &RenderPlan) -> Doc {
                 }));
             }
         }
-        blocks.extend(mreg_record_blocks(
-            &record,
-            &output.meta.key_index,
-            &plan.records[index],
-        ));
+        let planned = &plan.records[index];
+        let body = mreg_record_blocks(&record, &output.meta.key_index, &planned.fields);
+        if let Some(title) = &planned.title {
+            blocks.push(Block::Section(SectionBlock {
+                title: Some(title.clone()),
+                title_chrome: SectionTitleChrome::Card,
+                body_indent: CARD_INDENT,
+                inline_title_suffix: None,
+                trailing_newline: false,
+                blocks: body,
+            }));
+        } else {
+            blocks.extend(body);
+        }
     }
     Doc { blocks }
 }
@@ -664,9 +680,10 @@ fn key_value_from_map(map: &Map<String, Value>, preferred_keys: &[String]) -> Ke
         rows: ordered_keys(preferred_keys, map.keys())
             .filter_map(|key| {
                 map.get(key).map(|value| KeyValueRow {
+                    list_grid: None,
                     value_style: None,
                     key: key.clone(),
-                    value: lower_key_value_value(value, false),
+                    value: key_value_value(value, false),
                     indent: None,
                     gap: None,
                 })
@@ -682,34 +699,18 @@ struct MregRecordBuilder {
 }
 
 impl MregRecordBuilder {
-    fn push_row(
-        &mut self,
-        key: &str,
-        value: KeyValueValue,
-        depth: usize,
-        style: Option<crate::ui::style::CellStyle>,
-    ) {
-        self.pending_rows.push(KeyValueRow {
-            value_style: style,
-            key: key.to_string(),
-            value,
-            indent: (depth > 0).then(|| " ".repeat(depth * 2)),
-            gap: None,
-        });
-    }
-
     fn push_table(&mut self, key: &str, item_count: usize, mut table: TableBlock, depth: usize) {
         self.flush();
         table.nested = true;
         self.blocks.push(Block::Paragraph(ParagraphBlock {
             text: section_title(key, item_count),
-            indent: depth * 2,
+            indent: depth * CARD_INDENT,
             inline_markup: false,
         }));
         self.blocks.push(Block::Section(SectionBlock {
             title: None,
             title_chrome: SectionTitleChrome::Plain,
-            body_indent: (depth + 1) * 2,
+            body_indent: (depth + 1) * CARD_INDENT,
             inline_title_suffix: None,
             trailing_newline: false,
             blocks: vec![Block::Table(table)],
@@ -754,37 +755,18 @@ fn visit_mreg_record_field(
         FieldKind::Table(table) => {
             builder.push_table(key, table.data.rows.len(), table_from_plan(table), depth)
         }
-        FieldKind::Record(fields) => {
-            builder.push_row(key, KeyValueValue::Empty, depth, layout.style.clone());
-            for (nested_key, layout) in fields {
-                if let Some(nested) = value.get(nested_key) {
-                    visit_mreg_record_field(builder, nested_key, nested, depth + 1, layout);
+        FieldKind::Record(_) | FieldKind::Value => {
+            let mut row = layout.row.clone();
+            row.indent = (depth > 0).then(|| " ".repeat(depth * CARD_INDENT));
+            builder.pending_rows.push(row);
+            if let FieldKind::Record(fields) = &layout.kind {
+                for (nested_key, layout) in fields {
+                    if let Some(nested) = value.get(nested_key) {
+                        visit_mreg_record_field(builder, nested_key, nested, depth + 1, layout);
+                    }
                 }
             }
         }
-        FieldKind::Value => builder.push_row(
-            key,
-            lower_key_value_value(value, false),
-            depth,
-            layout.style.clone(),
-        ),
-    }
-}
-
-fn lower_key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
-    match value {
-        Value::Null if null_as_empty => KeyValueValue::Empty,
-        Value::Null => KeyValueValue::Scalar("null".to_string()),
-        Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-            KeyValueValue::Scalar(display_value(value))
-        }
-        Value::Array(items) => KeyValueValue::Array(
-            items
-                .iter()
-                .map(|item| lower_key_value_value(item, false))
-                .collect(),
-        ),
-        Value::Object(map) => KeyValueValue::Object(key_value_from_map(map, &[]).rows),
     }
 }
 
@@ -796,9 +778,10 @@ fn summary_from_group(group: &Group, preferred_keys: &[String]) -> Vec<KeyValueR
     ) {
         if let Some(value) = group.groups.get(key).or_else(|| group.aggregates.get(key)) {
             summary.push(KeyValueRow {
+                list_grid: None,
                 value_style: None,
                 key: key.clone(),
-                value: lower_key_value_value(value, false),
+                value: key_value_value(value, false),
                 indent: None,
                 gap: None,
             });
@@ -812,9 +795,10 @@ fn key_value_from_document_data_map(map: &Map<String, Value>, indent: usize) -> 
         rows: map
             .iter()
             .map(|(key, value)| KeyValueRow {
+                list_grid: None,
                 value_style: None,
                 key: key.clone(),
-                value: lower_key_value_value(value, true),
+                value: key_value_value(value, true),
                 indent: Some(" ".repeat(indent)),
                 gap: None,
             })

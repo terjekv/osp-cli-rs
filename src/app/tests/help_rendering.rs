@@ -145,6 +145,7 @@ fn compact_and_austere_help_surfaces_match_clap_layout_unit() {
 fn compact_help_can_add_color_without_box_chrome_unit() {
     let raw = clap_help(&["osp", "--help"]);
     let mut resolved = help_settings();
+    resolved.width = Some(200);
     resolved.mode = RenderMode::Rich;
     resolved.color = ColorMode::Always;
     resolved.runtime.stdout_is_tty = true;

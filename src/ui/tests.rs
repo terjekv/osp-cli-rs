@@ -193,7 +193,7 @@ fn ui2_renders_single_row_output_as_aligned_key_value_unit() {
 }
 
 #[test]
-fn ui2_mreg_renders_scalar_array_fields_as_multiline_lists_unit() {
+fn ui2_mreg_renders_scalar_arrays_inline_or_as_hanging_lists_unit() {
     let mut output = OutputResult::from_rows(vec![row! {
         "uid" => "oistes",
         "eduPersonAffiliation" => json!(["employee", "member", "staff"]),
@@ -222,12 +222,10 @@ fn ui2_mreg_renders_scalar_array_fields_as_multiline_lists_unit() {
     assert!(rendered.contains("uid:"));
     assert!(rendered.contains("oistes\n"));
     assert!(rendered.contains("eduPersonAffiliation (3):"));
-    assert!(rendered.contains("employee\n"));
-    assert!(rendered.contains("member\n"));
-    assert!(rendered.contains("staff\n"));
+    assert!(rendered.contains("eduPersonAffiliation (3):\n  employee"));
     assert!(rendered.contains("filegroups (4):"));
     assert!(rendered.contains("oistes\n"));
-    assert!(rendered.contains("vortex-opptak\n"));
+    assert!(rendered.contains("filegroups (4):\n  oistes"));
     assert!(rendered.contains("netgroups (6):"));
     assert!(rendered.contains("ansatt-373034"));
     assert!(rendered.contains("it-uio-ms365-ansatt-publisert"));
@@ -235,7 +233,7 @@ fn ui2_mreg_renders_scalar_array_fields_as_multiline_lists_unit() {
 }
 
 #[test]
-fn ui2_mreg_multiline_scalar_arrays_keep_continuation_alignment_unit() {
+fn ui2_mreg_scalar_arrays_that_fit_stay_inline_unit() {
     let mut output = OutputResult::from_rows(vec![row! {
         "uid" => "alice",
         "groups" => json!(["red", "blue", "green"]),
@@ -248,7 +246,7 @@ fn ui2_mreg_multiline_scalar_arrays_keep_continuation_alignment_unit() {
 
     assert_eq!(
         rendered,
-        "uid:        alice\ngroups (3): red\n            blue\n            green\n"
+        "uid:        alice\ngroups (3): red, blue, green\n"
     );
 }
 
@@ -273,7 +271,7 @@ fn ui2_markdown_renders_single_row_scalar_arrays_as_multiline_key_values_unit() 
 }
 
 #[test]
-fn ui2_rich_mreg_multiline_lists_keep_key_and_value_styling_unit() {
+fn ui2_rich_mreg_inline_lists_keep_key_and_value_styling_unit() {
     let output = OutputResult::from_rows(vec![row! {
         "eduPersonAffiliation" => json!(["employee", "member", "staff"]),
     }]);
@@ -288,9 +286,9 @@ fn ui2_rich_mreg_multiline_lists_keep_key_and_value_styling_unit() {
     let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
     assert!(rendered.contains("\x1b[38;2;189;147;249meduPersonAffiliation (3)\x1b[0m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242memployee\x1b[0m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242mmember\x1b[0m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242mstaff\x1b[0m"));
+    for value in ["employee", "member", "staff"] {
+        assert!(rendered.contains(&format!("\x1b[38;2;248;248;242m{value}\x1b[0m")));
+    }
 }
 
 #[test]
@@ -374,7 +372,7 @@ fn ui2_mreg_renders_nested_object_arrays_as_tables_unit() {
 
     let rendered = render(&output, &crate::ui::RenderRequest::new(&settings));
 
-    assert!(rendered.contains("name:       it-usit-gsd-drift"));
+    assert!(rendered.contains("name: it-usit-gsd-drift"));
     assert!(rendered.contains("siteadmins:"));
     assert!(rendered.contains("current:"));
     assert!(rendered.contains("expired (2):"));
@@ -456,6 +454,7 @@ fn ui2_terminal_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            title_field: None,
             display_notes: Vec::new(),
             context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
@@ -501,6 +500,7 @@ fn ui2_markdown_table_honors_column_alignment_metadata_unit() {
         }]),
         document: None,
         meta: OutputMeta {
+            title_field: None,
             display_notes: Vec::new(),
             context: Default::default(),
             key_index: vec!["name".to_string(), "count".to_string(), "state".to_string()],
@@ -654,7 +654,7 @@ fn ui2_full_help_layout_keeps_blank_between_paragraphs_and_data_unit() {
         },
     );
 
-    assert!(rendered.contains("  Welcome Demo!\n\n  Logged in as"));
+    assert!(rendered.contains("Welcome Demo!\n\nLogged in as"));
     assert!(rendered.contains("Theme"));
 }
 
@@ -675,9 +675,9 @@ fn ui2_structured_guide_output_keeps_help_entry_indent_unit() {
         },
     );
 
-    assert!(rendered.contains("- Commands "));
-    assert!(rendered.contains("\n  list  List history entries\n"));
-    assert!(!rendered.contains("\nlist  List history entries\n"));
+    assert!(rendered.contains("Commands "));
+    assert!(rendered.contains("\nlist  List history entries\n"));
+    assert!(!rendered.contains("\n  list  List history entries\n"));
 }
 
 #[test]
@@ -693,7 +693,7 @@ fn ui2_structured_document_output_uses_presentation_metadata_unit() {
             ..crate::ui::RenderRequest::new(&settings)
         },
     );
-    assert!(rendered.contains("\n  list    List history entries\n"));
+    assert!(rendered.contains("\nlist    List history entries\n"));
 }
 
 #[test]
@@ -797,7 +797,7 @@ fn ui2_lowering_stamps_direct_guide_render_behavior_into_ir_unit() {
         panic!("expected guide paragraph");
     };
 
-    assert_eq!(guide_section.body_indent, 2);
+    assert_eq!(guide_section.body_indent, 0);
     assert!(guide_section.trailing_newline);
     assert!(guide_paragraph.inline_markup);
     assert_eq!(guide_paragraph.indent, 0);
@@ -834,6 +834,7 @@ fn ui_grouped_outputs_lower_and_render_with_one_group_owner_unit() {
         ]),
         document: None,
         meta: OutputMeta {
+            title_field: None,
             display_notes: Vec::new(),
             context: Default::default(),
             key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],
@@ -1011,7 +1012,7 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
     assert!(!plain.contains("Errors") && !plain.contains("Warnings"));
     assert!(rendered.contains("\x1b[38;2;241;250;140m"));
     assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
-    assert!(rendered.contains("\x1b[38;2;248;248;242m  No matching host found."));
+    assert!(rendered.contains("\x1b[38;2;248;248;242mNo matching host found."));
     settings.color = ColorMode::Never;
     settings.unicode = UnicodeMode::Never;
     let uncolored = crate::ui::render_messages(

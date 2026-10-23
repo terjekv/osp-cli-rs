@@ -237,6 +237,8 @@ pub struct RenderSettings {
     pub guide_default_format: bool,
     /// Show screen table fit summaries and recovery actions.
     pub table_hints: bool,
+    /// Command detail level; positive values retain empty human fields.
+    pub verbosity: u8,
     pub mode: RenderMode,
     pub color: ColorMode,
     pub unicode: UnicodeMode,
@@ -248,6 +250,14 @@ pub struct RenderSettings {
     pub margin: usize,
     pub table_overflow: TableOverflow,
     pub table_too_wide: TableTooWide,
+    /// Blank lines between cards; `None` preserves each style's default.
+    pub mreg_gap: Option<usize>,
+    /// Minimum scalar-derived card width, including indentation.
+    pub mreg_min_width: usize,
+    /// Maximum card width, also limited by the terminal.
+    pub mreg_max_width: usize,
+    /// Maximum aligned label column, including separators.
+    pub mreg_label_max: usize,
     pub table_border: TableBorderStyle,
     /// Border for tables nested inside a record, such as `addresses (2):`.
     pub nested_table_border: TableBorderOverride,
@@ -265,6 +275,7 @@ impl Default for RenderSettings {
             format_explicit: false,
             guide_default_format: true,
             table_hints: true,
+            verbosity: 0,
             mode: RenderMode::Auto,
             color: ColorMode::Auto,
             unicode: UnicodeMode::Auto,
@@ -275,6 +286,10 @@ impl Default for RenderSettings {
             margin: 0,
             table_overflow: TableOverflow::Ellipsis,
             table_too_wide: TableTooWide::Mreg,
+            mreg_gap: None,
+            mreg_min_width: 40,
+            mreg_max_width: 80,
+            mreg_label_max: 18,
             table_border: TableBorderStyle::Square,
             nested_table_border: TableBorderOverride::None,
             style_overrides: style::StyleOverrides::default(),
@@ -546,6 +561,22 @@ fn sync_render_config_overrides(settings: &mut RenderSettings, config: &Resolved
         settings.table_too_wide = parsed;
     }
 
+    for (key, setting) in [
+        ("ui.mreg.min_width", &mut settings.mreg_min_width),
+        ("ui.mreg.max_width", &mut settings.mreg_max_width),
+        ("ui.mreg.label_max", &mut settings.mreg_label_max),
+    ] {
+        if let Some(value) = config_int(config, key).and_then(|value| usize::try_from(value).ok())
+            && value > 0
+        {
+            *setting = value;
+        }
+    }
+
+    if let Some(value) = config.get_string("ui.mreg.gap") {
+        settings.mreg_gap = value.parse().ok();
+    }
+
     if let Some(value) = config.get_string("ui.table.border")
         && let Some(parsed) = TableBorderStyle::parse(value)
     {
@@ -620,6 +651,8 @@ pub struct ResolvedRenderSettings {
     pub document_literal_commands: Vec<String>,
     pub display_limits: bool,
     pub table_hints: bool,
+    /// Command detail level; positive values retain empty human fields.
+    pub verbosity: u8,
     pub backend: RenderBackend,
     pub color: bool,
     pub unicode: bool,
@@ -628,6 +661,14 @@ pub struct ResolvedRenderSettings {
     pub margin: usize,
     pub table_overflow: TableOverflow,
     pub table_too_wide: TableTooWide,
+    /// Blank lines between cards; `None` preserves each style's default.
+    pub mreg_gap: Option<usize>,
+    /// Minimum scalar-derived card width, including indentation.
+    pub mreg_min_width: usize,
+    /// Maximum card width, also limited by the terminal.
+    pub mreg_max_width: usize,
+    /// Maximum aligned label column, including separators.
+    pub mreg_label_max: usize,
     pub table_border: TableBorderStyle,
     pub nested_table_border: TableBorderStyle,
     pub theme_name: String,
@@ -717,6 +758,7 @@ impl RenderSettings {
             document_literal_commands: Vec::new(),
             display_limits: false,
             table_hints: self.table_hints,
+            verbosity: self.verbosity,
             backend,
             color: backend == RenderBackend::Rich && self.resolve_color_mode(),
             unicode: backend == RenderBackend::Rich && self.resolve_unicode_mode(),
@@ -724,6 +766,10 @@ impl RenderSettings {
             margin: self.margin,
             table_overflow: self.table_overflow,
             table_too_wide: self.table_too_wide,
+            mreg_gap: self.mreg_gap,
+            mreg_min_width: self.mreg_min_width,
+            mreg_max_width: self.mreg_max_width,
+            mreg_label_max: self.mreg_label_max,
             table_border: self.table_border,
             nested_table_border: self.nested_table_border.resolve(self.table_border),
             theme_name,
@@ -1088,6 +1134,7 @@ mod tests {
             }]),
             document: None,
             meta: OutputMeta {
+                title_field: None,
                 display_notes: Vec::new(),
                 context: Default::default(),
                 key_index: vec!["team".to_string(), "count".to_string(), "uid".to_string()],

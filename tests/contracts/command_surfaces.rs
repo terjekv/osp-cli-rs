@@ -123,10 +123,8 @@ fn top_level_help_supports_all_explicit_output_formats_contract() {
     );
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "--help"]);
-    assert!(mreg.lines().any(|line| {
-        line.starts_with("Usage ") && line.contains("text osp [OPTIONS] [COMMAND]")
-    }));
-    assert!(mreg.contains("description Inspect and edit runtime config"));
+    assert!(mreg.contains("Usage:\n  text         osp [OPTIONS] [COMMAND]"));
+    assert!(mreg.contains("description  Inspect and edit runtime config"));
     assert!(!mreg.lines().any(|line| line.starts_with('|')));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "--help"]);
@@ -170,10 +168,7 @@ fn intro_command_supports_all_explicit_output_formats_contract() {
     assert!(table.contains("section"));
 
     let mreg = run_cli_stdout(&["--no-env", "--no-config-file", "--mreg", "intro"]);
-    assert!(
-        mreg.lines()
-            .any(|line| { line.starts_with("Commands ") && line.contains("name help ") })
-    );
+    assert!(mreg.contains("Commands:\n  name         help\n"));
     assert!(mreg.contains("Show this command overview."));
 
     let value = run_cli_stdout(&["--no-env", "--no-config-file", "--value", "intro"]);
@@ -283,13 +278,13 @@ repl.intro = "full"
     let unicode_plain = strip_ansi(&unicode);
     let ascii_plain = strip_ansi(&ascii);
 
-    assert!(unicode_plain.contains("─ OSP "), "{unicode_plain:?}");
+    assert!(unicode_plain.contains("OSP ─"), "{unicode_plain:?}");
     assert!(unicode_plain.contains("Keybindings"), "{unicode_plain:?}");
     assert!(unicode_plain.contains("Usage"), "{unicode_plain:?}");
-    assert!(!unicode_plain.contains("- OSP "), "{unicode_plain:?}");
+    assert!(!unicode_plain.contains("OSP -"), "{unicode_plain:?}");
 
-    assert!(ascii_plain.contains("- OSP "), "{ascii_plain:?}");
-    assert!(ascii_plain.contains("- Commands "), "{ascii_plain:?}");
+    assert!(ascii_plain.contains("OSP -"), "{ascii_plain:?}");
+    assert!(ascii_plain.contains("Commands -"), "{ascii_plain:?}");
     assert!(ascii_plain.contains("Keybindings"), "{ascii_plain:?}");
     assert!(ascii_plain.contains("Usage"), "{ascii_plain:?}");
     assert!(!ascii_plain.contains('─'), "{ascii_plain:?}");
@@ -333,14 +328,14 @@ theme.name = "rose-pine-moon"
         &["--no-env", "--format=auto", "intro"],
     );
 
-    let osp = guide.find("- OSP ").expect("OSP section should render");
+    let osp = guide.find("OSP -").expect("OSP section should render");
     let keybindings = guide
-        .find("- Keybindings ")
+        .find("Keybindings -")
         .expect("Keybindings section should render");
-    let pipes = guide.find("- Pipes ").expect("Pipes section should render");
+    let pipes = guide.find("Pipes -").expect("Pipes section should render");
     let usage = guide.find("Usage:").expect("Usage section should render");
     let commands = guide
-        .find("- Commands ")
+        .find("Commands -")
         .expect("Commands section should render");
 
     assert!(osp < keybindings, "{guide:?}");
@@ -433,9 +428,9 @@ repl.simple_prompt = true
 
     let unicode_plain = strip_ansi(&unicode);
     let ascii_plain = strip_ansi(&ascii);
-    assert!(unicode_plain.contains("─ OSP "), "{unicode_plain:?}");
+    assert!(unicode_plain.contains("OSP ─"), "{unicode_plain:?}");
     assert!(unicode_plain.contains("Ctrl-D"), "{unicode_plain:?}");
-    assert!(ascii_plain.contains("- OSP "), "{ascii_plain:?}");
+    assert!(ascii_plain.contains("OSP -"), "{ascii_plain:?}");
     assert!(ascii_plain.contains("Ctrl-D"), "{ascii_plain:?}");
     assert!(!ascii_plain.contains('─'), "{ascii_plain:?}");
 }

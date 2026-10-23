@@ -11,6 +11,11 @@ use std::sync::{
 };
 use std::time::Duration;
 
+/// A cancelled interactive prompt, preserved through product diagnostics.
+#[derive(Debug, thiserror::Error, miette::Diagnostic)]
+#[error("input cancelled")]
+pub struct PromptCancelled;
+
 static INTERRUPTED: OnceLock<Result<Arc<AtomicBool>, String>> = OnceLock::new();
 
 /// Install terminal interruption handling and start a fresh command boundary.

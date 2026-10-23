@@ -167,6 +167,7 @@ impl NativeCommand for TestNativeCommand {
             messages: Vec::new(),
             context: None,
             meta: ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),
@@ -397,7 +398,8 @@ fn make_test_state(
             PluginManager::new(plugin_dirs)
                 .with_roots(config_root, cache_root)
                 .with_bundled_roots(!cfg!(miri))
-                .with_default_roots(!cfg!(miri)),
+                .with_default_roots(!cfg!(miri))
+                .with_path_discovery(false),
         ),
         themes: Some(crate::ui::theme_catalog::ThemeCatalog::default()),
         session: None,

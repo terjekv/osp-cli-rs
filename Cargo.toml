@@ -66,6 +66,7 @@ unicode-width = "0.2"
 skim = { version = "5.0.0", default-features = false }
 
 [dev-dependencies]
+vt100 = "0.16"
 assert_cmd = "2.0"
 insta = "1.43"
 portable-pty = "0.9"

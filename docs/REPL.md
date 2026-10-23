@@ -33,6 +33,11 @@ keep session state for the next prompt
 osp
 ```
 
+With terminal colour enabled, the intro starts on a clean screen after moving
+visible output into terminal scrollback. Ctrl-L clears the REPL the same way
+and keeps the current input. Clearing uses the terminal height when a cursor
+row is unavailable without a blocking query; it never purges scrollback.
+
 ## Intro and help documents
 
 The intro and root `help` compose ordered semantic document blocks. Configure
@@ -75,6 +80,8 @@ Launch `-v`/`-q`/`-d` flags set session defaults. Per-line flags add to those
 defaults for one command only. `-v` explains service and session selection,
 `-vv` shows exchanges, and `-vvv` adds response/cache evidence. These diagnostics
 and verbose field supplements are complete stderr lines above the prompt.
+Background notices use the editor's printer to appear above the entire prompt,
+including multiline prompts, and wait until input resumes after commands.
 `-d` shows host dispatch; `-dd` adds internal host decisions and captured
 backtraces. File logging is independent of per-line stderr settings.
 
@@ -201,7 +208,9 @@ The REPL provides:
 - history search, bang replay and leading-space privacy; see
   [COMPLETION.md](COMPLETION.md#history) for keys and persistence rules
 - paged results: `next` and `prev`, or Shift+→ / Shift+← (also PageDown /
-  PageUp) on an empty line; with text on the line, Shift+arrows move the cursor
+  PageUp) on an empty line; these keys do nothing without a paginated result.
+  Typed `next` / `prev` still report when there is no result to continue.
+  With text on the line, Shift+arrows move the cursor
 
 Completion does not call remote services while you are typing. It works from
 the known command catalog, config vocabulary, and already-available runtime

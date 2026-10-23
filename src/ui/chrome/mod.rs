@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SectionTitleStyle {
     Plain,
-    Ruled(usize),
+    Ruled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,12 +34,9 @@ pub(crate) struct SectionChrome {
 pub(crate) const PLAIN_SECTION_CHROME: SectionChrome =
     SectionChrome::new(SectionTitleStyle::Plain, FooterRuleStyle::None);
 pub(crate) const GUIDE_SECTION_CHROME: SectionChrome =
-    SectionChrome::new(SectionTitleStyle::Ruled(2), FooterRuleStyle::None);
+    SectionChrome::new(SectionTitleStyle::Ruled, FooterRuleStyle::None);
 pub(crate) const FULL_HELP_LAYOUT_CHROME: SectionChrome =
-    SectionChrome::new(SectionTitleStyle::Ruled(2), FooterRuleStyle::Rule);
-
-pub(crate) const CARD_SECTION_CHROME: SectionChrome =
-    SectionChrome::new(SectionTitleStyle::Ruled(3), FooterRuleStyle::None);
+    SectionChrome::new(SectionTitleStyle::Ruled, FooterRuleStyle::Rule);
 
 impl SectionChrome {
     const fn new(title: SectionTitleStyle, footer: FooterRuleStyle) -> Self {
@@ -51,17 +48,17 @@ impl SectionChrome {
         title: &str,
         width: Option<usize>,
         unicode: bool,
+        margin: usize,
     ) -> RenderedTitle {
         match self.title {
             SectionTitleStyle::Plain => plain_section_title(title),
-            SectionTitleStyle::Ruled(columns) => {
-                ruled_section_title(title, width, unicode, columns)
-            }
+            SectionTitleStyle::Ruled => ruled_section_title(title, width, unicode, margin),
         }
     }
 
     pub(crate) fn render_title(self, title: &str, width: Option<usize>, unicode: bool) -> String {
-        self.render_title_line(title, width, unicode).plain_text()
+        self.render_title_line(title, width, unicode, 0)
+            .plain_text()
     }
 
     pub(crate) fn render_footer_rule(self, width: Option<usize>, unicode: bool) -> Option<String> {
@@ -96,11 +93,11 @@ pub(crate) fn ruled_section_title(
     title: &str,
     width: Option<usize>,
     unicode: bool,
-    title_columns: usize,
+    margin: usize,
 ) -> RenderedTitle {
     let title = normalize_title(title).to_string();
     let fill = if unicode { '─' } else { '-' };
-    let target_width = width.unwrap_or(24).max(12);
+    let target_width = width.unwrap_or(24);
     if title.is_empty() {
         return RenderedTitle {
             prefix: String::new(),
@@ -108,7 +105,11 @@ pub(crate) fn ruled_section_title(
             suffix: fill.to_string().repeat(target_width),
         };
     }
-    let prefix = format!("{} ", fill.to_string().repeat(title_columns.max(2) - 1));
+    let prefix = if margin == 0 {
+        String::new()
+    } else {
+        format!("{} ", fill.to_string().repeat(margin))
+    };
     let used = UnicodeWidthStr::width(prefix.as_str()) + UnicodeWidthStr::width(title.as_str()) + 1;
     let suffix = if used >= target_width {
         String::new()
@@ -143,15 +144,15 @@ mod tests {
     fn guide_rule_titles_respect_target_width_unit() {
         assert_eq!(
             GUIDE_SECTION_CHROME.render_title("Usage", Some(12), false),
-            "- Usage ----"
+            "Usage ------"
         );
         assert_eq!(
             FULL_HELP_LAYOUT_CHROME.render_title("Usage", Some(12), false),
-            "- Usage ----"
+            "Usage ------"
         );
         assert_eq!(
             GUIDE_SECTION_CHROME.render_title("Usage", Some(12), true),
-            "─ Usage ────"
+            "Usage ──────"
         );
     }
 

@@ -87,10 +87,10 @@ reusing a fitted screen string. Emitters apply the resolved margin uniformly,
 including machine output on the REPL screen.
 
 `plan/cards.rs` owns compact flat-list cards. When all records fit, it plans
-one aligned line per record; otherwise it uses double-rule titles and bodies
-indented by two columns. Grid value widths use rendered values in each column
-across records. Single and nested records retain classic cards. Lowering copies
-planned grids into the data-only IR.
+one aligned line per record; otherwise it uses colon headings and bodies
+indented by two spaces within the remaining width. Grid value widths use rendered
+values in each column across records. Single and nested records retain classic
+cards. Lowering copies planned grids into the data-only IR.
 
 Targets set automatic colour/Unicode defaults. Explicit choices survive screen,
 pager and pipe rendering; editor and clipboard always suppress colour.
@@ -114,3 +114,10 @@ Top-level terminal table cells summarize remaining multi-field object arrays as
 item counts and objects as nonempty field counts. Counts stay whole when fitted
 and contribute to shortened-cell footers; cards retain nested tables and exports
 retain their complete data.
+
+Classic card planning derives width from scalar lines, clamped by
+`ui.mreg.min_width` / `ui.mreg.max_width` (40 / 80) and the terminal. Lists use
+that width without widening the card. `ui.mreg.label_max` (18) caps alignment;
+wrapped values under longer labels hang at the child level. Scalar wrapping and
+hanging grids are planned before emission. Single records always remain classic,
+including declared titles and MREG recommendations.

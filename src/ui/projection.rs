@@ -1,5 +1,6 @@
 //! Pure human data projection, shared by layout planning and lowering.
 
+use super::doc::{KeyValueRow, KeyValueValue};
 use super::settings::ResolvedRenderSettings;
 use super::style::{CellStyle, StyleToken};
 use super::text::sanitize_human_text;
@@ -122,7 +123,12 @@ fn field_styles(value: &Value, rules: &[crate::core::DisplayRule]) -> FieldStyle
     styles
 }
 
-fn project_record(row: &Row, path: &[String], styles: &FieldStyles) -> RecordProjection {
+fn project_record(
+    row: &Row,
+    path: &[String],
+    styles: &FieldStyles,
+    keep_empty: bool,
+) -> RecordProjection {
     row.iter()
         .map(|(key, value)| {
             let mut path = path.to_vec();
@@ -133,10 +139,10 @@ fn project_record(row: &Row, path: &[String], styles: &FieldStyles) -> RecordPro
                     style: styles.get(&path).cloned(),
                     table: value
                         .as_array()
-                        .and_then(|items| project_array(items, &path, styles)),
+                        .and_then(|items| project_array(items, &path, styles, keep_empty)),
                     fields: value
                         .as_object()
-                        .map(|row| project_record(row, &path, styles))
+                        .map(|row| project_record(row, &path, styles, keep_empty))
                         .unwrap_or_default(),
                 },
             )
@@ -144,12 +150,17 @@ fn project_record(row: &Row, path: &[String], styles: &FieldStyles) -> RecordPro
         .collect()
 }
 
-fn project_array(items: &[Value], path: &[String], styles: &FieldStyles) -> Option<ProjectedTable> {
+fn project_array(
+    items: &[Value],
+    path: &[String],
+    styles: &FieldStyles,
+    keep_empty: bool,
+) -> Option<ProjectedTable> {
     let rows = items
         .iter()
         .map(|item| item.as_object().cloned())
         .collect::<Option<Vec<_>>>()?;
-    let mut table = project_table(&rows, &[], &[]);
+    let mut table = project_table(&rows, &[], &[], keep_empty);
     table.cell_styles = table
         .rows
         .iter()
@@ -215,7 +226,7 @@ fn retain_array_styles(styles: &mut FieldStyles, path: &[String], retained: &[us
         .collect();
 }
 
-fn empty_value(value: &Value) -> bool {
+pub(super) fn empty_value(value: &Value) -> bool {
     match value {
         Value::Null => true,
         Value::String(text) => text.is_empty(),
@@ -225,22 +236,22 @@ fn empty_value(value: &Value) -> bool {
     }
 }
 
-fn reduce_record(row: &mut Row, path: &[String], styles: &mut FieldStyles) {
+fn reduce_record(row: &mut Row, path: &[String], styles: &mut FieldStyles, keep_empty: bool) {
     for (key, value) in row {
         let mut path = path.to_vec();
         path.push(key.clone());
-        reduce_value(value, &path, styles);
+        reduce_value(value, &path, styles, keep_empty);
     }
 }
 
-fn reduce_value(value: &mut Value, path: &[String], styles: &mut FieldStyles) {
+fn reduce_value(value: &mut Value, path: &[String], styles: &mut FieldStyles, keep_empty: bool) {
     match value {
-        Value::Object(row) => reduce_record(row, path, styles),
+        Value::Object(row) => reduce_record(row, path, styles, keep_empty),
         Value::Array(items) => {
             for (index, item) in items.iter_mut().enumerate() {
                 let mut path = path.to_vec();
                 path.push(index.to_string());
-                reduce_value(item, &path, styles);
+                reduce_value(item, &path, styles, keep_empty);
             }
             if items.is_empty() || !items.iter().all(Value::is_object) {
                 return;
@@ -249,7 +260,7 @@ fn reduce_value(value: &mut Value, path: &[String], styles: &mut FieldStyles) {
                 .iter()
                 .filter_map(Value::as_object)
                 .flat_map(|row| row.iter())
-                .filter(|(_, value)| !empty_value(value))
+                .filter(|(_, value)| keep_empty || !empty_value(value))
                 .map(|(key, _)| key.clone())
                 .collect::<BTreeSet<_>>();
             for row in items.iter_mut().filter_map(Value::as_object_mut) {
@@ -292,6 +303,7 @@ fn reduce_output(
     output: &mut OutputResult,
     styles: &mut [FieldStyles],
     grouped_styles: &mut [Vec<FieldStyles>],
+    keep_empty: bool,
 ) {
     match &mut output.items {
         OutputItems::Rows(rows) => {
@@ -300,30 +312,38 @@ fn reduce_output(
                     row,
                     &[],
                     styles.get_mut(index).unwrap_or(&mut FieldStyles::new()),
+                    keep_empty,
                 );
             }
         }
         OutputItems::Groups(groups) => {
             for (index, group) in groups.iter_mut().enumerate() {
-                reduce_record(&mut group.groups, &[], &mut FieldStyles::new());
-                reduce_record(&mut group.aggregates, &[], &mut FieldStyles::new());
+                reduce_record(&mut group.groups, &[], &mut FieldStyles::new(), keep_empty);
+                reduce_record(
+                    &mut group.aggregates,
+                    &[],
+                    &mut FieldStyles::new(),
+                    keep_empty,
+                );
                 for (row_index, row) in group.rows.iter_mut().enumerate() {
-                    reduce_record(row, &[], &mut grouped_styles[index][row_index]);
+                    reduce_record(row, &[], &mut grouped_styles[index][row_index], keep_empty);
                 }
             }
         }
     }
-    fn blocks(items: &mut [DocBlock]) {
+    fn blocks(items: &mut [DocBlock], keep_empty: bool) {
         for block in items {
             match block {
-                DocBlock::Section { blocks: body, .. } => blocks(body),
-                DocBlock::Data { value } => reduce_value(value, &[], &mut FieldStyles::new()),
+                DocBlock::Section { blocks: body, .. } => blocks(body, keep_empty),
+                DocBlock::Data { value } => {
+                    reduce_value(value, &[], &mut FieldStyles::new(), keep_empty)
+                }
                 _ => {}
             }
         }
     }
     if let Some(OutputDocument::Semantic(document)) = &mut output.document {
-        blocks(&mut document.blocks);
+        blocks(&mut document.blocks, keep_empty);
     }
 }
 
@@ -331,15 +351,18 @@ fn project_document_tables(
     blocks: &[DocBlock],
     path: &mut Vec<usize>,
     tables: &mut std::collections::BTreeMap<Vec<usize>, ProjectedTable>,
+    keep_empty: bool,
 ) {
     for (index, block) in blocks.iter().enumerate() {
         path.push(index);
         match block {
-            DocBlock::Section { blocks, .. } => project_document_tables(blocks, path, tables),
+            DocBlock::Section { blocks, .. } => {
+                project_document_tables(blocks, path, tables, keep_empty)
+            }
             DocBlock::Data {
                 value: Value::Array(items),
             } => {
-                if let Some(table) = project_array(items, &[], &FieldStyles::new()) {
+                if let Some(table) = project_array(items, &[], &FieldStyles::new(), keep_empty) {
                     tables.insert(path.clone(), table);
                 }
             }
@@ -419,12 +442,21 @@ pub(super) fn project(
             .collect();
     }
     if format != OutputFormat::Value {
-        reduce_output(&mut display, &mut styles, &mut grouped_styles);
+        reduce_output(
+            &mut display,
+            &mut styles,
+            &mut grouped_styles,
+            settings.verbosity > 0,
+        );
     }
     let tables = match &display.items {
         OutputItems::Rows(rows) => {
-            let mut table =
-                project_table(rows, &display.meta.key_index, &display.meta.column_align);
+            let mut table = project_table(
+                rows,
+                &display.meta.key_index,
+                &display.meta.column_align,
+                settings.verbosity > 0,
+            );
             if !matches!(format, OutputFormat::Markdown | OutputFormat::Value) {
                 summarize_table(&mut table, rows);
             }
@@ -437,8 +469,12 @@ pub(super) fn project(
             .map(|(index, group)| {
                 let rows = crate::core::output_model::group_rows(group);
                 let styles = &grouped_styles[index];
-                let mut table =
-                    project_table(&rows, &display.meta.key_index, &display.meta.column_align);
+                let mut table = project_table(
+                    &rows,
+                    &display.meta.key_index,
+                    &display.meta.column_align,
+                    settings.verbosity > 0,
+                );
                 if !matches!(format, OutputFormat::Markdown | OutputFormat::Value) {
                     summarize_table(&mut table, &rows);
                 }
@@ -452,7 +488,12 @@ pub(super) fn project(
             .iter()
             .enumerate()
             .map(|(index, row)| {
-                project_record(row, &[], styles.get(index).unwrap_or(&FieldStyles::new()))
+                project_record(
+                    row,
+                    &[],
+                    styles.get(index).unwrap_or(&FieldStyles::new()),
+                    settings.verbosity > 0,
+                )
             })
             .collect(),
         OutputItems::Groups(groups) => groups
@@ -463,7 +504,12 @@ pub(super) fn project(
                     .iter()
                     .enumerate()
                     .map(|(row_index, row)| {
-                        project_record(row, &[], &grouped_styles[index][row_index])
+                        project_record(
+                            row,
+                            &[],
+                            &grouped_styles[index][row_index],
+                            settings.verbosity > 0,
+                        )
                     })
                     .collect::<Vec<_>>()
             })
@@ -471,7 +517,12 @@ pub(super) fn project(
     };
     let mut document_tables = std::collections::BTreeMap::new();
     if let Some(document) = display.document.as_ref().and_then(OutputDocument::semantic) {
-        project_document_tables(&document.blocks, &mut Vec::new(), &mut document_tables);
+        project_document_tables(
+            &document.blocks,
+            &mut Vec::new(),
+            &mut document_tables,
+            settings.verbosity > 0,
+        );
     }
     HumanProjection {
         tables,
@@ -574,6 +625,7 @@ fn sanitize_document(document: &mut Document) {
 }
 
 fn sanitize_output(output: &mut OutputResult) {
+    output.meta.title_field = output.meta.title_field.as_deref().map(sanitize_human_text);
     match &mut output.items {
         OutputItems::Rows(rows) => rows.iter_mut().for_each(sanitize_row),
         OutputItems::Groups(groups) => {
@@ -835,7 +887,14 @@ fn display_output(
             row_styles.push(styles);
         }
         if let Some(columns) = &output.meta.display_columns {
-            display.meta.key_index = display_labels(output, columns);
+            let labels = display_labels(output, columns);
+            display.meta.title_field = output.meta.title_field.as_ref().and_then(|field| {
+                columns
+                    .iter()
+                    .position(|column| column == field)
+                    .map(|index| labels[index].clone())
+            });
+            display.meta.key_index = labels;
             display.meta.display_columns = Some(display.meta.key_index.clone());
         }
     }
@@ -1022,6 +1081,7 @@ pub(super) fn project_table(
     rows: &[Row],
     key_index: &[String],
     column_align: &[ColumnAlignment],
+    keep_empty: bool,
 ) -> ProjectedTable {
     let all_headers = headers_for_rows(rows, key_index);
     let all_rows = rows
@@ -1035,7 +1095,8 @@ pub(super) fn project_table(
         .collect::<Vec<_>>();
     let mut visible_columns = (0..all_headers.len())
         .filter(|index| {
-            all_rows.is_empty()
+            keep_empty
+                || all_rows.is_empty()
                 || all_rows.iter().any(|row| {
                     row.get(*index)
                         .is_some_and(|value| !value.trim().is_empty())
@@ -1121,5 +1182,33 @@ pub(super) fn display_value(value: &Value) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         Value::Object(_) => serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
+    }
+}
+
+pub(super) fn key_value_value(value: &Value, null_as_empty: bool) -> KeyValueValue {
+    match value {
+        Value::Null if null_as_empty => KeyValueValue::Empty,
+        Value::Null => KeyValueValue::Scalar("null".to_string()),
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            KeyValueValue::Scalar(display_value(value))
+        }
+        Value::Array(items) => KeyValueValue::Array(
+            items
+                .iter()
+                .map(|item| key_value_value(item, false))
+                .collect(),
+        ),
+        Value::Object(map) => KeyValueValue::Object(
+            map.iter()
+                .map(|(key, value)| KeyValueRow {
+                    list_grid: None,
+                    value_style: None,
+                    key: key.clone(),
+                    value: key_value_value(value, false),
+                    indent: None,
+                    gap: None,
+                })
+                .collect(),
+        ),
     }
 }

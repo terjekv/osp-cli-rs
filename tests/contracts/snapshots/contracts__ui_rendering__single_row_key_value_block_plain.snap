@@ -2,10 +2,10 @@
 source: tests/contracts/ui_rendering.rs
 expression: sanitized
 ---
-cn:                       Oistein Sovik
-uid:                      oistes
-uidNumber:                361000
-uioPrimaryAffiliation:    ANSATT@373034
+cn:              Oistein Sovik
+uid:             oistes
+uidNumber:       361000
+uioPrimaryAffiliation: ANSATT@373034
 netgroups (44):
   ansatt-373034                       meta-ansatt-360000           rt-it-uu-kontakt                 vcs-dhcp
   ansatt-tekadm-373034                meta-ansatt-370000           rt-saksbehandler                 vcs-it-org
@@ -18,21 +18,17 @@ netgroups (44):
   mattermost-uio                      meta-ansatt-tekadm-373034    uio-tils                         vcs-virtprov-admins
   mattermost-uio-it                   meta-ansatt-tekadm-900000    usit                             vortex-opptak
   mattermost-usit                     postmaster-eo-migrerte       vcs-cfengine                     zabbix-iti-ops
-filegroups (4):           oistes
-                          ucore
-                          usit
-                          vortex-opptak
-dn:                       uid=oistes,cn=users,cn=system,dc=uio,dc=no
-eduPersonAffiliation (3): employee
-                          member
-                          staff
-gidNumber:                346297
-uioAffiliation:           ANSATT@373034
-objectClass (5):          uioMembership
-                          top
-                          account
-                          posixAccount
-                          uioAccountObject
-loginShell:               /local/gnu/bin/bash
-homeDirectory:            /uio/kant/usit-gsd-u1/oistes
-gecos:                    \istein S|vik
+filegroups (4):  oistes, ucore, usit, vortex-opptak
+dn:              uid=oistes,cn=users,cn=system,dc=uio,dc=no
+eduPersonAffiliation (3): employee, member, staff
+gidNumber:       346297
+uioAffiliation:  ANSATT@373034
+objectClass (5):
+  uioMembership
+  top
+  account
+  posixAccount
+  uioAccountObject
+loginShell:      /local/gnu/bin/bash
+homeDirectory:   /uio/kant/usit-gsd-u1/oistes
+gecos:           \istein S|vik

@@ -166,6 +166,16 @@ fn run_repl_cycle(
                     },
                 ));
             }
+            crate::repl::ReplEvent::Action(id @ ("pagination.prev" | "pagination.next")) => {
+                if state.session.native_context.pagination().is_none() {
+                    return Ok(crate::repl::ReplResult::Continue);
+                }
+                if id == "pagination.prev" {
+                    "prev"
+                } else {
+                    "next"
+                }
+            }
             crate::repl::ReplEvent::Action(
                 id @ ("output.page" | "output.editor" | "output.copy"),
             ) => {
@@ -492,7 +502,7 @@ mod tests {
             .find("PENDING")
             .expect("pending output should render");
 
-        assert!(output.starts_with("\x1b[2J\x1b[H"));
+        assert!(output.starts_with(&crate::repl::screen::clear_sequence()));
         assert!(intro_pos < help_pos);
         assert!(help_pos < pending_pos);
     }

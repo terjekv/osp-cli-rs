@@ -1808,6 +1808,9 @@ fn adapt_value_for_schema(
     let adapted = match schema.value_type {
         SchemaValueType::String => match value {
             ConfigValue::String(value) => ConfigValue::String(value.clone()),
+            ConfigValue::Integer(value) if key == "ui.mreg.gap" => {
+                ConfigValue::String(value.to_string())
+            }
             other => {
                 return Err(ConfigError::InvalidValueType {
                     key: key.to_string(),

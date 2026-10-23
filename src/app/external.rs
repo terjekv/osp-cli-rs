@@ -1477,6 +1477,7 @@ mod tests {
                         }],
                         context: None,
                         meta: ResponseMetaV1 {
+                            title_field: None,
                             context_not_found: false,
                             detail_columns: Vec::new(),
                             display_notes: Vec::new(),
@@ -1605,6 +1606,7 @@ mod tests {
                 messages: Vec::new(),
                 context: None,
                 meta: ResponseMetaV1 {
+                    title_field: None,
                     context_not_found: false,
                     detail_columns: Vec::new(),
                     display_notes: Vec::new(),
@@ -1789,6 +1791,7 @@ mod tests {
             }],
             context: None,
             meta: ResponseMetaV1 {
+                title_field: None,
                 context_not_found: false,
                 detail_columns: Vec::new(),
                 display_notes: Vec::new(),

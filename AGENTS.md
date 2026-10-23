@@ -2,6 +2,8 @@
 
 Repo-specific guidance for the generic OSP CLI.
 
+Read [the CLI contracts ADR](docs/adr/0001-terminal-contracts.md) before touching REPL, output or service code.
+
 ## OSP workspace knowledge
 
 When this repo is checked out alongside the OSP workspace wiki, read

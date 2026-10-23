@@ -358,8 +358,7 @@ fn mixed_guide_section_data_renders_through_canonical_pipeline_end_to_end() {
     let mreg = render(&output, &crate::ui::RenderRequest::new(&mreg_settings));
     for entry in [
         "Session",
-        "profile",
-        "prod",
+        "prod:",
         "theme",
         "rose-pine-moon",
         "Examples",

@@ -146,6 +146,8 @@ impl SectionStyleTokens {
 /// Context required to render section chrome with semantic styling.
 #[derive(Clone, Copy)]
 pub struct SectionRenderContext<'a> {
+    /// Effective content margin, also used for leading title rules.
+    pub margin: usize,
     /// Whether ANSI color output is enabled.
     pub color: bool,
     /// Active theme used for style resolution.
@@ -171,8 +173,6 @@ pub struct SectionDividerRequest<'a> {
     pub unicode: bool,
     /// Target divider width.
     pub width: Option<usize>,
-    /// Columns consumed before the title starts; at least two.
-    pub title_columns: usize,
     /// Theme and style overrides.
     pub render: SectionRenderContext<'a>,
     /// Border and title styling.
@@ -185,7 +185,7 @@ pub fn render_section_divider(title: &str, request: &SectionDividerRequest<'_>) 
         title,
         request.width,
         request.unicode,
-        request.title_columns,
+        request.render.margin,
     );
     format!(
         "{}{}{}",
@@ -222,6 +222,7 @@ pub fn render_section_divider(title: &str, request: &SectionDividerRequest<'_>) 
 ///     false,
 ///     Some(18),
 ///     SectionRenderContext {
+///         margin: 0,
 ///         color: false,
 ///         theme: &theme,
 ///         style_overrides: &StyleOverrides::default(),
@@ -315,7 +316,6 @@ fn render_ruled_section(
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode,
                 width,
-                title_columns: 2,
                 render,
                 tokens,
             },
@@ -341,7 +341,6 @@ fn render_ruled_section(
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode,
                 width,
-                title_columns: 2,
                 render,
                 tokens: SectionStyleTokens::same(tokens.border),
             },
@@ -557,6 +556,7 @@ mod tests {
             false,
             Some(18),
             SectionRenderContext {
+                margin: 0,
                 color: false,
                 theme: &theme,
                 style_overrides: &StyleOverrides::default(),
@@ -591,8 +591,8 @@ mod tests {
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode: false,
                 width: None,
-                title_columns: 2,
                 render: SectionRenderContext {
+                    margin: 0,
                     color: false,
                     theme: &crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME),
                     style_overrides: &crate::ui::StyleOverrides::default(),
@@ -622,8 +622,8 @@ mod tests {
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode: true,
                 width: Some(20),
-                title_columns: 2,
                 render: SectionRenderContext {
+                    margin: 0,
                     color: true,
                     theme: &theme,
                     style_overrides: &overrides,
@@ -635,7 +635,7 @@ mod tests {
             },
         );
 
-        assert!(divider.starts_with("\x1b[38;2;17;34;51m"));
+        assert!(divider.contains("\x1b[38;2;17;34;51m"));
         assert!(divider.contains("\x1b[38;2;68;85;102mInfo\x1b[0m"));
         assert!(divider.ends_with("\x1b[0m"));
     }
@@ -685,6 +685,7 @@ mod tests {
     fn top_bottom_section_frame_wraps_body_with_rules_unit() {
         let theme = crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME);
         let render = SectionRenderContext {
+            margin: 0,
             color: false,
             theme: &theme,
             style_overrides: &crate::ui::style::StyleOverrides::default(),
@@ -717,6 +718,7 @@ mod tests {
     fn square_section_frame_boxes_body_unit() {
         let theme = crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME);
         let render = SectionRenderContext {
+            margin: 0,
             color: false,
             theme: &theme,
             style_overrides: &crate::ui::style::StyleOverrides::default(),
@@ -744,6 +746,7 @@ mod tests {
     fn section_chrome_measures_wide_titles_in_terminal_columns_unit() {
         let theme = crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME);
         let render = SectionRenderContext {
+            margin: 0,
             color: false,
             theme: &theme,
             style_overrides: &crate::ui::style::StyleOverrides::default(),
@@ -755,7 +758,6 @@ mod tests {
             &crate::ui::section_chrome::SectionDividerRequest {
                 unicode: true,
                 width: Some(16),
-                title_columns: 2,
                 render,
                 tokens,
             },
@@ -782,6 +784,7 @@ mod tests {
     fn section_frame_styles_cover_none_bottom_and_round_unit() {
         let theme = crate::ui::theme::resolve_theme(crate::ui::theme::DEFAULT_THEME_NAME);
         let render = SectionRenderContext {
+            margin: 0,
             color: false,
             theme: &theme,
             style_overrides: &crate::ui::style::StyleOverrides::default(),

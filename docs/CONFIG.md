@@ -387,6 +387,17 @@ These keys currently drive user-visible rendering and REPL presentation:
     density; `hide` retains trailing-column removal and the combined fit summary
   - explicit/configured tables keep their chosen format; see [UI.md](UI.md#tables-and-mreg-layout)
     for the width, row-count and output-shape guards
+- `ui.mreg.min_width` / `ui.mreg.max_width`
+  - Positive display-column thresholds for cards; defaults 40 / 80.
+    Scalar lines determine width within these bounds and the terminal width;
+    lists cannot widen it. The maximum wins if below the minimum.
+- `ui.mreg.label_max`
+  - Positive aligned label-column cap (including separators); defaults to 18.
+    Longer labels use one space; wrapped values hang two spaces deeper.
+- `ui.mreg.gap`
+  - `auto | 0..10`; defaults to `auto` for all presentation presets
+  - blank lines between MREG cards; `auto` uses 0 for compact cards (including
+    one-line entries) and 1 for classic/nested cards
 - `ui.help.level`
   - `none | tiny | normal | verbose` (default `normal`, adjusted by `-v`/`-q`)
 - `theme.name`

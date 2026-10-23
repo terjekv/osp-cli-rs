@@ -55,3 +55,6 @@ mod process_support;
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[path = "e2e/pickers.rs"]
 mod pickers;
+
+#[path = "e2e/terminal_rules.rs"]
+mod terminal_rules;

@@ -141,7 +141,8 @@ pub fn read_text(question: &str) -> io::Result<Option<String>> {
     }
 }
 
-/// Asks a hidden question without echo or history. EOF and interruption cancel.
+/// Asks a hidden question without echo or history. EOF returns `None`; Ctrl-C
+/// returns `Interrupted` so startup can exit and commands can cancel.
 /// Replay and redirected input are rejected before writing the question.
 pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
     require_interactive()?;
@@ -149,14 +150,7 @@ pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
     let _open = PromptOpen::enter();
     match rpassword::prompt_password(super::sanitize_human_text(question)) {
         Ok(answer) => Ok(Some(answer)),
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::UnexpectedEof | io::ErrorKind::Interrupted
-            ) =>
-        {
-            Ok(None)
-        }
+        Err(error) if matches!(error.kind(), io::ErrorKind::UnexpectedEof) => Ok(None),
         Err(error) => Err(error),
     }
 }

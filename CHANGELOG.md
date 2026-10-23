@@ -28,6 +28,36 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 ### Changes
 
+- Always render single MREG records as classic cards, including producer titles:
+  colon labels, one field per line and counts only for multiple list items.
+  Derive card width from scalar lines so lists cannot widen cards; hang
+  longer lists and wrap prose with aligned continuations or a two-space hanging
+  block under long labels. Configure `ui.mreg.min_width` (40),
+  `ui.mreg.max_width` (80) and `ui.mreg.label_max` (18).
+
+- Use two columns per card level: titles at the margin, fields one level in,
+  and nested tables, objects and multiline lists hanging one further level in.
+  Keep lists inline when they fit on one line; cap label columns at 18 display
+  columns and let longer labels use their normal separator without padding.
+  Scalar wrapping keeps its own field's value column; compact grids still pack
+  short fields across columns.
+
+- Honor recommended MREG for flat record cards; omit empty card fields and
+  all-empty table columns unless `-v` requests detail. Multiple classic cards
+  consume their first field as a title. Optional plugin/output `title_field`
+  selects an explicit heading, including for single cards, without changing
+  exported data or DSL values.
+
+- Configure blank lines between MREG cards with `ui.mreg.gap=auto|0..10`.
+  The default preserves dense compact cards and spaced classic/nested cards.
+
+- Ignore paging keys when no paginated REPL result exists; typed `next` and
+  `prev` retain their guidance.
+
+- Deliver background notices above the complete multiline REPL prompt.
+
+- Preserve terminal scrollback when clearing the REPL for its intro or Ctrl-L.
+
 - Resolve unknown screen widths once at 100 columns instead of applying local
   card/list defaults to unlimited pager and export output. Classic card values
   wrap within the resolved screen width, including labels and indentation.
@@ -46,9 +76,6 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 
 - Size each compact grid value column from its own rendered values across
   records, with two spaces after labels and three spaces between pairs.
-
-- Indent compact card fields and wrapped continuations two columns under
-  double-rule titles, including the indent in width planning.
 
 - Limit the singleton card override to Table recommendations; other recommended
   formats retain precedence for single records.
@@ -80,7 +107,7 @@ matching `docs/releases/vX.Y.Z.md` file before a tag can be published.
 - Choose eligible automatic table/card layouts by visible values per rendered
   line, keeping tables on ties. Hidden columns alone no longer force cards.
 
-- Use compact ruled cards for multi-row flat MREG results: shared short-field
+- Use compact cards for multi-row flat MREG results: shared short-field
   grids, wrapped long fields and no blank card separators. Single and nested
   records retain the classic layout; title-only records use labelled entries.
 
