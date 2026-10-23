@@ -26,7 +26,11 @@
 //! - loader-pipeline assembly stays centralized here so callers do not invent
 //!   incompatible bootstrap rules
 
-use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 use directories::{BaseDirs, ProjectDirs};
 
@@ -225,6 +229,19 @@ impl RuntimeConfigPaths {
             "discovered runtime config paths"
         );
         paths
+    }
+
+    /// Uses the host's explicit root before ambient discovery, while retaining
+    /// the sealed path policy of [`RuntimeLoadOptions::defaults_only`].
+    pub(crate) fn from_config_root(config_root: Option<&Path>, load: RuntimeLoadOptions) -> Self {
+        if let Some(root) = config_root.filter(|_| !load.is_defaults_only()) {
+            return Self {
+                config_file: Some(root.join("config.toml")),
+                secrets_file: Some(root.join("secrets.toml")),
+                secrets_index_file: Some(root.join("secrets.index.toml")),
+            };
+        }
+        Self::discover_with(load)
     }
 
     fn from_env(env: &RuntimeEnvironment) -> Self {

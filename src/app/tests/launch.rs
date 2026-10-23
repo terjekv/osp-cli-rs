@@ -111,6 +111,104 @@ fn app_state_builder_tracks_session_public_helpers_from_resolved_config() {
     assert_eq!(failure.summary, "boom");
 }
 
+#[cfg(unix)]
+#[test]
+fn explicit_host_config_root_owns_repl_rebuilds_and_plugin_enablement() {
+    if crate::tests::isolated_test() {
+        return;
+    }
+    let root = make_temp_dir("osp-cli-host-root");
+    let ambient = make_temp_dir("osp-cli-ambient-root");
+    let plugins = make_temp_dir("osp-cli-host-plugins");
+    let cache = make_temp_dir("osp-cli-host-cache");
+    write_named_plugin(plugins.path(), "probe");
+    let config_path = root.join("config.toml");
+    let ambient_path = ambient.join("config.toml");
+    let ambient_config = r#"[default]
+user.name = "ambient-user"
+extensions.plugins.disabled = ["ambient-disabled"]
+"#;
+    std::fs::write(&ambient_path, ambient_config).unwrap();
+    unsafe { std::env::set_var("OSP_CONFIG_FILE", &ambient_path) };
+
+    let mut state = AppStateBuilder::from_resolved_config(
+        RuntimeContext::new(None, TerminalKind::Repl, None),
+        resolved_config(&[("user.name", "initial-user")]),
+    )
+    .unwrap()
+    .with_launch(
+        LaunchContext::default()
+            .with_config_root(Some(root.path().to_path_buf()))
+            .with_cache_root(Some(cache.path().to_path_buf()))
+            .with_plugin_dir(plugins.path().to_path_buf())
+            .with_runtime_load(crate::config::RuntimeLoadOptions::new().with_env(false)),
+    )
+    .build();
+    std::fs::write(
+        &config_path,
+        r#"[profile.default]
+user.name = "reloaded-user"
+extensions.plugins.disabled = ["kept-disabled"]
+"#,
+    )
+    .unwrap();
+    state = super::super::rebuild_repl_state(&state).expect("host config should reload");
+    assert_eq!(
+        state.runtime.config().get_string("user.name"),
+        Some("reloaded-user")
+    );
+
+    let (history, _history_root) = super::make_test_history(&mut state);
+    for (action, expected_disabled) in [
+        ("disable", vec!["kept-disabled", "probe"]),
+        ("enable", vec!["kept-disabled"]),
+    ] {
+        let executed = crate::repl::dispatch::execute_repl_plugin_line(
+            &mut state,
+            &history,
+            &format!("plugins {action} probe"),
+            None,
+        )
+        .expect("plugin enablement should persist");
+        assert!(matches!(
+            executed.result,
+            crate::repl::ReplResult::Restart { .. }
+        ));
+        let persisted: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            persisted["profile"]["default"]["extensions"]["plugins"]["disabled"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap())
+                .collect::<Vec<_>>(),
+            expected_disabled
+        );
+        assert_eq!(
+            std::fs::read_to_string(&ambient_path).unwrap(),
+            ambient_config
+        );
+        state = super::super::rebuild_repl_state(&state).expect("plugin config should reload");
+        assert_eq!(
+            state
+                .runtime
+                .config()
+                .get_string_list("extensions.plugins.disabled"),
+            Some(expected_disabled.into_iter().map(str::to_owned).collect())
+        );
+        assert_eq!(
+            state
+                .clients
+                .plugins()
+                .command_catalog()
+                .iter()
+                .any(|entry| entry.name == "probe"),
+            action == "enable"
+        );
+    }
+}
+
 #[test]
 fn app_state_builder_surfaces_invalid_theme_selection_errors() {
     let config = resolved_config(&[("theme.name", "definitely-not-a-theme")]);

@@ -85,6 +85,7 @@ fn set_enabled(
             Some(runtime.context.terminal_kind().as_config_terminal()),
         )
         .with_runtime_load(runtime.launch.runtime_load)
+        .with_config_root(clients.plugins().config_root().map(ToOwned::to_owned))
         .with_product_defaults(runtime.product_defaults().clone()),
     )?;
     let mut disabled = config
@@ -94,9 +95,12 @@ fn set_enabled(
     if !enabled {
         disabled.push(name.to_string());
     }
-    let path = RuntimeConfigPaths::discover()
-        .config_file
-        .ok_or_else(|| miette!("failed to resolve config.toml path for plugin config"))?;
+    let path = RuntimeConfigPaths::from_config_root(
+        clients.plugins().config_root(),
+        runtime.launch.runtime_load,
+    )
+    .config_file
+    .ok_or_else(|| miette!("failed to resolve config.toml path for plugin config"))?;
     set_scoped_value_in_toml(
         &path,
         "extensions.plugins.disabled",

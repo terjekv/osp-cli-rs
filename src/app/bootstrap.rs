@@ -23,6 +23,7 @@ use crate::config::{
 };
 use crate::ui::messages::MessageLevel;
 use miette::Result;
+use std::path::PathBuf;
 
 use crate::app::logging::{DeveloperLoggingConfig, FileLoggingConfig, parse_level_filter};
 use crate::app::{RuntimeContext, TerminalKind};
@@ -39,6 +40,7 @@ pub(crate) struct RuntimeConfigRequest {
     pub(crate) runtime_load: RuntimeLoadOptions,
     pub(crate) session_layer: Option<ConfigLayer>,
     pub(crate) product_defaults: ConfigLayer,
+    pub(crate) config_root: Option<PathBuf>,
 }
 
 impl RuntimeConfigRequest {
@@ -49,6 +51,7 @@ impl RuntimeConfigRequest {
             runtime_load: RuntimeLoadOptions::default(),
             session_layer: None,
             product_defaults: ConfigLayer::default(),
+            config_root: None,
         }
     }
 
@@ -64,6 +67,11 @@ impl RuntimeConfigRequest {
 
     pub(crate) fn with_product_defaults(mut self, product_defaults: ConfigLayer) -> Self {
         self.product_defaults = product_defaults;
+        self
+    }
+
+    pub(crate) fn with_config_root(mut self, config_root: Option<PathBuf>) -> Self {
+        self.config_root = config_root;
         self
     }
 }
@@ -107,7 +115,7 @@ pub(crate) fn prepare_runtime_config(
 ) -> std::result::Result<PreparedRuntimeConfig, ConfigError> {
     let paths = {
         let _phase = tracing::info_span!(target: "osp_startup", "config path discovery").entered();
-        RuntimeConfigPaths::discover_with(request.runtime_load)
+        RuntimeConfigPaths::from_config_root(request.config_root.as_deref(), request.runtime_load)
     };
     let options = runtime_resolve_options(&request);
     let (mut layers, base_resolved) = {
