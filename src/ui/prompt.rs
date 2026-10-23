@@ -148,10 +148,61 @@ pub fn read_hidden(question: &str) -> io::Result<Option<String>> {
     require_interactive()?;
     super::interrupt::prepare()?;
     let _open = PromptOpen::enter();
+    #[cfg(unix)]
+    let _terminal = HiddenInput::enter()?;
     match rpassword::prompt_password(super::sanitize_human_text(question)) {
         Ok(answer) => Ok(Some(answer)),
         Err(error) if matches!(error.kind(), io::ErrorKind::UnexpectedEof) => Ok(None),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+struct HiddenInput {
+    terminal: std::fs::File,
+    original: libc::termios,
+}
+
+#[cfg(unix)]
+impl HiddenInput {
+    fn enter() -> io::Result<Self> {
+        use std::os::fd::AsRawFd;
+
+        let terminal = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")?;
+        let fd = terminal.as_raw_fd();
+        let mut original = std::mem::MaybeUninit::uninit();
+        // SAFETY: fd is live and original has space for one termios value.
+        if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: tcgetattr initialized original on success.
+        let original = unsafe { original.assume_init() };
+        let guard = Self { terminal, original };
+        let mut hidden = original;
+        // rpassword prints before configuring input. Set its input flags first
+        // so Ctrl-C is queued as a byte as soon as the question is visible.
+        hidden.c_lflag &= !(libc::ECHO | libc::ECHONL | libc::ICANON | libc::ISIG);
+        hidden.c_cc[libc::VMIN] = 1;
+        hidden.c_cc[libc::VTIME] = 0;
+        // SAFETY: fd is live and hidden is an initialized termios value.
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &hidden) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(guard)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for HiddenInput {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+
+        // SAFETY: the owned terminal outlives this restoration, including unwind.
+        let _ =
+            unsafe { libc::tcsetattr(self.terminal.as_raw_fd(), libc::TCSANOW, &self.original) };
     }
 }
 
