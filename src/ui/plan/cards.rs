@@ -148,9 +148,12 @@ pub(super) fn plan_classic_rows(
                         row.key = label;
                         row.value = KeyValueValue::Scalar(joined);
                     } else {
+                        // Like osprov: the card width decides inline vs hanging;
+                        // a hanging grid uses the terminal width.
+                        let room = settings.width.unwrap_or(limit);
                         row.list_grid = Some(plan_list_grid(
                             &values,
-                            card_width.saturating_sub(CARD_INDENT).max(1),
+                            room.saturating_sub(indent + CARD_INDENT).max(1),
                             row.value_style.clone(),
                         ));
                     }
@@ -436,11 +439,12 @@ pub(super) fn plan_compact_cards(
                     });
                     let values = items.iter().map(display_value).collect::<Vec<_>>();
                     let values = values.iter().map(String::as_str).collect::<Vec<_>>();
-                    let mut grid = plan_list_grid(
-                        &values,
-                        width.saturating_sub(CARD_INDENT).max(1),
-                        field.value_style.clone(),
-                    );
+                    // Like osprov: a hanging grid uses the terminal width.
+                    let room = settings
+                        .width
+                        .unwrap_or(settings.mreg_max_width)
+                        .saturating_sub(settings.margin + 2 * CARD_INDENT);
+                    let mut grid = plan_list_grid(&values, room.max(1), field.value_style.clone());
                     grid.label_widths = vec![CARD_INDENT];
                     if let Some(first) = grid.column_widths.first_mut() {
                         *first += CARD_INDENT;
