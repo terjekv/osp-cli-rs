@@ -163,6 +163,8 @@ pub(crate) fn render_repl_intro(view: ReplViewContext<'_>, surface: &ReplSurface
         },
     );
     if !rendered.is_empty() {
+        // One blank row above the intro, so neither text nor artwork touches the top edge.
+        rendered.insert(0, '\n');
         rendered.push('\n');
     }
     rendered
