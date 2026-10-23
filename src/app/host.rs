@@ -909,19 +909,6 @@ pub fn render_report_message(
     rendered
 }
 
-pub(crate) fn has_report_detail(
-    err: &miette::Report,
-    level: crate::core::MessageLevel,
-    settings: &RenderSettings,
-) -> bool {
-    if level >= crate::core::MessageLevel::Info {
-        return false;
-    }
-    let summary = render_report_message(err, crate::core::MessageLevel::Success, settings);
-    let detail = render_report_message(err, crate::core::MessageLevel::Info, settings);
-    detail.trim() != summary.trim()
-}
-
 pub(crate) fn capture_missing_report_backtrace(err: &miette::Report) -> Option<Backtrace> {
     report_backtrace(err)
         .is_none()
@@ -1244,7 +1231,10 @@ pub(crate) fn report_unknown_repl_command(
     names: std::collections::BTreeSet<String>,
     scope: &crate::core::CommandScope,
 ) -> miette::Report {
-    let grammar = clap::Command::new("osp").subcommands(names.into_iter().map(clap::Command::new));
+    // The registry owns help too; do not synthesize a second help subcommand.
+    let grammar = clap::Command::new("osp")
+        .disable_help_subcommand(true)
+        .subcommands(names.into_iter().map(clap::Command::new));
     let words = std::iter::once(OsString::from("osp"))
         .chain(std::iter::once(OsString::from(command)))
         .chain(args.iter().map(OsString::from))

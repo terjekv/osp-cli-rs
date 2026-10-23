@@ -241,18 +241,12 @@ pub(crate) fn resolve_external_command_source(
     if matching.is_empty() {
         if !matches!(scope, crate::core::CommandScope::OneShot) {
             use clap::CommandFactory;
-            let mut names = crate::cli::Cli::command()
+            let names = crate::cli::Cli::command()
                 .get_subcommands()
                 .map(|child| child.get_name().to_owned())
-                .chain(
-                    crate::cli::repl_only_commands()
-                        .iter()
-                        .map(|child| child.get_name().to_owned()),
-                )
+                .chain(crate::repl::dispatch::builtins::command_names())
                 .chain(catalog.iter().map(|entry| entry.name.clone()))
-                .chain(["next".to_owned(), "prev".to_owned()])
                 .collect::<std::collections::BTreeSet<_>>();
-            names.remove("help");
             return Err(super::host::report_unknown_repl_command(
                 command, args, names, scope,
             ));

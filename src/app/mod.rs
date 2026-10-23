@@ -598,7 +598,7 @@ impl App {
                 );
                 let evidence = host::report_evidence(&err, verbosity);
                 sink::write_diagnostics(sink, &evidence.0, &error_render_settings);
-                let rendered = render_process_error(&err, &error_render_settings, verbosity, false);
+                let rendered = render_process_error(&err, &error_render_settings, verbosity, None);
                 if error_render_settings.format == OutputFormat::Json {
                     sink.write_stdout(&rendered);
                     if debug_level >= 2 {
@@ -681,9 +681,9 @@ pub(crate) fn render_process_error(
     err: &miette::Report,
     settings: &crate::ui::RenderSettings,
     verbosity: MessageLevel,
-    detail_hint: bool,
+    hint_action: Option<&str>,
 ) -> String {
-    let _ = (verbosity, detail_hint);
+    let _ = verbosity;
     let message = render_report_message(err, MessageLevel::Success, settings);
     if settings.format == OutputFormat::Json {
         let exit_code = classify_exit_code(err);
@@ -711,7 +711,10 @@ pub(crate) fn render_process_error(
         rendered.push_str(&format!("request-id: {id}\n"));
     }
     if let Some(action) = &error.action {
-        rendered.push_str(&format!("hint: {action}\n"));
+        rendered.push_str(&format!(
+            "hint: {action}{}\n",
+            hint_action.unwrap_or_default()
+        ));
     }
     rendered
 }

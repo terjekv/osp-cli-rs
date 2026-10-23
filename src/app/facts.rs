@@ -50,7 +50,6 @@ pub(crate) fn plugin_process_timeout(config: &ResolvedConfig) -> std::time::Dura
 }
 pub(crate) fn build_render_runtime(terminal_env: Option<&str>) -> RenderRuntime {
     RenderRuntime {
-        hint_action: None,
         command_scope: Default::default(),
         stdout_is_tty: std::io::stdout().is_terminal(),
         terminal: terminal_env.map(ToOwned::to_owned),

@@ -200,8 +200,6 @@ impl TableBorderOverride {
 /// resolved against.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RenderRuntime {
-    /// Inline key advertisement for the current REPL recovery hint.
-    pub hint_action: Option<String>,
     /// Where the reader types suggested commands.
     pub command_scope: crate::core::CommandScope,
     /// Whether the visible stdout path is a tty.

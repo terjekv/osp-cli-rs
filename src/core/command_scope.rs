@@ -23,15 +23,11 @@ impl CommandScope {
     /// Creates a failure with an executable hint retained independently of text.
     /// `suffix` supplies punctuation or an explanation after the command.
     pub fn run_hint(&self, message: impl Into<String>, line: &str, suffix: &str) -> CommandHint {
-        CommandHint {
-            command: line
-                .trim()
-                .strip_prefix("osp ")
-                .unwrap_or(line.trim())
-                .to_string(),
-            detail: super::CommandError::new(message)
+        CommandHint::new(
+            line,
+            super::CommandError::new(message)
                 .with_action(format!("Run {}{suffix}", self.command(line))),
-        }
+        )
     }
 
     /// Renders a root-form command for this prompt, accepting a leading `osp `.
@@ -82,6 +78,19 @@ impl CommandScope {
 pub struct CommandHint {
     pub(crate) command: String,
     detail: super::CommandError,
+}
+
+impl CommandHint {
+    pub(crate) fn new(command: &str, detail: super::CommandError) -> Self {
+        Self {
+            command: command
+                .trim()
+                .strip_prefix("osp ")
+                .unwrap_or(command.trim())
+                .to_owned(),
+            detail,
+        }
+    }
 }
 
 impl std::fmt::Display for CommandHint {

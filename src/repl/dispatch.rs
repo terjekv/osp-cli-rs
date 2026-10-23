@@ -423,7 +423,6 @@ fn execute_repl_line_inner(
                 err,
                 settings.clone(),
             ));
-            let mut settings = settings;
             let ui = &settings;
             if ui.debug_level > 0 {
                 state.session.record_prompt_timing(
@@ -438,8 +437,6 @@ fn execute_repl_line_inner(
             let plain_settings = ui.render_settings.plain_copy_settings();
             let remember = !is_repl_bang_request(&resolved)
                 && !is_doctor_request(&resolved, state.runtime.config.resolved());
-            let more = remember
-                && crate::app::host::has_report_detail(&err, ui.verbosity, &plain_settings);
             if remember {
                 state
                     .session
@@ -452,14 +449,17 @@ fn execute_repl_line_inner(
             if let Some(hints) = hints {
                 state.session.repl_feedback.remember_hints(hints);
             }
-            settings.render_settings.runtime.hint_action = crate::repl::lifecycle::hint_action(
+            let hint_action = crate::repl::lifecycle::hint_action(
                 state.runtime.config.resolved(),
                 ui.render_settings.format,
                 hint_count,
             );
-            let ui = &settings;
-            let rendered =
-                crate::app::render_process_error(&err, &ui.render_settings, ui.verbosity, more);
+            let rendered = crate::app::render_process_error(
+                &err,
+                &ui.render_settings,
+                ui.verbosity,
+                hint_action.as_deref(),
+            );
             if ui.render_settings.format == crate::core::output::OutputFormat::Json {
                 sink.write_stdout(&rendered);
                 if ui.debug_level >= 2 {

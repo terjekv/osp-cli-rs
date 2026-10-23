@@ -111,6 +111,7 @@ impl osp_cli::NativeCommand for RecoveryService {
                 .arg(Arg::new("detail").long("detail").action(ArgAction::SetTrue))
         };
         Command::new("orch")
+            .subcommand(Command::new("recover"))
             .subcommand(Command::new("show").arg(Arg::new("name").required(true)))
             .subcommand(Command::new("host").subcommand(info()))
             .subcommand(Command::new("hosts").subcommand(info()))
@@ -121,6 +122,22 @@ impl osp_cli::NativeCommand for RecoveryService {
         args: &[String],
         _: &osp_cli::NativeCommandContext<'_>,
     ) -> anyhow::Result<osp_cli::NativeCommandOutcome> {
+        if args == ["recover"] {
+            return Ok(osp_cli::NativeCommandOutcome::Response(Box::new(
+                serde_json::from_value(serde_json::json!({
+                    "protocol_version": 1,
+                    "ok": false,
+                    "data": null,
+                    "error": {
+                        "code": "recovery_required",
+                        "message": "Choose a recovery command.",
+                        "details": {"action": "Did you mean orch show?", "command": "orch show"}
+                    },
+                    "messages": [{"level": "info", "text": "hint: Read the fixture notes."}],
+                    "meta": {}
+                }))?,
+            )));
+        }
         let path = std::path::PathBuf::from(std::env::var_os("OSP_PLUGIN_PATH").unwrap());
         std::fs::write(path.join("executed"), format!("{}\n", args.join("\n")))?;
         Ok(osp_cli::NativeCommandOutcome::Help(
@@ -286,6 +303,23 @@ fn recovery_key_inserts_editable_scoped_command() {
         "show\ntarget\n"
     );
     std::fs::remove_file(native.join("executed")).unwrap();
+
+    session.type_text("orch recover --verbose");
+    let mark = session.output_len();
+    session.write_bytes(b"\r");
+    assert!(session.wait_for_plain_output_since(mark, "Choose a recovery command.", HANG_TIMEOUT));
+    assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
+    let failure = session.output_since(mark);
+    assert!(
+        failure.contains("hint: Read the fixture notes.\r\n")
+            || failure.contains("hint: Read the fixture notes.\n"),
+        "{failure}"
+    );
+    assert!(
+        failure.contains("hint: Did you mean orch show? (Alt+Enter inserts)"),
+        "{failure}"
+    );
+    assert_eq!(failure.matches("Alt+Enter").count(), 1, "{failure}");
 
     session.type_text("orch");
     let mark = session.output_len();

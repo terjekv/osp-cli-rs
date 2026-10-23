@@ -1376,8 +1376,18 @@ fn run_external_plugin_command(
         result.exit_code = raw.status;
         result.preserve_process_output = result.failure_report.is_none();
         if result.failure_report.is_none() {
-            result.hint_command = Some("doctor plugins".into());
-            result.stderr_text.push_str(&format!("error: Plugin {command} crashed (exit status {}).\nhint: Run osp doctor plugins.\n", raw.status));
+            result.failure_report = Some(miette::Report::new(
+                invocation
+                    .ui
+                    .render_settings
+                    .runtime
+                    .command_scope
+                    .run_hint(
+                        format!("Plugin {command} crashed (exit status {}).", raw.status),
+                        "doctor plugins",
+                        ".",
+                    ),
+            ));
         }
     }
     let backend = result

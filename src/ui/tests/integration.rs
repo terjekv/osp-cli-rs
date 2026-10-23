@@ -16,7 +16,6 @@ fn export_settings(format: OutputFormat) -> RenderSettings {
     settings.table_overflow = TableOverflow::None;
     settings.table_border = TableBorderStyle::None;
     settings.runtime = RenderRuntime {
-        hint_action: None,
         command_scope: Default::default(),
         stdout_is_tty: false,
         terminal: Some("dumb".into()),

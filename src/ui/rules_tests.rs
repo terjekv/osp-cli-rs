@@ -9,7 +9,6 @@ fn settings(format: OutputFormat) -> RenderSettings {
     settings.width = Some(95);
     settings.runtime = RenderRuntime {
         stdout_is_tty: true,
-        hint_action: None,
         command_scope: crate::core::CommandScope::ReplRoot,
         ..Default::default()
     };
