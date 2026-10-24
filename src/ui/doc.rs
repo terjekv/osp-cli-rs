@@ -22,6 +22,7 @@ pub enum Block {
     Blank,
     Rule,
     Paragraph(ParagraphBlock),
+    Preformatted(Vec<Vec<crate::core::document::TextSpan>>),
     Section(SectionBlock),
     Table(TableBlock),
     Entries(EntriesBlock),

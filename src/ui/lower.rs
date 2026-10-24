@@ -325,6 +325,7 @@ fn lower_document_blocks(
                 indent: 0,
                 inline_markup: true,
             })],
+            DocBlock::Preformatted { lines } => vec![Block::Preformatted(lines.clone())],
             DocBlock::Entries { entries } => {
                 let mut block =
                     entries_block_with_defaults(entries, if inside { 0 } else { 2 }, None);

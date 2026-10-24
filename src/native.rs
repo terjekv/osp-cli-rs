@@ -311,6 +311,9 @@ pub struct NativeProgressEvent {
     /// Optional structured terminal snapshot. Event data remains the stream
     /// and DSL contract; filtered invocations never display this snapshot.
     pub frame: Option<NativeProgressFrame>,
+    /// Optional semantic presentation for an unfiltered human terminal.
+    /// Machine streams and transformed invocations keep `data` as their contract.
+    pub document: Option<crate::core::Document>,
 }
 
 /// Accumulated structured state for a live terminal replacement frame.
@@ -320,6 +323,8 @@ pub struct NativeProgressFrame {
     pub data: serde_json::Value,
     /// Preferred human projection and format for the snapshot.
     pub meta: ResponseMetaV1,
+    /// Semantic presentation of the snapshot, when supplied by its producer.
+    pub document: Option<crate::core::Document>,
 }
 
 impl NativeProgressEvent {
@@ -331,6 +336,7 @@ impl NativeProgressEvent {
             meta: ResponseMetaV1::default(),
             replay: false,
             frame: None,
+            document: None,
         }
     }
 
@@ -346,11 +352,33 @@ impl NativeProgressEvent {
         self
     }
 
+    /// Supplies semantic content for unfiltered human terminal presentation.
+    pub fn with_document(mut self, document: crate::core::Document) -> Self {
+        self.document = Some(document);
+        self
+    }
+
     /// Uses a structured snapshot for unfiltered human terminal updates.
     pub fn with_frame(mut self, data: impl Into<serde_json::Value>, meta: ResponseMetaV1) -> Self {
         self.frame = Some(NativeProgressFrame {
             data: data.into(),
             meta,
+            document: None,
+        });
+        self
+    }
+
+    /// Uses a semantic terminal snapshot while retaining its plain data fallback.
+    pub fn with_frame_document(
+        mut self,
+        data: impl Into<serde_json::Value>,
+        document: crate::core::Document,
+        meta: ResponseMetaV1,
+    ) -> Self {
+        self.frame = Some(NativeProgressFrame {
+            data: data.into(),
+            meta,
+            document: Some(document),
         });
         self
     }

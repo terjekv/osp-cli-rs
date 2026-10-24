@@ -24,6 +24,17 @@ fn emit_blocks(blocks: &[Block]) -> String {
             Block::Blank => out.push(String::new()),
             Block::Rule => out.push("---".to_string()),
             Block::Paragraph(block) => out.push(emit_paragraph(block)),
+            Block::Preformatted(lines) => out.push(
+                lines
+                    .iter()
+                    .map(|line| {
+                        line.iter()
+                            .map(|span| span.text.as_str())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
             Block::Section(block) => out.push(emit_section(block)),
             Block::Table(block) => out.push(emit_table(block)),
             Block::Entries(block) => out.push(emit_entries(block)),

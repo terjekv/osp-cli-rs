@@ -984,7 +984,7 @@ mod integration;
 mod output_support;
 #[test]
 fn contextual_messages_preserve_event_order_and_theme_controls() {
-    use crate::core::MessageLevel;
+    use crate::core::{MessageLevel, TextRole, TextSpan};
     use crate::ui::messages::MessageBuffer;
     let mut messages = MessageBuffer::new();
     messages.warning("Task still running.");
@@ -1013,6 +1013,33 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
     assert!(rendered.contains("\x1b[38;2;241;250;140m"));
     assert!(rendered.contains("\x1b[1;38;2;255;85;85m"));
     assert!(rendered.contains("\x1b[38;2;248;248;242mNo matching host found."));
+    let document = Document {
+        blocks: vec![DocBlock::Preformatted {
+            lines: vec![vec![
+                TextSpan::new("label ", TextRole::Key),
+                TextSpan::new("activity ", TextRole::Info),
+                TextSpan::new("complete ", TextRole::Success),
+                TextSpan::new("attention ", TextRole::Warning),
+                TextSpan::new("failed ", TextRole::Error),
+                TextSpan::new("pending ", TextRole::Muted),
+                TextSpan::new("message", TextRole::Text),
+            ]],
+        }],
+    }
+    .to_output_result();
+    settings.width = Some(120);
+    let rendered = render(&document, &crate::ui::RenderRequest::new(&settings));
+    for styled in [
+        "\x1b[38;2;189;147;249mlabel ",
+        "\x1b[38;2;139;233;253mactivity ",
+        "\x1b[38;2;80;250;123mcomplete ",
+        "\x1b[38;2;241;250;140mattention ",
+        "\x1b[1;38;2;255;85;85mfailed ",
+        "\x1b[38;2;104;121;173mpending ",
+        "\x1b[38;2;248;248;242mmessage",
+    ] {
+        assert!(rendered.contains(styled), "{rendered:?}");
+    }
     settings.color = ColorMode::Never;
     settings.unicode = UnicodeMode::Never;
     let uncolored = crate::ui::render_messages(
@@ -1020,6 +1047,10 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
         &crate::ui::MessageRequest::new(&settings, MessageLevel::Warning),
     );
     assert!(uncolored.contains("Host lookup failed") && !uncolored.contains('\x1b'));
+    assert_eq!(
+        render(&document, &crate::ui::RenderRequest::new(&settings)),
+        "label activity complete attention failed pending message\n"
+    );
 }
 
 #[path = "tests/guide.rs"]

@@ -389,6 +389,13 @@ When implementing native commands:
   frame. The shared renderer renders that snapshot only on an unfiltered human
   terminal; JSON, redirected output and DSL always consume the original event.
   Set `progress_replace: true` on the frame metadata to replace it safely
+- for authored terminal lines, use `DocBlock::Preformatted` with `TextSpan`s
+  carrying explicit `TextRole`s. The renderer resolves those roles through the
+  selected theme and colour settings, sanitizes controls and fits terminal
+  width. `with_frame_document(snapshot, document, meta)` attaches this semantic
+  view to a stream frame; `with_document(document)` attaches it to preliminary
+  progress or a notice. These views apply only to unfiltered human terminals;
+  machine formats, redirected streams and DSL continue to consume event data
 - `emit_progress` remains preliminary human progress on stderr, independent of
   the streaming endpoint contract. Return the final document through the normal
   `NativeCommandOutcome` path; stream metadata never replaces that document

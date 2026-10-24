@@ -882,20 +882,34 @@ impl NativeProgressRenderer<'_, '_> {
         stages: &[String],
         stream: bool,
     ) -> anyhow::Result<()> {
-        let json = self.ui.render_settings.format == crate::core::OutputFormat::Json;
+        let human = !matches!(
+            self.ui.render_settings.format,
+            crate::core::OutputFormat::Json
+                | crate::core::OutputFormat::Csv
+                | crate::core::OutputFormat::Tsv
+        );
         if stream {
             event.meta.preserve_json_document = true;
             event.meta.row_path = None;
-            if !json
+            if human
                 && stages.is_empty()
                 && self.can_present.get()
                 && let Some(frame) = event.frame.take()
             {
                 event.data = frame.data;
                 event.meta = frame.meta;
+                event.document = frame.document;
             }
         }
         let mut result = CommandOutput::from_data(event.data, &event.meta, &event.messages, stages);
+        if human
+            && stages.is_empty()
+            && self.can_present.get()
+            && let Some(document) = event.document
+        {
+            result.body = super::CommandBody::Output(Box::new(document.to_output_result()));
+            result.format_hint = None;
+        }
         result
             .apply_stages(stages)
             .map_err(|err| anyhow::Error::from_boxed(err.into()))?;

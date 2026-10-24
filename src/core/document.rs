@@ -128,6 +128,13 @@ impl Document {
                             roles.push(DocumentRowRole::Text);
                         }
                     }
+                    DocBlock::Preformatted { lines } => {
+                        for line in lines {
+                            let text: String = line.iter().map(|span| span.text.as_str()).collect();
+                            rows.push(crate::row! { "section" => section, "text" => text });
+                            roles.push(DocumentRowRole::Text);
+                        }
+                    }
                     DocBlock::List { items } => {
                         for item in items {
                             for text in format!("- {item}").lines() {
@@ -662,6 +669,11 @@ pub enum DocBlock {
         /// Paragraph contents.
         text: String,
     },
+    /// Authored lines with explicit semantic styling and literal spacing.
+    Preformatted {
+        /// Ordered lines; spans on each line are concatenated without separators.
+        lines: Vec<Vec<TextSpan>>,
+    },
     /// Named entries such as commands, arguments, and options.
     Entries {
         /// Ordered entries.
@@ -677,6 +689,48 @@ pub enum DocBlock {
         /// The JSON payload.
         value: Value,
     },
+}
+
+/// Producer-declared meaning of a text span, resolved through the UI theme.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextRole {
+    /// Ordinary text.
+    #[default]
+    Text,
+    /// Secondary context or inactive content.
+    Muted,
+    /// Informational activity.
+    Info,
+    /// Successful completion.
+    Success,
+    /// A warning or condition needing attention.
+    Warning,
+    /// A failed operation.
+    Error,
+    /// A label or identifier.
+    Key,
+}
+
+/// Literal text with a semantic role, never a terminal escape sequence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextSpan {
+    /// Literal content; terminal controls are sanitized by human projection.
+    pub text: String,
+    /// Presentation intent, excluded from canonical document exports.
+    #[serde(skip)]
+    pub role: TextRole,
+}
+
+impl TextSpan {
+    /// Associates literal content with a theme-resolved semantic role.
+    pub fn new(text: impl Into<String>, role: TextRole) -> Self {
+        Self {
+            text: text.into(),
+            role,
+        }
+    }
 }
 
 /// One named entry in a document.

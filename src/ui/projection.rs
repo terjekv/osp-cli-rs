@@ -606,6 +606,11 @@ fn sanitize_document(document: &mut Document) {
                     blocks(body);
                 }
                 DocBlock::Paragraph { text } => *text = sanitize_human_text(text),
+                DocBlock::Preformatted { lines } => {
+                    for span in lines.iter_mut().flatten() {
+                        span.text = sanitize_human_text(&span.text);
+                    }
+                }
                 DocBlock::Entries { entries } => {
                     for entry in entries {
                         entry.name = sanitize_human_text(&entry.name);

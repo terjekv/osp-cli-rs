@@ -177,26 +177,42 @@ fn repl_margin_applies_once_and_exports_have_none() {
 
 #[test]
 fn colored_prose_wraps_without_losing_text() {
+    use crate::core::{TextRole, TextSpan};
+
     let mut settings = settings(OutputFormat::Guide);
     settings.width = Some(32);
     settings.color = crate::core::ColorMode::Always;
     settings.mode = crate::core::RenderMode::Rich;
     settings.theme_name = "dracula".into();
     let text = "Every word in this deliberately long paragraph must survive wrapping across several short terminal lines.";
-    let output = Document {
-        blocks: vec![DocBlock::Paragraph { text: text.into() }],
+    for block in [
+        DocBlock::Paragraph { text: text.into() },
+        DocBlock::Preformatted {
+            lines: vec![vec![
+                TextSpan::new("Every word in this ", TextRole::Info),
+                TextSpan::new("deliberately long paragraph ", TextRole::Success),
+                TextSpan::new(
+                    "must survive wrapping across several short terminal lines.",
+                    TextRole::Warning,
+                ),
+            ]],
+        },
+    ] {
+        let output = Document {
+            blocks: vec![block],
+        }
+        .to_output_result();
+        let rendered = render(&output, &RenderRequest::new(&settings));
+        assert!(rendered.contains('\x1b'));
+        for line in rendered.lines() {
+            assert!(crate::ui::text::display_width(line) <= 32, "{line:?}");
+        }
+        let plain = crate::ui::sanitize_human_text(&rendered);
+        assert_eq!(
+            plain.split_whitespace().collect::<Vec<_>>(),
+            text.split_whitespace().collect::<Vec<_>>()
+        );
     }
-    .to_output_result();
-    let rendered = render(&output, &RenderRequest::new(&settings));
-    assert!(rendered.contains('\x1b'));
-    for line in rendered.lines() {
-        assert!(crate::ui::text::display_width(line) <= 32, "{line:?}");
-    }
-    let plain = crate::ui::sanitize_human_text(&rendered);
-    assert_eq!(
-        plain.split_whitespace().collect::<Vec<_>>(),
-        text.split_whitespace().collect::<Vec<_>>()
-    );
 }
 
 #[test]

@@ -49,6 +49,14 @@ fn document_serialization_preserves_parsed_and_authored_order_unit() {
     for document in [
         help.clone(),
         Document::from_markdown_template("## OSP\nWelcome\n\n{{ help }}\n\n## Tail\nDone", &help),
+        Document {
+            blocks: vec![DocBlock::Preformatted {
+                lines: vec![vec![
+                    crate::core::TextSpan::new("Ready: ", crate::core::TextRole::Key),
+                    crate::core::TextSpan::new("complete", crate::core::TextRole::Success),
+                ]],
+            }],
+        },
     ] {
         let output = document.to_output_result();
         let json = render(

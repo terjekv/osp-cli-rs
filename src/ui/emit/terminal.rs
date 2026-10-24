@@ -38,6 +38,7 @@ fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
                 }
             }
             Block::Paragraph(block) => out.push(emit_paragraph(block, settings)),
+            Block::Preformatted(lines) => out.push(emit_preformatted(lines, settings)),
             Block::Section(block) => out.push(emit_section(block, settings)),
             Block::Table(block) => out.push(emit_table(block, settings)),
             Block::Entries(block) => out.push(emit_entries(block, settings)),
@@ -47,6 +48,42 @@ fn emit_blocks(blocks: &[Block], settings: &ResolvedRenderSettings) -> String {
         }
     }
     out.join("\n")
+}
+
+fn emit_preformatted(
+    lines: &[Vec<crate::core::document::TextSpan>],
+    settings: &ResolvedRenderSettings,
+) -> String {
+    use crate::core::document::TextRole;
+
+    let styler = ThemeStyler::new(settings.color, &settings.theme, &settings.style_overrides);
+    let styled = lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|span| {
+                    let token = match span.role {
+                        TextRole::Text => StyleToken::Text,
+                        TextRole::Muted => StyleToken::Muted,
+                        TextRole::Info => StyleToken::Info,
+                        TextRole::Success => StyleToken::Success,
+                        TextRole::Warning => StyleToken::Warning,
+                        TextRole::Error => StyleToken::Error,
+                        TextRole::Key => StyleToken::Key,
+                    };
+                    styler.paint(&span.text, token)
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let fitted = match settings.width {
+        Some(width) => {
+            super::shared::fit_prose(&styled, width.saturating_sub(settings.margin).max(1))
+        }
+        None => styled,
+    };
+    indent_lines(&fitted, settings.margin)
 }
 
 fn emit_paragraph(block: &ParagraphBlock, settings: &ResolvedRenderSettings) -> String {
