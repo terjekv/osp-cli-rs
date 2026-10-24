@@ -27,7 +27,10 @@ least four characters and compares the leading label at a Jaro-Winkler floor of
 
 ## While You Type
 
-- **Tab** completes like a shell first: a single match, or an exact word no
+- **Tab** after an exact long flag that takes a value (for example,
+  `--vlan`) opens its value choices directly; selection inserts the separating
+  space. Partial flag names still complete as flag names.
+- **Tab** otherwise completes like a shell first: a single match, or an exact word no
   other choice extends, is inserted with a trailing space; otherwise the word
   grows to the choices' shared prefix. When there is nothing to add, Tab opens
   the menu with nothing selected, and further Tabs (Shift-Tab backwards) put

@@ -127,7 +127,7 @@ impl CompletionEngine {
     fn analyze_command_parts(
         &self,
         mut parsed: ParsedLine,
-        cursor: CursorState,
+        mut cursor: CursorState,
     ) -> CompletionAnalysis {
         let context = self.prepare_cursor_command_state(
             &mut parsed.cursor_cmd,
@@ -139,6 +139,23 @@ impl CompletionEngine {
         let (_, full_path) = TreeResolver::new(self.suggester.tree())
             .resolve_context(&command_path_tokens(&parsed.full_cmd));
         canonicalize_command_path(&mut parsed.full_cmd, &full_path);
+        // An exact long value flag is ready for its value menu without an
+        // extra space. Keep the flag in the command and insert after it.
+        let resolver = TreeResolver::new(self.suggester.tree());
+        let flag_scope = resolver.resolve_exact_or_root(&context.flag_scope_path);
+        if cursor.token_stub.starts_with("--")
+            && cursor.raw_stub == cursor.token_stub
+            && flag_scope
+                .flags
+                .get(&cursor.token_stub)
+                .is_some_and(|flag| !flag.flag_only)
+            && matches!(parsed.cursor_cmd.tail().last(), Some(TailItem::Flag(flag))
+                if flag.name == cursor.token_stub && flag.values.is_empty())
+        {
+            cursor.token_stub.clear();
+            cursor.raw_stub.clear();
+            cursor.replace_range.start = cursor.replace_range.end;
+        }
         let request = self.build_completion_request(&parsed.cursor_cmd, &cursor, &context);
 
         CompletionAnalysis {

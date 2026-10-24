@@ -271,6 +271,9 @@ impl OspCompletionMenu {
         let Some(first) = values.first() else {
             return false;
         };
+        if needs_space_prefix(editor.get_buffer(), first.span.start, first.span.end) {
+            return false;
+        }
         let stub = editor
             .get_buffer()
             .get(first.span.start..first.span.end)
