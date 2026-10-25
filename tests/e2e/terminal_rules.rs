@@ -329,7 +329,10 @@ fn recovery_key_inserts_editable_scoped_command() {
     assert!(session.wait_for_editor_since(mark, HANG_TIMEOUT));
     let hint = session.output_since(mark);
     assert!(
-        hint.contains("? (Alt+Enter inserts, again to cycle)"),
+        hint.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("? (Alt+Enter inserts, again to cycle)"),
         "{hint}"
     );
     assert!(hint.contains("host info team\\ x --detail"), "{hint}");

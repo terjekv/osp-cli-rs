@@ -716,7 +716,11 @@ pub(crate) fn render_process_error(
             hint_action.unwrap_or_default()
         ));
     }
-    rendered
+    let resolved = crate::ui::resolve_settings(settings, crate::ui::RenderTarget::screen(settings));
+    resolved.width.map_or_else(
+        || rendered.clone(),
+        |width| crate::ui::fit_prose(&rendered, width.saturating_sub(resolved.margin).max(1)),
+    )
 }
 
 /// Emits a levelled message before a command host or credential flow resumes.

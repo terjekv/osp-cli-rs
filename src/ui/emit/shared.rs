@@ -34,7 +34,7 @@ pub(crate) fn apply_margin(text: String, margin: usize) -> String {
 }
 
 /// Fits already styled prose without collapsing authored label alignment.
-pub(super) fn fit_prose(text: &str, width: usize) -> String {
+pub(crate) fn fit_prose(text: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthChar;
 
     let mut lines = Vec::new();

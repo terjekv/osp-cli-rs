@@ -58,6 +58,19 @@ pub(super) fn render_messages(buffer: &MessageBuffer, request: &super::MessageRe
         MessageLayout::Compact => render_compact(&buffer, request.max_level, &styler),
         MessageLayout::Grouped => render_full(&buffer, request.max_level, &styler, chrome),
     };
+    let rendered = if request.layout != MessageLayout::Grouped {
+        settings.width.map_or_else(
+            || rendered.clone(),
+            |width| {
+                crate::ui::emit::shared::fit_prose(
+                    &rendered,
+                    width.saturating_sub(settings.margin).max(1),
+                )
+            },
+        )
+    } else {
+        rendered
+    };
     if rendered.is_empty() || rendered.ends_with('\n') {
         rendered
     } else {
