@@ -727,28 +727,7 @@ fn display_output(
                             }
                         })
                     }
-                    DisplayRule::Labels { field, labels } => {
-                        map_display_values(&mut original, field, &|value| {
-                            fn label(value: &mut Value, labels: &BTreeMap<String, String>) {
-                                match value {
-                                    Value::Array(items) => {
-                                        items.iter_mut().for_each(|value| label(value, labels))
-                                    }
-                                    Value::Object(map) => {
-                                        *map = std::mem::take(map)
-                                            .into_iter()
-                                            .map(|(key, mut value)| {
-                                                label(&mut value, labels);
-                                                (labels.get(&key).cloned().unwrap_or(key), value)
-                                            })
-                                            .collect()
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            label(value, labels);
-                        })
-                    }
+                    DisplayRule::Labels { .. } => {}
                     DisplayRule::Timestamp { field } => {
                         map_display_values(&mut original, field, &|value| {
                             if let Some(text) = value.as_str()
@@ -871,9 +850,13 @@ fn display_output(
                                     .iter()
                                     .map(|part| match part {
                                         DisplayPart::Literal { text } => Some(text.clone()),
-                                        DisplayPart::Field { field } => {
-                                            display_path(value, field).map(display_value)
-                                        }
+                                        DisplayPart::Field { field } => display_path(value, field)
+                                            .map(|value| {
+                                                value
+                                                    .as_str()
+                                                    .and_then(super::format_local_timestamp)
+                                                    .unwrap_or_else(|| display_value(value))
+                                            }),
                                     })
                                     .collect();
                                 if let Some(text) = text {
@@ -984,6 +967,36 @@ fn display_output(
             } else {
                 original.as_object().cloned().unwrap_or_default()
             };
+            for rule in &output.meta.display_rules {
+                if let crate::core::DisplayRule::Labels { field, labels } = rule {
+                    let mut value = Value::Object(std::mem::take(row));
+                    if let Some(columns) = &output.meta.display_columns {
+                        let headings = display_labels(output, columns);
+                        for (column, heading) in columns.iter().zip(headings) {
+                            if column == field
+                                || column.starts_with(&format!("{field}."))
+                                || column.starts_with(&format!("{field}/"))
+                            {
+                                if let Some(value) = value.get_mut(&heading) {
+                                    label_record_keys(value, labels);
+                                }
+                            } else if let Some(relative) = field.strip_prefix(&format!("{column}."))
+                            {
+                                if let Some(value) = value.get_mut(&heading) {
+                                    map_display_values(value, relative, &|value| {
+                                        label_record_keys(value, labels)
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        map_display_values(&mut value, field, &|value| {
+                            label_record_keys(value, labels)
+                        });
+                    }
+                    *row = value.as_object().cloned().unwrap_or_default();
+                }
+            }
             row_styles.push(styles);
         }
         if let Some(columns) = &output.meta.display_columns {
@@ -1325,7 +1338,17 @@ fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Va
     fn visit(value: &mut Value, path: &[String], apply: &impl Fn(&mut Value)) {
         if let Some((key, rest)) = path.split_first() {
             match value {
-                Value::Array(items) => items.iter_mut().for_each(|item| visit(item, path, apply)),
+                Value::Array(items) => {
+                    if key == "*" {
+                        items.iter_mut().for_each(|item| visit(item, rest, apply));
+                    } else if let Ok(index) = key.parse::<usize>() {
+                        if let Some(item) = items.get_mut(index) {
+                            visit(item, rest, apply);
+                        }
+                    } else {
+                        items.iter_mut().for_each(|item| visit(item, path, apply));
+                    }
+                }
                 Value::Object(map) => {
                     if let Some(value) = map.get_mut(key) {
                         visit(value, rest, apply);
@@ -1343,4 +1366,22 @@ fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Va
         field_path(value, selector)
     };
     visit(value, &path, apply);
+}
+
+fn label_record_keys(value: &mut Value, labels: &BTreeMap<String, String>) {
+    match value {
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|value| label_record_keys(value, labels)),
+        Value::Object(map) => {
+            *map = std::mem::take(map)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    label_record_keys(&mut value, labels);
+                    (labels.get(&key).cloned().unwrap_or(key), value)
+                })
+                .collect()
+        }
+        _ => {}
+    }
 }

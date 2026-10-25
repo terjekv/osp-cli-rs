@@ -23,7 +23,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 /// Producer-declared human display changes. Conditions use original row values;
-/// rules never change canonical data or DSL field values. Unless a literal key
+/// rules never change canonical data or DSL field values. Collection rules accept
+/// `*` for array members and numeric indices for one member. Unless a literal key
 /// is required, selectors accept top-level keys, dotted paths, or JSON Pointers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
