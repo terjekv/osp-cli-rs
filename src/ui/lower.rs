@@ -401,13 +401,9 @@ fn lower_document_blocks(
     lowered
 }
 
-/// `key (N):` for several rows; a single row needs no count.
+/// Every record-list subtable carries its row count, including a singleton.
 fn section_title(key: &str, count: usize) -> String {
-    if count == 1 {
-        format!("{key}:")
-    } else {
-        format!("{key} ({count}):")
-    }
+    format!("{key} ({count}):")
 }
 
 fn lower_value_doc(output: &OutputResult) -> Doc {

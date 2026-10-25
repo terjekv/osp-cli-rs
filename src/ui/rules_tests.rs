@@ -81,6 +81,7 @@ fn nested_blocks_use_one_indent() {
         "Name": "host.example.org",
         "LongParentLabel": "parent-value",
         "Nested": {"X": "child-value", "Inner": {"Y": "grandchild-value"}},
+        "Single": [{"Address":"192.0.2.3", "TTL":300}],
         "Records": [{"Address":"192.0.2.1", "TTL":300}, {"Address":"192.0.2.2", "TTL":300}],
         "Roles": ["first-long-role-name", "second-long-role-name", "third-long-role-name", "fourth-long-role-name"]
     })));
@@ -88,6 +89,8 @@ fn nested_blocks_use_one_indent() {
     request.target = RenderTarget::ReplScreen;
     output.meta.title_field = Some("Name".into());
     let output = render(&output, &request);
+    assert!(output.contains("Single (1):"), "{output}");
+    assert!(output.contains("Records (2):"), "{output}");
     let lines: Vec<_> = output.lines().collect();
     let indent = |line: &str| line.len() - line.trim_start().len();
     let title = lines
