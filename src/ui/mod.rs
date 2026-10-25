@@ -44,6 +44,7 @@ use crate::core::output::OutputFormat;
 use crate::core::output_model::{DisplayRule, OutputResult};
 
 pub(crate) use emit::json::json_value;
+pub(crate) use emit::shared::fit_prose;
 pub(crate) use messages::{MessageRequest, render as render_messages};
 pub(crate) use plan::plan_format;
 pub use section_chrome::{RuledSectionPolicy, SectionFrameStyle};

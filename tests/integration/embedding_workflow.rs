@@ -331,19 +331,10 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
                 "data": data,
             })
         };
-        let mut results = serde_json::Deserializer::from_str(&sink.stdout).into_iter::<Value>();
-        if filter == "task_id=task-42" {
-            assert_eq!(
-                results.next().unwrap().unwrap(),
-                json!({"task_id": "task-42", "state": "assessed"})
-            );
-            assert_eq!(
-                serde_json::from_str::<Value>(sink.stdout.lines().next().unwrap()).unwrap(),
-                json!({"task_id": "task-42", "state": "assessed"})
-            );
-        }
-        assert_eq!(results.next().unwrap().unwrap(), expected);
-        assert!(results.next().is_none());
+        assert_eq!(
+            serde_json::from_str::<Value>(&sink.stdout).unwrap(),
+            expected
+        );
         let mut messages = serde_json::Deserializer::from_str(&sink.stderr).into_iter::<Value>();
         assert_eq!(
             messages.next().unwrap().unwrap(),
@@ -351,10 +342,13 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
                 "messages": [{"level": "success", "text": "Plan validated for task-42"}]
             })
         );
-        assert_eq!(
-            sink.stderr[messages.byte_offset()..].trim_start_matches('\n'),
-            ""
-        );
+        if filter == "task_id=task-42" {
+            assert_eq!(
+                messages.next().unwrap().unwrap(),
+                json!({"task_id": "task-42", "state": "assessed"})
+            );
+        }
+        assert!(messages.next().is_none());
     }
 }
 

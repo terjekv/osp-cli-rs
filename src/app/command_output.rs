@@ -548,7 +548,7 @@ pub(crate) fn run_progress_command_with_ui(
             .unwrap_or_else(|| std::slice::from_ref(&data));
         for event in events {
             let line = serde_json::to_string(event).map_err(|err| miette!("{err}"))?;
-            sink.write_stdout(&format!("{line}\n"));
+            sink.write_stderr(&format!("{line}\n"));
         }
         return Ok(());
     }
