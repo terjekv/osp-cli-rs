@@ -120,7 +120,19 @@ fn ask_line(question: &str) -> io::Result<Option<String>> {
     stderr.write_all(super::sanitize_human_text(question).as_bytes())?;
     stderr.flush()?;
     let mut answer = String::new();
-    Ok((read_line(&mut answer)? != 0).then_some(answer))
+    let read = read_line(&mut answer);
+    // PTY drivers and the REPL may leave kernel echo disabled.
+    #[cfg(unix)]
+    {
+        let mut attrs = std::mem::MaybeUninit::<libc::termios>::uninit();
+        // SAFETY: stdin is live and attrs is inspected only after success.
+        if unsafe { libc::tcgetattr(libc::STDIN_FILENO, attrs.as_mut_ptr()) } == 0
+            && unsafe { attrs.assume_init() }.c_lflag & (libc::ECHO | libc::ECHONL) == 0
+        {
+            writeln!(stderr)?;
+        }
+    }
+    Ok((read? != 0).then_some(answer))
 }
 
 fn require_interactive() -> io::Result<()> {
