@@ -244,7 +244,7 @@ fn fitting_footer_names_losses_and_recovery() {
     );
     assert!(rendered.contains("comment"), "{rendered}");
     assert!(
-        rendered.contains("| P") && rendered.contains("--mreg") && rendered.contains("| LESS"),
+        rendered.contains("| P") && rendered.contains("--json") && rendered.contains("| LESS"),
         "{rendered}"
     );
 }

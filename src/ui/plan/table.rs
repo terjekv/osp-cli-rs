@@ -234,7 +234,7 @@ pub(super) fn fit_footer(
     if let Some(cards) = actions {
         let mut hints = vec!["full width: | LESS".to_string()];
         if cards {
-            hints.push("all fields: --mreg".to_string());
+            hints.push("all fields: --json".to_string());
         }
         let second = hidden.first().or_else(|| {
             shortened
