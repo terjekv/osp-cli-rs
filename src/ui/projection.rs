@@ -698,6 +698,101 @@ fn display_output(
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::Join { field, separator } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Value::Array(items) = value {
+                                *value = Value::String(
+                                    items
+                                        .iter()
+                                        .map(display_value)
+                                        .collect::<Vec<_>>()
+                                        .join(separator),
+                                );
+                            }
+                        })
+                    }
+                    DisplayRule::Replace { field, from, to } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Value::String(text) = value {
+                                *text = text.replace(from, to);
+                            }
+                        })
+                    }
+                    DisplayRule::StripSuffix { field, suffix } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Value::String(text) = value
+                                && let Some(prefix) = text.strip_suffix(suffix)
+                            {
+                                *text = prefix.to_owned();
+                            }
+                        })
+                    }
+                    DisplayRule::Labels { field, labels } => {
+                        map_display_values(&mut original, field, &|value| {
+                            fn label(value: &mut Value, labels: &BTreeMap<String, String>) {
+                                match value {
+                                    Value::Array(items) => {
+                                        items.iter_mut().for_each(|value| label(value, labels))
+                                    }
+                                    Value::Object(map) => {
+                                        *map = std::mem::take(map)
+                                            .into_iter()
+                                            .map(|(key, mut value)| {
+                                                label(&mut value, labels);
+                                                (labels.get(&key).cloned().unwrap_or(key), value)
+                                            })
+                                            .collect()
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            label(value, labels);
+                        })
+                    }
+                    DisplayRule::Timestamp { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(text) = value.as_str()
+                                && let Some(absolute) = super::format_local_timestamp(text)
+                                && let Some(relative) = super::format_relative_timestamp(text)
+                            {
+                                *value = Value::String(format!("{absolute} ({relative})"));
+                            }
+                        })
+                    }
+                    DisplayRule::SourceValues {
+                        field,
+                        sources,
+                        conflicts,
+                        labels,
+                    } => {
+                        let different = display_path(&raw, conflicts).and_then(Value::as_array);
+                        if let Some(different) = different.filter(|items| !items.is_empty())
+                            && let Some(value) = display_path_mut(&mut original, field)
+                        {
+                            let source_labels = display_path(&raw, sources)
+                                .and_then(Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_str)
+                                .map(|source| {
+                                    labels.get(source).map(String::as_str).unwrap_or(source)
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let mut shown =
+                                vec![format!("{} ({source_labels})", display_value(value))];
+                            for conflict in different {
+                                let source = conflict["source"].as_str().unwrap_or("source");
+                                let source =
+                                    labels.get(source).map(String::as_str).unwrap_or(source);
+                                shown.push(format!(
+                                    "{} ({source})",
+                                    display_value(&conflict["value"])
+                                ));
+                            }
+                            *value = Value::String(shown.join(" / "));
+                        }
+                    }
                     DisplayRule::AddressRangeTotal {
                         ranges,
                         start,
@@ -769,23 +864,23 @@ fn display_output(
                         }
                     }
                     DisplayRule::Compose { field, parts } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && (value.is_object() || value.is_array())
-                        {
-                            use crate::core::output_model::DisplayPart;
-                            let text: Option<String> = parts
-                                .iter()
-                                .map(|part| match part {
-                                    DisplayPart::Literal { text } => Some(text.clone()),
-                                    DisplayPart::Field { field } => {
-                                        display_path(value, field).map(display_value)
-                                    }
-                                })
-                                .collect();
-                            if let Some(text) = text {
-                                *value = Value::String(text);
+                        map_display_values(&mut original, field, &|value| {
+                            if value.is_object() || value.is_array() {
+                                use crate::core::output_model::DisplayPart;
+                                let text: Option<String> = parts
+                                    .iter()
+                                    .map(|part| match part {
+                                        DisplayPart::Literal { text } => Some(text.clone()),
+                                        DisplayPart::Field { field } => {
+                                            display_path(value, field).map(display_value)
+                                        }
+                                    })
+                                    .collect();
+                                if let Some(text) = text {
+                                    *value = Value::String(text);
+                                }
                             }
-                        }
+                        });
                     }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
                         let path = field_path(&original, field);
@@ -828,7 +923,7 @@ fn display_output(
                         }
                     }
                     DisplayRule::RelativeTimestamp { field } if format != OutputFormat::Value => {
-                        if let Some(value) = display_path_mut(&mut original, field) {
+                        map_display_values(&mut original, field, &|value| {
                             let formatted = match value {
                                 Value::String(text) => super::format_relative_timestamp(text),
                                 Value::Number(number) => {
@@ -839,7 +934,7 @@ fn display_output(
                             if let Some(formatted) = formatted {
                                 *value = Value::String(formatted);
                             }
-                        }
+                        });
                     }
                     _ => {}
                 }
@@ -899,6 +994,13 @@ fn display_output(
                     .position(|column| column == field)
                     .map(|index| labels[index].clone())
             });
+            for rule in &mut display.meta.display_rules {
+                if let crate::core::DisplayRule::Notice { field } = rule
+                    && let Some(index) = columns.iter().position(|column| column == field)
+                {
+                    *field = labels[index].clone();
+                }
+            }
             display.meta.key_index = labels;
             display.meta.display_columns = Some(display.meta.key_index.clone());
         }
@@ -1216,4 +1318,29 @@ pub(super) fn key_value_value(value: &Value, null_as_empty: bool) -> KeyValueVal
                 .collect(),
         ),
     }
+}
+
+/// Selectors traverse arrays without changing their cardinality.
+fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Value)) {
+    fn visit(value: &mut Value, path: &[String], apply: &impl Fn(&mut Value)) {
+        if let Some((key, rest)) = path.split_first() {
+            match value {
+                Value::Array(items) => items.iter_mut().for_each(|item| visit(item, path, apply)),
+                Value::Object(map) => {
+                    if let Some(value) = map.get_mut(key) {
+                        visit(value, rest, apply);
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            apply(value);
+        }
+    }
+    let path = if selector.is_empty() {
+        Vec::new()
+    } else {
+        field_path(value, selector)
+    };
+    visit(value, &path, apply);
 }

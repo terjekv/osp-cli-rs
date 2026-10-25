@@ -448,7 +448,18 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         } => !created(network) && !created(used) && !created(field),
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
-        DisplayRule::Warning { field }
+        DisplayRule::SourceValues {
+            field,
+            sources,
+            conflicts,
+            ..
+        } => !created(field) && !created(sources) && !created(conflicts),
+        DisplayRule::Join { field, .. }
+        | DisplayRule::Replace { field, .. }
+        | DisplayRule::StripSuffix { field, .. }
+        | DisplayRule::Labels { field, .. }
+        | DisplayRule::Timestamp { field }
+        | DisplayRule::Warning { field }
         | DisplayRule::ValueStyle { field, .. }
         | DisplayRule::Swatch { field }
         | DisplayRule::NullText { field, .. }

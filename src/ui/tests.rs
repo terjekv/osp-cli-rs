@@ -1055,3 +1055,87 @@ fn contextual_messages_preserve_event_order_and_theme_controls() {
 
 #[path = "tests/guide.rs"]
 mod guide;
+
+#[test]
+fn human_display_metadata_preserves_typed_exports() {
+    use crate::core::{DisplayPart, DisplayRule};
+    let raw = serde_json::json!({
+        "provider":"cloud:dev", "action":"set_expiry", "owners":["ops","web"],
+        "compute":{"cpu":2,"memory":8}, "os":"Debian 13",
+        "sources":["cloud"],"conflicts":[{"source":"inventory","value":"Debian 12"}],
+        "addresses":[{"address":"192.0.2.1","family":4}]
+    });
+    let mut output = crate::core::OutputResult::from_rows(vec![raw.as_object().unwrap().clone()]);
+    output.meta.display_columns = Some(
+        ["provider", "action", "owners", "compute", "os", "addresses"]
+            .map(str::to_owned)
+            .into(),
+    );
+    output.meta.display_rules = vec![
+        DisplayRule::StripSuffix {
+            field: "provider".into(),
+            suffix: ":dev".into(),
+        },
+        DisplayRule::Replace {
+            field: "action".into(),
+            from: "_".into(),
+            to: "-".into(),
+        },
+        DisplayRule::Join {
+            field: "owners".into(),
+            separator: " / ".into(),
+        },
+        DisplayRule::Compose {
+            field: "compute".into(),
+            parts: vec![
+                DisplayPart::Field {
+                    field: "cpu".into(),
+                },
+                DisplayPart::Literal {
+                    text: " CPU / ".into(),
+                },
+                DisplayPart::Field {
+                    field: "memory".into(),
+                },
+                DisplayPart::Literal {
+                    text: " GiB".into(),
+                },
+            ],
+        },
+        DisplayRule::SourceValues {
+            field: "os".into(),
+            sources: "sources".into(),
+            conflicts: "conflicts".into(),
+            labels: Default::default(),
+        },
+        DisplayRule::Labels {
+            field: "addresses".into(),
+            labels: [
+                ("address".into(), "Address".into()),
+                ("family".into(), "Family".into()),
+            ]
+            .into(),
+        },
+    ];
+    let settings = crate::ui::RenderSettings::test_plain(crate::core::OutputFormat::Mreg);
+    let human = crate::ui::render(&output, &crate::ui::RenderRequest::new(&settings));
+    for expected in [
+        "cloud",
+        "set-expiry",
+        "ops / web",
+        "2 CPU / 8 GiB",
+        "Debian 13 (cloud) / Debian 12 (inventory)",
+        "Address",
+        "Family",
+    ] {
+        assert!(human.contains(expected), "{expected}: {human}");
+    }
+    assert_eq!(
+        output.as_rows().unwrap()[0],
+        raw.as_object().unwrap().clone()
+    );
+    let settings = crate::ui::RenderSettings::test_plain(crate::core::OutputFormat::Json);
+    let json = crate::ui::render(&output, &crate::ui::RenderRequest::new(&settings));
+    let exported: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(exported, serde_json::json!([raw]));
+}
