@@ -360,8 +360,7 @@ impl NativeCommand for CuratedOrchRowsCommand {
         context: &NativeCommandContext<'_>,
     ) -> Result<NativeCommandOutcome> {
         for state in ["running", "completed"] {
-            context.emit_progress(
-                NativeProgressEvent::new(json!({
+            let event = NativeProgressEvent::new(json!({
                     "state": {"name": state},
                     "name": "db01.uio.no",
                     "provider": {"name": "vmware"},
@@ -376,8 +375,12 @@ impl NativeCommand for CuratedOrchRowsCommand {
                     progress_replace: true,
                     preserve_json_document: true,
                     ..ResponseMetaV1::default()
-                }),
-            )?;
+                });
+            if state == "running" {
+                context.emit_stream(event)?;
+            } else {
+                context.emit_progress(event)?;
+            }
         }
         context.flush_progress()?;
         Ok(NativeCommandOutcome::Response(Box::new(ResponseV1 {

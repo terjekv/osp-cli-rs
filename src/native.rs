@@ -276,8 +276,8 @@ impl<'a> NativeCommandContext<'a> {
     }
 
     /// Emits a canonical object to live consumers and the invocation's DSL.
-    /// JSON output writes each surviving event as one stdout JSON line before
-    /// the final result document. Human output uses the shared renderer.
+    /// JSON output writes each surviving event as one stderr JSON line, leaving
+    /// stdout for the final result document. Human output uses the shared renderer.
     pub fn emit_stream(&self, event: NativeProgressEvent) -> Result<()> {
         anyhow::ensure!(event.data.is_object(), "stream events must be JSON objects");
         match self.progress {
