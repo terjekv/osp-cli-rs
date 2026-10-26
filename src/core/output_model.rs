@@ -74,6 +74,8 @@ pub enum DisplayRule {
         sources: String,
         /// Selector for differing source/value records.
         conflicts: String,
+        /// Source label for an authoritative value without explicit provenance.
+        default_source: String,
         /// Source names mapped to human labels.
         labels: std::collections::BTreeMap<String, String>,
     },

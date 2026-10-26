@@ -745,6 +745,7 @@ fn display_output(
                         field,
                         sources,
                         conflicts,
+                        default_source,
                         labels,
                     } => {
                         let different = display_path(&raw, conflicts).and_then(Value::as_array);
@@ -760,7 +761,23 @@ fn display_output(
                                     labels.get(source).map(String::as_str).unwrap_or(source)
                                 })
                                 .collect::<Vec<_>>()
-                                .join(", ");
+                                .join(" / ");
+                            let source_labels = if source_labels.is_empty() {
+                                default_source.clone()
+                            } else {
+                                source_labels
+                            };
+                            if value.is_array() {
+                                let mut rows = attributed_records(value, &source_labels);
+                                for conflict in different {
+                                    let source = conflict["source"].as_str().unwrap_or("source");
+                                    let source =
+                                        labels.get(source).map(String::as_str).unwrap_or(source);
+                                    rows.extend(attributed_records(&conflict["value"], source));
+                                }
+                                *value = Value::Array(rows);
+                                continue;
+                            }
                             let mut shown =
                                 vec![format!("{} ({source_labels})", display_value(value))];
                             for conflict in different {
@@ -1368,6 +1385,24 @@ fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Va
         field_path(value, selector)
     };
     visit(value, &path, apply);
+}
+
+/// Preserve record columns while attributing array-valued disagreements.
+fn attributed_records(value: &Value, source: &str) -> Vec<Value> {
+    value
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(value))
+        .iter()
+        .map(|value| {
+            let mut row = value
+                .as_object()
+                .cloned()
+                .unwrap_or_else(|| [("Value".into(), value.clone())].into_iter().collect());
+            row.insert("Source".into(), Value::String(source.into()));
+            Value::Object(row)
+        })
+        .collect()
 }
 
 fn label_record_keys(value: &mut Value, labels: &BTreeMap<String, String>) {

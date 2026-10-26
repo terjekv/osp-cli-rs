@@ -1063,7 +1063,8 @@ fn human_display_metadata_preserves_typed_exports() {
         "provider":"cloud:dev", "action":"set_expiry", "owners":["ops","web"],
         "compute":{"cpu":2,"memory":8}, "os":"Debian 13",
         "sources":["cloud"],"conflicts":[{"source":"inventory","value":"Debian 12"}],
-        "addresses":[{"address":"192.0.2.1","family":4}]
+        "addresses":[{"address":"192.0.2.1","family":4}],
+        "address_conflicts":[{"source":"inventory","value":[{"address":"192.0.2.2","family":4}]}]
     });
     let mut output = crate::core::OutputResult::from_rows(vec![raw.as_object().unwrap().clone()]);
     output.meta.display_columns = Some(
@@ -1107,6 +1108,14 @@ fn human_display_metadata_preserves_typed_exports() {
             field: "os".into(),
             sources: "sources".into(),
             conflicts: "conflicts".into(),
+            default_source: "Authority".into(),
+            labels: Default::default(),
+        },
+        DisplayRule::SourceValues {
+            field: "addresses".into(),
+            sources: "absent".into(),
+            conflicts: "address_conflicts".into(),
+            default_source: "Authority".into(),
             labels: Default::default(),
         },
         DisplayRule::Labels {
@@ -1128,6 +1137,8 @@ fn human_display_metadata_preserves_typed_exports() {
         "Debian 13 (cloud) / Debian 12 (inventory)",
         "Address",
         "Family",
+        "Authority",
+        "192.0.2.2",
     ] {
         assert!(human.contains(expected), "{expected}: {human}");
     }
