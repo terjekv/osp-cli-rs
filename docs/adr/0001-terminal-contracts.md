@@ -45,3 +45,8 @@ Terminal promises need sized PTYs, raw escape-byte capture and a terminal model
 with scrollback. Colour goldens need controlled settings. Startup guards must
 prove editing while service responses remain blocked. Re-blessing a golden is
 a reviewed behaviour change, not a repair for a failing contract.
+
+Replaceable native progress is terminal presentation: machine formats and
+redirected output suppress its body. Explicit event streams retain canonical
+events; durable notices still reach nonterminal sinks. This keeps preliminary
+UI activity out of ordinary machine output without dropping trace streams.

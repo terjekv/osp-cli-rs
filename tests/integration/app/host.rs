@@ -376,9 +376,8 @@ impl NativeCommand for CuratedOrchRowsCommand {
                     preserve_json_document: true,
                     ..ResponseMetaV1::default()
                 });
-            if state == "running" {
-                context.emit_stream(event)?;
-            } else {
+            context.emit_stream(event.clone())?;
+            if state == "completed" {
                 context.emit_progress(event)?;
             }
         }

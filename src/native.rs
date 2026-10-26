@@ -263,8 +263,9 @@ impl<'a> NativeCommandContext<'a> {
     /// Submits one structured transient progress document to the host.
     ///
     /// The host may coalesce terminal replacement updates before displaying them.
-    /// Events remain available to stream consumers even without a terminal;
-    /// use [`Self::present`] or [`Self::emit_progress_measured`] for frames.
+    /// Replaceable bodies are terminal presentation and are suppressed for
+    /// machine formats and redirected output. Use [`Self::emit_stream`] for
+    /// canonical events, or [`Self::emit_progress_measured`] for immediate frames.
     /// A context created outside the host has no sink, in which case emission
     /// is a no-op. Native commands should still return the stable final
     /// document through [`NativeCommandOutcome`].
