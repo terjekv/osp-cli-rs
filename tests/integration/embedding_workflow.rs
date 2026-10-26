@@ -221,7 +221,13 @@ impl NativeCommand for ApprovalWorkflow {
         }]);
         // Stream consumers retain historical events without terminal coalescing.
         progress.replay = true;
-        context.emit_stream_measured(progress)?;
+        if context.can_present() {
+            // An immediate frame exercises the embedding sink without a timer.
+            progress.frame.as_mut().unwrap().meta.progress_replace = false;
+            context.emit_progress_measured(progress)?;
+        } else {
+            context.emit_stream_measured(progress)?;
+        }
         context.present(
             NativeProgressEvent::new(json!({"notice": notice})).with_meta(ResponseMetaV1 {
                 context: Default::default(),
@@ -287,7 +293,7 @@ fn embedded_approval_workflow_preserves_notices_progress_and_typed_results() {
         .unwrap(),
         3
     );
-    // Fast transient progress is delayed; the interaction notice remains durable.
+    assert!(terminal.0.stderr.contains("planning"));
     assert!(terminal.0.stderr.contains("Approval required"));
     assert!(terminal.0.stdout.contains("waiting_approval"));
 
