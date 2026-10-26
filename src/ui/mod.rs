@@ -66,9 +66,9 @@ pub(crate) use text::{
 #[cfg(test)]
 pub(crate) use theme::DEFAULT_THEME_NAME;
 
-const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S %:z";
+const LOCAL_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M %:z";
 
-/// Formats an RFC3339 timestamp in local time at seconds precision.
+/// Formats an RFC3339 timestamp in local time at minute precision.
 pub fn format_local_timestamp(value: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
