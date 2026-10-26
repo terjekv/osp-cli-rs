@@ -825,9 +825,6 @@ impl RenderSettings {
             }
             _ => None,
         };
-        if inferred == OutputFormat::Mreg && recommendation == Some(OutputFormat::Table) {
-            return (OutputFormat::Mreg, Inferred);
-        }
         if let Some(format) = recommendation {
             return (format, Recommended);
         }

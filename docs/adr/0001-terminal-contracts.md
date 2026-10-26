@@ -50,3 +50,7 @@ Replaceable native progress is terminal presentation: machine formats and
 redirected output suppress its body. Explicit event streams retain canonical
 events; durable notices still reach nonterminal sinks. This keeps preliminary
 UI activity out of ordinary machine output without dropping trace streams.
+
+An explicit table recommendation preserves a collection as a table even when
+it contains one record. Empty-result wording and duration formatting belong
+to display metadata; canonical payloads retain their original typed values.
