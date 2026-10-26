@@ -45,6 +45,13 @@ pub enum DisplayRule {
         /// Human spelling.
         to: String,
     },
+    /// Display a numeric quotient without changing the canonical value or unit.
+    Divide {
+        /// Canonical numeric selector.
+        field: String,
+        /// Nonzero divisor for the displayed number.
+        divisor: u64,
+    },
     /// Omit a matching trailing qualifier in human values only.
     StripQualifier {
         /// Canonical string selector.

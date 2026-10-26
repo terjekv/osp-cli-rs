@@ -718,6 +718,15 @@ fn display_output(
                             }
                         })
                     }
+                    DisplayRule::Divide { field, divisor } => {
+                        if *divisor != 0 {
+                            map_display_values(&mut original, field, &|value| {
+                                if let Some(number) = value.as_f64() {
+                                    *value = Value::String((number / *divisor as f64).to_string());
+                                }
+                            });
+                        }
+                    }
                     DisplayRule::StripQualifier {
                         field,
                         separator,

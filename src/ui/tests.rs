@@ -1061,7 +1061,7 @@ fn human_display_metadata_preserves_typed_exports() {
     use crate::core::{DisplayPart, DisplayRule};
     let raw = serde_json::json!({
         "provider":"cloud:dev", "action":"set_expiry", "owners":["ops","web"],
-        "compute":{"cpu":2,"memory":8}, "os":"Debian 13",
+        "compute":{"cpu":2,"memory_mib":8192}, "os":"Debian 13",
         "sources":["cloud"],"conflicts":[{"source":"inventory","value":"Debian 12"}],
         "addresses":[{"address":"192.0.2.1","family":4}],
         "address_conflicts":[{"source":"inventory","value":[{"address":"192.0.2.2","family":4}]}]
@@ -1087,6 +1087,10 @@ fn human_display_metadata_preserves_typed_exports() {
             field: "owners".into(),
             separator: " / ".into(),
         },
+        DisplayRule::Divide {
+            field: "compute.memory_mib".into(),
+            divisor: 1024,
+        },
         DisplayRule::Compose {
             field: "compute".into(),
             parts: vec![
@@ -1097,7 +1101,7 @@ fn human_display_metadata_preserves_typed_exports() {
                     text: " CPU / ".into(),
                 },
                 DisplayPart::Field {
-                    field: "memory".into(),
+                    field: "memory_mib".into(),
                 },
                 DisplayPart::Literal {
                     text: " GiB".into(),

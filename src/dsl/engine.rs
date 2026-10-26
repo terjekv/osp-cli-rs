@@ -456,6 +456,7 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         } => !created(field) && !created(sources) && !created(conflicts),
         DisplayRule::Join { field, .. }
         | DisplayRule::Replace { field, .. }
+        | DisplayRule::Divide { field, .. }
         | DisplayRule::StripQualifier { field, .. }
         | DisplayRule::Labels { field, .. }
         | DisplayRule::Timestamp { field }
