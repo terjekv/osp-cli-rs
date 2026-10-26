@@ -50,7 +50,18 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
     {
         return Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
-                text: "No results.".to_string(),
+                text: output
+                    .meta
+                    .display_rules
+                    .iter()
+                    .find_map(|rule| {
+                        if let DisplayRule::EmptyText { text } = rule {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "No results.".to_string()),
                 indent: 0,
                 inline_markup: false,
             })],
@@ -401,13 +412,9 @@ fn lower_document_blocks(
     lowered
 }
 
-/// `key (N):` for several rows; a single row needs no count.
+/// Every record-list subtable carries its row count, including a singleton.
 fn section_title(key: &str, count: usize) -> String {
-    if count == 1 {
-        format!("{key}:")
-    } else {
-        format!("{key} ({count}):")
-    }
+    format!("{key} ({count}):")
 }
 
 fn lower_value_doc(output: &OutputResult) -> Doc {

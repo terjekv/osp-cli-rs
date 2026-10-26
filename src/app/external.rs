@@ -891,15 +891,15 @@ impl NativeProgressRenderer<'_, '_> {
         if stream {
             event.meta.preserve_json_document = true;
             event.meta.row_path = None;
-            if human
-                && stages.is_empty()
-                && self.can_present.get()
-                && let Some(frame) = event.frame.take()
-            {
-                event.data = frame.data;
-                event.meta = frame.meta;
-                event.document = frame.document;
-            }
+        }
+        if human
+            && stages.is_empty()
+            && self.can_present.get()
+            && let Some(frame) = event.frame.take()
+        {
+            event.data = frame.data;
+            event.meta = frame.meta;
+            event.document = frame.document;
         }
         let mut result = CommandOutput::from_data(event.data, &event.meta, &event.messages, stages);
         if human

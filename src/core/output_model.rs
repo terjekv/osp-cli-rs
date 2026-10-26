@@ -23,11 +23,84 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 /// Producer-declared human display changes. Conditions use original row values;
-/// rules never change canonical data or DSL field values. Unless a literal key
+/// rules never change canonical data or DSL field values. Collection rules accept
+/// `*` for array members and numeric indices for one member. Unless a literal key
 /// is required, selectors accept top-level keys, dotted paths, or JSON Pointers.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DisplayRule {
+    /// Join scalar array values without changing the typed array.
+    Join {
+        /// Canonical array selector.
+        field: String,
+        /// Literal separator for human values.
+        separator: String,
+    },
+    /// Replace a literal spelling in human values only.
+    Replace {
+        /// Canonical string selector.
+        field: String,
+        /// Literal spelling to replace.
+        from: String,
+        /// Human spelling.
+        to: String,
+    },
+    /// Replace the standard empty human result text without adding payload data.
+    EmptyText {
+        /// Plain human text for an empty result.
+        text: String,
+    },
+    /// Humanize a numeric duration expressed in seconds.
+    DurationSeconds {
+        /// Canonical numeric selector.
+        field: String,
+    },
+    /// Show elapsed time since a canonical RFC3339 timestamp.
+    ElapsedTimestamp {
+        /// Canonical timestamp selector.
+        field: String,
+    },
+    /// Display a numeric quotient without changing the canonical value or unit.
+    Divide {
+        /// Canonical numeric selector.
+        field: String,
+        /// Nonzero divisor for the displayed number.
+        divisor: u64,
+    },
+    /// Omit a matching trailing qualifier in human values only.
+    StripQualifier {
+        /// Canonical string selector.
+        field: String,
+        /// Delimiter between the name and its single qualifier.
+        separator: String,
+        /// Complete qualifier to omit when it matches.
+        qualifier: String,
+    },
+    /// Label nested record keys without changing canonical selectors.
+    Labels {
+        /// Canonical collection selector.
+        field: String,
+        /// Canonical keys mapped to human labels recursively.
+        labels: std::collections::BTreeMap<String, String>,
+    },
+    /// Show an absolute timestamp followed by its relative age or remaining time.
+    Timestamp {
+        /// Canonical RFC3339 timestamp selector.
+        field: String,
+    },
+    /// Attribute differing source values, leaving agreement unadorned.
+    SourceValues {
+        /// Canonical selected value.
+        field: String,
+        /// Selector for the source names of the selected value.
+        sources: String,
+        /// Selector for differing source/value records.
+        conflicts: String,
+        /// Source label for an authoritative value without explicit provenance.
+        default_source: String,
+        /// Source names mapped to human labels.
+        labels: std::collections::BTreeMap<String, String>,
+    },
     /// Sum inclusive IP ranges without adding an aggregate to canonical JSON.
     AddressRangeTotal {
         /// Canonical array of range records.

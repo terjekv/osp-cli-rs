@@ -698,6 +698,134 @@ fn display_output(
             for rule in &output.meta.display_rules {
                 use crate::core::output_model::DisplayRule;
                 match rule {
+                    DisplayRule::Join { field, separator } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Value::Array(items) = value {
+                                *value = Value::String(
+                                    items
+                                        .iter()
+                                        .map(display_value)
+                                        .collect::<Vec<_>>()
+                                        .join(separator),
+                                );
+                            }
+                        })
+                    }
+                    DisplayRule::Replace { field, from, to } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Value::String(text) = value {
+                                *text = text.replace(from, to);
+                            }
+                        })
+                    }
+                    DisplayRule::EmptyText { .. } => {}
+                    DisplayRule::DurationSeconds { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(seconds) = value
+                                .as_f64()
+                                .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                            {
+                                *value = Value::String(elapsed_text(seconds.round() as u64));
+                            }
+                        })
+                    }
+                    DisplayRule::ElapsedTimestamp { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(time) = value
+                                .as_str()
+                                .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
+                            {
+                                let seconds = (chrono::Utc::now()
+                                    - time.with_timezone(&chrono::Utc))
+                                .num_seconds()
+                                .max(0) as u64;
+                                *value = Value::String(elapsed_text(seconds));
+                            }
+                        })
+                    }
+                    DisplayRule::Divide { field, divisor } => {
+                        if *divisor != 0 {
+                            map_display_values(&mut original, field, &|value| {
+                                if let Some(number) = value.as_f64() {
+                                    *value = Value::String((number / *divisor as f64).to_string());
+                                }
+                            });
+                        }
+                    }
+                    DisplayRule::StripQualifier {
+                        field,
+                        separator,
+                        qualifier,
+                    } => map_display_values(&mut original, field, &|value| {
+                        if let Value::String(text) = value
+                            && let Some((name, found)) = text.split_once(separator)
+                            && found == qualifier
+                        {
+                            *text = name.to_owned();
+                        }
+                    }),
+                    DisplayRule::Labels { .. } => {}
+                    DisplayRule::Timestamp { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(text) = value.as_str()
+                                && let Some(absolute) = super::format_local_timestamp(text)
+                                && let Some(relative) = super::format_relative_timestamp(text)
+                            {
+                                *value = Value::String(format!("{absolute} ({relative})"));
+                            }
+                        })
+                    }
+                    DisplayRule::SourceValues {
+                        field,
+                        sources,
+                        conflicts,
+                        default_source,
+                        labels,
+                    } => {
+                        let different = display_path(&raw, conflicts).and_then(Value::as_array);
+                        if let Some(different) = different.filter(|items| !items.is_empty())
+                            && let Some(value) = display_path_mut(&mut original, field)
+                        {
+                            let source_labels = display_path(&raw, sources)
+                                .and_then(Value::as_array)
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_str)
+                                .map(|source| {
+                                    labels.get(source).map(String::as_str).unwrap_or(source)
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" / ");
+                            let source_labels = if source_labels.is_empty() {
+                                default_source.clone()
+                            } else {
+                                source_labels
+                            };
+                            if value.is_array() {
+                                let mut rows = attributed_records(value, &source_labels);
+                                for conflict in different {
+                                    let source = conflict["source"].as_str().unwrap_or("source");
+                                    let source =
+                                        labels.get(source).map(String::as_str).unwrap_or(source);
+                                    rows.extend(attributed_records(&conflict["value"], source));
+                                }
+                                *value = Value::Array(rows);
+                                continue;
+                            }
+                            let mut shown =
+                                vec![format!("{} ({source_labels})", display_value(value))];
+                            for conflict in different {
+                                let source = conflict["source"].as_str().unwrap_or("source");
+                                let source =
+                                    labels.get(source).map(String::as_str).unwrap_or(source);
+                                shown.push(format!(
+                                    "{} ({source})",
+                                    display_value(&conflict["value"])
+                                ));
+                            }
+                            *value = Value::String(shown.join(" / "));
+                        }
+                    }
                     DisplayRule::AddressRangeTotal {
                         ranges,
                         start,
@@ -769,23 +897,27 @@ fn display_output(
                         }
                     }
                     DisplayRule::Compose { field, parts } => {
-                        if let Some(value) = display_path_mut(&mut original, field)
-                            && (value.is_object() || value.is_array())
-                        {
-                            use crate::core::output_model::DisplayPart;
-                            let text: Option<String> = parts
-                                .iter()
-                                .map(|part| match part {
-                                    DisplayPart::Literal { text } => Some(text.clone()),
-                                    DisplayPart::Field { field } => {
-                                        display_path(value, field).map(display_value)
-                                    }
-                                })
-                                .collect();
-                            if let Some(text) = text {
-                                *value = Value::String(text);
+                        map_display_values(&mut original, field, &|value| {
+                            if value.is_object() || value.is_array() {
+                                use crate::core::output_model::DisplayPart;
+                                let text: Option<String> = parts
+                                    .iter()
+                                    .map(|part| match part {
+                                        DisplayPart::Literal { text } => Some(text.clone()),
+                                        DisplayPart::Field { field } => display_path(value, field)
+                                            .map(|value| {
+                                                value
+                                                    .as_str()
+                                                    .and_then(super::format_local_timestamp)
+                                                    .unwrap_or_else(|| display_value(value))
+                                            }),
+                                    })
+                                    .collect();
+                                if let Some(text) = text {
+                                    *value = Value::String(text);
+                                }
                             }
-                        }
+                        });
                     }
                     DisplayRule::HideArrayItemsWhenTrue { field, when } => {
                         let path = field_path(&original, field);
@@ -828,7 +960,7 @@ fn display_output(
                         }
                     }
                     DisplayRule::RelativeTimestamp { field } if format != OutputFormat::Value => {
-                        if let Some(value) = display_path_mut(&mut original, field) {
+                        map_display_values(&mut original, field, &|value| {
                             let formatted = match value {
                                 Value::String(text) => super::format_relative_timestamp(text),
                                 Value::Number(number) => {
@@ -839,7 +971,7 @@ fn display_output(
                             if let Some(formatted) = formatted {
                                 *value = Value::String(formatted);
                             }
-                        }
+                        });
                     }
                     _ => {}
                 }
@@ -889,6 +1021,35 @@ fn display_output(
             } else {
                 original.as_object().cloned().unwrap_or_default()
             };
+            for rule in &output.meta.display_rules {
+                if let crate::core::DisplayRule::Labels { field, labels } = rule {
+                    let mut value = Value::Object(std::mem::take(row));
+                    if let Some(columns) = &output.meta.display_columns {
+                        let headings = display_labels(output, columns);
+                        for (column, heading) in columns.iter().zip(headings) {
+                            if column == field
+                                || column.starts_with(&format!("{field}."))
+                                || column.starts_with(&format!("{field}/"))
+                            {
+                                if let Some(value) = value.get_mut(&heading) {
+                                    label_record_keys(value, labels);
+                                }
+                            } else if let Some(relative) = field.strip_prefix(&format!("{column}."))
+                                && let Some(value) = value.get_mut(&heading)
+                            {
+                                map_display_values(value, relative, &|value| {
+                                    label_record_keys(value, labels)
+                                });
+                            }
+                        }
+                    } else {
+                        map_display_values(&mut value, field, &|value| {
+                            label_record_keys(value, labels)
+                        });
+                    }
+                    *row = value.as_object().cloned().unwrap_or_default();
+                }
+            }
             row_styles.push(styles);
         }
         if let Some(columns) = &output.meta.display_columns {
@@ -899,6 +1060,13 @@ fn display_output(
                     .position(|column| column == field)
                     .map(|index| labels[index].clone())
             });
+            for rule in &mut display.meta.display_rules {
+                if let crate::core::DisplayRule::Notice { field } = rule
+                    && let Some(index) = columns.iter().position(|column| column == field)
+                {
+                    *field = labels[index].clone();
+                }
+            }
             display.meta.key_index = labels;
             display.meta.display_columns = Some(display.meta.key_index.clone());
         }
@@ -1215,5 +1383,89 @@ pub(super) fn key_value_value(value: &Value, null_as_empty: bool) -> KeyValueVal
                 })
                 .collect(),
         ),
+    }
+}
+
+/// Selectors traverse arrays without changing their cardinality.
+fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Value)) {
+    fn visit(value: &mut Value, path: &[String], apply: &impl Fn(&mut Value)) {
+        if let Some((key, rest)) = path.split_first() {
+            match value {
+                Value::Array(items) => {
+                    if key == "*" {
+                        items.iter_mut().for_each(|item| visit(item, rest, apply));
+                    } else if let Ok(index) = key.parse::<usize>() {
+                        if let Some(item) = items.get_mut(index) {
+                            visit(item, rest, apply);
+                        }
+                    } else {
+                        items.iter_mut().for_each(|item| visit(item, path, apply));
+                    }
+                }
+                Value::Object(map) => {
+                    if let Some(value) = map.get_mut(key) {
+                        visit(value, rest, apply);
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            apply(value);
+        }
+    }
+    let path = if selector.is_empty() {
+        Vec::new()
+    } else {
+        field_path(value, selector)
+    };
+    visit(value, &path, apply);
+}
+
+fn elapsed_text(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    if seconds < 3600 {
+        return format!("{}m {}s", seconds / 60, seconds % 60);
+    }
+    if seconds < 86400 {
+        return format!("{}h {}m", seconds / 3600, seconds % 3600 / 60);
+    }
+    format!("{}d {}h", seconds / 86400, seconds % 86400 / 3600)
+}
+
+/// Preserve record columns while attributing array-valued disagreements.
+fn attributed_records(value: &Value, source: &str) -> Vec<Value> {
+    value
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(value))
+        .iter()
+        .map(|value| {
+            let mut row = value
+                .as_object()
+                .cloned()
+                .unwrap_or_else(|| [("Value".into(), value.clone())].into_iter().collect());
+            row.insert("Source".into(), Value::String(source.into()));
+            Value::Object(row)
+        })
+        .collect()
+}
+
+fn label_record_keys(value: &mut Value, labels: &BTreeMap<String, String>) {
+    match value {
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|value| label_record_keys(value, labels)),
+        Value::Object(map) => {
+            *map = std::mem::take(map)
+                .into_iter()
+                .map(|(key, mut value)| {
+                    label_record_keys(&mut value, labels);
+                    (labels.get(&key).cloned().unwrap_or(key), value)
+                })
+                .collect()
+        }
+        _ => {}
     }
 }

@@ -440,6 +440,7 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
     }
     meta.unix_timestamp_columns.retain(|field| !created(field));
     meta.display_rules.retain(|rule| match rule {
+        DisplayRule::EmptyText { .. } => false,
         DisplayRule::AddressRangeTotal { ranges, field, .. } => !created(ranges) && !created(field),
         DisplayRule::AddressCountRemaining {
             network,
@@ -448,7 +449,21 @@ fn forget_formatting(meta: &mut OutputMeta, synthesized: &[String]) {
         } => !created(network) && !created(used) && !created(field),
         DisplayRule::SuffixWhenTrue { field, when, .. }
         | DisplayRule::BlankWhenPresent { field, when } => !created(field) && !created(when),
-        DisplayRule::Warning { field }
+        DisplayRule::SourceValues {
+            field,
+            sources,
+            conflicts,
+            ..
+        } => !created(field) && !created(sources) && !created(conflicts),
+        DisplayRule::Join { field, .. }
+        | DisplayRule::Replace { field, .. }
+        | DisplayRule::DurationSeconds { field }
+        | DisplayRule::ElapsedTimestamp { field }
+        | DisplayRule::Divide { field, .. }
+        | DisplayRule::StripQualifier { field, .. }
+        | DisplayRule::Labels { field, .. }
+        | DisplayRule::Timestamp { field }
+        | DisplayRule::Warning { field }
         | DisplayRule::ValueStyle { field, .. }
         | DisplayRule::Swatch { field }
         | DisplayRule::NullText { field, .. }

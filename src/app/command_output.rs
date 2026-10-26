@@ -552,6 +552,17 @@ pub(crate) fn run_progress_command_with_ui(
         }
         return Ok(());
     }
+    if !stream
+        && result.progress_replace
+        && (!sink.stderr_is_terminal()
+            || matches!(
+                result.output_format(&ui.render_settings),
+                OutputFormat::Json | OutputFormat::Csv | OutputFormat::Tsv
+            ))
+    {
+        emit_messages_for_ui(config, ui, &result.messages, ui.verbosity, sink);
+        return Ok(());
+    }
     let show_body = !result.progress_replace || ui.verbosity >= MessageLevel::Success;
     let framed = show_body
         && result.progress_replace
