@@ -1072,9 +1072,10 @@ fn human_display_metadata_preserves_typed_exports() {
             .into(),
     );
     output.meta.display_rules = vec![
-        DisplayRule::StripSuffix {
+        DisplayRule::StripQualifier {
             field: "provider".into(),
-            suffix: ":dev".into(),
+            separator: ":".into(),
+            qualifier: "dev".into(),
         },
         DisplayRule::Replace {
             field: "action".into(),

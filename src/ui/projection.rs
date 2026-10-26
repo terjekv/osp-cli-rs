@@ -718,15 +718,18 @@ fn display_output(
                             }
                         })
                     }
-                    DisplayRule::StripSuffix { field, suffix } => {
-                        map_display_values(&mut original, field, &|value| {
-                            if let Value::String(text) = value
-                                && let Some(prefix) = text.strip_suffix(suffix)
-                            {
-                                *text = prefix.to_owned();
-                            }
-                        })
-                    }
+                    DisplayRule::StripQualifier {
+                        field,
+                        separator,
+                        qualifier,
+                    } => map_display_values(&mut original, field, &|value| {
+                        if let Value::String(text) = value
+                            && let Some((name, found)) = text.split_once(separator)
+                            && found == qualifier
+                        {
+                            *text = name.to_owned();
+                        }
+                    }),
                     DisplayRule::Labels { .. } => {}
                     DisplayRule::Timestamp { field } => {
                         map_display_values(&mut original, field, &|value| {
@@ -981,12 +984,11 @@ fn display_output(
                                     label_record_keys(value, labels);
                                 }
                             } else if let Some(relative) = field.strip_prefix(&format!("{column}."))
+                                && let Some(value) = value.get_mut(&heading)
                             {
-                                if let Some(value) = value.get_mut(&heading) {
-                                    map_display_values(value, relative, &|value| {
-                                        label_record_keys(value, labels)
-                                    });
-                                }
+                                map_display_values(value, relative, &|value| {
+                                    label_record_keys(value, labels)
+                                });
                             }
                         }
                     } else {

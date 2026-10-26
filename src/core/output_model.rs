@@ -46,11 +46,13 @@ pub enum DisplayRule {
         to: String,
     },
     /// Omit a matching trailing qualifier in human values only.
-    StripSuffix {
+    StripQualifier {
         /// Canonical string selector.
         field: String,
-        /// Literal suffix, including its delimiter.
-        suffix: String,
+        /// Delimiter between the name and its single qualifier.
+        separator: String,
+        /// Complete qualifier to omit when it matches.
+        qualifier: String,
     },
     /// Label nested record keys without changing canonical selectors.
     Labels {
