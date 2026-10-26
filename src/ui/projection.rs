@@ -718,6 +718,31 @@ fn display_output(
                             }
                         })
                     }
+                    DisplayRule::EmptyText { .. } => {}
+                    DisplayRule::DurationSeconds { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(seconds) = value
+                                .as_f64()
+                                .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                            {
+                                *value = Value::String(elapsed_text(seconds.round() as u64));
+                            }
+                        })
+                    }
+                    DisplayRule::ElapsedTimestamp { field } => {
+                        map_display_values(&mut original, field, &|value| {
+                            if let Some(time) = value
+                                .as_str()
+                                .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
+                            {
+                                let seconds = (chrono::Utc::now()
+                                    - time.with_timezone(&chrono::Utc))
+                                .num_seconds()
+                                .max(0) as u64;
+                                *value = Value::String(elapsed_text(seconds));
+                            }
+                        })
+                    }
                     DisplayRule::Divide { field, divisor } => {
                         if *divisor != 0 {
                             map_display_values(&mut original, field, &|value| {
@@ -1394,6 +1419,19 @@ fn map_display_values(value: &mut Value, selector: &str, apply: &impl Fn(&mut Va
         field_path(value, selector)
     };
     visit(value, &path, apply);
+}
+
+fn elapsed_text(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    if seconds < 3600 {
+        return format!("{}m {}s", seconds / 60, seconds % 60);
+    }
+    if seconds < 86400 {
+        return format!("{}h {}m", seconds / 3600, seconds % 3600 / 60);
+    }
+    format!("{}d {}h", seconds / 86400, seconds % 86400 / 3600)
 }
 
 /// Preserve record columns while attributing array-valued disagreements.

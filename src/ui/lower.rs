@@ -50,7 +50,18 @@ pub fn lower_output(projection: &super::projection::HumanProjection, plan: &Rend
     {
         return Doc {
             blocks: vec![Block::Paragraph(ParagraphBlock {
-                text: "No results.".to_string(),
+                text: output
+                    .meta
+                    .display_rules
+                    .iter()
+                    .find_map(|rule| {
+                        if let DisplayRule::EmptyText { text } = rule {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "No results.".to_string()),
                 indent: 0,
                 inline_markup: false,
             })],

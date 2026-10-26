@@ -45,6 +45,21 @@ pub enum DisplayRule {
         /// Human spelling.
         to: String,
     },
+    /// Replace the standard empty human result text without adding payload data.
+    EmptyText {
+        /// Plain human text for an empty result.
+        text: String,
+    },
+    /// Humanize a numeric duration expressed in seconds.
+    DurationSeconds {
+        /// Canonical numeric selector.
+        field: String,
+    },
+    /// Show elapsed time since a canonical RFC3339 timestamp.
+    ElapsedTimestamp {
+        /// Canonical timestamp selector.
+        field: String,
+    },
     /// Display a numeric quotient without changing the canonical value or unit.
     Divide {
         /// Canonical numeric selector.

@@ -1060,7 +1060,7 @@ mod guide;
 fn human_display_metadata_preserves_typed_exports() {
     use crate::core::{DisplayPart, DisplayRule};
     let raw = serde_json::json!({
-        "provider":"cloud:dev", "action":"set_expiry", "owners":["ops","web"],
+        "provider":"cloud:dev", "action":"set_expiry", "duration":1.969, "owners":["ops","web"],
         "compute":{"cpu":2,"memory_mib":8192}, "os":"Debian 13",
         "sources":["cloud"],"conflicts":[{"source":"inventory","value":"Debian 12"}],
         "addresses":[{"address":"192.0.2.1","family":4}],
@@ -1068,11 +1068,22 @@ fn human_display_metadata_preserves_typed_exports() {
     });
     let mut output = crate::core::OutputResult::from_rows(vec![raw.as_object().unwrap().clone()]);
     output.meta.display_columns = Some(
-        ["provider", "action", "owners", "compute", "os", "addresses"]
-            .map(str::to_owned)
-            .into(),
+        [
+            "provider",
+            "action",
+            "owners",
+            "compute",
+            "os",
+            "addresses",
+            "duration",
+        ]
+        .map(str::to_owned)
+        .into(),
     );
     output.meta.display_rules = vec![
+        DisplayRule::DurationSeconds {
+            field: "duration".into(),
+        },
         DisplayRule::StripQualifier {
             field: "provider".into(),
             separator: ":".into(),
@@ -1136,6 +1147,7 @@ fn human_display_metadata_preserves_typed_exports() {
     for expected in [
         "cloud",
         "set-expiry",
+        "2s",
         "ops / web",
         "2 CPU / 8 GiB",
         "Debian 13 (cloud) / Debian 12 (inventory)",
